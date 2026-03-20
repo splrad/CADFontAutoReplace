@@ -162,7 +162,7 @@ internal sealed class ConfigService
 
             if (RegistryService.DeleteSubKeyTree(Registry.CurrentUser, appKeyPath))
             {
-                log.Info($"已删除注册表项: HKCU\\{appKeyPath}");
+                log.Info($"已删除注册表项: HKCU\\{appKeyPath},必须重启CAD才可使用NETLOAD命令重新加载插件");
                 deletedCount++;
             }
             else

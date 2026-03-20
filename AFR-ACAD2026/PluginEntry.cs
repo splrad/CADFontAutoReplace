@@ -17,7 +17,8 @@ namespace AFR_ACAD2026;
 public class PluginEntry : IExtensionApplication
 {
     // 延迟执行队列：文档事件入队，等待 Idle 时统一处理
-    private static readonly Queue<(Document Doc, string Trigger)> _pendingExecutions = new();
+    // Doc 为 null 表示需要在 Idle 时获取当前活动文档（用于 Startup）
+    private static readonly Queue<(Document? Doc, string Trigger)> _pendingExecutions = new();
     private static bool _idleHandlerRegistered;
 
     public void Initialize()
@@ -36,8 +37,8 @@ public class PluginEntry : IExtensionApplication
             docMgr.DocumentActivated += OnDocumentActivated;
             docMgr.DocumentToBeDestroyed += OnDocumentToBeDestroyed;
 
-            // 第三阶段: 通过 Idle 事件延迟启动执行
-            ScheduleExecution(AcadApp.DocumentManager.MdiActiveDocument, "Startup");
+            // 第三阶段: 延迟启动执行 — 不在此处获取文档引用，避免使用未就绪的文档
+            ScheduleExecution(null, "Startup");
 
             log.Info("AFR 插件初始化成功。");
         }
@@ -88,11 +89,10 @@ public class PluginEntry : IExtensionApplication
 
     /// <summary>
     /// 将文档执行请求加入队列，延迟到 Application.Idle 时处理。
-    /// 确保 AutoCAD 完成图纸加载和自身消息输出后，插件日志才最后显示。
+    /// doc 为 null 时（Startup），在 Idle 回调中获取当前活动文档。
     /// </summary>
     private static void ScheduleExecution(Document? doc, string trigger)
     {
-        if (doc == null) return;
         _pendingExecutions.Enqueue((doc, trigger));
         if (!_idleHandlerRegistered)
         {
@@ -103,6 +103,7 @@ public class PluginEntry : IExtensionApplication
 
     /// <summary>
     /// Idle 回调：AutoCAD 空闲时处理所有排队的文档执行请求。
+    /// doc 为 null 的条目在此处解析为当前活动文档。
     /// </summary>
     private static void OnDeferredIdle(object? sender, System.EventArgs e)
     {
@@ -112,6 +113,10 @@ public class PluginEntry : IExtensionApplication
         while (_pendingExecutions.Count > 0)
         {
             var (doc, trigger) = _pendingExecutions.Dequeue();
+            // Startup 或其他 null 情况：在 Idle 时获取当前活动文档
+            doc ??= AcadApp.DocumentManager.MdiActiveDocument;
+            if (doc == null) continue;
+
             try
             {
                 ExecutionController.Instance.Execute(doc, trigger);

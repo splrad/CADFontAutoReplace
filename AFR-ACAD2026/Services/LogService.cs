@@ -122,7 +122,7 @@ internal sealed class LogService
             {
                 editor.WriteMessage("\n=============================================");
                 editor.WriteMessage("\nCAD缺失字体自动替换工具 AFR");
-                editor.WriteMessage("\n版本：v1.0-2026/03/19");
+                editor.WriteMessage("\n版本：v2.0-2026/03/21");
                 editor.WriteMessage("\n插件首次加载运行必须执行：AFR");
                 editor.WriteMessage("\n命令说明：");
                 editor.WriteMessage("\n AFR - 配置替换字体");
