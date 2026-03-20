@@ -1,0 +1,61 @@
+<Window x:Class="AFR_ACAD2026.UI.FontSelectionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AFR — 字体配置"
+        Width="480" Height="300"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False">
+
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="16"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="12"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- 标题 -->
+        <TextBlock Grid.Row="0" Grid.ColumnSpan="3"
+                   Text="请选择用于替换缺失字体的备用字体"
+                   FontSize="14" FontWeight="SemiBold"/>
+
+        <!-- 主字体 -->
+        <TextBlock Grid.Row="2" Grid.Column="0"
+                   Text="主字体 (SHX):"
+                   VerticalAlignment="Center"/>
+        <ComboBox Grid.Row="2" Grid.Column="2"
+                  x:Name="MainFontCombo"
+                  IsEditable="True"
+                  Height="28"/>
+
+        <!-- 大字体 -->
+        <TextBlock Grid.Row="4" Grid.Column="0"
+                   Text="大字体 (SHX):"
+                   VerticalAlignment="Center"/>
+        <ComboBox Grid.Row="4" Grid.Column="2"
+                  x:Name="BigFontCombo"
+                  IsEditable="True"
+                  Height="28"/>
+
+        <!-- 按钮 -->
+        <StackPanel Grid.Row="6" Grid.ColumnSpan="3"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Content="确定" Width="90" Height="30"
+                    Margin="0,0,12,0" IsDefault="True"
+                    x:Name="OkButton" Click="OkButton_Click"/>
+            <Button Content="取消" Width="90" Height="30"
+                    IsCancel="True"
+                    x:Name="CancelButton" Click="CancelButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
