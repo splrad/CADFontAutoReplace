@@ -1,6 +1,5 @@
 using Microsoft.Win32;
 using System.Reflection;
-using System.Text.RegularExpressions;
 using AFR_ACAD2026.Services;
 
 namespace AFR_ACAD2026.Core;
@@ -17,9 +16,6 @@ internal static class AppInitializer
     private const string Description = "AFR Auto Replace Font Plugin";
     private const int LoadCtrls = 2;   // 随 AutoCAD 启动自动加载
     private const int Managed = 1;     // 托管 .NET 插件
-
-    private static readonly Regex AcadKeyPattern =
-        new(@"^ACAD-[A-Za-z0-9]+:[A-Za-z0-9]+$", RegexOptions.Compiled);
 
     public static void Initialize()
     {
@@ -109,7 +105,7 @@ internal static class AppInitializer
         var subKeyNames = RegistryService.GetSubKeyNames(Registry.CurrentUser, AutoCadBasePath);
         foreach (var name in subKeyNames)
         {
-            if (AcadKeyPattern.IsMatch(name))
+            if (ConfigService.AcadKeyPatternRegex().IsMatch(name))
             {
                 results.Add(name);
             }

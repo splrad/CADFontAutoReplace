@@ -7,14 +7,16 @@ namespace AFR_ACAD2026.Services;
 /// 业务级配置服务，基于注册表存储。
 /// 提供带缓存的、类型安全的 MainFont、BigFont、IsInitialized 访问。
 /// </summary>
-internal sealed class ConfigService
+internal sealed partial class ConfigService
 {
     private static readonly Lazy<ConfigService> _instance = new(() => new ConfigService());
     public static ConfigService Instance => _instance.Value;
 
     internal const string AutoCadBasePath = @"Software\Autodesk\AutoCAD\R25.1";
     internal const string AppName = "AFR-ACAD2026";
-    private static readonly Regex AcadKeyPattern = new(@"^ACAD-[A-Za-z0-9]+:[A-Za-z0-9]+$", RegexOptions.Compiled);
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^ACAD-[A-Za-z0-9]+:[A-Za-z0-9]+$")]
+    internal static partial Regex AcadKeyPatternRegex();
 
     // 缓存字段
     private string? _mainFont;
@@ -38,7 +40,7 @@ internal sealed class ConfigService
         var subKeyNames = RegistryService.GetSubKeyNames(Registry.CurrentUser, AutoCadBasePath);
         foreach (var name in subKeyNames)
         {
-            if (AcadKeyPattern.IsMatch(name))
+            if (AcadKeyPatternRegex().IsMatch(name))
             {
                 results.Add($@"{AutoCadBasePath}\{name}\Applications\{AppName}");
             }
@@ -154,7 +156,7 @@ internal sealed class ConfigService
         foreach (var name in subKeyNames)
         {
             // 严格验证 ACAD-xxxx:xxx 格式（必须包含冒号）
-            if (!AcadKeyPattern.IsMatch(name)) continue;
+            if (!AcadKeyPatternRegex().IsMatch(name)) continue;
 
             var appKeyPath = $@"{AutoCadBasePath}\{name}\Applications\{AppName}";
 
@@ -162,7 +164,7 @@ internal sealed class ConfigService
 
             if (RegistryService.DeleteSubKeyTree(Registry.CurrentUser, appKeyPath))
             {
-                log.Info($"已删除注册表项: HKCU\\{appKeyPath},必须重启CAD才可使用NETLOAD命令重新加载插件");
+                log.Info($"已删除注册表项: HKCU\\{appKeyPath}");
                 deletedCount++;
             }
             else

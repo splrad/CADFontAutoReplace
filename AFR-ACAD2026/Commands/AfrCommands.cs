@@ -85,7 +85,7 @@ public class AfrCommands
             log.Info($"注册表清理完成 — 共删除 {deletedCount} 个 AFR-ACAD2026 注册表项。");
 
             log.Info("AFR 插件已完全卸载。");
-            log.Info("如需重新加载，请使用 NETLOAD 命令加载新路径下的 DLL。");
+            log.Info("如需重新加载，请重启CAD后使用 NETLOAD 命令加载新路径下的 DLL。");
 
             // 第三步：先输出日志，再完成卸载
             log.Flush();
