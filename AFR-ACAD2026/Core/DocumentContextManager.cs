@@ -24,9 +24,11 @@ internal sealed class DocumentContextManager
     public bool HasExecuted(Document doc)
     {
         if (doc == null) return true;
+        var key = GetDocumentKey(doc);
+        if (key == null) return true;
         lock (_lock)
         {
-            return _executedDocuments.ContainsKey(GetDocumentKey(doc));
+            return _executedDocuments.ContainsKey(key);
         }
     }
 
@@ -34,6 +36,7 @@ internal sealed class DocumentContextManager
     {
         if (doc == null) return;
         var key = GetDocumentKey(doc);
+        if (key == null) return;
         lock (_lock)
         {
             _executedDocuments[key] = DateTime.Now;
@@ -44,6 +47,7 @@ internal sealed class DocumentContextManager
     {
         if (doc == null) return;
         var key = GetDocumentKey(doc);
+        if (key == null) return;
         lock (_lock)
         {
             _executedDocuments.Remove(key);
@@ -63,10 +67,19 @@ internal sealed class DocumentContextManager
     /// 获取文档唯一标识。
     /// 优先使用 Database.Filename（已保存图纸的完整路径），
     /// 未保存图纸（Filename 为空）则回退到 Document.Name 作为临时标识。
+    /// 访问已释放文档时返回 null。
     /// </summary>
-    private static string GetDocumentKey(Document doc)
+    private static string? GetDocumentKey(Document doc)
     {
-        var dbFilename = doc.Database?.Filename;
-        return string.IsNullOrEmpty(dbFilename) ? doc.Name : dbFilename;
+        try
+        {
+            if (doc.IsDisposed) return null;
+            var dbFilename = doc.Database?.Filename;
+            return string.IsNullOrEmpty(dbFilename) ? doc.Name : dbFilename;
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

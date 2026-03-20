@@ -21,6 +21,8 @@ public class PluginEntry : IExtensionApplication
     // Doc 为 null 表示需要在 Idle 时获取当前活动文档（用于 Startup）
     private static readonly Queue<(Document? Doc, string Trigger)> _pendingExecutions = new();
     private static bool _idleHandlerRegistered;
+    private static volatile bool _unloaded;
+    private static readonly object _scheduleLock = new();
 
     public void Initialize()
     {
@@ -39,6 +41,7 @@ public class PluginEntry : IExtensionApplication
             docMgr.DocumentToBeDestroyed += OnDocumentToBeDestroyed;
 
             // 第三阶段: 延迟启动执行 — 不在此处获取文档引用，避免使用未就绪的文档
+            _unloaded = false;
             ScheduleExecution(null, "Startup");
 
             log.Info("AFR 插件初始化成功。");
@@ -61,15 +64,20 @@ public class PluginEntry : IExtensionApplication
     /// </summary>
     internal static void Unload()
     {
-        // 注销事件
-        UnregisterEvents();
-
-        // 清空延迟执行队列
-        _pendingExecutions.Clear();
-        if (_idleHandlerRegistered)
+        lock (_scheduleLock)
         {
-            AcadApp.Idle -= OnDeferredIdle;
-            _idleHandlerRegistered = false;
+            _unloaded = true;
+
+            // 注销事件
+            UnregisterEvents();
+
+            // 清空延迟执行队列
+            _pendingExecutions.Clear();
+            if (_idleHandlerRegistered)
+            {
+                AcadApp.Idle -= OnDeferredIdle;
+                _idleHandlerRegistered = false;
+            }
         }
 
         // 清空文档跟踪
@@ -93,11 +101,16 @@ public class PluginEntry : IExtensionApplication
     /// </summary>
     private static void ScheduleExecution(Document? doc, string trigger)
     {
-        _pendingExecutions.Enqueue((doc, trigger));
-        if (!_idleHandlerRegistered)
+        lock (_scheduleLock)
         {
-            _idleHandlerRegistered = true;
-            AcadApp.Idle += OnDeferredIdle;
+            if (_unloaded) return;
+
+            _pendingExecutions.Enqueue((doc, trigger));
+            if (!_idleHandlerRegistered)
+            {
+                _idleHandlerRegistered = true;
+                AcadApp.Idle += OnDeferredIdle;
+            }
         }
     }
 
@@ -107,15 +120,25 @@ public class PluginEntry : IExtensionApplication
     /// </summary>
     private static void OnDeferredIdle(object? sender, System.EventArgs e)
     {
-        AcadApp.Idle -= OnDeferredIdle;
-        _idleHandlerRegistered = false;
-
-        while (_pendingExecutions.Count > 0)
+        // 从队列中取出所有待处理项（持锁时间最短化）
+        (Document? Doc, string Trigger)[] pending;
+        lock (_scheduleLock)
         {
-            var (doc, trigger) = _pendingExecutions.Dequeue();
+            AcadApp.Idle -= OnDeferredIdle;
+            _idleHandlerRegistered = false;
+
+            if (_unloaded || _pendingExecutions.Count == 0) return;
+
+            pending = [.. _pendingExecutions];
+            _pendingExecutions.Clear();
+        }
+
+        for (int i = 0; i < pending.Length; i++)
+        {
+            var (doc, trigger) = pending[i];
             // Startup 或其他 null 情况：在 Idle 时获取当前活动文档
             doc ??= AcadApp.DocumentManager.MdiActiveDocument;
-            if (doc == null) continue;
+            if (doc == null || doc.IsDisposed) continue;
 
             try
             {

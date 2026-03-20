@@ -21,14 +21,14 @@ internal sealed record FontCheckResult(
 /// 支持 TrueType（系统字体 + CAD 搜索路径）、SHX（FindFile）、大字体（FindFile）。
 /// 通过名称归一化处理 acad.fmp 字体映射问题。
 /// </summary>
-internal sealed class FontDetector
+internal static class FontDetector
 {
     private static readonly Lazy<HashSet<string>> _systemFontNames = new(BuildSystemFontIndex);
 
     /// <summary>
     /// 扫描数据库中所有文字样式，返回存在缺失字体的样式列表。
     /// </summary>
-    public List<FontCheckResult> DetectMissingFonts(Database db)
+    public static List<FontCheckResult> DetectMissingFonts(Database db)
     {
         var results = new List<FontCheckResult>();
 

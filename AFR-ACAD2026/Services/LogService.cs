@@ -55,9 +55,16 @@ internal sealed class LogService
     {
         lock (_lock)
         {
-            int trueTypeCount = _buffer.Count(e => e.Category == LogCategory.FontTrueType);
-            int shxCount = _buffer.Count(e => e.Category == LogCategory.FontShx);
-            int bigFontCount = _buffer.Count(e => e.Category == LogCategory.FontBigFont);
+            int trueTypeCount = 0, shxCount = 0, bigFontCount = 0;
+            for (int i = 0; i < _buffer.Count; i++)
+            {
+                switch (_buffer[i].Category)
+                {
+                    case LogCategory.FontTrueType: trueTypeCount++; break;
+                    case LogCategory.FontShx: shxCount++; break;
+                    case LogCategory.FontBigFont: bigFontCount++; break;
+                }
+            }
             int total = trueTypeCount + shxCount + bigFontCount;
 
             _buffer.Add((LogCategory.Statistics,
@@ -102,54 +109,56 @@ internal sealed class LogService
             var editor = doc?.Editor;
             if (editor == null) return;
 
-            List<(LogCategory Category, string Message, DateTime Timestamp)> entries;
+            // 分桶收集 — 避免 OrderBy 排序分配
+            const int bucketCount = 7;
+            List<string>?[] buckets = new List<string>?[bucketCount];
+            bool showHeader;
+            string docName;
+
             lock (_lock)
             {
                 if (_buffer.Count == 0) return;
-                entries = [.. _buffer.OrderBy(e => (int)e.Category)];
+                for (int i = 0; i < _buffer.Count; i++)
+                {
+                    var (category, message, _) = _buffer[i];
+                    int idx = (int)category;
+                    string formatted = category switch
+                    {
+                        LogCategory.Error => $"\n[错误] {message}",
+                        LogCategory.Warning => $"\n[警告] {message}",
+                        LogCategory.Info => $"\n[信息] {message}",
+                        _ => $"\n{message}"
+                    };
+                    (buckets[idx] ??= []).Add(formatted);
+                }
                 _buffer.Clear();
-            }
 
-            // 日志头 — 每个图纸仅显示一次
-            var docName = doc?.Name ?? string.Empty;
-            bool showHeader;
-            lock (_lock)
-            {
+                // 日志头判定在同一把锁内完成，消除竞争窗口
+                docName = doc?.Name ?? string.Empty;
                 showHeader = _headerShownDocuments.Add(docName);
             }
 
             if (showHeader)
             {
-                editor.WriteMessage("\n=============================================");
-                editor.WriteMessage("\nCAD缺失字体自动替换工具 AFR");
-                editor.WriteMessage("\n版本：v2.0-2026/03/21");
-                editor.WriteMessage("\n插件首次加载运行必须执行：AFR");
-                editor.WriteMessage("\n命令说明：");
-                editor.WriteMessage("\n AFR - 配置替换字体");
-                editor.WriteMessage("\n AFRUNLOAD - 卸载插件");
-                editor.WriteMessage("\n=============================================");
+                editor.WriteMessage(
+                    "\n=============================================" +
+                    "\nCAD缺失字体自动替换工具 AFR" +
+                    "\n版本：v2.0-2026/03/21" +
+                    "\n插件首次加载运行必须执行：AFR" +
+                    "\n命令说明：" +
+                    "\n AFR - 配置替换字体" +
+                    "\n AFRUNLOAD - 卸载插件" +
+                    "\n=============================================");
             }
 
-            // 按优先级排序输出所有缓存条目
-            foreach (var (category, message, _) in entries)
+            // 按优先级桶顺序输出
+            for (int b = 0; b < bucketCount; b++)
             {
-                switch (category)
+                var bucket = buckets[b];
+                if (bucket == null) continue;
+                for (int i = 0; i < bucket.Count; i++)
                 {
-                    case LogCategory.Error:
-                        editor.WriteMessage($"\n[错误] {message}");
-                        break;
-                    case LogCategory.Warning:
-                        editor.WriteMessage($"\n[警告] {message}");
-                        break;
-                    case LogCategory.FontTrueType:
-                    case LogCategory.FontShx:
-                    case LogCategory.FontBigFont:
-                    case LogCategory.Statistics:
-                        editor.WriteMessage($"\n{message}");
-                        break;
-                    case LogCategory.Info:
-                        editor.WriteMessage($"\n[信息] {message}");
-                        break;
+                    editor.WriteMessage(bucket[i]);
                 }
             }
 

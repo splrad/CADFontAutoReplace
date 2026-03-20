@@ -22,7 +22,7 @@ internal sealed partial class ConfigService
     private string? _mainFont;
     private string? _bigFont;
     private int? _isInitialized;
-    private bool _cacheLoaded;
+    private volatile bool _cacheLoaded;
     private readonly object _lock = new();
 
     private List<string>? _resolvedAppPaths;
@@ -34,20 +34,26 @@ internal sealed partial class ConfigService
     /// </summary>
     internal IReadOnlyList<string> GetAllApplicationPaths()
     {
-        if (_resolvedAppPaths != null) return _resolvedAppPaths;
+        var cached = _resolvedAppPaths;
+        if (cached != null) return cached;
 
-        var results = new List<string>();
-        var subKeyNames = RegistryService.GetSubKeyNames(Registry.CurrentUser, AutoCadBasePath);
-        foreach (var name in subKeyNames)
+        lock (_lock)
         {
-            if (AcadKeyPatternRegex().IsMatch(name))
-            {
-                results.Add($@"{AutoCadBasePath}\{name}\Applications\{AppName}");
-            }
-        }
+            if (_resolvedAppPaths != null) return _resolvedAppPaths;
 
-        _resolvedAppPaths = results;
-        return results;
+            var results = new List<string>();
+            var subKeyNames = RegistryService.GetSubKeyNames(Registry.CurrentUser, AutoCadBasePath);
+            foreach (var name in subKeyNames)
+            {
+                if (AcadKeyPatternRegex().IsMatch(name))
+                {
+                    results.Add($@"{AutoCadBasePath}\{name}\Applications\{AppName}");
+                }
+            }
+
+            _resolvedAppPaths = results;
+            return results;
+        }
     }
 
     /// <summary>

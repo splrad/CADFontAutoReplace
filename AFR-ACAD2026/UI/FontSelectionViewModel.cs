@@ -116,6 +116,17 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    // 缓存 PropertyChangedEventArgs 避免重复分配
+    private static readonly PropertyChangedEventArgs _mainFontArgs = new(nameof(SelectedMainFont));
+    private static readonly PropertyChangedEventArgs _bigFontArgs = new(nameof(SelectedBigFont));
+    private static readonly PropertyChangedEventArgs _confirmArgs = new(nameof(IsConfirmEnabled));
+
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        PropertyChanged?.Invoke(this, propertyName switch
+        {
+            nameof(SelectedMainFont) => _mainFontArgs,
+            nameof(SelectedBigFont) => _bigFontArgs,
+            nameof(IsConfirmEnabled) => _confirmArgs,
+            _ => new PropertyChangedEventArgs(propertyName)
+        });
 }

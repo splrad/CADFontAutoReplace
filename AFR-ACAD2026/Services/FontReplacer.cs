@@ -7,13 +7,13 @@ namespace AFR_ACAD2026.Services;
 /// 使用配置的备用字体替换文字样式中的缺失字体。
 /// 仅修改已确认缺失的样式 — 正常字体不受影响。
 /// </summary>
-internal sealed class FontReplacer
+internal static class FontReplacer
 {
     /// <summary>
     /// 使用指定的备用字体替换缺失字体。
     /// 返回被修改的样式数量。
     /// </summary>
-    public int ReplaceMissingFonts(
+    public static int ReplaceMissingFonts(
         Database db,
         IReadOnlyList<FontCheckResult> missingFonts,
         string mainFont,
@@ -24,6 +24,13 @@ internal sealed class FontReplacer
         var log = LogService.Instance;
         int replaceCount = 0;
 
+        // 预构建字典—O(1)查找替代线性搜索
+        var missingMap = new Dictionary<string, FontCheckResult>(missingFonts.Count, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < missingFonts.Count; i++)
+        {
+            missingMap.TryAdd(missingFonts[i].StyleName, missingFonts[i]);
+        }
+
         using var tr = db.TransactionManager.StartTransaction();
         var styleTable = (TextStyleTable)tr.GetObject(db.TextStyleTableId, OpenMode.ForRead);
 
@@ -32,8 +39,7 @@ internal sealed class FontReplacer
             try
             {
                 var style = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
-                var missing = FindMissing(missingFonts, style.Name);
-                if (missing == null) continue;
+                if (!missingMap.TryGetValue(style.Name, out var missing)) continue;
 
                 bool changed = false;
                 style.UpgradeOpen();
@@ -81,13 +87,4 @@ internal sealed class FontReplacer
         return replaceCount;
     }
 
-    private static FontCheckResult? FindMissing(IReadOnlyList<FontCheckResult> list, string styleName)
-    {
-        for (int i = 0; i < list.Count; i++)
-        {
-            if (string.Equals(list[i].StyleName, styleName, StringComparison.OrdinalIgnoreCase))
-                return list[i];
-        }
-        return null;
     }
-}

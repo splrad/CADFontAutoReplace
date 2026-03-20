@@ -21,7 +21,7 @@ internal sealed class ExecutionController
     /// </summary>
     public void Execute(Document doc, string triggerSource)
     {
-        if (doc == null) return;
+        if (doc == null || doc.IsDisposed) return;
 
         var log = LogService.Instance;
         var config = ConfigService.Instance;
@@ -45,8 +45,7 @@ internal sealed class ExecutionController
             using (doc.LockDocument())
             {
                 // 第一阶段: 检测缺失字体
-                var detector = new FontDetector();
-                var missingFonts = detector.DetectMissingFonts(doc.Database);
+                var missingFonts = FontDetector.DetectMissingFonts(doc.Database);
 
                 if (missingFonts.Count == 0)
                 {
@@ -56,8 +55,7 @@ internal sealed class ExecutionController
                 }
 
                 // 第二阶段: 替换缺失字体
-                var replacer = new FontReplacer();
-                int replaceCount = replacer.ReplaceMissingFonts(
+                int replaceCount = FontReplacer.ReplaceMissingFonts(
                     doc.Database, missingFonts, config.MainFont, config.BigFont);
 
                 // 添加统计汇总
