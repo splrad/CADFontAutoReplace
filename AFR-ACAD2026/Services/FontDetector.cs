@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.GraphicsInterface;
@@ -20,10 +21,15 @@ internal sealed record FontCheckResult(
 /// 检测图纸 TextStyleTable 中的缺失字体。
 /// 支持 TrueType（系统字体 + CAD 搜索路径）、SHX（FindFile）、大字体（FindFile）。
 /// 通过名称归一化处理 acad.fmp 字体映射问题。
+/// FindFile 结果会话级缓存，避免重复磁盘 I/O。
 /// </summary>
 internal static class FontDetector
 {
     private static readonly Lazy<HashSet<string>> _systemFontNames = new(BuildSystemFontIndex);
+
+    // FindFile 结果缓存 — 字体可用性在 CAD 会话期间不变
+    // Key: "{hint}:{normalizedFileName}" Value: 是否找到
+    private static readonly ConcurrentDictionary<string, bool> _findFileCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// 扫描数据库中所有文字样式，返回存在缺失字体的样式列表。
@@ -135,15 +141,24 @@ internal static class FontDetector
 
     private static bool TryFindFile(string fileName, Database db, FindFileHint hint)
     {
+        var cacheKey = string.Concat(((int)hint).ToString(), ":", fileName);
+
+        if (_findFileCache.TryGetValue(cacheKey, out var cached))
+            return cached;
+
+        bool found;
         try
         {
             var result = HostApplicationServices.Current.FindFile(fileName, db, hint);
-            return !string.IsNullOrEmpty(result);
+            found = !string.IsNullOrEmpty(result);
         }
         catch
         {
-            return false;
+            found = false;
         }
+
+        _findFileCache.TryAdd(cacheKey, found);
+        return found;
     }
 
     /// <summary>

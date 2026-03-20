@@ -18,7 +18,7 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
     private string _selectedBigFont = string.Empty;
 
     /// <summary>当前 CAD Fonts 目录下可用的 SHX 字体列表。</summary>
-    public ObservableCollection<string> AvailableFonts { get; } = [];
+    public ObservableCollection<string> AvailableFonts { get; }
 
     public string SelectedMainFont
     {
@@ -48,11 +48,11 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
 
     public FontSelectionViewModel()
     {
-        LoadAvailableFonts();
+        AvailableFonts = new ObservableCollection<string>(ScanAvailableFonts());
         LoadCurrentConfig();
     }
 
-    private void LoadAvailableFonts()
+    private static SortedSet<string> ScanAvailableFonts()
     {
         var fonts = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -83,10 +83,7 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
         }
         catch { }
 
-        foreach (var font in fonts)
-        {
-            AvailableFonts.Add(font);
-        }
+        return fonts;
     }
 
     private static void ScanDirectory(string directory, string pattern, SortedSet<string> results)
