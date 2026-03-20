@@ -5,8 +5,7 @@ using AFR_ACAD2026.Services;
 namespace AFR_ACAD2026.Core;
 
 /// <summary>
-/// 处理首次注册表初始化、自动加载键值设置、
-/// LOADER 路径自修复以及默认配置创建。
+/// 处理首次注册表初始化、自动加载键值设置以及默认配置创建。
 /// 所有操作均为幂等的 — 不会重复写入。
 /// </summary>
 internal static class AppInitializer
@@ -63,19 +62,6 @@ internal static class AppInitializer
             RegistryService.WriteString(Registry.CurrentUser, appPath, "BigFont", string.Empty);
             RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", 0);
             log.Info($"已写入默认配置: {appPath}");
-        }
-
-        // 路径自修复: 若 DLL 已移动，更新 LOADER
-        RepairLoaderPath(appPath, dllPath, log);
-    }
-
-    private static void RepairLoaderPath(string appPath, string dllPath, LogService log)
-    {
-        var currentLoader = RegistryService.ReadString(Registry.CurrentUser, appPath, "LOADER");
-        if (!string.Equals(currentLoader, dllPath, StringComparison.OrdinalIgnoreCase))
-        {
-            RegistryService.WriteString(Registry.CurrentUser, appPath, "LOADER", dllPath);
-            log.Info($"LOADER 路径已修复: '{currentLoader}' → '{dllPath}'");
         }
     }
 
