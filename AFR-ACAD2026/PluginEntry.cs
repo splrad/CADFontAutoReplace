@@ -50,6 +50,32 @@ public class PluginEntry : IExtensionApplication
 
     public void Terminate()
     {
+        UnregisterEvents();
+    }
+
+    /// <summary>
+    /// 卸载插件：注销所有事件、清空执行队列和文档跟踪。
+    /// 由 AFRUNLOAD 命令调用。
+    /// </summary>
+    internal static void Unload()
+    {
+        // 注销事件
+        UnregisterEvents();
+
+        // 清空延迟执行队列
+        _pendingExecutions.Clear();
+        if (_idleHandlerRegistered)
+        {
+            AcadApp.Idle -= OnDeferredIdle;
+            _idleHandlerRegistered = false;
+        }
+
+        // 清空文档跟踪
+        DocumentContextManager.Instance.Clear();
+    }
+
+    private static void UnregisterEvents()
+    {
         try
         {
             var docMgr = AcadApp.DocumentManager;

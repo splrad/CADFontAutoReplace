@@ -126,6 +126,7 @@ internal sealed class LogService
                 editor.WriteMessage("\n插件首次加载运行必须执行：AFR");
                 editor.WriteMessage("\n命令说明：");
                 editor.WriteMessage("\n AFR - 配置替换字体");
+                editor.WriteMessage("\n AFRUNLOAD - 卸载插件");
                 editor.WriteMessage("\n=============================================");
             }
 

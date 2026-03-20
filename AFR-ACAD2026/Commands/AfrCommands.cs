@@ -58,4 +58,46 @@ public class AfrCommands
             log.Flush();
         }
     }
+
+    /// <summary>
+    /// AFRUNLOAD 命令: 完整卸载插件。
+    /// 注销所有事件监听、删除 AFR-ACAD2026 注册表项、清空运行状态。
+    /// 卸载后插件不再自动运行，用户可从其他路径重新加载。
+    /// </summary>
+    [CommandMethod("AFRUNLOAD")]
+    public void AfrUnloadCommand()
+    {
+        var editor = AcadApp.DocumentManager.MdiActiveDocument?.Editor;
+        var log = LogService.Instance;
+
+        try
+        {
+            log.Info("正在执行 AFRUNLOAD — 卸载 AFR 插件...");
+
+            // 第一步：注销事件、清空队列和文档跟踪
+            PluginEntry.Unload();
+            log.Info("已注销所有文档事件监听。");
+            log.Info("已清空执行队列和文档跟踪状态。");
+
+            // 第二步：删除注册表项（仅 AFR-ACAD2026）
+            var config = ConfigService.Instance;
+            int deletedCount = config.DeleteAllApplicationKeys();
+            log.Info($"注册表清理完成 — 共删除 {deletedCount} 个 AFR-ACAD2026 注册表项。");
+
+            log.Info("AFR 插件已完全卸载。");
+            log.Info("如需重新加载，请使用 NETLOAD 命令加载新路径下的 DLL。");
+
+            // 第三步：先输出日志，再完成卸载
+            log.Flush();
+
+            // 最终确认（直接输出，因为 Flush 已完成）
+            editor?.WriteMessage("\nAFR 插件已卸载完成，可通过 NETLOAD 重新加载。\n");
+        }
+        catch (System.Exception ex)
+        {
+            log.Error("AFRUNLOAD 命令执行失败", ex);
+            log.Flush();
+            editor?.WriteMessage($"\n卸载失败: {ex.Message}\n");
+        }
+    }
 }

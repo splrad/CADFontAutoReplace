@@ -85,4 +85,20 @@ internal static class RegistryService
             return [];
         }
     }
+
+    /// <summary>
+    /// 删除指定路径下的子项。仅删除该子项本身及其所有值和子项。
+    /// </summary>
+    public static bool DeleteSubKeyTree(RegistryKey baseKey, string subKeyPath)
+    {
+        try
+        {
+            baseKey.DeleteSubKeyTree(subKeyPath, throwOnMissingSubKey: false);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }

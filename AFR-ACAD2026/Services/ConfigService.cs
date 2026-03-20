@@ -136,6 +136,42 @@ internal sealed class ConfigService
             _mainFont = null;
             _bigFont = null;
             _isInitialized = null;
+            _resolvedAppPaths = null;
         }
+    }
+
+    /// <summary>
+    /// 删除所有 ACAD-xxxx:xxx\Applications 下的 AFR-ACAD2026 注册表项。
+    /// 仅删除 AFR-ACAD2026 项，不影响其他任何注册表项。
+    /// 返回成功删除的数量。
+    /// </summary>
+    public int DeleteAllApplicationKeys()
+    {
+        int deletedCount = 0;
+        var log = LogService.Instance;
+
+        var subKeyNames = RegistryService.GetSubKeyNames(Registry.CurrentUser, AutoCadBasePath);
+        foreach (var name in subKeyNames)
+        {
+            // 严格验证 ACAD-xxxx:xxx 格式（必须包含冒号）
+            if (!AcadKeyPattern.IsMatch(name)) continue;
+
+            var appKeyPath = $@"{AutoCadBasePath}\{name}\Applications\{AppName}";
+
+            if (!RegistryService.KeyExists(Registry.CurrentUser, appKeyPath)) continue;
+
+            if (RegistryService.DeleteSubKeyTree(Registry.CurrentUser, appKeyPath))
+            {
+                log.Info($"已删除注册表项: HKCU\\{appKeyPath}");
+                deletedCount++;
+            }
+            else
+            {
+                log.Error($"删除注册表项失败: HKCU\\{appKeyPath}");
+            }
+        }
+
+        InvalidateCache();
+        return deletedCount;
     }
 }
