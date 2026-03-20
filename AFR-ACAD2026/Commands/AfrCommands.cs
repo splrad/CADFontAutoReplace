@@ -26,7 +26,7 @@ public class AfrCommands
             var window = new FontSelectionWindow();
             Autodesk.AutoCAD.ApplicationServices.Application.ShowModalWindow(window);
 
-            if (window.DialogResult != true || !window.Confirmed)
+            if (window.DialogResult != true)
             {
                 log.Info("AFR 命令已被用户取消。");
                 return;

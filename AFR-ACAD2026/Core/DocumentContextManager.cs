@@ -1,4 +1,5 @@
 using Autodesk.AutoCAD.ApplicationServices;
+using AFR_ACAD2026.Services;
 
 namespace AFR_ACAD2026.Core;
 
@@ -41,6 +42,7 @@ internal sealed class DocumentContextManager
         {
             _executedDocuments.Remove(GetDocumentKey(doc));
         }
+        LogService.Instance.ResetHeaderForDocument(GetDocumentKey(doc));
     }
 
     public void Clear()

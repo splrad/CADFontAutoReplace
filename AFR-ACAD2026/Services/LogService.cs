@@ -27,6 +27,7 @@ internal sealed class LogService
     public static LogService Instance => _instance.Value;
 
     private readonly List<(LogCategory Category, string Message, DateTime Timestamp)> _buffer = [];
+    private readonly HashSet<string> _headerShownDocuments = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
 
     private LogService() { }
@@ -77,32 +78,56 @@ internal sealed class LogService
     }
 
     /// <summary>
+    /// 清除指定文档的日志头显示标记。
+    /// 文档关闭后重新打开时可再次显示日志头。
+    /// </summary>
+    public void ResetHeaderForDocument(string documentName)
+    {
+        lock (_lock)
+        {
+            _headerShownDocuments.Remove(documentName);
+        }
+    }
+
+    /// <summary>
     /// 将所有缓冲日志按优先级排序后统一输出到 AutoCAD 编辑器命令行。
     /// 输出顺序：日志头 → 错误 → 警告 → TrueType → SHX → 大字体 → 信息 → 统计。
     /// </summary>
     public void Flush()
     {
-        List<(LogCategory Category, string Message, DateTime Timestamp)> entries;
-        lock (_lock)
-        {
-            if (_buffer.Count == 0) return;
-            entries = [.. _buffer.OrderBy(e => (int)e.Category)];
-            _buffer.Clear();
-        }
-
         try
         {
-            var editor = Application.DocumentManager.MdiActiveDocument?.Editor;
+            // 先检查编辑器是否可用，不可用则保留缓冲区等待下次 Flush
+            var doc = Application.DocumentManager.MdiActiveDocument;
+            var editor = doc?.Editor;
             if (editor == null) return;
 
-            // 日志头 — 固定格式，最高优先级
-            editor.WriteMessage("\n=============================================");
-            editor.WriteMessage("\nCAD缺失字体自动替换工具 AFR");
-            editor.WriteMessage("\n版本：v1.0-2026/03/19");
-            editor.WriteMessage("\n插件首次加载运行必须执行：AFR");
-            editor.WriteMessage("\n命令说明：");
-            editor.WriteMessage("\n AFR - 配置替换字体");
-            editor.WriteMessage("\n=============================================");
+            List<(LogCategory Category, string Message, DateTime Timestamp)> entries;
+            lock (_lock)
+            {
+                if (_buffer.Count == 0) return;
+                entries = [.. _buffer.OrderBy(e => (int)e.Category)];
+                _buffer.Clear();
+            }
+
+            // 日志头 — 每个图纸仅显示一次
+            var docName = doc?.Name ?? string.Empty;
+            bool showHeader;
+            lock (_lock)
+            {
+                showHeader = _headerShownDocuments.Add(docName);
+            }
+
+            if (showHeader)
+            {
+                editor.WriteMessage("\n=============================================");
+                editor.WriteMessage("\nCAD缺失字体自动替换工具 AFR");
+                editor.WriteMessage("\n版本：v1.0-2026/03/19");
+                editor.WriteMessage("\n插件首次加载运行必须执行：AFR");
+                editor.WriteMessage("\n命令说明：");
+                editor.WriteMessage("\n AFR - 配置替换字体");
+                editor.WriteMessage("\n=============================================");
+            }
 
             // 按优先级排序输出所有缓存条目
             foreach (var (category, message, _) in entries)

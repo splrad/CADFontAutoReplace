@@ -12,9 +12,14 @@ namespace AFR_ACAD2026;
 /// <summary>
 /// 插件入口点，实现 IExtensionApplication。
 /// 负责初始化、事件注册和生命周期管理。
+/// 文档事件通过 Idle 延迟执行，确保日志在 AutoCAD 完成所有输出后最后显示。
 /// </summary>
 public class PluginEntry : IExtensionApplication
 {
+    // 延迟执行队列：文档事件入队，等待 Idle 时统一处理
+    private static readonly Queue<(Document Doc, string Trigger)> _pendingExecutions = new();
+    private static bool _idleHandlerRegistered;
+
     public void Initialize()
     {
         var log = LogService.Instance;
@@ -32,16 +37,13 @@ public class PluginEntry : IExtensionApplication
             docMgr.DocumentToBeDestroyed += OnDocumentToBeDestroyed;
 
             // 第三阶段: 通过 Idle 事件延迟启动执行
-            AcadApp.Idle += OnFirstIdle;
+            ScheduleExecution(AcadApp.DocumentManager.MdiActiveDocument, "Startup");
 
             log.Info("AFR 插件初始化成功。");
         }
         catch (System.Exception ex)
         {
             log.Error("插件初始化失败", ex);
-        }
-        finally
-        {
             log.Flush();
         }
     }
@@ -59,51 +61,53 @@ public class PluginEntry : IExtensionApplication
     }
 
     /// <summary>
-    /// 初始化后首次空闲时触发一次。
-    /// 若 IsInitialized = 1，则在启动时处理当前活动文档。
+    /// 将文档执行请求加入队列，延迟到 Application.Idle 时处理。
+    /// 确保 AutoCAD 完成图纸加载和自身消息输出后，插件日志才最后显示。
     /// </summary>
-    private static void OnFirstIdle(object? sender, System.EventArgs e)
+    private static void ScheduleExecution(Document? doc, string trigger)
     {
-        AcadApp.Idle -= OnFirstIdle;
-        try
+        if (doc == null) return;
+        _pendingExecutions.Enqueue((doc, trigger));
+        if (!_idleHandlerRegistered)
         {
-            var doc = AcadApp.DocumentManager.MdiActiveDocument;
-            if (doc != null)
-            {
-                ExecutionController.Instance.Execute(doc, "Startup");
-            }
+            _idleHandlerRegistered = true;
+            AcadApp.Idle += OnDeferredIdle;
         }
-        catch (System.Exception ex)
+    }
+
+    /// <summary>
+    /// Idle 回调：AutoCAD 空闲时处理所有排队的文档执行请求。
+    /// </summary>
+    private static void OnDeferredIdle(object? sender, System.EventArgs e)
+    {
+        AcadApp.Idle -= OnDeferredIdle;
+        _idleHandlerRegistered = false;
+
+        while (_pendingExecutions.Count > 0)
         {
-            LogService.Instance.Error("启动执行失败", ex);
-            LogService.Instance.Flush();
+            var (doc, trigger) = _pendingExecutions.Dequeue();
+            try
+            {
+                ExecutionController.Instance.Execute(doc, trigger);
+            }
+            catch (System.Exception ex)
+            {
+                LogService.Instance.Error($"{trigger} 延迟执行失败", ex);
+                LogService.Instance.Flush();
+            }
         }
     }
 
     private static void OnDocumentCreated(object sender, DocumentCollectionEventArgs e)
     {
-        try
-        {
-            if (e.Document != null)
-                ExecutionController.Instance.Execute(e.Document, "DocumentCreated");
-        }
-        catch (System.Exception ex)
-        {
-            LogService.Instance.Error("DocumentCreated 处理失败", ex);
-        }
+        if (e.Document != null)
+            ScheduleExecution(e.Document, "DocumentCreated");
     }
 
     private static void OnDocumentActivated(object sender, DocumentCollectionEventArgs e)
     {
-        try
-        {
-            if (e.Document != null)
-                ExecutionController.Instance.Execute(e.Document, "DocumentActivated");
-        }
-        catch (System.Exception ex)
-        {
-            LogService.Instance.Error("DocumentActivated 处理失败", ex);
-        }
+        if (e.Document != null)
+            ScheduleExecution(e.Document, "DocumentActivated");
     }
 
     private static void OnDocumentToBeDestroyed(object sender, DocumentCollectionEventArgs e)

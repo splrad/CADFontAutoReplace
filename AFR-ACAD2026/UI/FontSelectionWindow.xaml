@@ -1,61 +1,113 @@
-<Window x:Class="AFR_ACAD2026.UI.FontSelectionWindow"
+﻿<Window x:Class="AFR_ACAD2026.UI.FontSelectionWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="AFR — 字体配置"
-        Width="480" Height="300"
+        xmlns:hc="https://handyorg.github.io/handycontrol"
+        Title="AFR — 字体替换配置"
+        Width="350" Height="360"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
-        ShowInTaskbar="False">
+        ShowInTaskbar="False"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent">
 
-    <Grid Margin="24">
+    <!-- 窗口资源定义，引入HandyControl的默认皮肤和主题 -->
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/HandyControl;component/Themes/SkinDefault.xaml"/>
+                <ResourceDictionary Source="pack://application:,,,/HandyControl;component/Themes/Theme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <!-- 通过带圆角的包裹层实现整体窗口的圆角效果，添加拖拽事件使无边框窗口可移动 -->
+    <Border CornerRadius="12" Background="{DynamicResource RegionBrush}" MouseLeftButtonDown="Window_MouseLeftButtonDown">
+        <!-- 主布局网格，设置了统一的内外边距 -->
+        <Grid Margin="24,20,24,20">
+            <!-- 定义网格的行，用于划分标题、主字体、大字体和按钮组 -->
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="16"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="12"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/> <!-- 0: 标题区 -->
+            <RowDefinition Height="28"/>   <!-- 1: 间距 -->
+            <RowDefinition Height="Auto"/> <!-- 2: 主字体卡片 -->
+            <RowDefinition Height="16"/>   <!-- 3: 间距 -->
+            <RowDefinition Height="Auto"/> <!-- 4: 大字体卡片 -->
+            <RowDefinition Height="*"/>    <!-- 5: 弹性空间 -->
+            <RowDefinition Height="Auto"/> <!-- 6: 底部按钮区 -->
         </Grid.RowDefinitions>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto"/>
-            <ColumnDefinition Width="12"/>
-            <ColumnDefinition Width="*"/>
-        </Grid.ColumnDefinitions>
 
-        <!-- 标题 -->
-        <TextBlock Grid.Row="0" Grid.ColumnSpan="3"
-                   Text="请选择用于替换缺失字体的备用字体"
-                   FontSize="14" FontWeight="SemiBold"/>
+        <!-- 标题区：显示窗口的主标题和副标题说明 -->
+        <StackPanel Grid.Row="0">
+            <!-- 主标题 -->
+            <TextBlock Text="AFR 字体替换配置"
+                       FontSize="22" FontWeight="Bold"
+                       Foreground="{DynamicResource PrimaryTextBrush}"/>
+            <!-- 副标题说明 -->
+            <TextBlock Text="请选择用于替换缺失字体的默认字体"
+                       FontSize="13" Margin="0,8,0,0"
+                       Foreground="{DynamicResource SecondaryTextBrush}"/>
+        </StackPanel>
 
-        <!-- 主字体 -->
-        <TextBlock Grid.Row="2" Grid.Column="0"
-                   Text="主字体 (SHX):"
-                   VerticalAlignment="Center"/>
-        <ComboBox Grid.Row="2" Grid.Column="2"
-                  x:Name="MainFontCombo"
-                  IsEditable="True"
-                  Height="28"/>
+        <!-- 主字体卡片：用于选择普通的SHX字体 -->
+        <hc:Card Grid.Row="2"
+                 BorderThickness="0"
+                 Effect="{DynamicResource EffectShadow1}">
+            <StackPanel Margin="16,12">
+                <!-- SHX字体标签 -->
+                <TextBlock Text="SHX字体"
+                           FontSize="13" FontWeight="SemiBold"
+                           Foreground="{DynamicResource PrimaryTextBrush}"
+                           Margin="0,0,0,6"/>
+                <!-- SHX字体下拉选择框，支持搜索和手动输入 -->
+                <ComboBox IsEditable="True"
+                          IsTextSearchEnabled="True"
+                          hc:InfoElement.Placeholder="搜索或选择 SHX 字体..."
+                          Style="{StaticResource ComboBoxExtend}"
+                          ItemsSource="{Binding AvailableFonts}"
+                          Text="{Binding SelectedMainFont, UpdateSourceTrigger=PropertyChanged}"/>
+            </StackPanel>
+        </hc:Card>
 
-        <!-- 大字体 -->
-        <TextBlock Grid.Row="4" Grid.Column="0"
-                   Text="大字体 (SHX):"
-                   VerticalAlignment="Center"/>
-        <ComboBox Grid.Row="4" Grid.Column="2"
-                  x:Name="BigFontCombo"
-                  IsEditable="True"
-                  Height="28"/>
+        <!-- 大字体卡片：用于选择亚洲语言的大字体 -->
+        <hc:Card Grid.Row="4"
+                 BorderThickness="0"
+                 Effect="{DynamicResource EffectShadow1}">
+            <StackPanel Margin="16,12">
+                <!-- 大字体标签 -->
+                <TextBlock Text="大字体"
+                           FontSize="13" FontWeight="SemiBold"
+                           Foreground="{DynamicResource PrimaryTextBrush}"
+                           Margin="0,0,0,6"/>
+                <!-- 大字体下拉选择框，支持搜索和手动输入 -->
+                <ComboBox IsEditable="True"
+                          IsTextSearchEnabled="True"
+                          hc:InfoElement.Placeholder="搜索或选择大字体..."
+                          Style="{StaticResource ComboBoxExtend}"
+                          ItemsSource="{Binding AvailableFonts}"
+                          Text="{Binding SelectedBigFont, UpdateSourceTrigger=PropertyChanged}"/>
+            </StackPanel>
+        </hc:Card>
 
-        <!-- 按钮 -->
-        <StackPanel Grid.Row="6" Grid.ColumnSpan="3"
+        <!-- 操作按钮区：包含确认和取消按钮 -->
+        <StackPanel Grid.Row="6"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right">
-            <Button Content="确定" Width="90" Height="30"
-                    Margin="0,0,12,0" IsDefault="True"
-                    x:Name="OkButton" Click="OkButton_Click"/>
-            <Button Content="取消" Width="90" Height="30"
+            <!-- 取消按钮，点击关闭窗口 -->
+            <Button Content="取消"
+                    MinWidth="100" Height="36"
+                    Margin="0,0,12,0"
+                    hc:BorderElement.CornerRadius="8"
                     IsCancel="True"
-                    x:Name="CancelButton" Click="CancelButton_Click"/>
+                    Click="OnCancel"/>
+            <!-- 确认按钮，绑定了可用性状态，点击保存配置 -->
+            <Button Content="确认"
+                    MinWidth="100" Height="36"
+                    Style="{StaticResource ButtonPrimary}"
+                    hc:BorderElement.CornerRadius="8"
+                    IsEnabled="{Binding IsConfirmEnabled}"
+                    IsDefault="True"
+                    Click="OnConfirm"/>
         </StackPanel>
     </Grid>
+    </Border>
 </Window>
