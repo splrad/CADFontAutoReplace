@@ -16,44 +16,50 @@ internal static class AppInitializer
     private const int LoadCtrls = 2;   // 随 AutoCAD 启动自动加载
     private const int Managed = 1;     // 托管 .NET 插件
 
-    public static void Initialize()
+    /// <summary>
+    /// 执行注册表初始化。返回 true 表示首次安装（新建了注册表项）。
+    /// </summary>
+    public static bool Initialize()
     {
         var log = LogService.Instance;
+        bool isFirstRun = false;
         try
         {
             var dllPath = GetCurrentDllPath();
-            log.Info($"插件 DLL 路径: {dllPath}");
 
             var profiles = GetAcadProfiles();
             if (profiles.Count == 0)
             {
                 log.Warning("未找到有效的 AutoCAD R25.1 配置文件 (ACAD-xxxx:xxx)。");
-                return;
+                return false;
             }
 
             foreach (var profile in profiles)
             {
                 var appPath = $@"{AutoCadBasePath}\{profile}\Applications\{AppName}";
-                InitializeProfile(appPath, dllPath, log);
+                if (InitializeProfile(appPath, dllPath, log))
+                    isFirstRun = true;
             }
-
-            log.Info("注册表初始化完成。");
         }
         catch (Exception ex)
         {
             log.Error("应用初始化失败", ex);
         }
+        return isFirstRun;
     }
 
-    private static void InitializeProfile(string appPath, string dllPath, LogService log)
+    /// <summary>
+    /// 初始化单个配置文件。返回 true 表示首次创建。
+    /// </summary>
+    private static bool InitializeProfile(string appPath, string dllPath, LogService log)
     {
         bool isNewKey = !RegistryService.KeyExists(Registry.CurrentUser, appPath);
 
         // 自动加载键值（幂等 — 仅在值不同时写入）
-        WriteIfChanged(appPath, "LOADER", dllPath, log);
-        WriteIfChanged(appPath, "LOADCTRLS", LoadCtrls, log);
-        WriteIfChanged(appPath, "MANAGED", Managed, log);
-        WriteIfChanged(appPath, "DESCRIPTION", Description, log);
+        WriteIfChanged(appPath, "LOADER", dllPath);
+        WriteIfChanged(appPath, "LOADCTRLS", LoadCtrls);
+        WriteIfChanged(appPath, "MANAGED", Managed);
+        WriteIfChanged(appPath, "DESCRIPTION", Description);
 
         // 首次初始化的默认配置
         if (isNewKey)
@@ -61,27 +67,26 @@ internal static class AppInitializer
             RegistryService.WriteString(Registry.CurrentUser, appPath, "MainFont", string.Empty);
             RegistryService.WriteString(Registry.CurrentUser, appPath, "BigFont", string.Empty);
             RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", 0);
-            log.Info($"已写入默认配置: {appPath}");
+            log.Info($"首次安装 — 已写入默认配置。");
         }
+        return isNewKey;
     }
 
-    private static void WriteIfChanged(string appPath, string name, string value, LogService log)
+    private static void WriteIfChanged(string appPath, string name, string value)
     {
         var current = RegistryService.ReadString(Registry.CurrentUser, appPath, name);
         if (!string.Equals(current, value, StringComparison.Ordinal))
         {
             RegistryService.WriteString(Registry.CurrentUser, appPath, name, value);
-            log.Info($"注册表更新: {name} = {value}");
         }
     }
 
-    private static void WriteIfChanged(string appPath, string name, int value, LogService log)
+    private static void WriteIfChanged(string appPath, string name, int value)
     {
         var current = RegistryService.ReadDword(Registry.CurrentUser, appPath, name);
         if (current != value)
         {
             RegistryService.WriteDword(Registry.CurrentUser, appPath, name, value);
-            log.Info($"注册表更新: {name} = {value}");
         }
     }
 

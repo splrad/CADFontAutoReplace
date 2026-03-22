@@ -58,14 +58,17 @@ public class PluginEntry : IExtensionApplication
         var log = LogService.Instance;
         try
         {
-            log.Info("AFR 插件正在初始化...");
-
             // 第零阶段: 提前触发系统字体索引的后台构建
             // 与后续初始化和 CAD 启动并行执行，Idle 时通常已就绪
             FontDetector.PrewarmSystemFonts();
 
             // 第一阶段: 注册表初始化（自动加载、默认配置）
-            AppInitializer.Initialize();
+            bool isFirstRun = AppInitializer.Initialize();
+
+            if (isFirstRun)
+            {
+                log.Info("AFR 插件首次安装完成，请执行 AFR 命令配置替换字体。");
+            }
 
             // 第二阶段: 注册文档事件以支持多文档（MDI）
             // 仅监听 DocumentCreated（新建/打开），不监听 DocumentActivated（切换）
@@ -76,8 +79,6 @@ public class PluginEntry : IExtensionApplication
             // 第三阶段: 延迟启动执行 — 不在此处获取文档引用，避免使用未就绪的文档
             _unloaded = false;
             ScheduleExecution(null, "Startup");
-
-            log.Info("AFR 插件初始化成功。");
         }
         catch (System.Exception ex)
         {

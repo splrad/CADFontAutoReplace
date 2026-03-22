@@ -57,7 +57,7 @@ internal sealed class LogService
         lock (_lock)
         {
             _buffer.Add((LogCategory.Statistics,
-                $"替换TrueType字体：{trueTypeCount}；替换SHX字体：{shxCount}；替换BigFont字体：{bigFontCount}；共替换：{total}",
+                $"已替换缺失字体 {total} 个 (TrueType字体: {trueTypeCount}, SHX字体: {shxCount}, BigFont字体: {bigFontCount})",
                 DateTime.Now));
         }
     }
