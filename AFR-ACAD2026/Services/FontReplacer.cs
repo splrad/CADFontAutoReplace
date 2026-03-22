@@ -55,24 +55,19 @@ internal static class FontReplacer
                         style.Font = new FontDescriptor("", false, false, 0, 0);
                         style.FileName = mainFont;
                         changed = true;
-                        log.FontTrueType($"[样式: {style.Name}]-TrueType字体缺失: {fontName} → 替换为: {mainFont}");
                     }
                     else
                     {
-                        string oldFileName = style.FileName;
                         style.FileName = mainFont;
                         changed = true;
-                        log.FontShx($"[样式: {style.Name}]-SHX字体缺失: {oldFileName} → 替换为: {mainFont}");
                     }
                 }
 
                 // 若大字体缺失且已配置替换字体，则执行替换
                 if (missing.IsBigFontMissing && !string.IsNullOrEmpty(bigFont))
                 {
-                    string oldBigFont = style.BigFontFileName;
                     style.BigFontFileName = bigFont;
                     changed = true;
-                    log.FontBigFont($"[样式: {style.Name}]-大字体缺失: {oldBigFont} → 替换为: {bigFont}");
                 }
 
                 if (changed) replaceCount++;

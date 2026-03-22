@@ -10,10 +10,7 @@ internal enum LogCategory
     Error = 0,         // 错误 — 最高优先级
     Warning = 1,       // 警告
     Info = 2,          // 一般信息
-    FontTrueType = 3,  // TrueType 字体替换记录（第一优先级）
-    FontShx = 4,       // SHX 字体替换记录（第二优先级）
-    FontBigFont = 5,   // 大字体替换记录（第三优先级）
-    Statistics = 6     // 统计汇总 — 最后输出
+    Statistics = 3     // 统计汇总 — 最后输出
 }
 
 /// <summary>
@@ -38,40 +35,29 @@ internal sealed class LogService
     public void Error(string message, Exception ex) =>
         AddEntry(LogCategory.Error, $"{message}: {ex.Message}");
 
-    /// <summary>记录 TrueType 字体替换（第一优先级）。</summary>
-    public void FontTrueType(string message) => AddEntry(LogCategory.FontTrueType, message);
-
-    /// <summary>记录 SHX 字体替换（第二优先级）。</summary>
-    public void FontShx(string message) => AddEntry(LogCategory.FontShx, message);
-
-    /// <summary>记录大字体替换（第三优先级）。</summary>
-    public void FontBigFont(string message) => AddEntry(LogCategory.FontBigFont, message);
-
     /// <summary>
-    /// 根据已缓存的字体替换记录自动计算并添加统计条目。
+    /// 根据缺失字体检测结果直接计算并添加统计条目。
     /// 必须在 Flush 之前调用。
     /// </summary>
-    public void AddStatistics()
+    public void AddStatistics(IReadOnlyList<FontCheckResult> missingFonts)
     {
+        int trueTypeCount = 0, shxCount = 0, bigFontCount = 0;
+        for (int i = 0; i < missingFonts.Count; i++)
+        {
+            var item = missingFonts[i];
+            if (item.IsMainFontMissing)
+            {
+                if (item.IsTrueType) trueTypeCount++;
+                else shxCount++;
+            }
+            if (item.IsBigFontMissing) bigFontCount++;
+        }
+        int total = trueTypeCount + shxCount + bigFontCount;
+
         lock (_lock)
         {
-            int trueTypeCount = 0, shxCount = 0, bigFontCount = 0;
-            for (int i = 0; i < _buffer.Count; i++)
-            {
-                switch (_buffer[i].Category)
-                {
-                    case LogCategory.FontTrueType: trueTypeCount++; break;
-                    case LogCategory.FontShx: shxCount++; break;
-                    case LogCategory.FontBigFont: bigFontCount++; break;
-                }
-            }
-            int total = trueTypeCount + shxCount + bigFontCount;
-
             _buffer.Add((LogCategory.Statistics,
-                $"替换TrueType字体：{trueTypeCount}；替换SHX字体：{shxCount}；替换BigFont字体：{bigFontCount}；",
-                DateTime.Now));
-            _buffer.Add((LogCategory.Statistics,
-                $"共替换缺失字体数量：{total}",
+                $"替换TrueType字体：{trueTypeCount}；替换SHX字体：{shxCount}；替换BigFont字体：{bigFontCount}；共替换：{total}",
                 DateTime.Now));
         }
     }
@@ -110,7 +96,7 @@ internal sealed class LogService
             if (editor == null) return;
 
             // 分桶收集 — 避免 OrderBy 排序分配
-            const int bucketCount = 7;
+            const int bucketCount = 4;
             List<string>?[] buckets = new List<string>?[bucketCount];
             bool showHeader;
             string docName;

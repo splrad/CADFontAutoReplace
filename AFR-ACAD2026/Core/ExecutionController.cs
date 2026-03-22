@@ -59,7 +59,7 @@ internal sealed class ExecutionController
                     doc.Database, missingFonts, config.MainFont, config.BigFont);
 
                 // 添加统计汇总
-                log.AddStatistics();
+                log.AddStatistics(missingFonts);
 
                 // 第三阶段: 重新生成图形
                 if (replaceCount > 0)
