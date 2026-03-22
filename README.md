@@ -16,9 +16,9 @@ AutoCAD 插件，自动检测并替换图纸中缺失的 SHX / TrueType / 大字
 
 ## 支持的 AutoCAD 版本
 
-| DLL 文件名 | AutoCAD 版本 | .NET 运行时 | 注册表路径 |
-|---|---|---|---|
-| `AFR-ACAD2026.dll` | AutoCAD **2026**（R25.1） | .NET 8.0 | `R25.1\ACAD-xxxx:xxx` |
+| DLL 文件名 | AutoCAD 版本 | 注册表路径 |
+|---|---|---|
+| `AFR-ACAD2026.dll` | AutoCAD **2026**（R25.1） | `R25.1\ACAD-xxxx:xxx` |
 
 > 📌 目前仅支持 AutoCAD 2026。后续版本支持将以独立 DLL 的形式发布，文件名中的版本号会相应变化。
 
