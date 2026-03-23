@@ -146,13 +146,20 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 检查字体名称是否包含无效字符（控制字符、替换字符等）。
+    /// 检查字体名称是否包含无效字符或编码损坏特征。
+    /// 过滤控制字符、替换字符、PUA 字符以及乱码常见模式（如 "::"）。
     /// </summary>
     private static bool HasInvalidChars(string name)
     {
+        if (name.Contains("::"))
+            return true;
+
         foreach (char c in name)
         {
             if (char.IsControl(c) || c == '\uFFFD' || c == '\uFFFE' || c == '\uFFFF')
+                return true;
+            // Private Use Area 字符通常表示编码异常
+            if (c >= '\uE000' && c <= '\uF8FF')
                 return true;
         }
         return false;
