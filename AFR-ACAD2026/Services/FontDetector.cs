@@ -15,7 +15,8 @@ internal sealed record FontCheckResult(
     string BigFontFileName,
     bool IsMainFontMissing,
     bool IsBigFontMissing,
-    bool IsTrueType);
+    bool IsTrueType,
+    string TypeFace);
 
 /// <summary>
 /// 检测图纸 TextStyleTable 中的缺失字体。
@@ -85,7 +86,8 @@ internal static class FontDetector
                 {
                     results.Add(new FontCheckResult(
                         styleName, fileName, bigFontName,
-                        isMainMissing, isBigMissing, isTrueType));
+                        isMainMissing, isBigMissing, isTrueType,
+                        isTrueType ? (font.TypeFace ?? string.Empty) : string.Empty));
                 }
             }
             catch (Exception ex)

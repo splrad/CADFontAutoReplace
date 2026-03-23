@@ -1,0 +1,163 @@
+<Window x:Class="AFR_ACAD2026.UI.FontReplacementLogWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:hc="https://handyorg.github.io/handycontrol"
+        Title="AFR — 字体替换日志"
+        Width="560" Height="520"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/HandyControl;component/Themes/SkinDefault.xaml"/>
+                <ResourceDictionary Source="pack://application:,,,/HandyControl;component/Themes/Theme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+            <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Border CornerRadius="10" Background="{DynamicResource RegionBrush}"
+            MouseLeftButtonDown="Window_MouseLeftButtonDown">
+        <Grid Margin="20,16,20,16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>  <!-- 0: 标题 -->
+                <RowDefinition Height="12"/>    <!-- 1: 间距 -->
+                <RowDefinition Height="Auto"/>  <!-- 2: 统计摘要 -->
+                <RowDefinition Height="12"/>    <!-- 3: 间距 -->
+                <RowDefinition Height="*"/>     <!-- 4: 样式列表 -->
+                <RowDefinition Height="12"/>    <!-- 5: 间距 -->
+                <RowDefinition Height="Auto"/>  <!-- 6: 按钮 -->
+            </Grid.RowDefinitions>
+
+            <!-- 标题 -->
+            <StackPanel Grid.Row="0">
+                <TextBlock Text="AFR 字体替换日志"
+                           FontSize="18" FontWeight="Bold"
+                           Foreground="{DynamicResource PrimaryTextBrush}"/>
+                <TextBlock Text="查看缺失字体检测结果，可手动调整各样式的替换字体（仅对当前图纸生效）"
+                           FontSize="12" Margin="0,4,0,0"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           TextWrapping="Wrap"/>
+            </StackPanel>
+
+            <!-- 统计摘要 -->
+            <Border Grid.Row="2" CornerRadius="6" Padding="12,8"
+                    Background="{DynamicResource SecondaryRegionBrush}">
+                <TextBlock Text="{Binding SummaryText}" FontSize="12"
+                           Foreground="{DynamicResource PrimaryTextBrush}"
+                           TextWrapping="Wrap"/>
+            </Border>
+
+            <!-- 样式列表 / 空状态 -->
+            <Grid Grid.Row="4">
+                <!-- 空状态提示 -->
+                <TextBlock Text="当前图纸未检测到缺失字体 ✓"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           FontSize="14"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           Visibility="{Binding HasNoItems, Converter={StaticResource BoolToVis}}"/>
+
+                <!-- 缺失字体样式列表 -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              Visibility="{Binding HasItems, Converter={StaticResource BoolToVis}}">
+                    <ItemsControl ItemsSource="{Binding Items}" Margin="0,0,4,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border CornerRadius="6" Margin="0,0,0,8"
+                                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                        Padding="12,8">
+                                    <StackPanel>
+                                        <!-- 标题行：样式名 + 类型标签 + 状态 -->
+                                        <DockPanel Margin="0,0,0,6">
+                                            <TextBlock DockPanel.Dock="Right"
+                                                       Text="{Binding StatusText}" FontSize="11"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource SuccessBrush}"/>
+                                            <Border DockPanel.Dock="Right" CornerRadius="3"
+                                                    Padding="6,1" Margin="0,0,8,0"
+                                                    Background="{DynamicResource PrimaryBrush}">
+                                                <TextBlock Text="{Binding FontTypeTag}" FontSize="10"
+                                                           Foreground="White"/>
+                                            </Border>
+                                            <TextBlock Text="{Binding StyleName}"
+                                                       FontSize="13" FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </DockPanel>
+
+                                        <!-- 主字体区域（仅主字体缺失时显示） -->
+                                        <StackPanel Visibility="{Binding IsMainFontMissing, Converter={StaticResource BoolToVis}}">
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                                <TextBlock Text="缺失字体: " FontSize="11"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                                <TextBlock Text="{Binding OriginalFont}" FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource DangerBrush}"/>
+                                            </StackPanel>
+                                            <DockPanel>
+                                                <TextBlock Text="替换为:" FontSize="11"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                                           DockPanel.Dock="Left" Margin="0,0,6,0"/>
+                                                <ComboBox IsEditable="True" IsTextSearchEnabled="True"
+                                                          Height="28"
+                                                          hc:InfoElement.Placeholder="选择替换字体..."
+                                                          Style="{StaticResource ComboBoxExtend}"
+                                                          ItemsSource="{Binding AvailableMainFonts}"
+                                                          Text="{Binding SelectedMainReplacement, UpdateSourceTrigger=PropertyChanged}"/>
+                                            </DockPanel>
+                                        </StackPanel>
+
+                                        <!-- 大字体区域（仅大字体缺失时显示） -->
+                                        <StackPanel Margin="0,6,0,0"
+                                                    Visibility="{Binding IsBigFontMissing, Converter={StaticResource BoolToVis}}">
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                                <TextBlock Text="缺失大字体: " FontSize="11"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                                <TextBlock Text="{Binding OriginalBigFont}" FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource DangerBrush}"/>
+                                            </StackPanel>
+                                            <DockPanel>
+                                                <TextBlock Text="替换为:" FontSize="11"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                                           DockPanel.Dock="Left" Margin="0,0,6,0"/>
+                                                <ComboBox IsEditable="True" IsTextSearchEnabled="True"
+                                                          Height="28"
+                                                          hc:InfoElement.Placeholder="选择大字体..."
+                                                          Style="{StaticResource ComboBoxExtend}"
+                                                          ItemsSource="{Binding AvailableBigFonts}"
+                                                          Text="{Binding SelectedBigReplacement, UpdateSourceTrigger=PropertyChanged}"/>
+                                            </DockPanel>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+
+            <!-- 按钮 -->
+            <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="应用替换"
+                        MinWidth="80" Height="32" FontSize="12"
+                        Margin="0,0,10,0"
+                        Style="{StaticResource ButtonPrimary}"
+                        hc:BorderElement.CornerRadius="6"
+                        IsEnabled="{Binding HasItems}"
+                        Click="OnApply"/>
+                <Button Content="关闭"
+                        MinWidth="80" Height="32" FontSize="12"
+                        hc:BorderElement.CornerRadius="6"
+                        Click="OnClose"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

@@ -17,6 +17,7 @@ internal sealed class DocumentContextManager
     // Key: 图纸唯一标识（Database.Filename 或临时标识）
     // Value: 首次处理时间
     private readonly Dictionary<string, DateTime> _executedDocuments = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<FontCheckResult>> _detectionResults = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
 
     private DocumentContextManager() { }
@@ -51,6 +52,7 @@ internal sealed class DocumentContextManager
         lock (_lock)
         {
             _executedDocuments.Remove(key);
+            _detectionResults.Remove(key);
         }
         LogService.Instance.ResetHeaderForDocument(key);
     }
@@ -60,6 +62,35 @@ internal sealed class DocumentContextManager
         lock (_lock)
         {
             _executedDocuments.Clear();
+            _detectionResults.Clear();
+        }
+    }
+
+    /// <summary>
+    /// 存储文档的缺失字体检测结果，供 AFRLOG 命令使用。
+    /// </summary>
+    public void StoreDetectionResults(Document doc, List<FontCheckResult> results)
+    {
+        if (doc == null) return;
+        var key = GetDocumentKey(doc);
+        if (key == null) return;
+        lock (_lock)
+        {
+            _detectionResults[key] = results;
+        }
+    }
+
+    /// <summary>
+    /// 获取文档最近一次的缺失字体检测结果。
+    /// </summary>
+    public List<FontCheckResult>? GetDetectionResults(Document doc)
+    {
+        if (doc == null) return null;
+        var key = GetDocumentKey(doc);
+        if (key == null) return null;
+        lock (_lock)
+        {
+            return _detectionResults.TryGetValue(key, out var r) ? r : null;
         }
     }
 

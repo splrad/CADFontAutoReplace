@@ -21,6 +21,7 @@ internal sealed partial class ConfigService
     // 缓存字段
     private string? _mainFont;
     private string? _bigFont;
+    private string? _trueTypeFont;
     private int? _isInitialized;
     private volatile bool _cacheLoaded;
     private readonly object _lock = new();
@@ -76,6 +77,7 @@ internal sealed partial class ConfigService
 
             _mainFont = RegistryService.ReadString(Registry.CurrentUser, path, "MainFont");
             _bigFont = RegistryService.ReadString(Registry.CurrentUser, path, "BigFont");
+            _trueTypeFont = RegistryService.ReadString(Registry.CurrentUser, path, "TrueTypeFont");
             _isInitialized = RegistryService.ReadDword(Registry.CurrentUser, path, "IsInitialized");
             _cacheLoaded = true;
         }
@@ -115,6 +117,23 @@ internal sealed partial class ConfigService
         }
     }
 
+    public string TrueTypeFont
+    {
+        get
+        {
+            EnsureCacheLoaded();
+            return _trueTypeFont ?? string.Empty;
+        }
+        set
+        {
+            foreach (var path in GetAllApplicationPaths())
+            {
+                RegistryService.WriteString(Registry.CurrentUser, path, "TrueTypeFont", value);
+            }
+            lock (_lock) { _trueTypeFont = value; }
+        }
+    }
+
     public bool IsInitialized
     {
         get
@@ -143,6 +162,7 @@ internal sealed partial class ConfigService
             _cacheLoaded = false;
             _mainFont = null;
             _bigFont = null;
+            _trueTypeFont = null;
             _isInitialized = null;
             _resolvedAppPaths = null;
         }

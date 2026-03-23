@@ -36,9 +36,10 @@ public class AfrCommands
             var config = ConfigService.Instance;
             config.MainFont = window.SelectedMainFont;
             config.BigFont = window.SelectedBigFont;
+            config.TrueTypeFont = window.SelectedTrueTypeFont;
             config.IsInitialized = true;
 
-            log.Info($"配置已保存 — 主字体: '{window.SelectedMainFont}', 大字体: '{window.SelectedBigFont}'");
+            log.Info($"配置已保存 — 主字体: '{window.SelectedMainFont}', TrueType字体: '{window.SelectedTrueTypeFont}', 大字体: '{window.SelectedBigFont}'");
 
             // 对当前文档执行字体替换
             var doc = AcadApp.DocumentManager.MdiActiveDocument;
@@ -52,6 +53,55 @@ public class AfrCommands
         catch (System.Exception ex)
         {
             log.Error("AFR 命令执行失败", ex);
+        }
+        finally
+        {
+            log.Flush();
+        }
+    }
+
+    /// <summary>
+    /// AFRLOG 命令: 打开字体替换日志界面。
+    /// 显示缺失字体检测结果，支持手动逐一指定替换字体（仅影响当前图纸，不写入注册表）。
+    /// </summary>
+    [CommandMethod("AFRLOG")]
+    public void AfrLogCommand()
+    {
+        var log = LogService.Instance;
+        try
+        {
+            var doc = AcadApp.DocumentManager.MdiActiveDocument;
+            if (doc == null)
+            {
+                log.Info("请先打开一个图纸文件。");
+                return;
+            }
+
+            // 优先使用已存储的检测结果，否则重新检测
+            var results = DocumentContextManager.Instance.GetDetectionResults(doc);
+            if (results == null || results.Count == 0)
+            {
+                using (doc.LockDocument())
+                {
+                    results = FontDetector.DetectMissingFonts(doc.Database);
+                }
+            }
+
+            var config = ConfigService.Instance;
+            var vm = new FontReplacementLogViewModel(
+                results, config.MainFont, config.BigFont, config.TrueTypeFont);
+
+            var window = new FontReplacementLogWindow(vm);
+            Autodesk.AutoCAD.ApplicationServices.Application.ShowModalWindow(window);
+
+            if (window.AppliedCount > 0)
+            {
+                log.Info($"手动替换完成 — 共替换 {window.AppliedCount} 个样式的字体。");
+            }
+        }
+        catch (System.Exception ex)
+        {
+            log.Error("AFRLOG 命令执行失败", ex);
         }
         finally
         {

@@ -17,6 +17,9 @@ public partial class FontSelectionWindow : Window
     /// <summary>用户选择的大字体（已去除首尾空白）。</summary>
     public string SelectedBigFont => ViewModel.SelectedBigFont?.Trim() ?? string.Empty;
 
+    /// <summary>用户选择的 TrueType 替换字体（已去除首尾空白）。</summary>
+    public string SelectedTrueTypeFont => ViewModel.SelectedTrueTypeFont?.Trim() ?? string.Empty;
+
     public FontSelectionWindow()
     {
         ViewModel = new FontSelectionViewModel();

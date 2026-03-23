@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:hc="https://handyorg.github.io/handycontrol"
         Title="AFR — 字体替换配置"
-        Width="320" Height="300"
+        Width="320" Height="400"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
@@ -28,9 +28,11 @@
                 <RowDefinition Height="20"/>   <!-- 1: 间距 -->
                 <RowDefinition Height="Auto"/> <!-- 2: SHX 字体 -->
                 <RowDefinition Height="12"/>   <!-- 3: 间距 -->
-                <RowDefinition Height="Auto"/> <!-- 4: 大字体 -->
-                <RowDefinition Height="*"/>    <!-- 5: 弹性 -->
-                <RowDefinition Height="Auto"/> <!-- 6: 按钮 -->
+                <RowDefinition Height="Auto"/> <!-- 4: TrueType 字体 -->
+                <RowDefinition Height="12"/>   <!-- 5: 间距 -->
+                <RowDefinition Height="Auto"/> <!-- 6: 大字体 -->
+                <RowDefinition Height="*"/>    <!-- 7: 弹性 -->
+                <RowDefinition Height="Auto"/> <!-- 8: 按钮 -->
             </Grid.RowDefinitions>
 
             <!-- 标题 -->
@@ -63,8 +65,28 @@
                 </StackPanel>
             </Border>
 
-            <!-- 大字体选择 -->
+            <!-- TrueType 字体选择 -->
             <Border Grid.Row="4" CornerRadius="6"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                    Padding="12,8">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="&#xE8D4;" FontFamily="Segoe MDL2 Assets" FontSize="13"
+                                   Foreground="{DynamicResource PrimaryBrush}" VerticalAlignment="Center"
+                                   Margin="0,0,6,0"/>
+                        <TextBlock Text="TrueType 字体" FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource PrimaryTextBrush}"/>
+                    </StackPanel>
+                    <ComboBox IsEditable="True" IsTextSearchEnabled="True" Height="30"
+                              hc:InfoElement.Placeholder="搜索或选择 TrueType 字体..."
+                              Style="{StaticResource ComboBoxExtend}"
+                              ItemsSource="{Binding AvailableTrueTypeFonts}"
+                              Text="{Binding SelectedTrueTypeFont, UpdateSourceTrigger=PropertyChanged}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- 大字体选择 -->
+            <Border Grid.Row="6" CornerRadius="6"
                     BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                     Padding="12,8">
                 <StackPanel>
@@ -84,7 +106,7 @@
             </Border>
 
             <!-- 按钮 -->
-            <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+            <StackPanel Grid.Row="8" Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="取消"
                         MinWidth="80" Height="32" FontSize="12"
                         Margin="0,0,10,0"

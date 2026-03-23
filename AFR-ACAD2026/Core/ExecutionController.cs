@@ -45,6 +45,9 @@ internal sealed class ExecutionController
                 // 第一阶段: 检测缺失字体
                 var missingFonts = FontDetector.DetectMissingFonts(doc.Database);
 
+                // 存储检测结果供 AFRLOG 命令使用
+                contextMgr.StoreDetectionResults(doc, missingFonts);
+
                 if (missingFonts.Count == 0)
                 {
                     log.Info("未检测到缺失字体。");
@@ -54,7 +57,7 @@ internal sealed class ExecutionController
 
                 // 第二阶段: 替换缺失字体
                 int replaceCount = FontReplacer.ReplaceMissingFonts(
-                    doc.Database, missingFonts, config.MainFont, config.BigFont);
+                    doc.Database, missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont);
 
                 // 添加统计汇总
                 log.AddStatistics(missingFonts);

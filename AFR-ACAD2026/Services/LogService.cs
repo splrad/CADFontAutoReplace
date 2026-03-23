@@ -134,6 +134,7 @@ internal sealed class LogService
                     "\n项目地址(国内)：https://gitee.com/splrad/CADFontAutoReplace.git" +
                     "\n命令说明：" +
                     "\n AFR - 配置替换字体" +
+                    "\n AFRLOG - 查看替换日志与手动替换" +
                     "\n AFRUNLOAD - 卸载插件" +
                     "\n=============================================");
             }

@@ -3,6 +3,8 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Windows.Markup;
+using System.Windows.Media;
 using AFR_ACAD2026.Services;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
@@ -16,9 +18,13 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
 {
     private string _selectedMainFont = string.Empty;
     private string _selectedBigFont = string.Empty;
+    private string _selectedTrueTypeFont = string.Empty;
 
     /// <summary>当前 CAD Fonts 目录下可用的 SHX 字体列表。</summary>
     public ObservableCollection<string> AvailableFonts { get; }
+
+    /// <summary>系统已安装的 TrueType 中文字体列表。</summary>
+    public ObservableCollection<string> AvailableTrueTypeFonts { get; }
 
     public string SelectedMainFont
     {
@@ -43,16 +49,28 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
         }
     }
 
+    public string SelectedTrueTypeFont
+    {
+        get => _selectedTrueTypeFont;
+        set
+        {
+            if (_selectedTrueTypeFont == value) return;
+            _selectedTrueTypeFont = value ?? string.Empty;
+            OnPropertyChanged();
+        }
+    }
+
     /// <summary>主字体已选择时启用确认按钮。</summary>
     public bool IsConfirmEnabled => !string.IsNullOrWhiteSpace(SelectedMainFont);
 
     public FontSelectionViewModel()
     {
         AvailableFonts = new ObservableCollection<string>(ScanAvailableFonts());
+        AvailableTrueTypeFonts = new ObservableCollection<string>(ScanSystemTrueTypeFonts());
         LoadCurrentConfig();
     }
 
-    private static SortedSet<string> ScanAvailableFonts()
+    internal static SortedSet<string> ScanAvailableFonts()
     {
         var fonts = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -86,6 +104,60 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
         return fonts;
     }
 
+    /// <summary>
+    /// 扫描系统已安装的 TrueType 字体，优先使用中文本地化名称。
+    /// 过滤掉名称包含无效字符（乱码）的字体。
+    /// </summary>
+    internal static SortedSet<string> ScanSystemTrueTypeFonts()
+    {
+        var fonts = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var zhCN = XmlLanguage.GetLanguage("zh-cn");
+            var zh = XmlLanguage.GetLanguage("zh");
+
+            foreach (var family in Fonts.SystemFontFamilies)
+            {
+                string? displayName = null;
+
+                // 优先使用 zh-CN 本地化名称，其次 zh
+                if (family.FamilyNames.TryGetValue(zhCN, out var zhCNName)
+                    && !string.IsNullOrWhiteSpace(zhCNName))
+                {
+                    displayName = zhCNName;
+                }
+                else if (family.FamilyNames.TryGetValue(zh, out var zhName)
+                         && !string.IsNullOrWhiteSpace(zhName))
+                {
+                    displayName = zhName;
+                }
+
+                // 跳过没有中文名的字体
+                if (displayName == null) continue;
+
+                // 过滤包含控制字符或替换字符的乱码名称
+                if (HasInvalidChars(displayName)) continue;
+
+                fonts.Add(displayName);
+            }
+        }
+        catch { }
+        return fonts;
+    }
+
+    /// <summary>
+    /// 检查字体名称是否包含无效字符（控制字符、替换字符等）。
+    /// </summary>
+    private static bool HasInvalidChars(string name)
+    {
+        foreach (char c in name)
+        {
+            if (char.IsControl(c) || c == '\uFFFD' || c == '\uFFFE' || c == '\uFFFF')
+                return true;
+        }
+        return false;
+    }
+
     private static void ScanDirectory(string directory, string pattern, SortedSet<string> results)
     {
         if (!Directory.Exists(directory)) return;
@@ -109,6 +181,8 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
             SelectedMainFont = config.MainFont;
         if (!string.IsNullOrEmpty(config.BigFont))
             SelectedBigFont = config.BigFont;
+        if (!string.IsNullOrEmpty(config.TrueTypeFont))
+            SelectedTrueTypeFont = config.TrueTypeFont;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -116,6 +190,7 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
     // 缓存 PropertyChangedEventArgs 避免重复分配
     private static readonly PropertyChangedEventArgs _mainFontArgs = new(nameof(SelectedMainFont));
     private static readonly PropertyChangedEventArgs _bigFontArgs = new(nameof(SelectedBigFont));
+    private static readonly PropertyChangedEventArgs _trueTypeFontArgs = new(nameof(SelectedTrueTypeFont));
     private static readonly PropertyChangedEventArgs _confirmArgs = new(nameof(IsConfirmEnabled));
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
@@ -123,6 +198,7 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
         {
             nameof(SelectedMainFont) => _mainFontArgs,
             nameof(SelectedBigFont) => _bigFontArgs,
+            nameof(SelectedTrueTypeFont) => _trueTypeFontArgs,
             nameof(IsConfirmEnabled) => _confirmArgs,
             _ => new PropertyChangedEventArgs(propertyName)
         });
