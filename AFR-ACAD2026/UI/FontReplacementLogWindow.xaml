@@ -83,7 +83,6 @@
                                     <ColumnDefinition Width="68"/>
                                     <ColumnDefinition Width="120"/>
                                     <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="58"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="样式名" FontSize="11" FontWeight="SemiBold"
                                            Foreground="{DynamicResource PrimaryTextBrush}"/>
@@ -93,8 +92,6 @@
                                            Foreground="{DynamicResource PrimaryTextBrush}"/>
                                 <TextBlock Grid.Column="3" Text="替换字体" FontSize="11" FontWeight="SemiBold"
                                            Foreground="{DynamicResource PrimaryTextBrush}" Margin="4,0,0,0"/>
-                                <TextBlock Grid.Column="4" Text="状态" FontSize="11" FontWeight="SemiBold"
-                                           Foreground="{DynamicResource PrimaryTextBrush}"/>
                             </Grid>
                         </Border>
 
@@ -112,7 +109,6 @@
                                                     <ColumnDefinition Width="68"/>
                                                     <ColumnDefinition Width="120"/>
                                                     <ColumnDefinition Width="*"/>
-                                                    <ColumnDefinition Width="58"/>
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Grid.Column="0" Text="{Binding StyleName}"
                                                            FontSize="11" VerticalAlignment="Center"
@@ -138,19 +134,6 @@
                                                           Style="{StaticResource ComboBoxExtend}"
                                                           ItemsSource="{Binding AvailableFonts}"
                                                           Text="{Binding SelectedReplacement, UpdateSourceTrigger=PropertyChanged}"/>
-                                                <TextBlock Grid.Column="4" Text="{Binding StatusText}"
-                                                           FontSize="11" VerticalAlignment="Center">
-                                                    <TextBlock.Style>
-                                                        <Style TargetType="TextBlock">
-                                                            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding IsApplied}" Value="True">
-                                                                    <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/>
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </TextBlock.Style>
-                                                </TextBlock>
                                             </Grid>
                                         </Border>
                                     </DataTemplate>

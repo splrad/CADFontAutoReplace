@@ -34,7 +34,6 @@ public partial class FontReplacementLogWindow : Window
             var map = new Dictionary<string, StyleFontReplacement>(StringComparer.OrdinalIgnoreCase);
             foreach (var row in ViewModel.Items)
             {
-                if (row.IsApplied) continue;
                 string font = row.SelectedReplacement?.Trim() ?? string.Empty;
                 if (string.IsNullOrEmpty(font)) continue;
 
@@ -57,12 +56,6 @@ public partial class FontReplacementLogWindow : Window
                         doc.Editor.Regen();
                         AppliedCount += count;
                     }
-                }
-
-                foreach (var row in ViewModel.Items)
-                {
-                    if (!row.IsApplied)
-                        row.IsApplied = true;
                 }
             }
         }

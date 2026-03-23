@@ -13,7 +13,6 @@ namespace AFR_ACAD2026.UI;
 internal sealed class FontReplacementRow : INotifyPropertyChanged
 {
     private string _selectedReplacement = string.Empty;
-    private bool _isApplied;
 
     public string StyleName { get; }
     public string FontCategory { get; }
@@ -34,20 +33,6 @@ internal sealed class FontReplacementRow : INotifyPropertyChanged
             OnPropertyChanged();
         }
     }
-
-    public bool IsApplied
-    {
-        get => _isApplied;
-        set
-        {
-            if (_isApplied == value) return;
-            _isApplied = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(StatusText));
-        }
-    }
-
-    public string StatusText => IsApplied ? "✓ 已替换" : "待处理";
 
     public FontReplacementRow(
         string styleName,
