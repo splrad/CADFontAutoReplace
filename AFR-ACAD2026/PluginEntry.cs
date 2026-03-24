@@ -35,6 +35,9 @@ public class PluginEntry : IExtensionApplication
         AppDomain.CurrentDomain.AssemblyResolve += OnResolveEmbeddedAssembly;
     }
 
+    // 缓存已解析的嵌入程序集，避免重复从资源流读取和加载
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Assembly> _resolvedAssemblies = new();
+
     /// <summary>
     /// 从嵌入资源中加载第三方程序集（如 HandyControl）。
     /// 实现单 DLL 分发 — 所有依赖嵌入到 AFR-ACAD2026.dll 中。
@@ -44,13 +47,18 @@ public class PluginEntry : IExtensionApplication
         var assemblyName = new AssemblyName(args.Name).Name;
         if (assemblyName == null) return null;
 
+        if (_resolvedAssemblies.TryGetValue(assemblyName, out var cached))
+            return cached;
+
         var resourceName = assemblyName + ".dll";
         using var stream = typeof(PluginEntry).Assembly.GetManifestResourceStream(resourceName);
         if (stream == null) return null;
 
         var data = new byte[stream.Length];
         stream.ReadExactly(data);
-        return Assembly.Load(data);
+        var assembly = Assembly.Load(data);
+        _resolvedAssemblies.TryAdd(assemblyName, assembly);
+        return assembly;
     }
 
     public void Initialize()

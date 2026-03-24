@@ -16,6 +16,10 @@ namespace AFR_ACAD2026.UI;
 /// </summary>
 internal sealed class FontSelectionViewModel : INotifyPropertyChanged
 {
+    // 会话级缓存 — SHX 和 TrueType 字体列表在 CAD 运行期间不变，只扫描一次
+    private static SortedSet<string>? _cachedShxFonts;
+    private static SortedSet<string>? _cachedTrueTypeFonts;
+
     private string _selectedMainFont = string.Empty;
     private string _selectedBigFont = string.Empty;
     private string _selectedTrueTypeFont = string.Empty;
@@ -72,6 +76,8 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
 
     internal static SortedSet<string> ScanAvailableFonts()
     {
+        if (_cachedShxFonts != null) return _cachedShxFonts;
+
         var fonts = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // 扫描 AutoCAD 支持搜索路径 (ACADPREFIX)
@@ -101,6 +107,7 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
         }
         catch { }
 
+        _cachedShxFonts = fonts;
         return fonts;
     }
 
@@ -110,6 +117,8 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
     /// </summary>
     internal static SortedSet<string> ScanSystemTrueTypeFonts()
     {
+        if (_cachedTrueTypeFonts != null) return _cachedTrueTypeFonts;
+
         var fonts = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
@@ -146,6 +155,7 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
             }
         }
         catch { }
+        _cachedTrueTypeFonts = fonts;
         return fonts;
     }
 
