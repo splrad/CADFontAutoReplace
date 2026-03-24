@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:hc="https://handyorg.github.io/handycontrol"
         Title="AFR — 字体替换日志"
-        Width="580" Height="480"
+        Width="610" Height="480"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
@@ -102,10 +102,10 @@
                                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="105"/>
-                                    <ColumnDefinition Width="72"/>
-                                    <ColumnDefinition Width="105"/>
-                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="4.5*"/>
+                                    <ColumnDefinition Width="100"/>
+                                    <ColumnDefinition Width="2*"/>
+                                    <ColumnDefinition Width="2*"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="样式名" FontSize="11" FontWeight="SemiBold"
                                            Foreground="{DynamicResource PrimaryTextBrush}"/>
@@ -128,10 +128,10 @@
                                                 BorderThickness="0,0,0,1">
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="105"/>
-                                                    <ColumnDefinition Width="72"/>
-                                                    <ColumnDefinition Width="105"/>
-                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="4.5*"/>
+                                                    <ColumnDefinition Width="100"/>
+                                                    <ColumnDefinition Width="2*"/>
+                                                    <ColumnDefinition Width="2*"/>
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Grid.Column="0" Text="{Binding StyleName}"
                                                            FontSize="11" VerticalAlignment="Center"
@@ -182,7 +182,6 @@
 
             <!-- 底部：左侧批量操作 + 右侧按钮 -->
             <DockPanel Grid.Row="6">
-                <!-- 右侧操作按钮 -->
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Content="应用替换"
                             MinWidth="80" Height="32" FontSize="12"
@@ -196,29 +195,28 @@
                             hc:BorderElement.CornerRadius="6"
                             Click="OnClose"/>
                 </StackPanel>
-                <!-- 左侧批量操作 -->
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
                             Visibility="{Binding HasItems, Converter={StaticResource BoolToVis}}">
-                    <ComboBox Width="90" Height="28" IsEditable="True" IsTextSearchEnabled="True"
-                              hc:InfoElement.Placeholder="SHX主字体..."
+                    <ComboBox Width="110" Height="28" IsEditable="True" IsTextSearchEnabled="True"
+                              hc:InfoElement.Placeholder="SHX主字体"
                               Style="{StaticResource ComboBoxExtend}"
                               ItemsSource="{Binding AvailableShxFonts}"
                               Text="{Binding BatchShxFont, UpdateSourceTrigger=PropertyChanged}"
                               Loaded="OnComboBoxLoaded"/>
-                    <ComboBox Width="90" Height="28" Margin="4,0,0,0" IsEditable="True" IsTextSearchEnabled="True"
-                              hc:InfoElement.Placeholder="SHX大字体..."
+                    <ComboBox Width="110" Height="28" Margin="4,0,0,0" IsEditable="True" IsTextSearchEnabled="True"
+                              hc:InfoElement.Placeholder="SHX大字体"
                               Style="{StaticResource ComboBoxExtend}"
                               ItemsSource="{Binding AvailableShxFonts}"
                               Text="{Binding BatchBigFont, UpdateSourceTrigger=PropertyChanged}"
                               Loaded="OnComboBoxLoaded"/>
-                    <ComboBox Width="90" Height="28" Margin="4,0,0,0" IsEditable="True" IsTextSearchEnabled="True"
-                              hc:InfoElement.Placeholder="TrueType..."
+                    <ComboBox Width="120" Height="28" Margin="4,0,0,0" IsEditable="True" IsTextSearchEnabled="True"
+                              hc:InfoElement.Placeholder="TrueType字体"
                               Style="{StaticResource ComboBoxExtend}"
                               ItemsSource="{Binding AvailableTrueTypeFonts}"
                               Text="{Binding BatchTrueTypeFont, UpdateSourceTrigger=PropertyChanged}"
                               Loaded="OnComboBoxLoaded"/>
-                    <Button Content="一键替换" Height="28" FontSize="11"
-                            Margin="6,0,0,0" Padding="8,0"
+                    <Button Content="填充" Height="28" FontSize="11"
+                            Margin="5,0,0,0" Padding="6,0"
                             hc:BorderElement.CornerRadius="4"
                             Click="OnBatchApply"/>
                 </StackPanel>
