@@ -1,0 +1,140 @@
+<Window x:Class="AFR_ACAD2026.MTextEditor.MTextEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:hc="https://handyorg.github.io/handycontrol"
+        Title="AFR — MText 编辑器"
+        Width="820" Height="520"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/HandyControl;component/Themes/SkinDefault.xaml"/>
+                <ResourceDictionary Source="pack://application:,,,/HandyControl;component/Themes/Theme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Border CornerRadius="10" Background="{DynamicResource RegionBrush}"
+            MouseLeftButtonDown="Window_MouseLeftButtonDown">
+        <Grid Margin="20,14,20,14">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>  <!-- 0: 标题 -->
+                <RowDefinition Height="10"/>    <!-- 1: 间距 -->
+                <RowDefinition Height="Auto"/>  <!-- 2: 面板标题 -->
+                <RowDefinition Height="*"/>     <!-- 3: 编辑区域 -->
+                <RowDefinition Height="10"/>    <!-- 4: 间距 -->
+                <RowDefinition Height="Auto"/>  <!-- 5: 查找替换 -->
+                <RowDefinition Height="10"/>    <!-- 6: 间距 -->
+                <RowDefinition Height="Auto"/>  <!-- 7: 状态和按钮 -->
+            </Grid.RowDefinitions>
+
+            <!-- 标题 -->
+            <StackPanel Grid.Row="0">
+                <TextBlock Text="MText 编辑器"
+                           FontSize="16" FontWeight="Bold"
+                           Foreground="{DynamicResource PrimaryTextBrush}"/>
+                <TextBlock Text="编辑多行文字的格式代码 — 左侧高亮预览，右侧原始代码"
+                           FontSize="11" Margin="0,3,0,0"
+                           Foreground="{DynamicResource SecondaryTextBrush}"/>
+            </StackPanel>
+
+            <!-- 面板标题 -->
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="10"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="▎可视化编辑" FontSize="11" FontWeight="SemiBold"
+                           Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,4"/>
+                <TextBlock Grid.Column="2" Text="▎原始代码 (Contents)" FontSize="11" FontWeight="SemiBold"
+                           Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,4"/>
+            </Grid>
+
+            <!-- 编辑区域 -->
+            <Grid Grid.Row="3">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="10"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 左侧：可视化编辑 (RichTextBox) -->
+                <Border Grid.Column="0" CornerRadius="6" ClipToBounds="True"
+                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                    <RichTextBox x:Name="VisualEditor"
+                                 AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Disabled"
+                                 FontFamily="Consolas" FontSize="13"
+                                 Padding="8,6"
+                                 BorderThickness="0"
+                                 Background="{DynamicResource SecondaryRegionBrush}"
+                                 Foreground="{DynamicResource PrimaryTextBrush}"
+                                 TextChanged="VisualEditor_TextChanged"/>
+                </Border>
+
+                <!-- 右侧：原始代码 (TextBox) -->
+                <Border Grid.Column="2" CornerRadius="6" ClipToBounds="True"
+                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                    <TextBox x:Name="RawEditor"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             FontFamily="Consolas" FontSize="13"
+                             Padding="8,6"
+                             BorderThickness="0"
+                             Background="{DynamicResource SecondaryRegionBrush}"
+                             Foreground="{DynamicResource PrimaryTextBrush}"
+                             TextChanged="RawEditor_TextChanged"/>
+                </Border>
+            </Grid>
+
+            <!-- 查找替换 -->
+            <Border Grid.Row="5" CornerRadius="6" Padding="10,6"
+                    Background="{DynamicResource SecondaryRegionBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="查找:" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0"
+                               Foreground="{DynamicResource PrimaryTextBrush}"/>
+                    <TextBox Width="200" Height="26" FontSize="11"
+                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"/>
+                    <TextBlock Text="替换:" FontSize="11" VerticalAlignment="Center" Margin="12,0,6,0"
+                               Foreground="{DynamicResource PrimaryTextBrush}"/>
+                    <TextBox Width="200" Height="26" FontSize="11"
+                             Text="{Binding ReplaceText, UpdateSourceTrigger=PropertyChanged}"/>
+                    <Button Content="批量替换" Height="26" MinWidth="70" FontSize="11" Margin="10,0,0,0"
+                            hc:BorderElement.CornerRadius="4"
+                            Style="{StaticResource ButtonWarning}"
+                            Click="OnBatchReplace"/>
+                </StackPanel>
+            </Border>
+
+            <!-- 状态和按钮 -->
+            <DockPanel Grid.Row="7">
+                <TextBlock DockPanel.Dock="Left"
+                           Text="{Binding StatusMessage}" FontSize="11"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource SecondaryTextBrush}"/>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="复制代码" Height="32" MinWidth="80" FontSize="12" Margin="0,0,8,0"
+                            hc:BorderElement.CornerRadius="6"
+                            Click="OnCopyCode"/>
+                    <Button Content="取消" Height="32" MinWidth="80" FontSize="12" Margin="0,0,8,0"
+                            hc:BorderElement.CornerRadius="6"
+                            IsCancel="True" Click="OnCancel"/>
+                    <Button Content="确认" Height="32" MinWidth="80" FontSize="12"
+                            Style="{StaticResource ButtonPrimary}"
+                            hc:BorderElement.CornerRadius="6"
+                            IsDefault="True" Click="OnConfirm"/>
+                </StackPanel>
+            </DockPanel>
+        </Grid>
+    </Border>
+</Window>
