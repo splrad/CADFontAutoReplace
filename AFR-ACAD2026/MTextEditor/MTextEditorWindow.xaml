@@ -48,7 +48,7 @@
                              IsReadOnly="True"
                              VerticalScrollBarVisibility="Auto"
                              HorizontalScrollBarVisibility="Disabled"
-                             FontFamily="Consolas" FontSize="13"
+                             FontFamily="pack://application:,,,/AFR-ACAD2026;component/MTextEditor/Fonts/#JetBrains Maple Mono, Consolas" FontSize="13"
                              Padding="8,6"
                              BorderThickness="0"
                              Background="{DynamicResource SecondaryRegionBrush}"

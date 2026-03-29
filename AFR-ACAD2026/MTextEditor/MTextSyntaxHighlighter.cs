@@ -41,7 +41,7 @@ internal static partial class MTextSyntaxHighlighter
     {
         var doc = new FlowDocument
         {
-            FontFamily = new FontFamily("Consolas"),
+            FontFamily = new FontFamily(new Uri("pack://application:,,,/AFR-ACAD2026;component/MTextEditor/Fonts/"), "./#JetBrains Maple Mono, Consolas"),
             FontSize = 13,
             PagePadding = new Thickness(0)
         };

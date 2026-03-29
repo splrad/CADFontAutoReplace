@@ -20,6 +20,11 @@
     </PackageReference>
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 嵌入字体 — WPF Resource，运行时从内存加载，不释放到磁盘 -->
+    <Resource Include="MTextEditor\Fonts\JetBrainsMapleMono-Regular.ttf" />
+  </ItemGroup>
+
   <!-- 将 HandyControl.dll 嵌入为程序集资源，并从输出中移除 -->
   <Target Name="EmbedHandyControl" AfterTargets="ResolveAssemblyReferences">
     <ItemGroup>
