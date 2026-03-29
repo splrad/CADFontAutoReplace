@@ -1,0 +1,66 @@
+<Window x:Class="AFR_ACAD2026.MTextEditor.MTextEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:hc="https://handyorg.github.io/handycontrol"
+        Title="AFR — MText 查看器"
+        Width="500" Height="560"
+        WindowStartupLocation="Manual"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/HandyControl;component/Themes/SkinDefault.xaml"/>
+                <ResourceDictionary Source="pack://application:,,,/HandyControl;component/Themes/Theme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Border CornerRadius="10" Background="{DynamicResource RegionBrush}"
+            MouseLeftButtonDown="Window_MouseLeftButtonDown">
+        <Grid Margin="20,14,20,14">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>  <!-- 0: 标题 -->
+                <RowDefinition Height="10"/>    <!-- 1: 间距 -->
+                <RowDefinition Height="*"/>     <!-- 2: 查看区域 -->
+                <RowDefinition Height="10"/>    <!-- 3: 间距 -->
+                <RowDefinition Height="Auto"/>  <!-- 4: 按钮 -->
+            </Grid.RowDefinitions>
+
+            <!-- 标题 -->
+            <StackPanel Grid.Row="0">
+                <TextBlock Text="MText 查看器"
+                           FontSize="16" FontWeight="Bold"
+                           Foreground="{DynamicResource PrimaryTextBrush}"/>
+                <TextBlock Text="查看多行文字的格式代码（语法高亮）"
+                           FontSize="11" Margin="0,3,0,0"
+                           Foreground="{DynamicResource SecondaryTextBrush}"/>
+            </StackPanel>
+
+            <!-- 查看区域 -->
+            <Border Grid.Row="2" CornerRadius="6" ClipToBounds="True"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                <RichTextBox x:Name="RawViewer"
+                             IsReadOnly="True"
+                             VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Disabled"
+                             FontFamily="Consolas" FontSize="13"
+                             Padding="8,6"
+                             BorderThickness="0"
+                             Background="{DynamicResource SecondaryRegionBrush}"
+                             Foreground="{DynamicResource PrimaryTextBrush}"/>
+            </Border>
+
+            <!-- 按钮 -->
+            <DockPanel Grid.Row="4">
+                <Button DockPanel.Dock="Right" Content="关闭" Height="32" MinWidth="80" FontSize="12"
+                        hc:BorderElement.CornerRadius="6"
+                        IsCancel="True" Click="OnClose"/>
+            </DockPanel>
+        </Grid>
+    </Border>
+</Window>
