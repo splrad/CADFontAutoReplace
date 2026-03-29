@@ -26,12 +26,12 @@ public class FontMappingCommand
             ed.WriteMessage("\n=== AFR 字体映射诊断 ===\n");
 
             // 检查默认映射
-            string[] testFonts = ["@gbcbig", "gbcbig", "gbenor", "txt"];
+            string[] testFonts = ["@gbcbig", "@gbcbig.shx", "gbcbig", "gbenor", "txt"];
             foreach (var font in testFonts)
             {
                 string mapped = FontMappingService.QueryMapping(font);
-                string status = string.Equals(font, mapped, StringComparison.OrdinalIgnoreCase) ? "无映射" : $"→ {mapped}";
-                ed.WriteMessage($"  {font,-16} {status}\n");
+                bool same = string.Equals(font, mapped, StringComparison.OrdinalIgnoreCase);
+                ed.WriteMessage($"  {font,-20} {(same ? "无映射" : $"→ {mapped}")}\n");
             }
 
             // 扫描当前文档的文字样式

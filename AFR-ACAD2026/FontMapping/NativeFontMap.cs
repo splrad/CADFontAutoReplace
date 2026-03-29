@@ -20,12 +20,22 @@ internal static class NativeFontMap
     internal static extern bool AddMapping(string sourceFont, string targetFont);
 
     /// <summary>
-    /// 查询字体映射结果：给定源字体名，返回映射后的目标字体名。
-    /// 若无映射则返回原名。
+    /// 查询字体映射结果。返回原生指针，由调用方手动编组。
     /// 原生签名: const wchar_t* __cdecl mapFontName(const wchar_t* name)
+    /// 注意：返回的是内部指针，不可用 LPWStr 自动编组（会触发 CoTaskMemFree）。
     /// </summary>
     [DllImport(AcDbDll, CallingConvention = CallingConvention.Cdecl,
                EntryPoint = "?mapFontName@@YAPEB_WPEB_W@Z", CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.LPWStr)]
-    internal static extern string MapFontName(string fontName);
+    private static extern nint MapFontNameNative(string fontName);
+
+    /// <summary>
+    /// 查询字体名的映射结果。
+    /// 若无映射则返回原名，若原生函数返回 NULL 则返回原名。
+    /// </summary>
+    internal static string MapFontName(string fontName)
+    {
+        nint ptr = MapFontNameNative(fontName);
+        if (ptr == 0) return fontName;
+        return Marshal.PtrToStringUni(ptr) ?? fontName;
+    }
 }

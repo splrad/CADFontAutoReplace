@@ -24,17 +24,20 @@ internal static class FontMappingService
     /// <summary>
     /// 默认字体映射规则。
     /// Key = 源字体名（图纸中引用的字体），Value = 目标字体名（本机可用的字体）。
+    /// 同时覆盖带扩展名和不带扩展名两种格式，因为 AutoCAD 内部可能使用任一格式查找。
     /// </summary>
-    private static readonly Dictionary<string, string> DefaultMappings = new(StringComparer.OrdinalIgnoreCase)
-    {
+    private static readonly (string Source, string Target)[] DefaultMappings =
+    [
         // 竖排大字体 → 常规大字体
-        ["@gbcbig"] = "gbcbig",
-    };
+        ("@gbcbig", "gbcbig"),
+        ("@gbcbig.shx", "gbcbig.shx"),
+    ];
 
     /// <summary>
     /// 在插件初始化阶段注入所有字体映射。
+    /// 优先尝试 Hook loadShape（在文件解析时拦截），
+    /// 回退到直接 addMapping（对文字样式表生效）。
     /// 必须在任何文档打开之前调用（PluginEntry.Initialize 中）。
-    /// 多次调用安全（仅首次执行）。
     /// </summary>
     internal static void EnsureInitialized()
     {
@@ -44,32 +47,32 @@ internal static class FontMappingService
             if (_initialized) return;
 
             var log = LogService.Instance;
-            int successCount = 0;
 
-            foreach (var (source, target) in DefaultMappings)
+            // 阶段 2: 安装 loadShape Hook — 在首次字体加载时注入映射
+            bool hookInstalled = LoadShapeHook.Install();
+
+            if (!hookInstalled)
             {
-                try
+                // 回退到阶段 1: 直接调用 addMapping
+                log.Warning("LoadShapeHook 未安装，回退到直接 addMapping");
+                int successCount = 0;
+                foreach (var (source, target) in DefaultMappings)
                 {
-                    bool result = NativeFontMap.AddMapping(source, target);
-                    if (result)
+                    try
                     {
-                        log.Info($"字体映射已添加: {source} → {target}");
-                        successCount++;
+                        bool result = NativeFontMap.AddMapping(source, target);
+                        log.Info(result
+                            ? $"字体映射已添加: {source} → {target}"
+                            : $"字体映射添加失败（返回 false）: {source} → {target}");
+                        if (result) successCount++;
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        log.Warning($"字体映射添加失败（返回 false）: {source} → {target}");
+                        log.Error($"字体映射添加异常: {source} → {target}", ex);
                     }
                 }
-                catch (Exception ex)
-                {
-                    log.Error($"字体映射添加异常: {source} → {target}", ex);
-                }
-            }
-
-            if (successCount > 0)
-            {
-                log.Info($"字体映射初始化完成，共 {successCount} 条规则生效。");
+                if (successCount > 0)
+                    log.Info($"字体映射初始化完成，共 {successCount} 条规则生效。");
             }
 
             _initialized = true;
