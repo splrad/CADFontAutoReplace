@@ -2,12 +2,14 @@ using System.Reflection;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Runtime;
 using AFR_ACAD2026.Core;
+using AFR_ACAD2026.FontMapping;
 using AFR_ACAD2026.Services;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
 [assembly: ExtensionApplication(typeof(AFR_ACAD2026.PluginEntry))]
 [assembly: CommandClass(typeof(AFR_ACAD2026.Commands.AfrCommands))]
 [assembly: CommandClass(typeof(AFR_ACAD2026.MTextEditor.MTextEditorCommand))]
+[assembly: CommandClass(typeof(AFR_ACAD2026.FontMapping.FontMappingCommand))]
 
 namespace AFR_ACAD2026;
 
@@ -67,7 +69,11 @@ public class PluginEntry : IExtensionApplication
         var log = LogService.Instance;
         try
         {
-            // 第零阶段: 提前触发系统字体索引的后台构建
+            // 第零阶段 A: 字体映射注入 — 必须在任何文档打开之前
+            // 解决 2004 版 DWG 图纸因字体缺失导致的中文乱码
+            FontMappingService.EnsureInitialized();
+
+            // 第零阶段 B: 提前触发系统字体索引的后台构建
             // 与后续初始化和 CAD 启动并行执行，Idle 时通常已就绪
             FontDetector.PrewarmSystemFonts();
 
