@@ -5,7 +5,7 @@ namespace AFR_ACAD2026.MTextEditor;
 
 /// <summary>
 /// MText 编辑器的 ViewModel。
-/// 管理原始内容、查找替换、状态消息。
+/// 管理原始内容、查找替换、显示格式转换。
 /// </summary>
 internal sealed class MTextEditorViewModel : INotifyPropertyChanged
 {
@@ -14,6 +14,9 @@ internal sealed class MTextEditorViewModel : INotifyPropertyChanged
     private string _replaceText = string.Empty;
     private string _statusMessage = string.Empty;
 
+    /// <summary>
+    /// MText 原始内容（实际存储格式，\P 为段落分隔符）。
+    /// </summary>
     public string RawContents
     {
         get => _rawContents;
@@ -41,6 +44,27 @@ internal sealed class MTextEditorViewModel : INotifyPropertyChanged
     public MTextEditorViewModel(string contents)
     {
         _rawContents = contents ?? string.Empty;
+    }
+
+    /// <summary>
+    /// 将 MText 原始内容转为编辑器显示格式（\P 后插入换行以提高可读性）。
+    /// </summary>
+    internal static string ToDisplayFormat(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return string.Empty;
+        return raw.Replace("\\P", "\\P\n");
+    }
+
+    /// <summary>
+    /// 将编辑器显示格式转回 MText 原始内容。
+    /// 先还原 \P 后的显示换行，再将用户手动输入的换行转为 \P。
+    /// </summary>
+    internal static string ToRawFormat(string display)
+    {
+        if (string.IsNullOrEmpty(display)) return string.Empty;
+        string result = display.Replace("\\P\r\n", "\\P").Replace("\\P\n", "\\P");
+        result = result.Replace("\r\n", "\\P").Replace("\n", "\\P");
+        return result;
     }
 
     /// <summary>

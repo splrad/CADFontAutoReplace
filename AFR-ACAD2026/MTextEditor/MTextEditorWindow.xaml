@@ -39,7 +39,7 @@
                 <TextBlock Text="MText 编辑器"
                            FontSize="16" FontWeight="Bold"
                            Foreground="{DynamicResource PrimaryTextBrush}"/>
-                <TextBlock Text="编辑多行文字的格式代码 — 左侧高亮预览，右侧原始代码"
+                <TextBlock Text="编辑多行文字的格式代码 — 左侧原始代码，右侧预览效果"
                            FontSize="11" Margin="0,3,0,0"
                            Foreground="{DynamicResource SecondaryTextBrush}"/>
             </StackPanel>
@@ -51,9 +51,9 @@
                     <ColumnDefinition Width="10"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="▎可视化编辑" FontSize="11" FontWeight="SemiBold"
+                <TextBlock Grid.Column="0" Text="▎原始代码 (Contents)" FontSize="11" FontWeight="SemiBold"
                            Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,4"/>
-                <TextBlock Grid.Column="2" Text="▎原始代码 (Contents)" FontSize="11" FontWeight="SemiBold"
+                <TextBlock Grid.Column="2" Text="▎预览效果" FontSize="11" FontWeight="SemiBold"
                            Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,4"/>
             </Grid>
 
@@ -65,23 +65,8 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- 左侧：可视化编辑 (RichTextBox) -->
+                <!-- 左侧：原始代码 (TextBox，可编辑，支持撤回) -->
                 <Border Grid.Column="0" CornerRadius="6" ClipToBounds="True"
-                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                    <RichTextBox x:Name="VisualEditor"
-                                 AcceptsReturn="True"
-                                 VerticalScrollBarVisibility="Auto"
-                                 HorizontalScrollBarVisibility="Disabled"
-                                 FontFamily="Consolas" FontSize="13"
-                                 Padding="8,6"
-                                 BorderThickness="0"
-                                 Background="{DynamicResource SecondaryRegionBrush}"
-                                 Foreground="{DynamicResource PrimaryTextBrush}"
-                                 TextChanged="VisualEditor_TextChanged"/>
-                </Border>
-
-                <!-- 右侧：原始代码 (TextBox) -->
-                <Border Grid.Column="2" CornerRadius="6" ClipToBounds="True"
                         BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
                     <TextBox x:Name="RawEditor"
                              AcceptsReturn="True"
@@ -93,6 +78,19 @@
                              Background="{DynamicResource SecondaryRegionBrush}"
                              Foreground="{DynamicResource PrimaryTextBrush}"
                              TextChanged="RawEditor_TextChanged"/>
+                </Border>
+
+                <!-- 右侧：预览效果 (RichTextBox，只读) -->
+                <Border Grid.Column="2" CornerRadius="6" ClipToBounds="True"
+                        BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                    <RichTextBox x:Name="PreviewEditor"
+                                 IsReadOnly="True"
+                                 VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Disabled"
+                                 Padding="8,6"
+                                 BorderThickness="0"
+                                 Background="{DynamicResource SecondaryRegionBrush}"
+                                 Foreground="{DynamicResource PrimaryTextBrush}"/>
                 </Border>
             </Grid>
 

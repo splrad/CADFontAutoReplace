@@ -6,8 +6,8 @@ using System.Windows.Media;
 namespace AFR_ACAD2026.MTextEditor;
 
 /// <summary>
-/// MText 格式代码语法高亮器。
-/// 识别并高亮 MText Contents 中的格式控制代码。
+/// MText 格式代码解析器 — 将原始 Contents 转换为可视预览文档。
+/// 去除格式代码，\P 转为段落分隔，转义序列还原为可读字符。
 /// </summary>
 internal static partial class MTextSyntaxHighlighter
 {
@@ -21,88 +21,69 @@ internal static partial class MTextSyntaxHighlighter
     [GeneratedRegex(@"\{\\[A-Za-z][^;]*;|\}|\\[PpOoLlUu~\\{}]|\\S[^;]*;")]
     internal static partial Regex FormatCodeRegex();
 
-    // 格式组开头 {\C1; {\H2x; {\fArial; 等
-    private static readonly SolidColorBrush FormatCodeBrush = CreateFrozenBrush(0, 120, 212);
-    // 转义序列 \P \~ \\ 等
-    private static readonly SolidColorBrush EscapeBrush = CreateFrozenBrush(16, 136, 68);
-    // 格式组结尾 }
-    private static readonly SolidColorBrush BraceBrush = CreateFrozenBrush(212, 118, 10);
-
-    private static SolidColorBrush CreateFrozenBrush(byte r, byte g, byte b)
-    {
-        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
-        brush.Freeze();
-        return brush;
-    }
-
     /// <summary>
-    /// 根据 MText 原始内容创建带语法高亮的 FlowDocument。
+    /// 根据 MText 原始内容创建预览文档。
+    /// 去除格式控制代码，\P 转为段落分隔，转义序列还原。
     /// </summary>
-    public static FlowDocument CreateHighlightedDocument(string contents)
+    public static FlowDocument CreatePreviewDocument(string rawContents)
     {
         var doc = new FlowDocument
         {
-            FontFamily = new FontFamily("Consolas"),
-            FontSize = 13,
+            FontFamily = new FontFamily("Microsoft YaHei, Segoe UI"),
+            FontSize = 14,
             PagePadding = new Thickness(0)
         };
 
-        if (string.IsNullOrEmpty(contents))
+        if (string.IsNullOrEmpty(rawContents))
         {
             doc.Blocks.Add(new Paragraph { Margin = new Thickness(0) });
             return doc;
         }
 
-        var lines = contents.Split('\n');
-        foreach (var rawLine in lines)
+        // 将格式代码替换为对应的可视文本
+        string processed = FormatCodeRegex().Replace(rawContents, EvaluateFormatCode);
+
+        // 按换行符（来自 \P 转换）分段
+        var lines = processed.Split('\n');
+        foreach (var line in lines)
         {
-            var line = rawLine.TrimEnd('\r');
-            var paragraph = new Paragraph { Margin = new Thickness(0) };
-            HighlightLine(paragraph, line);
+            var paragraph = new Paragraph(new Run(line))
+            {
+                Margin = new Thickness(0, 0, 0, 2)
+            };
             doc.Blocks.Add(paragraph);
         }
 
         return doc;
     }
 
-    private static void HighlightLine(Paragraph paragraph, string line)
+    /// <summary>
+    /// 将匹配到的格式代码转换为预览用的可读文本。
+    /// </summary>
+    private static string EvaluateFormatCode(Match match)
     {
-        if (string.IsNullOrEmpty(line)) return;
+        string v = match.Value;
 
-        int lastIndex = 0;
-        var matches = FormatCodeRegex().Matches(line);
+        // 段落分隔
+        if (v is "\\P") return "\n";
 
-        foreach (Match match in matches)
-        {
-            if (match.Index > lastIndex)
-            {
-                paragraph.Inlines.Add(new Run(line[lastIndex..match.Index]));
-            }
+        // 转义序列还原
+        if (v is "\\\\") return "\\";
+        if (v is "\\~") return "\u00A0";
+        if (v is "\\{") return "{";
+        if (v is "\\}") return "}";
 
-            var run = new Run(match.Value);
-            if (match.Value == "}")
-            {
-                run.Foreground = BraceBrush;
-                run.FontWeight = FontWeights.SemiBold;
-            }
-            else if (match.Value.StartsWith("{\\"))
-            {
-                run.Foreground = FormatCodeBrush;
-                run.FontWeight = FontWeights.SemiBold;
-            }
-            else
-            {
-                run.Foreground = EscapeBrush;
-                run.FontWeight = FontWeights.SemiBold;
-            }
+        // 格式组结尾 — 去除
+        if (v is "}") return "";
 
-            paragraph.Inlines.Add(run);
-            lastIndex = match.Index + match.Length;
-        }
+        // 格式组开头 {\C1; {\H2x; {\fArial; 等 — 去除
+        if (v.StartsWith("{\\")) return "";
 
-        if (lastIndex < line.Length)
-        {
-            paragraph.Inlines.Add(new Run(line[lastIndex..]));
-        }
+        // 堆叠 \S1/2; → 显示为 1/2
+        if (v.StartsWith("\\S") && v.EndsWith(";") && v.Length > 3)
+            return v[2..^1];
+
+        // 其他控制代码 — 去除
+        return "";
     }
 }

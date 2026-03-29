@@ -1,65 +1,40 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Documents;
 using System.Windows.Input;
-using System.Windows.Threading;
 
 namespace AFR_ACAD2026.MTextEditor;
 
 /// <summary>
 /// MText 编辑器窗口。
-/// 左侧 RichTextBox 高亮显示格式代码，右侧 TextBox 显示原始内容。
-/// 两侧实时同步，编辑任一侧均可。
+/// 左侧 TextBox 编辑原始代码（\P 自动换行显示，支持撤回），
+/// 右侧 RichTextBox 只读预览效果。
 /// </summary>
 public partial class MTextEditorWindow : Window
 {
     private readonly MTextEditorViewModel _viewModel;
     private bool _isSyncing;
-    private readonly DispatcherTimer _highlightTimer;
 
     internal MTextEditorWindow(MTextEditorViewModel vm)
     {
         _viewModel = vm;
         DataContext = vm;
         InitializeComponent();
-
-        _highlightTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
-        _highlightTimer.Tick += OnHighlightTimerTick;
-
         Loaded += (_, _) => SyncFromViewModel();
     }
 
     /// <summary>
-    /// 从 ViewModel 同步内容到两侧编辑器。
+    /// 从 ViewModel 同步到两侧面板。
+    /// 注意：设置 TextBox.Text 会清空撤回历史（仅在初始化和批量替换时调用）。
     /// </summary>
     private void SyncFromViewModel()
     {
         _isSyncing = true;
         try
         {
-            RawEditor.Text = _viewModel.RawContents;
-            VisualEditor.Document = MTextSyntaxHighlighter.CreateHighlightedDocument(_viewModel.RawContents);
+            RawEditor.Text = MTextEditorViewModel.ToDisplayFormat(_viewModel.RawContents);
+            PreviewEditor.Document = MTextSyntaxHighlighter.CreatePreviewDocument(_viewModel.RawContents);
         }
         finally { _isSyncing = false; }
-    }
-
-    private void VisualEditor_TextChanged(object sender, TextChangedEventArgs e)
-    {
-        if (_isSyncing) return;
-        _isSyncing = true;
-        try
-        {
-            string text = new TextRange(
-                VisualEditor.Document.ContentStart,
-                VisualEditor.Document.ContentEnd).Text.TrimEnd('\r', '\n');
-            RawEditor.Text = text;
-            _viewModel.RawContents = text;
-        }
-        finally { _isSyncing = false; }
-
-        // 延迟刷新高亮（避免打字时光标跳动）
-        _highlightTimer.Stop();
-        _highlightTimer.Start();
     }
 
     private void RawEditor_TextChanged(object sender, TextChangedEventArgs e)
@@ -68,31 +43,8 @@ public partial class MTextEditorWindow : Window
         _isSyncing = true;
         try
         {
-            _viewModel.RawContents = RawEditor.Text;
-            VisualEditor.Document = MTextSyntaxHighlighter.CreateHighlightedDocument(RawEditor.Text);
-        }
-        finally { _isSyncing = false; }
-    }
-
-    /// <summary>
-    /// 延迟刷新可视化编辑器的语法高亮，并尽可能恢复光标位置。
-    /// </summary>
-    private void OnHighlightTimerTick(object? sender, EventArgs e)
-    {
-        _highlightTimer.Stop();
-        if (!VisualEditor.IsFocused) return;
-
-        _isSyncing = true;
-        try
-        {
-            int offset = VisualEditor.Document.ContentStart
-                .GetOffsetToPosition(VisualEditor.CaretPosition);
-
-            VisualEditor.Document = MTextSyntaxHighlighter.CreateHighlightedDocument(_viewModel.RawContents);
-
-            var restored = VisualEditor.Document.ContentStart.GetPositionAtOffset(offset);
-            if (restored != null)
-                VisualEditor.CaretPosition = restored;
+            _viewModel.RawContents = MTextEditorViewModel.ToRawFormat(RawEditor.Text);
+            PreviewEditor.Document = MTextSyntaxHighlighter.CreatePreviewDocument(_viewModel.RawContents);
         }
         finally { _isSyncing = false; }
     }
