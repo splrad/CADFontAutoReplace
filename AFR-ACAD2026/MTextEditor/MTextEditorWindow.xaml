@@ -65,19 +65,19 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- 左侧：原始代码 (TextBox，可编辑，支持撤回) -->
+                <!-- 左侧：原始代码 (RichTextBox，语法高亮) -->
                 <Border Grid.Column="0" CornerRadius="6" ClipToBounds="True"
                         BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                    <TextBox x:Name="RawEditor"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto"
-                             FontFamily="Consolas" FontSize="13"
-                             Padding="8,6"
-                             BorderThickness="0"
-                             Background="{DynamicResource SecondaryRegionBrush}"
-                             Foreground="{DynamicResource PrimaryTextBrush}"
-                             TextChanged="RawEditor_TextChanged"/>
+                    <RichTextBox x:Name="RawEditor"
+                                 AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Disabled"
+                                 FontFamily="Consolas" FontSize="13"
+                                 Padding="8,6"
+                                 BorderThickness="0"
+                                 Background="{DynamicResource SecondaryRegionBrush}"
+                                 Foreground="{DynamicResource PrimaryTextBrush}"
+                                 TextChanged="RawEditor_TextChanged"/>
                 </Border>
 
                 <!-- 右侧：预览效果 (RichTextBox，只读) -->
@@ -116,14 +116,7 @@
 
             <!-- 状态和按钮 -->
             <DockPanel Grid.Row="7">
-                <TextBlock DockPanel.Dock="Left"
-                           Text="{Binding StatusMessage}" FontSize="11"
-                           VerticalAlignment="Center"
-                           Foreground="{DynamicResource SecondaryTextBrush}"/>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="复制代码" Height="32" MinWidth="80" FontSize="12" Margin="0,0,8,0"
-                            hc:BorderElement.CornerRadius="6"
-                            Click="OnCopyCode"/>
                     <Button Content="取消" Height="32" MinWidth="80" FontSize="12" Margin="0,0,8,0"
                             hc:BorderElement.CornerRadius="6"
                             IsCancel="True" Click="OnCancel"/>
@@ -132,6 +125,9 @@
                             hc:BorderElement.CornerRadius="6"
                             IsDefault="True" Click="OnConfirm"/>
                 </StackPanel>
+                <TextBlock Text="{Binding StatusMessage}" FontSize="11"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource SecondaryTextBrush}"/>
             </DockPanel>
         </Grid>
     </Border>
