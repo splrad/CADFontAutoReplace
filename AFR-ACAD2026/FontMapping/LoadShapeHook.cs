@@ -75,7 +75,7 @@ internal static class LoadShapeHook
     private static GCHandle _detourPin;
 
     private static bool _installed;
-    private static volatile bool _mappingDone;
+    private static int _logCount;  // 诊断日志计数
 
     /// <summary>
     /// 安装 Hook。在 PluginEntry.Initialize() 中调用。
@@ -170,24 +170,50 @@ internal static class LoadShapeHook
 
     /// <summary>
     /// Detour 函数 — 拦截每次 loadShape 调用。
-    /// 首次调用时注入字体映射规则。
+    /// 1. 记录前 10 次调用的参数用于诊断
+    /// 2. 若第二参数（大字体名）以 @ 开头，去除 @ 前缀后传入原始函数
     /// </summary>
     private static int Detour(nint fontName, nint bigFontName, nint objectId, nint shapeNumber,
                               nint database, nint param6, nint param7)
     {
-        // 首次调用时注入映射
-        if (!_mappingDone)
+        try
         {
-            _mappingDone = true;
-            try
+            string? font = fontName != 0 ? Marshal.PtrToStringUni(fontName) : null;
+            string? bigFont = bigFontName != 0 ? Marshal.PtrToStringUni(bigFontName) : null;
+
+            // 诊断日志：前 10 次调用
+            int count = Interlocked.Increment(ref _logCount);
+            if (count <= 10)
             {
-                NativeFontMap.AddMapping("@gbcbig", "gbcbig");
-                NativeFontMap.AddMapping("@gbcbig.shx", "gbcbig.shx");
+                LogService.Instance.Info($"LoadShapeHook #{count}: font=\"{font}\", bigFont=\"{bigFont}\"");
             }
-            catch { /* 映射失败不影响原始函数执行 */ }
+
+            // 核心逻辑：去除大字体名的 @ 前缀（竖排→横排）
+            if (bigFont != null && bigFont.StartsWith('@'))
+            {
+                string fixedBigFont = bigFont[1..];
+                nint fixedPtr = Marshal.StringToHGlobalUni(fixedBigFont);
+                try
+                {
+                    if (count <= 10)
+                        LogService.Instance.Info($"  → 修正大字体: {bigFont} → {fixedBigFont}");
+
+                    return _trampolineDelegate!(fontName, fixedPtr, objectId, shapeNumber,
+                                                database, param6, param7);
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(fixedPtr);
+                }
+            }
+        }
+        catch
+        {
+            // 任何异常都不能阻止原始函数执行
         }
 
-        return _trampolineDelegate!(fontName, bigFontName, objectId, shapeNumber, database, param6, param7);
+        return _trampolineDelegate!(fontName, bigFontName, objectId, shapeNumber,
+                                    database, param6, param7);
     }
 
     /// <summary>
