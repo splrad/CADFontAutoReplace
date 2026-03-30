@@ -8,7 +8,6 @@ using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 [assembly: ExtensionApplication(typeof(AFR_ACAD2026.PluginEntry))]
 [assembly: CommandClass(typeof(AFR_ACAD2026.Commands.AfrCommands))]
 [assembly: CommandClass(typeof(AFR_ACAD2026.MTextEditor.MTextEditorCommand))]
-[assembly: CommandClass(typeof(AFR_ACAD2026.FontMapping.FontMappingCommand))]
 
 namespace AFR_ACAD2026;
 

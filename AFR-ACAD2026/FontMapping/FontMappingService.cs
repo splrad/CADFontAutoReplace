@@ -341,14 +341,5 @@ internal static partial class FontMappingService
     [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
     private static extern bool CreateHardLink(string lpFileName, string lpExistingFileName, nint lpSecurityAttributes = 0);
 
-    /// <summary>
-    /// 诊断用：查询指定字体名的当前映射结果。
-    /// </summary>
-    internal static string QueryMapping(string fontName)
-    {
-        try { return NativeFontMap.MapFontName(fontName); }
-        catch { return fontName; }
-    }
-
     #endregion
 }
