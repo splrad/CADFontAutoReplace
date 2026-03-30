@@ -2,6 +2,7 @@ using System.Reflection;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Runtime;
 using AFR_ACAD2026.Core;
+using AFR_ACAD2026.FontMapping;
 using AFR_ACAD2026.Services;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
@@ -67,7 +68,11 @@ public class PluginEntry : IExtensionApplication
         var log = LogService.Instance;
         try
         {
-            // 第零阶段: 提前触发系统字体索引的后台构建
+            // 第零阶段 A: 定位 acad.fmp — 必须在任何文档打开之前
+            // FMP 中保留了上次会话发现的字体映射，AutoCAD 解析 DWG 时会读取
+            FontMappingService.InitializeFmpPath();
+
+            // 第零阶段 B: 提前触发系统字体索引的后台构建
             // 与后续初始化和 CAD 启动并行执行，Idle 时通常已就绪
             FontDetector.PrewarmSystemFonts();
 

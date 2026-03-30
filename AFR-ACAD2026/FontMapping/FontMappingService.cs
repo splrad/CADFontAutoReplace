@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text;
 using System.Text.RegularExpressions;
 using Autodesk.AutoCAD.DatabaseServices;
 using AFR_ACAD2026.Services;
@@ -11,31 +12,40 @@ namespace AFR_ACAD2026.FontMapping;
 internal sealed record InlineFontFixRecord(
     string MissingFont,
     string ReplacementFont,
-    string FixMethod,      // "硬链接" 或 "内容替换"
+    string FixMethod,      // "FMP映射"
     string FontCategory);  // "SHX主字体" / "SHX大字体" / "TrueType"
 
 /// <summary>
-/// 字体映射服务 — 专门处理 FontReplacer 无法覆盖的字体缺失场景。
+/// 字体映射服务 — 通过写入 acad.fmp 文件处理 MText 内联字体缺失。
 ///
 /// FontReplacer 通过修改 TextStyleTableRecord 替换样式表中的缺失字体，
 /// 但 MText 内联字体码（\Fgbenor,@gbcbig|c134;）绕过了样式表，
 /// 直接按文件名加载字体，FontReplacer 无法修复。
 ///
-/// 本服务仅处理 MText 内联字体码中引用的缺失字体：
+/// 本服务将缺失字体的映射写入 acad.fmp，AutoCAD 在解析 DWG 时
+/// 会读取此文件进行字体替换，从而避免乱码。映射持久化到文件，
+/// 后续打开相同类型图纸时无需再次处理。
+///
+/// 映射规则（三阶段）：
 ///
 /// 阶段 1 — 内联 SHX 字体（无 @ 前缀）：
-///   缺失的主字体 → 硬链接到 ConfigService.MainFont
-///   缺失的大字体 → 硬链接到 ConfigService.BigFont
+///   缺失的主字体 → 映射到 ConfigService.MainFont
+///   缺失的大字体 → 映射到 ConfigService.BigFont
 ///
 /// 阶段 2 — 内联 @前缀竖排大字体（如 @gbcbig）：
-///   @xxx 缺失 + xxx 存在（原文件或阶段1新建）→ 硬链接 @xxx → xxx
-///   @xxx 缺失 + xxx 不存在 → 硬链接 @xxx → ConfigService.BigFont
+///   @xxx 缺失 + xxx 存在（原始或阶段1已映射）→ 映射 @xxx → xxx
+///   @xxx 缺失 + xxx 不存在 → 映射 @xxx → ConfigService.BigFont
 ///
 /// 阶段 3 — 内联 TrueType 字体：
-///   缺失的 TTF 主字体 → 修改 MText.Contents，替换为 ConfigService.MainFont
+///   缺失的 TTF 主字体 → 映射到 ConfigService.BigFont
 /// </summary>
 internal static partial class FontMappingService
 {
+    private const string FmpMarkerBegin = "AFR_MAP_BEGIN;AFR_MAP_BEGIN";
+    private const string FmpMarkerEnd = "AFR_MAP_END;AFR_MAP_END";
+
+    private static string? _fmpPath;
+
     /// <summary>
     /// 匹配 MText 内联字体码: \Fmain,big|... 或 \Fmain|...
     /// </summary>
@@ -43,15 +53,32 @@ internal static partial class FontMappingService
     private static partial Regex InlineFontRegex();
 
     /// <summary>
-    /// 扫描文档中所有 MText 内联字体引用，为缺失的字体创建硬链接或替换内容。
+    /// 在 PluginEntry.Initialize() 中调用，定位 acad.fmp 路径。
+    /// 此时 FMP 中已有上次会话写入的映射，无需额外操作。
+    /// </summary>
+    internal static void InitializeFmpPath()
+    {
+        _fmpPath = FindFmpPath();
+        if (_fmpPath != null)
+            LogService.Instance.Info($"FontMapping: FMP 路径已定位");
+        else
+            LogService.Instance.Warning("FontMapping: 未找到 acad.fmp，内联字体映射不可用");
+    }
+
+    /// <summary>
+    /// 扫描文档中所有 MText 内联字体引用，将缺失字体的映射写入 acad.fmp。
     /// 必须在 FontDetector / FontReplacer 之前调用。
-    /// 返回本次修复记录列表，供 AFRLOG 界面显示。
+    /// 返回本次新增映射记录列表，供 AFRLOG 界面显示。
     /// </summary>
     internal static List<InlineFontFixRecord> EnsureMissingFonts(Database db)
     {
+        var records = new List<InlineFontFixRecord>();
+
+        if (_fmpPath == null)
+            return records;
+
         var log = LogService.Instance;
         var config = ConfigService.Instance;
-        var records = new List<InlineFontFixRecord>();
 
         string? repMain = NullIfEmpty(config.MainFont);
         string? repBig = NullIfEmpty(config.BigFont);
@@ -59,47 +86,54 @@ internal static partial class FontMappingService
         if (repMain == null && repBig == null)
             return records;
 
-        // 查找替换字体的实际文件路径
-        string? repMainPath = repMain != null ? FindFontFile(EnsureShx(repMain), db) : null;
-        string? repBigPath = repBig != null ? FindFontFile(EnsureShx(repBig), db) : null;
-
-        if (repMainPath == null && repBigPath == null)
-            return records;
-
-        // 收集所有 SHX 字体引用
+        // 收集 MText 内联字体引用
         var mainFonts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var bigFonts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        CollectFontReferences(db, mainFonts, bigFonts);
+        var ttfFonts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        CollectFontReferences(db, mainFonts, bigFonts, ttfFonts);
 
-        if (mainFonts.Count == 0 && bigFonts.Count == 0)
+        if (mainFonts.Count == 0 && bigFonts.Count == 0 && ttfFonts.Count == 0)
             return records;
 
-        // 记录本次创建的硬链接（文件名 → 完整路径），供阶段2查找阶段1新建的字体
-        var created = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // 读取现有 FMP 中 AFR 映射，避免重复添加
+        var existingMappings = ReadAfrMappings();
 
-        // ── 阶段 1：常规字体（无 @ 前缀）──
+        // 计算需要新增的映射
+        var newMappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        if (repMainPath != null)
+        // 阶段 1 追踪：记录已映射的非 @ 大字体（供阶段 2 使用）
+        var mappedBigFonts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // ── 阶段 1：常规 SHX 字体（无 @ 前缀）──
+
+        if (repMain != null)
         {
+            string repMainShx = EnsureShx(repMain);
             foreach (string font in mainFonts)
             {
                 string shx = EnsureShx(font);
-                if (string.IsNullOrEmpty(FindFontFile(shx, db)))
-                    if (TryCreateLink(shx, repMainPath, created, log))
-                        records.Add(new(shx, Path.GetFileName(repMainPath), "硬链接", "SHX主字体"));
+                if (string.IsNullOrEmpty(FindFontFile(shx, db)) && !existingMappings.ContainsKey(shx))
+                {
+                    newMappings.TryAdd(shx, repMainShx);
+                    records.Add(new(shx, repMainShx, "FMP映射", "SHX主字体"));
+                }
             }
         }
 
-        if (repBigPath != null)
+        if (repBig != null)
         {
+            string repBigShx = EnsureShx(repBig);
             foreach (string font in bigFonts)
             {
-                if (font.StartsWith('@')) continue; // 阶段2处理
+                if (font.StartsWith('@')) continue;
 
                 string shx = EnsureShx(font);
-                if (string.IsNullOrEmpty(FindFontFile(shx, db)))
-                    if (TryCreateLink(shx, repBigPath, created, log))
-                        records.Add(new(shx, Path.GetFileName(repBigPath), "硬链接", "SHX大字体"));
+                if (string.IsNullOrEmpty(FindFontFile(shx, db)) && !existingMappings.ContainsKey(shx))
+                {
+                    newMappings.TryAdd(shx, repBigShx);
+                    mappedBigFonts.Add(shx);
+                    records.Add(new(shx, repBigShx, "FMP映射", "SHX大字体"));
+                }
             }
         }
 
@@ -110,113 +144,177 @@ internal static partial class FontMappingService
             if (!font.StartsWith('@')) continue;
 
             string shx = EnsureShx(font);
-            if (!string.IsNullOrEmpty(FindFontFile(shx, db)))
+            if (!string.IsNullOrEmpty(FindFontFile(shx, db)) || existingMappings.ContainsKey(shx))
                 continue;
 
+            // 优先使用基础字体（去掉 @ 后的同名字体）
             string baseShx = EnsureShx(font[1..]);
-            string? basePath = FindFontFile(baseShx, db);
+            bool baseExists = !string.IsNullOrEmpty(FindFontFile(baseShx, db));
 
-            if (string.IsNullOrEmpty(basePath) && created.TryGetValue(baseShx, out string? createdPath))
-                basePath = createdPath;
+            // 基础字体可能在阶段 1 中刚被映射（虽然文件不存在，但已有替代）
+            if (!baseExists && (newMappings.ContainsKey(baseShx) || existingMappings.ContainsKey(baseShx)))
+                baseExists = true;
 
-            string? targetPath = !string.IsNullOrEmpty(basePath) ? basePath : repBigPath;
-            if (targetPath != null && TryCreateLink(shx, targetPath, created, log))
-                records.Add(new(shx, Path.GetFileName(targetPath), "硬链接", "SHX大字体"));
+            if (baseExists)
+            {
+                // 基础字体可用（原始或已映射）→ @xxx 映射到 xxx
+                string target = newMappings.TryGetValue(baseShx, out string? mapped) ? mapped
+                    : existingMappings.TryGetValue(baseShx, out string? existing) ? existing
+                    : baseShx;
+                newMappings.TryAdd(shx, target);
+                records.Add(new(shx, target, "FMP映射", "SHX大字体"));
+            }
+            else if (repBig != null)
+            {
+                string repBigShx = EnsureShx(repBig);
+                newMappings.TryAdd(shx, repBigShx);
+                records.Add(new(shx, repBigShx, "FMP映射", "SHX大字体"));
+            }
         }
 
-        // ── 阶段 3：MText 内联 TrueType 字体替换 ──
+        // ── 阶段 3：MText 内联 TrueType 字体 ──
 
-        if (repMain != null)
+        if (repBig != null)
         {
-            int ttfCount = ReplaceMissingInlineTtfFonts(db, repMain, log);
-            if (ttfCount > 0)
-                records.Add(new($"MText 内联 ({ttfCount} 个)", repMain, "内容替换", "TrueType"));
+            string repBigShx = EnsureShx(repBig);
+            foreach (string ttf in ttfFonts)
+            {
+                if (!string.IsNullOrEmpty(FindTtfFile(ttf, db)) || existingMappings.ContainsKey(ttf))
+                    continue;
+
+                newMappings.TryAdd(ttf, repBigShx);
+                records.Add(new(ttf, repBigShx, "FMP映射", "TrueType"));
+            }
+        }
+
+        // 写入 FMP 文件
+        if (newMappings.Count > 0)
+        {
+            WriteAfrMappings(existingMappings, newMappings);
+            log.Info($"FontMapping: 已写入 {newMappings.Count} 条映射到 acad.fmp");
         }
 
         return records;
     }
 
-    #region 阶段 3：MText 内联 TrueType 替换
+    #region FMP 文件管理
 
     /// <summary>
-    /// 扫描所有 MText 实体，将内联字体码中缺失的 TrueType 主字体
-    /// 替换为用户配置的 SHX 主字体。仅修改 MText.Contents，不影响样式表。
-    ///
-    /// 示例：\Ftxt_____.ttf,gbcbig|c134; → \Fgbenor,gbcbig|c134;
+    /// 定位 acad.fmp 文件路径。
     /// </summary>
-    private static int ReplaceMissingInlineTtfFonts(Database db, string shxMainFont, LogService log)
+    private static string? FindFmpPath()
     {
+        // 方式 1：通过 HostApplicationServices.FindFile
         try
         {
-            using var tr = db.TransactionManager.StartTransaction();
-            var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-            int replaceCount = 0;
+            string path = HostApplicationServices.Current.FindFile(
+                "acad.fmp", null, FindFileHint.Default);
+            if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                return path;
+        }
+        catch { }
 
-            foreach (ObjectId btrId in bt)
+        // 方式 2：搜索用户 AppData 下的 AutoCAD Support 目录
+        try
+        {
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string acadBase = Path.Combine(appData, "Autodesk");
+            if (Directory.Exists(acadBase))
             {
-                var btr = (BlockTableRecord)tr.GetObject(btrId, OpenMode.ForRead);
-                foreach (ObjectId entId in btr)
+                foreach (string dir in Directory.GetDirectories(acadBase, "AutoCAD *"))
                 {
-                    if (!entId.ObjectClass.DxfName.Equals("MTEXT", StringComparison.OrdinalIgnoreCase))
-                        continue;
+                    foreach (string fmp in Directory.GetFiles(dir, "acad.fmp", SearchOption.AllDirectories))
+                        return fmp;
+                }
+            }
+        }
+        catch { }
 
-                    var mtext = (MText)tr.GetObject(entId, OpenMode.ForRead);
-                    string? contents = mtext.Contents;
-                    if (string.IsNullOrEmpty(contents)) continue;
+        return null;
+    }
 
-                    string modified = InlineFontRegex().Replace(contents, match =>
-                    {
-                        string mainFont = match.Groups[1].Value;
+    /// <summary>
+    /// 读取 FMP 文件中已有的 AFR 映射。
+    /// </summary>
+    private static Dictionary<string, string> ReadAfrMappings()
+    {
+        var mappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (_fmpPath == null || !File.Exists(_fmpPath)) return mappings;
 
-                        // 仅处理显式 TrueType 字体引用（.ttf/.ttc/.otf）
-                        if (!IsTrueTypeName(mainFont))
-                            return match.Value;
+        try
+        {
+            bool inAfrSection = false;
+            foreach (string line in File.ReadAllLines(_fmpPath, Encoding.UTF8))
+            {
+                if (line.Equals(FmpMarkerBegin, StringComparison.OrdinalIgnoreCase))
+                { inAfrSection = true; continue; }
 
-                        // 字体可用则跳过
-                        if (!string.IsNullOrEmpty(FindTtfFile(mainFont, db)))
-                            return match.Value;
+                if (line.Equals(FmpMarkerEnd, StringComparison.OrdinalIgnoreCase))
+                { inAfrSection = false; continue; }
 
-                        // 替换主字体名，保留大字体和代码页
-                        return string.Concat(@"\F", shxMainFont, match.Value.AsSpan(2 + mainFont.Length));
-                    });
+                if (inAfrSection)
+                {
+                    int sep = line.IndexOf(';');
+                    if (sep > 0)
+                        mappings.TryAdd(line[..sep], line[(sep + 1)..]);
+                }
+            }
+        }
+        catch { }
 
-                    if (!string.Equals(modified, contents, StringComparison.Ordinal))
-                    {
-                        mtext.UpgradeOpen();
-                        mtext.Contents = modified;
-                        replaceCount++;
-                    }
+        return mappings;
+    }
+
+    /// <summary>
+    /// 将 AFR 映射写入 FMP 文件（合并已有 + 新增，保留系统映射）。
+    /// </summary>
+    private static void WriteAfrMappings(
+        Dictionary<string, string> existing, Dictionary<string, string> newMappings)
+    {
+        if (_fmpPath == null) return;
+
+        try
+        {
+            // 读取系统映射（AFR 区段之外的行）
+            var systemLines = new List<string>();
+            if (File.Exists(_fmpPath))
+            {
+                bool inAfrSection = false;
+                foreach (string line in File.ReadAllLines(_fmpPath, Encoding.UTF8))
+                {
+                    if (line.Equals(FmpMarkerBegin, StringComparison.OrdinalIgnoreCase))
+                    { inAfrSection = true; continue; }
+
+                    if (line.Equals(FmpMarkerEnd, StringComparison.OrdinalIgnoreCase))
+                    { inAfrSection = false; continue; }
+
+                    if (!inAfrSection)
+                        systemLines.Add(line);
                 }
             }
 
-            tr.Commit();
+            // 合并已有 + 新增映射
+            var allMappings = new Dictionary<string, string>(existing, StringComparer.OrdinalIgnoreCase);
+            foreach (var (key, value) in newMappings)
+                allMappings[key] = value;
 
-            if (replaceCount > 0)
-                log.Info($"FontMapping: 已替换 {replaceCount} 个 MText 中缺失的内联 TrueType 字体 → {shxMainFont}");
+            // 写回文件
+            using var writer = new StreamWriter(_fmpPath, false, Encoding.UTF8);
+            foreach (string line in systemLines)
+                writer.WriteLine(line);
 
-            return replaceCount;
+            if (allMappings.Count > 0)
+            {
+                writer.WriteLine(FmpMarkerBegin);
+                foreach (var (source, target) in allMappings)
+                    writer.WriteLine($"{source};{target}");
+                writer.WriteLine(FmpMarkerEnd);
+            }
         }
         catch (Exception ex)
         {
-            log.Error("FontMapping: MText 内联 TrueType 字体替换失败", ex);
-            return 0;
+            LogService.Instance.Error("FontMapping: 写入 acad.fmp 失败", ex);
         }
-    }
-
-    private static bool IsTrueTypeName(string name) =>
-        name.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) ||
-        name.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase) ||
-        name.EndsWith(".otf", StringComparison.OrdinalIgnoreCase);
-
-    private static string FindTtfFile(string fileName, Database db)
-    {
-        try
-        {
-            string result = HostApplicationServices.Current.FindFile(
-                fileName, db, FindFileHint.TrueTypeFontFile);
-            return string.IsNullOrEmpty(result) ? string.Empty : result;
-        }
-        catch { return string.Empty; }
     }
 
     #endregion
@@ -224,10 +322,11 @@ internal static partial class FontMappingService
     #region 字体引用收集
 
     /// <summary>
-    /// 仅从 MText 内联字体码中收集 SHX 字体引用。
-    /// 样式表中的缺失字体由 FontReplacer 处理，不在此收集。
+    /// 仅从 MText 内联字体码中收集字体引用。
+    /// SHX 主字体 → mainFonts, 大字体 → bigFonts, TrueType → ttfFonts
     /// </summary>
-    private static void CollectFontReferences(Database db, HashSet<string> mainFonts, HashSet<string> bigFonts)
+    private static void CollectFontReferences(Database db,
+        HashSet<string> mainFonts, HashSet<string> bigFonts, HashSet<string> ttfFonts)
     {
         try
         {
@@ -251,7 +350,9 @@ internal static partial class FontMappingService
                         string main = match.Groups[1].Value;
                         string big = match.Groups[2].Value;
 
-                        if (IsShxName(main))
+                        if (IsTrueTypeName(main))
+                            ttfFonts.Add(main);
+                        else if (IsShxName(main))
                             mainFonts.Add(main);
 
                         if (!string.IsNullOrEmpty(big))
@@ -269,43 +370,6 @@ internal static partial class FontMappingService
 
     #region 辅助方法
 
-    /// <summary>
-    /// 创建硬链接（回退到拷贝），并记录到 created 字典。
-    /// 成功返回 true。
-    /// </summary>
-    private static bool TryCreateLink(string fileName, string targetPath,
-        Dictionary<string, string> created, LogService log)
-    {
-        string dir = Path.GetDirectoryName(targetPath)!;
-        string linkPath = Path.Combine(dir, fileName);
-
-        if (File.Exists(linkPath) || created.ContainsKey(fileName))
-            return false;
-
-        try
-        {
-            if (CreateHardLink(linkPath, targetPath))
-                log.Info($"FontMapping: 已创建硬链接 {fileName} → {Path.GetFileName(targetPath)}");
-            else
-            {
-                File.Copy(targetPath, linkPath);
-                log.Info($"FontMapping: 已拷贝 {Path.GetFileName(targetPath)} → {fileName}");
-            }
-            created[fileName] = linkPath;
-            return true;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            log.Warning($"FontMapping: 无权限创建 {fileName}（需要管理员权限写入 Fonts 目录）");
-            return false;
-        }
-        catch (Exception ex)
-        {
-            log.Error($"FontMapping: 创建 {fileName} 失败", ex);
-            return false;
-        }
-    }
-
     private static string FindFontFile(string fileName, Database db)
     {
         try
@@ -317,29 +381,33 @@ internal static partial class FontMappingService
         catch { return string.Empty; }
     }
 
-    /// <summary>
-    /// 判断是否为 SHX 字体名（排除 TrueType 字体）。
-    /// </summary>
+    private static string FindTtfFile(string fileName, Database db)
+    {
+        try
+        {
+            string result = HostApplicationServices.Current.FindFile(
+                fileName, db, FindFileHint.TrueTypeFontFile);
+            return string.IsNullOrEmpty(result) ? string.Empty : result;
+        }
+        catch { return string.Empty; }
+    }
+
     private static bool IsShxName(string? name)
     {
         if (string.IsNullOrEmpty(name)) return false;
-        // 排除 TrueType 扩展名
-        if (name.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) ||
-            name.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase) ||
-            name.EndsWith(".otf", StringComparison.OrdinalIgnoreCase))
-            return false;
-        return true;
+        return !IsTrueTypeName(name);
     }
+
+    private static bool IsTrueTypeName(string name) =>
+        name.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) ||
+        name.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase) ||
+        name.EndsWith(".otf", StringComparison.OrdinalIgnoreCase);
 
     private static string EnsureShx(string name) =>
         name.EndsWith(".shx", StringComparison.OrdinalIgnoreCase) ? name : name + ".shx";
 
     private static string? NullIfEmpty(string? s) =>
         string.IsNullOrEmpty(s) ? null : s;
-
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
-    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
-    private static extern bool CreateHardLink(string lpFileName, string lpExistingFileName, nint lpSecurityAttributes = 0);
 
     #endregion
 }

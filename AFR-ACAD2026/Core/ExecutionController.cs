@@ -43,8 +43,8 @@ internal sealed class ExecutionController
             // 获取文档写入锁
             using (doc.LockDocument())
             {
-                // 第零阶段: 缺失字体文件修复 — 在字体检测之前
-                // 扫描 MText 内联字体码，为缺失的 SHX 字体创建硬链接
+                // 第零阶段: 内联字体映射 — 在字体检测之前
+                // 扫描 MText 内联字体码，将缺失字体映射写入 acad.fmp
                 var inlineFixResults = FontMappingService.EnsureMissingFonts(doc.Database);
                 contextMgr.StoreInlineFontFixResults(doc, inlineFixResults);
 
