@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using AFR_ACAD2026.FontMapping;
 using AFR_ACAD2026.Services;
 
 namespace AFR_ACAD2026.UI;
@@ -69,18 +70,22 @@ internal sealed class FontReplacementLogViewModel : INotifyPropertyChanged
     private string _batchTrueTypeFont = string.Empty;
 
     public ObservableCollection<FontReplacementRow> Items { get; } = [];
+    public ObservableCollection<InlineFontFixRecord> InlineFixItems { get; } = [];
     public string SummaryText { get; }
     public int ShxCount { get; }
     public int TrueTypeCount { get; }
     public int BigFontCount { get; }
+    public int InlineFixCount { get; }
     public string ShxLabel => $"SHX主字体  {ShxCount}";
     public string TrueTypeLabel => $"TrueType  {TrueTypeCount}";
     public string BigFontLabel => $"SHX大字体  {BigFontCount}";
+    public string InlineFixLabel => $"内联修复  {InlineFixCount}";
     public bool HasShx => ShxCount > 0;
     public bool HasTrueType => TrueTypeCount > 0;
     public bool HasBigFont => BigFontCount > 0;
+    public bool HasInlineFix => InlineFixCount > 0;
     public bool HasItems => Items.Count > 0;
-    public bool HasNoItems => !HasItems;
+    public bool HasNoItems => !HasItems && !HasInlineFix;
 
     /// <summary>批量操作可选的 SHX 字体列表。</summary>
     public ObservableCollection<string> AvailableShxFonts { get; }
@@ -128,7 +133,8 @@ internal sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         string globalMainFont,
         string globalBigFont,
         string globalTrueTypeFont,
-        Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? currentFonts = null)
+        Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? currentFonts = null,
+        IReadOnlyList<InlineFontFixRecord>? inlineFixResults = null)
     {
         var shxFonts = new ObservableCollection<string>(FontSelectionViewModel.ScanAvailableFonts());
         var ttFonts = new ObservableCollection<string>(FontSelectionViewModel.ScanSystemTrueTypeFonts());
@@ -204,6 +210,19 @@ internal sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         else
         {
             SummaryText = "未检测到缺失字体";
+        }
+
+        // 内联字体修复记录
+        if (inlineFixResults != null)
+        {
+            foreach (var r in inlineFixResults)
+                InlineFixItems.Add(r);
+            InlineFixCount = inlineFixResults.Count;
+
+            if (Items.Count == 0 && InlineFixCount > 0)
+                SummaryText = $"内联字体修复 {InlineFixCount} 项";
+            else if (InlineFixCount > 0)
+                SummaryText += $" · 内联修复 {InlineFixCount} 项";
         }
     }
 

@@ -1,4 +1,5 @@
 using Autodesk.AutoCAD.ApplicationServices;
+using AFR_ACAD2026.FontMapping;
 using AFR_ACAD2026.Services;
 
 namespace AFR_ACAD2026.Core;
@@ -42,6 +43,11 @@ internal sealed class ExecutionController
             // 获取文档写入锁
             using (doc.LockDocument())
             {
+                // 第零阶段: 缺失字体文件修复 — 在字体检测之前
+                // 扫描 MText 内联字体码，为缺失的 SHX 字体创建硬链接
+                var inlineFixResults = FontMappingService.EnsureMissingFonts(doc.Database);
+                contextMgr.StoreInlineFontFixResults(doc, inlineFixResults);
+
                 // 第一阶段: 检测缺失字体
                 var missingFonts = FontDetector.DetectMissingFonts(doc.Database);
 

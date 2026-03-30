@@ -1,4 +1,5 @@
 using Autodesk.AutoCAD.ApplicationServices;
+using AFR_ACAD2026.FontMapping;
 using AFR_ACAD2026.Services;
 
 namespace AFR_ACAD2026.Core;
@@ -18,6 +19,7 @@ internal sealed class DocumentContextManager
     // Value: 首次处理时间
     private readonly Dictionary<string, DateTime> _executedDocuments = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<FontCheckResult>> _detectionResults = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<InlineFontFixRecord>> _inlineFontFixResults = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
 
     private DocumentContextManager() { }
@@ -53,6 +55,7 @@ internal sealed class DocumentContextManager
         {
             _executedDocuments.Remove(key);
             _detectionResults.Remove(key);
+            _inlineFontFixResults.Remove(key);
         }
         LogService.Instance.ResetHeaderForDocument(key);
     }
@@ -63,6 +66,7 @@ internal sealed class DocumentContextManager
         {
             _executedDocuments.Clear();
             _detectionResults.Clear();
+            _inlineFontFixResults.Clear();
         }
     }
 
@@ -91,6 +95,34 @@ internal sealed class DocumentContextManager
         lock (_lock)
         {
             return _detectionResults.TryGetValue(key, out var r) ? r : null;
+        }
+    }
+
+    /// <summary>
+    /// 存储文档的内联字体修复记录，供 AFRLOG 命令使用。
+    /// </summary>
+    public void StoreInlineFontFixResults(Document doc, List<InlineFontFixRecord> results)
+    {
+        if (doc == null || results.Count == 0) return;
+        var key = GetDocumentKey(doc);
+        if (key == null) return;
+        lock (_lock)
+        {
+            _inlineFontFixResults[key] = results;
+        }
+    }
+
+    /// <summary>
+    /// 获取文档的内联字体修复记录。
+    /// </summary>
+    public List<InlineFontFixRecord>? GetInlineFontFixResults(Document doc)
+    {
+        if (doc == null) return null;
+        var key = GetDocumentKey(doc);
+        if (key == null) return null;
+        lock (_lock)
+        {
+            return _inlineFontFixResults.TryGetValue(key, out var r) ? r : null;
         }
     }
 

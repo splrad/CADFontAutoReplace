@@ -96,8 +96,9 @@ public class AfrCommands
             }
 
             var config = ConfigService.Instance;
+            var inlineFixResults = DocumentContextManager.Instance.GetInlineFontFixResults(doc);
             var vm = new FontReplacementLogViewModel(
-                results, config.MainFont, config.BigFont, config.TrueTypeFont, currentFonts);
+                results, config.MainFont, config.BigFont, config.TrueTypeFont, currentFonts, inlineFixResults);
 
             var window = new FontReplacementLogWindow(vm);
             Autodesk.AutoCAD.ApplicationServices.Application.ShowModalWindow(window);
