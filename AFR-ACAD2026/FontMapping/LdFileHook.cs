@@ -343,6 +343,7 @@ internal static class LdFileHook
         // 系统 TrueType 字族名 — 同步扫描，确保 Hook 拦截前数据就绪
         // ldfile 可能收到字族名（如 "宋体"）而非文件名（simsun.ttc），
         // 必须将字族名加入可用集合，否则会被误判为缺失 SHX 并重定向。
+        int beforeCount = _availableFonts.Count;
         try
         {
             foreach (var family in Fonts.SystemFontFamilies)
@@ -351,6 +352,18 @@ internal static class LdFileHook
                 foreach (var localizedName in family.FamilyNames.Values)
                     _availableFonts.Add(localizedName);
             }
+        }
+        catch (Exception ex)
+        {
+            LogService.Instance.Warning($"FontMapping: 系统字体扫描失败: {ex.Message}");
+        }
+        LogService.Instance.Info($"FontMapping: 可用字体 {_availableFonts.Count} 项 (系统字族名 {_availableFonts.Count - beforeCount} 项)");
+
+        // Windows 系统字体目录 — ldfile 可能收到系统字体文件名（如 simsun.ttc），
+        // 这些文件位于 C:\Windows\Fonts 而非 AutoCAD 目录，必须扫描以避免误重定向。
+        try
+        {
+            ScanDirectory(Environment.GetFolderPath(Environment.SpecialFolder.Fonts));
         }
         catch { }
     }
