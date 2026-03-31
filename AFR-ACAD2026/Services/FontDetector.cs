@@ -64,7 +64,12 @@ internal static class FontDetector
                 var bigFontName = style.BigFontFileName ?? string.Empty;
                 var font = style.Font;
 
-                bool isTrueType = !string.IsNullOrEmpty(font.TypeFace);
+                // 判断样式类型：SHX 还是 TrueType
+                // 当 FileName 有 .shx 后缀时，以 SHX 为准（匹配 ST 对话框显示行为），
+                // 即使 Font.TypeFace 也有值（DWG 数据不一致时以 FileName 为准）。
+                bool hasShxFileName = !string.IsNullOrWhiteSpace(fileName)
+                    && fileName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase);
+                bool isTrueType = !string.IsNullOrEmpty(font.TypeFace) && !hasShxFileName;
                 bool isMainMissing = false;
                 bool isBigMissing = false;
 
