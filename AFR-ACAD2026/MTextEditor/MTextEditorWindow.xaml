@@ -49,7 +49,7 @@
                              IsReadOnly="True"
                              VerticalScrollBarVisibility="Auto"
                              HorizontalScrollBarVisibility="Disabled"
-                             FontFamily="JetBrains Maple Mono, Cascadia Code, Consolas, 微软雅黑" FontSize="13"
+                             FontFamily="JetBrains Maple Mono Regular, Cascadia Code, Consolas, 微软雅黑" FontSize="13"
                              Padding="8,6"
                              BorderThickness="0"
                              Background="{DynamicResource SecondaryRegionBrush}"
