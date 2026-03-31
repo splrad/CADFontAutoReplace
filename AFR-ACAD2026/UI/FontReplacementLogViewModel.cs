@@ -183,7 +183,8 @@ internal sealed class FontReplacementLogViewModel : INotifyPropertyChanged
                     else { shxRows.Add(row); shxCount++; }
                 }
 
-                if (r.IsBigFontMissing)
+                // TrueType 样式不支持大字体，不显示大字体行
+                if (r.IsBigFontMissing && !r.IsTrueType)
                 {
                     string currentBig = current.BigFontFileName;
                     string replacement = !string.IsNullOrEmpty(currentBig) ? currentBig : globalBigFont;

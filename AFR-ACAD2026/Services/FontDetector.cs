@@ -79,7 +79,8 @@ internal static class FontDetector
                                  || IsShxTypeMismatch(fileName, db, expectBigFont: false);
                 }
 
-                if (!string.IsNullOrWhiteSpace(bigFontName))
+                // TrueType 样式无法使用大字体（AutoCAD 中大字体选项被禁用）
+                if (!isTrueType && !string.IsNullOrWhiteSpace(bigFontName))
                 {
                     // 检查大字体：文件必须存在且必须是大字体文件
                     isBigMissing = !IsShxFontAvailable(bigFontName, db)

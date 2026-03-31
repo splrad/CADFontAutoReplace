@@ -65,6 +65,8 @@ internal static class FontReplacer
                         {
                             style.Font = new FontDescriptor(trueTypeFont, false, false, 0, 0);
                             style.FileName = string.Empty;
+                            // TrueType 样式不支持大字体，清空避免残留
+                            style.BigFontFileName = string.Empty;
                             changed = true;
                         }
                     }
@@ -80,7 +82,8 @@ internal static class FontReplacer
                 }
 
                 // 若大字体缺失且已配置替换字体，则执行替换
-                if (missing.IsBigFontMissing && !string.IsNullOrEmpty(bigFont))
+                // TrueType 样式不支持大字体，跳过
+                if (missing.IsBigFontMissing && !missing.IsTrueType && !string.IsNullOrEmpty(bigFont))
                 {
                     style.BigFontFileName = bigFont;
                     changed = true;
@@ -134,6 +137,8 @@ internal static class FontReplacer
                     {
                         style.Font = new FontDescriptor(replacement.MainFontReplacement, false, false, 0, 0);
                         style.FileName = string.Empty;
+                        // TrueType 样式不支持大字体，清空避免残留
+                        style.BigFontFileName = string.Empty;
                     }
                     else
                     {
@@ -142,7 +147,8 @@ internal static class FontReplacer
                     changed = true;
                 }
 
-                if (!string.IsNullOrEmpty(replacement.BigFontReplacement))
+                // TrueType 样式不支持大字体，跳过
+                if (!replacement.IsTrueType && !string.IsNullOrEmpty(replacement.BigFontReplacement))
                 {
                     style.BigFontFileName = replacement.BigFontReplacement;
                     changed = true;

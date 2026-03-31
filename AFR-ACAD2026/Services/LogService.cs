@@ -50,7 +50,8 @@ internal sealed class LogService
                 if (item.IsTrueType) trueTypeCount++;
                 else shxCount++;
             }
-            if (item.IsBigFontMissing) bigFontCount++;
+            // TrueType 样式不支持大字体，不计入统计
+            if (item.IsBigFontMissing && !item.IsTrueType) bigFontCount++;
         }
         int total = trueTypeCount + shxCount + bigFontCount;
 
