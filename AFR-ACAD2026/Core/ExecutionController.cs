@@ -56,15 +56,7 @@ internal sealed class ExecutionController
                     return;
                 }
 
-                // 第二阶段: 替换缺失字体 + Regen 同步解析器缓存
-                //
-                // FontReplacer: 将数据库中的缺失字体替换为可用字体。
-                // Regen:        强制 AutoCAD 字体解析器以更新后的数据库重新解析。
-                //   DWG 加载时解析器对缺失字体建立了替代缓存（如 FangSong_GB2312 → @Arial Unicode MS），
-                //   仅修改数据库不会清除此缓存。Regen 触发重新解析，此时数据库中的字体均已可用，
-                //   解析器不会再产生替代映射，内部状态与数据库一致。
-                //   注: 之前 Regen 导致问题是因为 IsShapeFile 分类错误使部分字体未被正确替换，
-                //       解析器仍对缺失字体执行替代。现已改用 Font.TypeFace 分类，替换完整。
+                // 第二阶段: 替换缺失字体 + Regen 刷新显示
                 FontReplacer.ReplaceMissingFonts(
                     doc.Database, missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont);
 

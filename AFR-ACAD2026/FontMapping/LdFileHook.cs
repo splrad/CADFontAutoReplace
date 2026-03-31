@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Windows.Media;
 using AFR_ACAD2026.Services;
 
 namespace AFR_ACAD2026.FontMapping;
@@ -233,6 +234,12 @@ internal static class LdFileHook
             if (fontExists)
                 return _trampolineDelegate(fileName, param2, db, desc);
 
+            // 系统 TrueType 字族名放行 — ldfile 可能收到字族名（如 "宋体"），
+            // 这些不在 _availableFonts（文件名集合）中但确实已安装，不应重定向。
+            string baseName = fontName.TrimStart('@');
+            if (FontDetector.IsSystemFont(baseName))
+                return _trampolineDelegate(fileName, param2, db, desc);
+
             // 字体缺失 → 根据 param2 类型选择正确的替换字体
             string? resolved = ResolveMissingFont(fontName, param2);
             if (resolved != null)
@@ -329,6 +336,20 @@ internal static class LdFileHook
             {
                 foreach (string supportDir in Directory.GetDirectories(dir, "Support", SearchOption.AllDirectories))
                     ScanDirectory(supportDir);
+            }
+        }
+        catch { }
+
+        // 系统 TrueType 字族名 — 同步扫描，确保 Hook 拦截前数据就绪
+        // ldfile 可能收到字族名（如 "宋体"）而非文件名（simsun.ttc），
+        // 必须将字族名加入可用集合，否则会被误判为缺失 SHX 并重定向。
+        try
+        {
+            foreach (var family in Fonts.SystemFontFamilies)
+            {
+                _availableFonts.Add(family.Source);
+                foreach (var localizedName in family.FamilyNames.Values)
+                    _availableFonts.Add(localizedName);
             }
         }
         catch { }

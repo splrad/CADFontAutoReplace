@@ -45,6 +45,18 @@ internal static class FontDetector
     }
 
     /// <summary>
+    /// 检查名称是否为系统已安装的 TrueType 字体族名。
+    /// 供 LdFileHook 在 ldfile 回调中判断：若为系统字体族名则放行，
+    /// 避免将 TrueType 字族名（如 "宋体"）误当作缺失 SHX 文件重定向。
+    /// </summary>
+    public static bool IsSystemFont(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return false;
+        var task = _systemFontNamesTask;
+        return task.IsCompleted && task.Result.Contains(name);
+    }
+
+    /// <summary>
     /// 扫描数据库中所有文字样式，返回存在缺失字体的样式列表。
     /// </summary>
     public static List<FontCheckResult> DetectMissingFonts(Database db)
