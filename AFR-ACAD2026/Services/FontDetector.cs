@@ -65,9 +65,12 @@ internal static class FontDetector
                 var font = style.Font;
 
                 // 判断样式类型：SHX 还是 TrueType
-                // IsShapeFile 是 AutoCAD API 的权威属性，直接反映样式的内部分类，
-                // 无需通过 FileName 扩展名猜测（FileName 可能无扩展名、数据不一致）。
-                bool isTrueType = !style.IsShapeFile;
+                // Font.TypeFace 是区分两种字体类型的权威字段：
+                //   TrueType 样式: TypeFace 存储字族名（如 "Arial"），非空
+                //   SHX 样式:      TypeFace 为空，字体文件名存储在 FileName 中
+                // 注意: IsShapeFile 表示"形文件 vs 文字样式"（DXF group 70 bit 1），
+                //       不能用于区分 SHX 和 TrueType，普通 SHX 文字样式 IsShapeFile=false。
+                bool isTrueType = !string.IsNullOrEmpty(font.TypeFace);
                 bool isMainMissing = false;
                 bool isBigMissing = false;
 
