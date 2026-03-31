@@ -56,17 +56,15 @@ internal sealed class ExecutionController
                     return;
                 }
 
-                // 第二阶段: Replace → Regen → Replace（同一份检测数据）
-                //   首次替换: 修正样式表，使 Regen 渲染时引用有效字体
-                //   Regen:    刷新显示（LdFileHook 重定向确保渲染正确）
-                //             副作用 — MText 内联码可能将缺失字体名写回样式表，
-                //             并可能翻转 IsShapeFile 导致分类变化
-                //   二次替换: 用首次检测数据修复 Regen 的覆盖（保持原始分类不变）
-                FontReplacer.ReplaceMissingFonts(
-                    doc.Database, missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont);
-
-                doc.Editor.Regen();
-
+                // 第二阶段: 替换缺失字体
+                // 不执行 Regen — 原因：
+                //   Regen 处理 MText 内联码时会将缺失字体名（如 @Arial Unicode MS.shx）
+                //   写回样式表并缓存到 AutoCAD 内部状态，无论之后 Replace 多少次，
+                //   内部状态始终与数据库不一致，导致 ST 对话框弹出"当前样式已修改"。
+                // 不需要 Regen 的理由：
+                //   SHX 字体：LdFileHook 已在 DWG 加载阶段将缺失字体重定向到替换字体，
+                //             渲染结果已正确，无需 Regen 刷新显示。
+                //   TrueType：下次用户交互（缩放/平移）触发自动 Regen 时显示更新。
                 FontReplacer.ReplaceMissingFonts(
                     doc.Database, missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont);
 
