@@ -47,6 +47,7 @@ internal static class LdFileHook
 
     // 字体解析状态
     private static readonly HashSet<string> _availableFonts = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> _bigFontFiles = new(StringComparer.OrdinalIgnoreCase);
     private static string _repMainFont = "";
     private static string _repBigFont = "";
     [ThreadStatic] private static bool _inHook;
@@ -207,10 +208,40 @@ internal static class LdFileHook
             if (param2 == FontTypeShape)
                 return _trampolineDelegate(fileName, param2, db, desc);
 
-            // 字体文件存在 → 直接放行
-            if (_availableFonts.Contains(fontName) ||
-                _availableFonts.Contains(EnsureShx(fontName)))
+            string shxName = EnsureShx(fontName);
+            bool fontExists = _availableFonts.Contains(fontName) || _availableFonts.Contains(shxName);
+
+            if (fontExists)
+            {
+                // 字体文件存在 → 检查类型是否与请求匹配
+                bool isBigFont = _bigFontFiles.Contains(fontName) || _bigFontFiles.Contains(shxName);
+
+                if (param2 == FontTypeBigFont && !isBigFont)
+                {
+                    // 常规字体被用作大字体 → 重定向到 BigFont
+                    if (!string.IsNullOrEmpty(_repBigFont) && _availableFonts.Contains(_repBigFont))
+                    {
+                        _redirectLog.TryAdd(fontName, (_repBigFont, param2));
+                        IntPtr repPtr = Marshal.StringToHGlobalUni(_repBigFont);
+                        try { return _trampolineDelegate(repPtr, param2, db, desc); }
+                        finally { Marshal.FreeHGlobal(repPtr); }
+                    }
+                }
+                else if (param2 == FontTypeRegular && isBigFont)
+                {
+                    // 大字体被用作常规字体 → 重定向到 MainFont
+                    if (!string.IsNullOrEmpty(_repMainFont) && _availableFonts.Contains(_repMainFont))
+                    {
+                        _redirectLog.TryAdd(fontName, (_repMainFont, param2));
+                        IntPtr repPtr = Marshal.StringToHGlobalUni(_repMainFont);
+                        try { return _trampolineDelegate(repPtr, param2, db, desc); }
+                        finally { Marshal.FreeHGlobal(repPtr); }
+                    }
+                }
+
+                // 类型匹配或无法修正 → 直接放行
                 return _trampolineDelegate(fileName, param2, db, desc);
+            }
 
             // 字体缺失 → 根据 param2 类型选择正确的替换字体
             string? resolved = ResolveMissingFont(fontName, param2);
@@ -327,13 +358,38 @@ internal static class LdFileHook
             foreach (string file in Directory.EnumerateFiles(dir))
             {
                 string ext = Path.GetExtension(file);
-                if (ext.Equals(".shx", StringComparison.OrdinalIgnoreCase) ||
-                    ext.Equals(".ttf", StringComparison.OrdinalIgnoreCase) ||
-                    ext.Equals(".ttc", StringComparison.OrdinalIgnoreCase))
+                if (ext.Equals(".shx", StringComparison.OrdinalIgnoreCase))
+                {
+                    string fileName = Path.GetFileName(file);
+                    _availableFonts.Add(fileName);
+                    ClassifyShxFont(file, fileName);
+                }
+                else if (ext.Equals(".ttf", StringComparison.OrdinalIgnoreCase) ||
+                         ext.Equals(".ttc", StringComparison.OrdinalIgnoreCase))
                 {
                     _availableFonts.Add(Path.GetFileName(file));
                 }
             }
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 读取 SHX 文件头，识别是否为大字体文件。
+    /// 文件头格式: "AutoCAD-86 bigfont 1.0" / "AutoCAD-86 unifont 1.0" / "AutoCAD-86 shapes 1.0"
+    /// </summary>
+    private static void ClassifyShxFont(string filePath, string fileName)
+    {
+        try
+        {
+            byte[] header = new byte[30];
+            using var fs = File.OpenRead(filePath);
+            int bytesRead = fs.Read(header, 0, 30);
+            if (bytesRead < 25) return;
+
+            string headerStr = System.Text.Encoding.ASCII.GetString(header, 0, bytesRead);
+            if (headerStr.Contains("bigfont", StringComparison.OrdinalIgnoreCase))
+                _bigFontFiles.Add(fileName);
         }
         catch { }
     }
