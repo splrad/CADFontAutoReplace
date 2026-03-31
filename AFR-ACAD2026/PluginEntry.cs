@@ -26,6 +26,7 @@ public class PluginEntry : IExtensionApplication
     private static bool _idleHandlerRegistered;
     private static volatile bool _unloaded;
     private static readonly object _scheduleLock = new();
+    private static string _originalFontAlt = "simplex.shx";
 
     /// <summary>
     /// 静态构造函数：在类型首次使用时注册嵌入程序集解析。
@@ -84,6 +85,18 @@ public class PluginEntry : IExtensionApplication
                 log.Info("AFR 插件首次安装完成，请执行 AFR 命令配置替换字体。");
             }
 
+            // 第 1.5 阶段: 关闭 AutoCAD 原生字体替代
+            // FONTALT="." 禁止 AutoCAD 在 DWG 加载时抢先用 simplex.shx 替代缺失字体，
+            // 由 LdFileHook（文件级重定向）和 FontReplacer（数据库级替换）全权接管。
+            // 若不关闭，AutoCAD 替代结果写入样式内部状态，与 FontReplacer 的替换不一致，
+            // 导致 ST 弹出"当前样式已修改"。
+            try
+            {
+                _originalFontAlt = (string)AcadApp.GetSystemVariable("FONTALT");
+                AcadApp.SetSystemVariable("FONTALT", ".");
+            }
+            catch { }
+
             // 第二阶段: 注册文档事件以支持多文档（MDI）
             // 仅监听 DocumentCreated（新建/打开），不监听 DocumentActivated（切换）
             var docMgr = AcadApp.DocumentManager;
@@ -103,6 +116,10 @@ public class PluginEntry : IExtensionApplication
 
     public void Terminate()
     {
+        // 还原 FONTALT 为插件加载前的值
+        try { AcadApp.SetSystemVariable("FONTALT", _originalFontAlt); }
+        catch { }
+
         LdFileHook.Uninstall();
         UnregisterEvents();
     }
@@ -128,6 +145,10 @@ public class PluginEntry : IExtensionApplication
                 _idleHandlerRegistered = false;
             }
         }
+
+        // 还原 FONTALT
+        try { AcadApp.SetSystemVariable("FONTALT", _originalFontAlt); }
+        catch { }
 
         // 卸载 Hook
         LdFileHook.Uninstall();
