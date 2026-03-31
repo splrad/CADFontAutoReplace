@@ -182,12 +182,12 @@ internal static class LdFileHook
 
     #region Hook Handler
 
-    // ldfile param2 字体类型常量（基于 AutoCAD 行为推断）
-    // param2=0: 常规 SHX 主字体
-    // param2=1: SHX 大字体（Big Font）
+    // ldfile param2 字体类型常量（基于 AutoCAD 实际行为验证）
+    // param2=0: SHX 大字体（Big Font）
+    // param2=1: 常规 SHX 主字体
     // param2=2: SHX 形文件（Shape File）
-    private const int FontTypeRegular = 0;
-    private const int FontTypeBigFont = 1;
+    private const int FontTypeBigFont = 0;
+    private const int FontTypeRegular = 1;
     private const int FontTypeShape = 2;
 
     private static int HookHandler(IntPtr fileName, int param2, IntPtr db, IntPtr desc)
