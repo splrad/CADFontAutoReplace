@@ -43,12 +43,7 @@ internal sealed class ExecutionController
             // 获取文档写入锁
             using (doc.LockDocument())
             {
-                // 第一阶段: 预先 Regen — 让 AutoCAD 处理 MText 内联字体码并写入样式表
-                // 必须在 FontReplacer 之前执行，否则 Regen 会将内联字体（如 @Arial Unicode MS.shx）
-                // 写回样式表，覆盖 FontReplacer 的修改。
-                doc.Editor.Regen();
-
-                // 第二阶段: 检测缺失字体（样式表）— 在 Regen 稳定后检测
+                // 第一阶段: 检测缺失字体（样式表原始状态）
                 var missingFonts = FontDetector.DetectMissingFonts(doc.Database);
 
                 // 存储检测结果供 AFRLOG 命令使用
@@ -61,17 +56,38 @@ internal sealed class ExecutionController
                     return;
                 }
 
-                // 第三阶段: 替换样式表中的缺失字体（最终覆盖，不再 Regen）
+                // 第二阶段: Replace → Regen → Replace
+                //   首次替换: 修正样式表，使 Regen 渲染时引用有效字体
+                //   Regen:    刷新显示（LdFileHook 重定向确保渲染正确）
+                //             副作用 — MText 内联码可能将缺失字体名写回样式表
+                //   二次替换: 修复 Regen 对样式表的覆盖，确保最终状态正确
                 FontReplacer.ReplaceMissingFonts(
                     doc.Database, missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont);
 
-                // 第四阶段: 收集 Hook 重定向记录（过滤样式表缺失字体，仅保留 MText 内联字体）
-                // 排除集仅包含样式表中确认缺失的字体（由 FontReplacer 处理），
+                doc.Editor.Regen();
+
+                var postRegenMissing = FontDetector.DetectMissingFonts(doc.Database);
+                if (postRegenMissing.Count > 0)
+                {
+                    FontReplacer.ReplaceMissingFonts(
+                        doc.Database, postRegenMissing, config.MainFont, config.BigFont, config.TrueTypeFont);
+                }
+
+                // 第三阶段: 收集 Hook 重定向记录（过滤样式表缺失字体，仅保留 MText 内联字体）
+                // 排除集合并两次检测中确认缺失的字体（均由 FontReplacer 处理），
                 // 不排除存在的字体，避免误过滤 MText 内联字体（如 @gbcbig → gbcbig）。
                 var styleMissingFonts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 for (int i = 0; i < missingFonts.Count; i++)
                 {
                     var f = missingFonts[i];
+                    if (f.IsMainFontMissing && !string.IsNullOrEmpty(f.FileName))
+                        styleMissingFonts.Add(f.FileName);
+                    if (f.IsBigFontMissing && !string.IsNullOrEmpty(f.BigFontFileName))
+                        styleMissingFonts.Add(f.BigFontFileName);
+                }
+                for (int i = 0; i < postRegenMissing.Count; i++)
+                {
+                    var f = postRegenMissing[i];
                     if (f.IsMainFontMissing && !string.IsNullOrEmpty(f.FileName))
                         styleMissingFonts.Add(f.FileName);
                     if (f.IsBigFontMissing && !string.IsNullOrEmpty(f.BigFontFileName))
