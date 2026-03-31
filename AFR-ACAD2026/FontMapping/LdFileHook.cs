@@ -282,9 +282,14 @@ internal static class LdFileHook
             string baseName = fontName.TrimStart('@');
             string baseShx = EnsureShx(baseName);
             if (_availableFonts.Contains(baseShx))
-                return baseShx;
-            // 基础字体不存在 → 回落到 param2 逻辑（不盲目用 BigFont）
-            // @ 前缀可能是 TrueType 竖排（如 @Arial Unicode MS）或 SHX 大字体竖排
+            {
+                // 检查字体类型兼容性: 大字体槽位必须用大字体文件
+                // 不能将常规 SHX（如 ming.shx）返回给大字体槽位，
+                // 否则 AutoCAD 报告 "常规字体文件，不是大字体文件"。
+                if (fontType != FontTypeBigFont || _bigFontFiles.Contains(baseShx))
+                    return baseShx;
+            }
+            // 基础字体不存在或类型不兼容 → 回落到 param2 逻辑
         }
 
         // TTF 字体通常不经过 ldfile，但如果出现则跳过（由系统字体 API 处理）

@@ -70,7 +70,18 @@ public class PluginEntry : IExtensionApplication
         var log = LogService.Instance;
         try
         {
-            // 第零阶段 A: 安装 ldfile Hook — 必须在任何文档打开之前
+            // 第零阶段: 关闭 AutoCAD 原生字体替代机制 — 必须最先执行
+            // 确保在 DWG 加载、Hook 安装之前生效，避免 AutoCAD 用旧值抢先替代。
+            try
+            {
+                _originalFontAlt = (string)AcadApp.GetSystemVariable("FONTALT");
+                _originalFontMap = (string)AcadApp.GetSystemVariable("FONTMAP");
+                AcadApp.SetSystemVariable("FONTALT", ".");
+                AcadApp.SetSystemVariable("FONTMAP", "");
+            }
+            catch { }
+
+            // 第一阶段 A: 安装 ldfile Hook — 必须在任何文档打开之前
             // Hook 拦截字体文件加载，将缺失字体重定向到用户配置的替换字体
             LdFileHook.Install();
 
@@ -85,19 +96,6 @@ public class PluginEntry : IExtensionApplication
             {
                 log.Info("AFR 插件首次安装完成，请执行 AFR 命令配置替换字体。");
             }
-
-            // 第 1.5 阶段: 关闭 AutoCAD 原生字体替代机制
-            // FONTALT="." 禁止 AutoCAD 用 simplex.shx 替代缺失字体，
-            // FONTMAP=""  禁止 acad.fmp 字体映射表静默替换字体。
-            // 由 LdFileHook（文件级重定向）和 FontReplacer（数据库级替换）全权接管。
-            try
-            {
-                _originalFontAlt = (string)AcadApp.GetSystemVariable("FONTALT");
-                _originalFontMap = (string)AcadApp.GetSystemVariable("FONTMAP");
-                AcadApp.SetSystemVariable("FONTALT", ".");
-                AcadApp.SetSystemVariable("FONTMAP", "");
-            }
-            catch { }
 
             // 第二阶段: 注册文档事件以支持多文档（MDI）
             // 仅监听 DocumentCreated（新建/打开），不监听 DocumentActivated（切换）
