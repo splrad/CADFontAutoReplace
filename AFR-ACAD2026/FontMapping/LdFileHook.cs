@@ -221,7 +221,9 @@ internal static class LdFileHook
             string? resolved = ResolveMissingFont(fontName, param2);
             if (resolved != null)
             {
-                _redirectLog.TryAdd(fontName, (resolved, param2));
+                // 规范化 key：统一小写 + .shx 后缀，避免 "XC90"/"xc90.shx" 重复
+                string logKey = EnsureShx(fontName).ToLowerInvariant();
+                _redirectLog.TryAdd(logKey, (resolved, param2));
 
                 IntPtr resolvedPtr = Marshal.StringToHGlobalUni(resolved);
                 try
@@ -252,10 +254,11 @@ internal static class LdFileHook
     /// </summary>
     private static string? ResolveMissingFont(string fontName, int fontType)
     {
-        // 规则 5/9: @xxx → 优先使用去掉 @ 的基础字体
+        // 规则 5/9: @xxx → 优先使用去掉 @ 的基础字体（支持 @@xxx 双前缀）
         if (fontName.StartsWith('@'))
         {
-            string baseShx = EnsureShx(fontName[1..]);
+            string baseName = fontName.TrimStart('@');
+            string baseShx = EnsureShx(baseName);
             if (_availableFonts.Contains(baseShx))
                 return baseShx;
 
