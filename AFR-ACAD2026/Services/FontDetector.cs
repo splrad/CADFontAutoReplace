@@ -101,6 +101,34 @@ internal static class FontDetector
     }
 
     /// <summary>
+    /// 收集样式表中所有字体文件名（含主字体和大字体）。
+    /// 用于 Hook 排除列表：样式表字体由 FontReplacer 处理，不应被 Hook 拦截。
+    /// </summary>
+    public static HashSet<string> CollectStyleTableFontNames(Database db)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        using var tr = db.TransactionManager.StartOpenCloseTransaction();
+        var styleTable = (TextStyleTable)tr.GetObject(db.TextStyleTableId, OpenMode.ForRead);
+
+        foreach (ObjectId id in styleTable)
+        {
+            try
+            {
+                var style = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
+                if (!string.IsNullOrWhiteSpace(style.FileName))
+                    names.Add(style.FileName);
+                if (!string.IsNullOrWhiteSpace(style.BigFontFileName))
+                    names.Add(style.BigFontFileName);
+            }
+            catch { }
+        }
+
+        tr.Commit();
+        return names;
+    }
+
+    /// <summary>
     /// 读取数据库中所有文字样式的当前字体配置。
     /// 用于 AFRLOG 界面显示实际字体（反映手动替换或 ST 命令修改后的状态）。
     /// </summary>

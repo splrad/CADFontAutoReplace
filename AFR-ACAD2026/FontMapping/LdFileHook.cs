@@ -15,18 +15,16 @@ internal sealed record InlineFontFixRecord(
     string FontCategory);  // "SHX主字体" / "SHX大字体" / "TrueType"
 
 /// <summary>
-/// Hook acdb25.dll 的 ldfile 函数，在 DWG 解析阶段拦截字体文件加载。
-/// 当 AutoCAD 尝试加载缺失的字体文件时，透明重定向到用户配置的替换字体。
+/// Hook acdb25.dll 的 ldfile 函数，在 Regen 阶段拦截缺失字体文件加载。
 ///
-/// 时序：PluginEntry.Initialize() → Install() → Hook 就绪
-///       → 用户打开 DWG → AutoCAD 解析 MText → 调用 ldfile
-///       → Hook 检测字体缺失 → 重定向到替换字体 → 文字正常显示
+/// 两阶段设计：
+///   1. DWG 解析阶段（Hook 未激活）: 所有 ldfile 调用直接放行，
+///      AutoCAD 用自己的机制处理样式表缺失字体（如 simplex.shx 替换）。
+///   2. Regen 阶段（Hook 激活）: FontReplacer 已完成样式表替换后，
+///      Activate() 传入样式表字体排除列表，Hook 仅重定向非样式表的缺失字体
+///      （主要是 MText 内联字体），Regen 完成后 Deactivate()。
 ///
-/// 映射规则：
-///   @xxx.shx 缺失 + xxx.shx 存在 → 重定向到 xxx.shx
-///   @xxx.shx 缺失 + xxx.shx 也缺失 → 重定向到 ConfigService.BigFont
-///   TTF 字体缺失 → 重定向到 ConfigService.BigFont
-///   其他 SHX 缺失 → 重定向到 ConfigService.MainFont
+/// 这保证了样式表字体可通过 ST/AFRLOG 随时调整，无需重启 CAD。
 /// </summary>
 internal static class LdFileHook
 {
@@ -48,8 +46,10 @@ internal static class LdFileHook
     // 字体解析状态
     private static readonly HashSet<string> _availableFonts = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> _bigFontFiles = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> _styleTableFonts = new(StringComparer.OrdinalIgnoreCase);
     private static string _repMainFont = "";
     private static string _repBigFont = "";
+    private static volatile bool _active; // 仅在 Activate() 后才重定向
     [ThreadStatic] private static bool _inHook;
 
     // 记录本次会话的重定向: fontName → (replacement, fontType)
@@ -165,6 +165,34 @@ internal static class LdFileHook
     }
 
     /// <summary>
+    /// 激活 Hook 重定向 — 传入样式表字体名作为排除列表。
+    /// 必须在 FontReplacer 完成样式表替换后、Regen 之前调用。
+    /// Regen 触发 MText 重新渲染时，Hook 仅重定向排除列表之外的缺失字体。
+    /// </summary>
+    internal static void Activate(HashSet<string> styleTableFontNames)
+    {
+        _styleTableFonts.Clear();
+        foreach (string name in styleTableFontNames)
+        {
+            _styleTableFonts.Add(EnsureShx(name).ToLowerInvariant());
+            // 也排除无扩展名形式
+            string noExt = Path.GetFileNameWithoutExtension(name).ToLowerInvariant();
+            if (!string.IsNullOrEmpty(noExt))
+                _styleTableFonts.Add(noExt);
+        }
+        _redirectLog.Clear();
+        _active = true;
+    }
+
+    /// <summary>
+    /// 停用 Hook 重定向（Regen 完成后调用）。
+    /// </summary>
+    internal static void Deactivate()
+    {
+        _active = false;
+    }
+
+    /// <summary>
     /// 获取本次会话的重定向记录（供 AFRLOG 显示）。
     /// </summary>
     internal static List<InlineFontFixRecord> GetRedirectRecords()
@@ -193,8 +221,8 @@ internal static class LdFileHook
 
     private static int HookHandler(IntPtr fileName, int param2, IntPtr db, IntPtr desc)
     {
-        // 防止递归
-        if (_inHook || _trampolineDelegate == null)
+        // 未激活或防止递归 → 直接放行
+        if (!_active || _inHook || _trampolineDelegate == null)
             return _trampolineDelegate?.Invoke(fileName, param2, db, desc) ?? -1;
 
         _inHook = true;
@@ -211,19 +239,22 @@ internal static class LdFileHook
             string shxName = EnsureShx(fontName);
             bool fontExists = _availableFonts.Contains(fontName) || _availableFonts.Contains(shxName);
 
-            // 字体文件存在 → 直接放行，不干预
-            // AutoCAD 对类型不匹配（如常规字体在大字体槽位）有自己的容错处理，
-            // 强制重定向反而会导致 "形 XX 未定义" 错误
+            // 字体文件存在 → 直接放行
             if (fontExists)
                 return _trampolineDelegate(fileName, param2, db, desc);
 
-            // 字体缺失 → 根据 param2 类型选择正确的替换字体
+            // 样式表字体 → 跳过，由 FontReplacer 处理
+            // 样式表字体有 AFRLOG/ST 命令可随时调整，Hook 不应干预
+            string normalizedName = shxName.ToLowerInvariant();
+            string baseName = fontName.TrimStart('@').ToLowerInvariant();
+            if (_styleTableFonts.Contains(normalizedName) || _styleTableFonts.Contains(baseName))
+                return _trampolineDelegate(fileName, param2, db, desc);
+
+            // 非样式表的缺失字体 → 根据 param2 类型选择正确的替换字体
             string? resolved = ResolveMissingFont(fontName, param2);
             if (resolved != null)
             {
-                // 规范化 key：统一小写 + .shx 后缀，避免 "XC90"/"xc90.shx" 重复
-                string logKey = EnsureShx(fontName).ToLowerInvariant();
-                _redirectLog.TryAdd(logKey, (resolved, param2));
+                _redirectLog.TryAdd(normalizedName, (resolved, param2));
 
                 IntPtr resolvedPtr = Marshal.StringToHGlobalUni(resolved);
                 try

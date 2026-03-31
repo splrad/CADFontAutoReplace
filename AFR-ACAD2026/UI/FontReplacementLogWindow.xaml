@@ -203,7 +203,7 @@
 							<Border Grid.Row="0" Padding="8,4" CornerRadius="6,6,0,0"
 									Background="{DynamicResource SecondaryRegionBrush}"
 									BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
-								<TextBlock Text="缺失字体映射（DWG 加载阶段自动完成）"
+								<TextBlock Text="MText 内联字体映射（自动完成，无需手动操作）"
 										   FontSize="11" FontWeight="SemiBold"
 										   Foreground="{DynamicResource SecondaryTextBrush}"/>
 							</Border>
