@@ -211,37 +211,11 @@ internal static class LdFileHook
             string shxName = EnsureShx(fontName);
             bool fontExists = _availableFonts.Contains(fontName) || _availableFonts.Contains(shxName);
 
+            // 字体文件存在 → 直接放行，不干预
+            // AutoCAD 对类型不匹配（如常规字体在大字体槽位）有自己的容错处理，
+            // 强制重定向反而会导致 "形 XX 未定义" 错误
             if (fontExists)
-            {
-                // 字体文件存在 → 检查类型是否与请求匹配
-                bool isBigFont = _bigFontFiles.Contains(fontName) || _bigFontFiles.Contains(shxName);
-
-                if (param2 == FontTypeBigFont && !isBigFont)
-                {
-                    // 常规字体被用作大字体 → 重定向到 BigFont
-                    if (!string.IsNullOrEmpty(_repBigFont) && _availableFonts.Contains(_repBigFont))
-                    {
-                        _redirectLog.TryAdd(fontName, (_repBigFont, param2));
-                        IntPtr repPtr = Marshal.StringToHGlobalUni(_repBigFont);
-                        try { return _trampolineDelegate(repPtr, param2, db, desc); }
-                        finally { Marshal.FreeHGlobal(repPtr); }
-                    }
-                }
-                else if (param2 == FontTypeRegular && isBigFont)
-                {
-                    // 大字体被用作常规字体 → 重定向到 MainFont
-                    if (!string.IsNullOrEmpty(_repMainFont) && _availableFonts.Contains(_repMainFont))
-                    {
-                        _redirectLog.TryAdd(fontName, (_repMainFont, param2));
-                        IntPtr repPtr = Marshal.StringToHGlobalUni(_repMainFont);
-                        try { return _trampolineDelegate(repPtr, param2, db, desc); }
-                        finally { Marshal.FreeHGlobal(repPtr); }
-                    }
-                }
-
-                // 类型匹配或无法修正 → 直接放行
                 return _trampolineDelegate(fileName, param2, db, desc);
-            }
 
             // 字体缺失 → 根据 param2 类型选择正确的替换字体
             string? resolved = ResolveMissingFont(fontName, param2);
