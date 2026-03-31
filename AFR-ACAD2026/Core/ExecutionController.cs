@@ -56,30 +56,29 @@ internal sealed class ExecutionController
                     return;
                 }
 
-                // 第二阶段: 替换样式表中的缺失字体
+                // 第二阶段: 收集样式表原始字体名（用于后续过滤 Hook 记录）
+                // 必须在 FontReplacer 修改样式表之前收集
+                var styleTableFontNames = FontDetector.CollectStyleTableFontNames(doc.Database);
+
+                // 第三阶段: 替换样式表中的缺失字体
                 int replaceCount = FontReplacer.ReplaceMissingFonts(
                     doc.Database, missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont);
 
-                // 第三阶段: 激活 Hook 并重新生成图形
-                // Hook 在 Regen 阶段仅重定向样式表之外的缺失字体（如 MText 内联字体）
-                // 样式表字体已由 FontReplacer 处理，用户可通过 ST/AFRLOG 随时调整
-                var styleTableFontNames = FontDetector.CollectStyleTableFontNames(doc.Database);
-                LdFileHook.Activate(styleTableFontNames);
-                try
-                {
-                    doc.Editor.Regen();
-                }
-                finally
-                {
-                    LdFileHook.Deactivate();
-                }
-
-                // 收集 Hook 重定向记录供 AFRLOG 显示
-                var inlineFixResults = LdFileHook.GetRedirectRecords();
+                // 第四阶段: 收集 Hook 重定向记录（过滤样式表字体，仅保留 MText 内联字体）
+                // Hook 在 DWG 解析阶段已重定向所有缺失字体（含样式表字体），
+                // 但样式表字体已由 FontReplacer 覆盖，用户可通过 ST/AFRLOG 随时调整，
+                // 此处过滤掉样式表字体，仅在 AFRLOG 中显示 MText 内联字体映射。
+                var inlineFixResults = LdFileHook.GetRedirectRecords(styleTableFontNames);
                 contextMgr.StoreInlineFontFixResults(doc, inlineFixResults);
 
                 // 添加统计汇总
                 log.AddStatistics(missingFonts, inlineFixResults.Count);
+
+                // 第四阶段: 重新生成图形
+                if (replaceCount > 0)
+                {
+                    doc.Editor.Regen();
+                }
             }
 
             contextMgr.MarkExecuted(doc);

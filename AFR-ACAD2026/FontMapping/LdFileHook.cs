@@ -15,16 +15,16 @@ internal sealed record InlineFontFixRecord(
     string FontCategory);  // "SHX主字体" / "SHX大字体" / "TrueType"
 
 /// <summary>
-/// Hook acdb25.dll 的 ldfile 函数，在 Regen 阶段拦截缺失字体文件加载。
+/// Hook acdb25.dll 的 ldfile 函数，在 DWG 解析阶段拦截缺失字体文件加载。
 ///
-/// 两阶段设计：
-///   1. DWG 解析阶段（Hook 未激活）: 所有 ldfile 调用直接放行，
-///      AutoCAD 用自己的机制处理样式表缺失字体（如 simplex.shx 替换）。
-///   2. Regen 阶段（Hook 激活）: FontReplacer 已完成样式表替换后，
-///      Activate() 传入样式表字体排除列表，Hook 仅重定向非样式表的缺失字体
-///      （主要是 MText 内联字体），Regen 完成后 Deactivate()。
+/// 设计原理：
+///   DWG 解析阶段: Hook 重定向所有缺失字体（含样式表 + MText 内联字体），
+///   确保 MText 内联字体在首次渲染时就能正确显示。
+///   Execute 阶段: FontReplacer 覆盖样式表字体，用户可通过 ST/AFRLOG 随时调整。
+///   AFRLOG 显示: GetRedirectRecords() 过滤掉样式表字体，仅展示 MText 内联字体映射。
 ///
-/// 这保证了样式表字体可通过 ST/AFRLOG 随时调整，无需重启 CAD。
+/// 样式表字体虽然在 DWG 解析阶段被 Hook 重定向，但 FontReplacer 会用用户配置覆盖，
+/// 因此样式表字体始终可控，无需重启 CAD。
 /// </summary>
 internal static class LdFileHook
 {
@@ -46,10 +46,8 @@ internal static class LdFileHook
     // 字体解析状态
     private static readonly HashSet<string> _availableFonts = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> _bigFontFiles = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly HashSet<string> _styleTableFonts = new(StringComparer.OrdinalIgnoreCase);
     private static string _repMainFont = "";
     private static string _repBigFont = "";
-    private static volatile bool _active; // 仅在 Activate() 后才重定向
     [ThreadStatic] private static bool _inHook;
 
     // 记录本次会话的重定向: fontName → (replacement, fontType)
@@ -165,41 +163,37 @@ internal static class LdFileHook
     }
 
     /// <summary>
-    /// 激活 Hook 重定向 — 传入样式表字体名作为排除列表。
-    /// 必须在 FontReplacer 完成样式表替换后、Regen 之前调用。
-    /// Regen 触发 MText 重新渲染时，Hook 仅重定向排除列表之外的缺失字体。
+    /// 获取本次会话的重定向记录，过滤掉样式表字体（供 AFRLOG 显示）。
+    /// 样式表字体已由 FontReplacer 处理，用户可通过 ST/AFRLOG 调整，
+    /// 此处仅返回样式表之外的重定向（即 MText 内联字体）。
     /// </summary>
-    internal static void Activate(HashSet<string> styleTableFontNames)
+    internal static List<InlineFontFixRecord> GetRedirectRecords(HashSet<string>? styleTableFontNames = null)
     {
-        _styleTableFonts.Clear();
-        foreach (string name in styleTableFontNames)
+        // 构建样式表排除集（规范化）
+        HashSet<string>? exclude = null;
+        if (styleTableFontNames is { Count: > 0 })
         {
-            _styleTableFonts.Add(EnsureShx(name).ToLowerInvariant());
-            // 也排除无扩展名形式
-            string noExt = Path.GetFileNameWithoutExtension(name).ToLowerInvariant();
-            if (!string.IsNullOrEmpty(noExt))
-                _styleTableFonts.Add(noExt);
+            exclude = new(StringComparer.OrdinalIgnoreCase);
+            foreach (string name in styleTableFontNames)
+            {
+                exclude.Add(EnsureShx(name).ToLowerInvariant());
+                string noExt = Path.GetFileNameWithoutExtension(name).ToLowerInvariant();
+                if (!string.IsNullOrEmpty(noExt))
+                    exclude.Add(noExt);
+            }
         }
-        _redirectLog.Clear();
-        _active = true;
-    }
 
-    /// <summary>
-    /// 停用 Hook 重定向（Regen 完成后调用）。
-    /// </summary>
-    internal static void Deactivate()
-    {
-        _active = false;
-    }
-
-    /// <summary>
-    /// 获取本次会话的重定向记录（供 AFRLOG 显示）。
-    /// </summary>
-    internal static List<InlineFontFixRecord> GetRedirectRecords()
-    {
         var records = new List<InlineFontFixRecord>();
         foreach (var (missing, (replacement, fontType)) in _redirectLog)
         {
+            // 过滤样式表字体
+            if (exclude != null)
+            {
+                string baseName = missing.TrimStart('@');
+                if (exclude.Contains(missing) || exclude.Contains(baseName))
+                    continue;
+            }
+
             string category = missing.StartsWith('@') ? "SHX大字体"
                 : IsTrueTypeName(missing) ? "TrueType"
                 : fontType == FontTypeBigFont ? "SHX大字体"
@@ -221,8 +215,8 @@ internal static class LdFileHook
 
     private static int HookHandler(IntPtr fileName, int param2, IntPtr db, IntPtr desc)
     {
-        // 未激活或防止递归 → 直接放行
-        if (!_active || _inHook || _trampolineDelegate == null)
+        // 防止递归
+        if (_inHook || _trampolineDelegate == null)
             return _trampolineDelegate?.Invoke(fileName, param2, db, desc) ?? -1;
 
         _inHook = true;
@@ -243,17 +237,11 @@ internal static class LdFileHook
             if (fontExists)
                 return _trampolineDelegate(fileName, param2, db, desc);
 
-            // 样式表字体 → 跳过，由 FontReplacer 处理
-            // 样式表字体有 AFRLOG/ST 命令可随时调整，Hook 不应干预
-            string normalizedName = shxName.ToLowerInvariant();
-            string baseName = fontName.TrimStart('@').ToLowerInvariant();
-            if (_styleTableFonts.Contains(normalizedName) || _styleTableFonts.Contains(baseName))
-                return _trampolineDelegate(fileName, param2, db, desc);
-
-            // 非样式表的缺失字体 → 根据 param2 类型选择正确的替换字体
+            // 字体缺失 → 根据 param2 类型选择正确的替换字体
             string? resolved = ResolveMissingFont(fontName, param2);
             if (resolved != null)
             {
+                string normalizedName = shxName.ToLowerInvariant();
                 _redirectLog.TryAdd(normalizedName, (resolved, param2));
 
                 IntPtr resolvedPtr = Marshal.StringToHGlobalUni(resolved);
