@@ -56,38 +56,27 @@ internal sealed class ExecutionController
                     return;
                 }
 
-                // 第二阶段: Replace → Regen → Replace
+                // 第二阶段: Replace → Regen → Replace（同一份检测数据）
                 //   首次替换: 修正样式表，使 Regen 渲染时引用有效字体
                 //   Regen:    刷新显示（LdFileHook 重定向确保渲染正确）
-                //             副作用 — MText 内联码可能将缺失字体名写回样式表
-                //   二次替换: 修复 Regen 对样式表的覆盖，确保最终状态正确
+                //             副作用 — MText 内联码可能将缺失字体名写回样式表，
+                //             并可能翻转 IsShapeFile 导致分类变化
+                //   二次替换: 用首次检测数据修复 Regen 的覆盖（保持原始分类不变）
                 FontReplacer.ReplaceMissingFonts(
                     doc.Database, missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont);
 
                 doc.Editor.Regen();
 
-                var postRegenMissing = FontDetector.DetectMissingFonts(doc.Database);
-                if (postRegenMissing.Count > 0)
-                {
-                    FontReplacer.ReplaceMissingFonts(
-                        doc.Database, postRegenMissing, config.MainFont, config.BigFont, config.TrueTypeFont);
-                }
+                FontReplacer.ReplaceMissingFonts(
+                    doc.Database, missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont);
 
                 // 第三阶段: 收集 Hook 重定向记录（过滤样式表缺失字体，仅保留 MText 内联字体）
-                // 排除集合并两次检测中确认缺失的字体（均由 FontReplacer 处理），
+                // 排除集仅包含样式表中确认缺失的字体（由 FontReplacer 处理），
                 // 不排除存在的字体，避免误过滤 MText 内联字体（如 @gbcbig → gbcbig）。
                 var styleMissingFonts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 for (int i = 0; i < missingFonts.Count; i++)
                 {
                     var f = missingFonts[i];
-                    if (f.IsMainFontMissing && !string.IsNullOrEmpty(f.FileName))
-                        styleMissingFonts.Add(f.FileName);
-                    if (f.IsBigFontMissing && !string.IsNullOrEmpty(f.BigFontFileName))
-                        styleMissingFonts.Add(f.BigFontFileName);
-                }
-                for (int i = 0; i < postRegenMissing.Count; i++)
-                {
-                    var f = postRegenMissing[i];
                     if (f.IsMainFontMissing && !string.IsNullOrEmpty(f.FileName))
                         styleMissingFonts.Add(f.FileName);
                     if (f.IsBigFontMissing && !string.IsNullOrEmpty(f.BigFontFileName))
