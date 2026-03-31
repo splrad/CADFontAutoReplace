@@ -6,12 +6,12 @@ using AFR_ACAD2026.Services;
 namespace AFR_ACAD2026.FontMapping;
 
 /// <summary>
-/// 单条内联字体修复记录。
+/// 单条 MText 字体映射记录。
 /// </summary>
 internal sealed record InlineFontFixRecord(
     string MissingFont,
     string ReplacementFont,
-    string FixMethod,      // "Hook重定向"
+    string FixMethod,      // "MText映射"
     string FontCategory);  // "SHX主字体" / "SHX大字体" / "TrueType"
 
 /// <summary>
@@ -174,7 +174,7 @@ internal static class LdFileHook
             string category = missing.StartsWith('@') ? "SHX大字体"
                 : IsTrueTypeName(missing) ? "TrueType"
                 : "SHX主字体";
-            records.Add(new(missing, replacement, "Hook重定向", category));
+            records.Add(new(missing, replacement, "MText映射", category));
         }
         return records;
     }

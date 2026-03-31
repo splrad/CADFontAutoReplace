@@ -39,7 +39,7 @@ internal sealed class LogService
     /// 根据缺失字体检测结果直接计算并添加统计条目。
     /// 必须在 Flush 之前调用。
     /// </summary>
-    public void AddStatistics(IReadOnlyList<FontCheckResult> missingFonts)
+    public void AddStatistics(IReadOnlyList<FontCheckResult> missingFonts, int mtextMappingCount = 0)
     {
         int trueTypeCount = 0, shxCount = 0, bigFontCount = 0;
         for (int i = 0; i < missingFonts.Count; i++)
@@ -54,11 +54,13 @@ internal sealed class LogService
         }
         int total = trueTypeCount + shxCount + bigFontCount;
 
+        string msg = $"已替换缺失字体 {total} 个 (TrueType字体: {trueTypeCount}, SHX字体: {shxCount}, BigFont字体: {bigFontCount})";
+        if (mtextMappingCount > 0)
+            msg += $", MText映射: {mtextMappingCount}";
+
         lock (_lock)
         {
-            _buffer.Add((LogCategory.Statistics,
-                $"已替换缺失字体 {total} 个 (TrueType字体: {trueTypeCount}, SHX字体: {shxCount}, BigFont字体: {bigFontCount})",
-                DateTime.Now));
+            _buffer.Add((LogCategory.Statistics, msg, DateTime.Now));
         }
     }
 
