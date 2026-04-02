@@ -20,8 +20,6 @@ public abstract class PluginEntryBase : IExtensionApplication
     private static bool _idleHandlerRegistered;
     private static volatile bool _unloaded;
     private static readonly object _scheduleLock = new();
-    private static string _originalFontAlt = "simplex.shx";
-    private static string _originalFontMap = "";
 
     // 嵌入程序集缓存（HandyControl 等第三方依赖）
     private static Assembly? _resolvedHandyControl;
@@ -80,17 +78,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         var log = LogService.Instance;
         try
         {
-            // 第零阶段: 关闭 AutoCAD 原生字体替代机制
-            try
-            {
-                _originalFontAlt = (string)AcadApp.GetSystemVariable("FONTALT");
-                _originalFontMap = (string)AcadApp.GetSystemVariable("FONTMAP");
-                AcadApp.SetSystemVariable("FONTALT", ".");
-                AcadApp.SetSystemVariable("FONTMAP", "");
-            }
-            catch { }
-
-            // 第一阶段 A: 安装字体 Hook
+            // 第零阶段: 安装字体 Hook
             if (PlatformManager.Platform.SupportsLdFileHook)
                 PlatformManager.FontHook.Install();
 
@@ -100,7 +88,17 @@ public abstract class PluginEntryBase : IExtensionApplication
             // 第一阶段: 注册表初始化
             bool isFirstRun = AppInitializer.Initialize();
             if (isFirstRun)
+            {
+                // 首次安装: 关闭 AutoCAD 原生字体替代机制（持久化变量，仅需设置一次）
+                try
+                {
+                    AcadApp.SetSystemVariable("FONTALT", ".");
+                    AcadApp.SetSystemVariable("FONTMAP", "");
+                }
+                catch { }
+
                 log.Info("AFR 插件首次安装完成，请执行 AFR 命令配置替换字体。");
+            }
 
             // 第二阶段: 注册文档事件
             var docMgr = AcadApp.DocumentManager;
@@ -120,13 +118,6 @@ public abstract class PluginEntryBase : IExtensionApplication
 
     public void Terminate()
     {
-        try
-        {
-            AcadApp.SetSystemVariable("FONTALT", _originalFontAlt);
-            AcadApp.SetSystemVariable("FONTMAP", _originalFontMap);
-        }
-        catch { }
-
         PlatformManager.FontHook.Uninstall();
         UnregisterEvents();
     }
@@ -151,8 +142,7 @@ public abstract class PluginEntryBase : IExtensionApplication
 
         try
         {
-            AcadApp.SetSystemVariable("FONTALT", _originalFontAlt);
-            AcadApp.SetSystemVariable("FONTMAP", _originalFontMap);
+            AcadApp.SetSystemVariable("FONTALT", "simplex.shx");
         }
         catch { }
 

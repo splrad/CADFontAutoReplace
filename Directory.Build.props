@@ -1,8 +1,9 @@
 <Project>
 
   <PropertyGroup>
-    <!-- 统一构建产物输出到 artifacts/ 目录 -->
+    <!-- 统一构建产物输出到 artifacts/ 目录（仅 bin，不含 obj） -->
     <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+    <UseArtifactsIntermediateOutput>false</UseArtifactsIntermediateOutput>
   </PropertyGroup>
 
 </Project>
