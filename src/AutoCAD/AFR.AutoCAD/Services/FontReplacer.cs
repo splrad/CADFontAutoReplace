@@ -55,14 +55,24 @@ internal static class FontReplacer
                         // TrueType 只用 TrueType 字体替换
                         if (!string.IsNullOrEmpty(trueTypeFont))
                         {
-                            // 必须使用替换字体的实际 CharacterSet 和 PitchAndFamily，
-                            // 否则 AutoCAD 加载时会"修正"为实际值，触发 ST "已修改"弹窗，
-                            // 且 CharacterSet 不匹配会导致文字用错误的字符集编码渲染（显示问号）。
                             var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(trueTypeFont);
-                            style.Font = new FontDescriptor(trueTypeFont, false, false, charset, pitch);
+
+                            // 诊断: 替换前状态
+                            var before = style.Font;
+                            log.Info($"[TT替换] 样式='{style.Name}' 替换前: TypeFace='{before.TypeFace}' FileName='{style.FileName}' CharSet={before.CharacterSet} Pitch={before.PitchAndFamily}");
+                            log.Info($"[TT替换] 替换为: '{trueTypeFont}' CharSet={charset} Pitch={pitch}");
+
+                            // 先清除 SHX 引用，再设置 TrueType
+                            // 顺序关键: FileName 和 Font 有内部联动，
+                            // 必须先清 FileName 再设 Font，与 SHX 分支的"先清后设"对称。
                             style.FileName = string.Empty;
-                            // TrueType 样式不支持大字体，清空避免残留
                             style.BigFontFileName = string.Empty;
+                            style.Font = new FontDescriptor(trueTypeFont, false, false, charset, pitch);
+
+                            // 诊断: 替换后读回验证
+                            var after = style.Font;
+                            log.Info($"[TT替换] 替换后: TypeFace='{after.TypeFace}' FileName='{style.FileName}' CharSet={after.CharacterSet} Pitch={after.PitchAndFamily}");
+
                             changed = true;
                         }
                     }
@@ -135,10 +145,10 @@ internal static class FontReplacer
                 {
                     if (replacement.IsTrueType)
                     {
-                        style.Font = new FontDescriptor(replacement.MainFontReplacement, false, false, 0, 0);
+                        var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(replacement.MainFontReplacement);
                         style.FileName = string.Empty;
-                        // TrueType 样式不支持大字体，清空避免残留
                         style.BigFontFileName = string.Empty;
+                        style.Font = new FontDescriptor(replacement.MainFontReplacement, false, false, charset, pitch);
                     }
                     else
                     {

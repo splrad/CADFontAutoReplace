@@ -1,4 +1,6 @@
 using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.GraphicsInterface;
 using AFR.FontMapping;
 using AFR.Models;
 using AFR.Services;
@@ -61,6 +63,9 @@ internal sealed class ExecutionController
                 FontReplacer.ReplaceMissingFonts(
                     doc.Database, missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont);
 
+                // 诊断: Regen 前验证样式表状态（确认替换是否持久化到数据库）
+                VerifyStyleTableAfterReplace(doc.Database, missingFonts, log);
+
                 doc.Editor.Regen();
 
                 // 第三阶段: 扫描 MText 内联字体，交叉比对 Hook 重定向记录
@@ -121,5 +126,41 @@ internal sealed class ExecutionController
         }
 
         return records;
+    }
+
+    /// <summary>
+    /// 诊断: 在 Regen 前读回样式表，验证 FontReplacer 的修改是否已写入数据库。
+    /// </summary>
+    private static void VerifyStyleTableAfterReplace(
+        Database db, IReadOnlyList<FontCheckResult> missingFonts, LogService log)
+    {
+        try
+        {
+            var missingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < missingFonts.Count; i++)
+                missingNames.Add(missingFonts[i].StyleName);
+
+            using var tr = db.TransactionManager.StartOpenCloseTransaction();
+            var styleTable = (TextStyleTable)tr.GetObject(db.TextStyleTableId, OpenMode.ForRead);
+
+            foreach (ObjectId id in styleTable)
+            {
+                try
+                {
+                    var style = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
+                    if (!missingNames.Contains(style.Name)) continue;
+
+                    var font = style.Font;
+                    log.Info($"[验证] 样式='{style.Name}' TypeFace='{font.TypeFace}' FileName='{style.FileName}' BigFont='{style.BigFontFileName}' CharSet={font.CharacterSet} Pitch={font.PitchAndFamily}");
+                }
+                catch { }
+            }
+
+            tr.Commit();
+        }
+        catch (Exception ex)
+        {
+            log.Warning($"[验证] 读回样式表失败: {ex.Message}");
+        }
     }
 }

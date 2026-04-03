@@ -67,14 +67,21 @@ internal static class FontDetector
                 var bigFontName = style.BigFontFileName ?? string.Empty;
                 var font = style.Font;
 
+                // TrueType 字体可用性优先检查:
+                // 当 TypeFace 指定的 TrueType 字体已安装时，AutoCAD 优先使用 TrueType 渲染，
+                // 即使 FileName 指向的 SHX 文件缺失也不影响显示。
+                // 此时不应将样式报告为缺失，否则 FontReplacer 会用 SHX 覆盖 TrueType → 乱码。
+                if (!string.IsNullOrEmpty(font.TypeFace)
+                    && IsTrueTypeFontAvailable(font.TypeFace, fileName, db))
+                {
+                    continue;
+                }
+
                 // 判断样式类型：SHX 还是 TrueType
                 // 规则：TypeFace 非空 且 FileName 不是 SHX 格式 → TrueType
                 //       其他情况 → SHX
                 // 当 TypeFace 和 FileName 同时有值时（DWG 数据不一致），FileName 优先。
-                // 原因：走 TrueType 分支会设置 FontDescriptor(TypeFace, 0, 0)，
-                //       AutoCAD 加载时会"修正"为实际 CharacterSet/PitchAndFamily，
-                //       导致内部状态与 DWG 不一致，ST 弹出"当前样式已修改"。
-                //       走 SHX 分支则清空 TypeFace + 设 FileName，无 TrueType 解析，无此问题。
+                // 此时 TrueType 已确认不可用（上方检查已排除），按 SHX 处理更安全。
                 bool fileNameIsSHX = !string.IsNullOrWhiteSpace(fileName)
                     && !fileName.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase)
                     && !fileName.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase)
@@ -85,7 +92,7 @@ internal static class FontDetector
 
                 if (isTrueType)
                 {
-                    isMainMissing = !IsTrueTypeFontAvailable(font.TypeFace, fileName, db);
+                    isMainMissing = true; // TrueType 已确认不可用（上方 continue 排除了可用的）
                 }
                 else if (!string.IsNullOrWhiteSpace(fileName))
                 {
@@ -374,6 +381,7 @@ internal static class FontDetector
 
         var result = QueryFontMetricsFromGdi(fontName);
         _fontMetricsCache.TryAdd(fontName, result);
+        LogService.Instance.Info($"[FontMetrics] '{fontName}' → CharacterSet={result.CharacterSet} PitchAndFamily={result.PitchAndFamily}");
         return result;
     }
 
@@ -416,7 +424,7 @@ internal static class FontDetector
         }
     }
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct TEXTMETRICW
     {
         public int tmHeight, tmAscent, tmDescent, tmInternalLeading, tmExternalLeading;
