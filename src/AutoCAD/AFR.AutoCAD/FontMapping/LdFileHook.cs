@@ -11,13 +11,15 @@ namespace AFR.FontMapping;
 /// Hook acdb25.dll 的 ldfile 函数，在 DWG 解析阶段拦截缺失字体文件加载。
 ///
 /// 设计原理：
-///   DWG 解析阶段: Hook 重定向所有缺失字体（含样式表 + MText 内联字体），
-///   确保 MText 内联字体在首次渲染时就能正确显示。
+///   DWG 解析阶段: Hook 按字体类型分流重定向 —
+///     .shx 后缀 → 用配置的 SHX 替换字体（MainFont / BigFont）
+///     非 .shx（TrueType 字族名）→ 用配置的 TrueType 替换字体
 ///   Execute 阶段: FontReplacer 覆盖样式表字体，用户可通过 ST/AFRLOG 随时调整。
-///   AFRLOG 显示: GetRedirectRecords() 过滤掉样式表字体，仅展示 MText 内联字体映射。
 ///
-/// 样式表字体虽然在 DWG 解析阶段被 Hook 重定向，但 FontReplacer 会用用户配置覆盖，
-/// 因此样式表字体始终可控，无需重启 CAD。
+/// 关键约束：
+///   对 TrueType 字族名（样式表回退或 MText 内联 \f）必须重定向到 TrueType 替换字体，
+///   而非 SHX。若将 TrueType 误重定向为 SHX，会污染 AutoCAD 内部字体缓存，
+///   导致 FontReplacer 的 TrueType 替换与缓存冲突（文字乱码 + ST 弹窗）。
 /// </summary>
 internal static class LdFileHook
 {
@@ -43,6 +45,7 @@ internal static class LdFileHook
     private static readonly HashSet<string> _bigFontFiles = new(StringComparer.OrdinalIgnoreCase);
     private static string _repMainFont = "";
     private static string _repBigFont = "";
+    private static string _repTrueTypeFont = "";
     [ThreadStatic] private static bool _inHook;
 
     // 记录本次会话的重定向: fontName → (replacement, fontType)
@@ -76,6 +79,8 @@ internal static class LdFileHook
                 _repMainFont = EnsureShx(config.MainFont);
             if (!string.IsNullOrEmpty(config.BigFont))
                 _repBigFont = EnsureShx(config.BigFont);
+            if (!string.IsNullOrEmpty(config.TrueTypeFont))
+                _repTrueTypeFont = config.TrueTypeFont;
 
             if (string.IsNullOrEmpty(_repMainFont) && string.IsNullOrEmpty(_repBigFont))
             {
@@ -160,6 +165,7 @@ internal static class LdFileHook
         var config = ConfigService.Instance;
         _repMainFont = !string.IsNullOrEmpty(config.MainFont) ? EnsureShx(config.MainFont) : "";
         _repBigFont = !string.IsNullOrEmpty(config.BigFont) ? EnsureShx(config.BigFont) : "";
+        _repTrueTypeFont = !string.IsNullOrEmpty(config.TrueTypeFont) ? config.TrueTypeFont : "";
     }
 
     /// <summary>
@@ -209,11 +215,18 @@ internal static class LdFileHook
             if (FontDetector.IsSystemFont(baseName))
                 return _trampolineDelegate(fileName, param2, db, desc);
 
-            // 字体缺失 → 根据 param2 类型选择正确的替换字体
-            string? resolved = ResolveMissingFont(fontName, param2);
+            // 字体缺失 → 按字体类型选择替换策略
+            // .shx 后缀 → SHX 字体，用 MainFont/BigFont 替换
+            // 非 .shx → TrueType 字族名（样式表回退或内联 \f），用 TrueTypeFont 替换
+            bool isShxRequest = fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase);
+            string? resolved = isShxRequest
+                ? ResolveMissingShxFont(fontName, param2)
+                : ResolveMissingTrueTypeFont(fontName);
             if (resolved != null)
             {
-                string normalizedName = shxName.ToLowerInvariant();
+                string normalizedName = isShxRequest
+                    ? shxName.ToLowerInvariant()
+                    : fontName.TrimStart('@');
                 _redirectLog.TryAdd(normalizedName, (resolved, param2));
 
                 // 获取或创建原生字符串指针（缓存，不释放）
@@ -239,41 +252,33 @@ internal static class LdFileHook
     }
 
     /// <summary>
-    /// 根据规则解析缺失字体的替换目标。
+    /// 解析缺失 SHX 字体的替换目标（fontName 以 .shx 结尾）。
     /// param2 编码了 AutoCAD 期望的字体类型，决定使用 MainFont 还是 BigFont。
     /// </summary>
-    private static string? ResolveMissingFont(string fontName, int fontType)
+    private static string? ResolveMissingShxFont(string fontName, int fontType)
     {
-        // @xxx → 优先尝试去掉 @ 的基础字体（支持 @@xxx 双前缀）
+        // @xxx.shx → 优先尝试去掉 @ 的基础字体（支持 @@xxx 双前缀）
         if (fontName.StartsWith('@'))
         {
             string baseName = fontName.TrimStart('@');
             string baseShx = EnsureShx(baseName);
             if (_availableFonts.Contains(baseShx))
             {
-                // 检查字体类型兼容性: 大字体槽位必须用大字体文件
-                // 不能将常规 SHX（如 ming.shx）返回给大字体槽位，
-                // 否则 AutoCAD 报告 "常规字体文件，不是大字体文件"。
                 if (fontType != FontTypeBigFont || _bigFontFiles.Contains(baseShx))
                     return baseShx;
             }
-            // 基础字体不存在或类型不兼容 → 回落到 param2 逻辑
         }
 
-        // TTF 字体通常不经过 ldfile，但如果出现则跳过（由系统字体 API 处理）
+        // TTF 文件名（如 arial.ttf）→ 跳过，由系统字体 API 处理
         if (IsTrueTypeName(fontName))
             return null;
 
-        // 根据 param2 区分：AutoCAD 期望大字体 → 用 BigFont，期望主字体 → 用 MainFont
+        // 根据 param2 区分：大字体 → BigFont，主字体 → MainFont
         if (fontType == FontTypeBigFont)
         {
-            // 优先使用用户配置的大字体
             if (!string.IsNullOrEmpty(_repBigFont) && _availableFonts.Contains(_repBigFont))
                 return _repBigFont;
 
-            // 兜底: 从已扫描的大字体文件中选取任意可用的
-            // 若返回 null，AutoCAD 会回退到 mainFont（如 ming.shx）作为大字体，
-            // 导致 "常规字体文件，不是大字体文件" 警告。
             foreach (var bf in _bigFontFiles)
             {
                 if (_availableFonts.Contains(bf))
@@ -282,9 +287,30 @@ internal static class LdFileHook
             return null;
         }
 
-        // 常规 SHX 缺失 → MainFont
         if (!string.IsNullOrEmpty(_repMainFont) && _availableFonts.Contains(_repMainFont))
             return _repMainFont;
+
+        return null;
+    }
+
+    /// <summary>
+    /// 解析缺失 TrueType 字体的替换目标（fontName 无 .shx 后缀）。
+    /// 来源：样式表缺失 TrueType 的 AutoCAD 回退调用，或 MText 内联 \f 字体。
+    /// 必须用 TrueType 字族名替换，避免 SHX 类型污染 AutoCAD 内部缓存。
+    /// </summary>
+    private static string? ResolveMissingTrueTypeFont(string fontName)
+    {
+        // @xxx → 优先尝试去掉 @ 的基础字族名（竖排 TrueType）
+        if (fontName.StartsWith('@'))
+        {
+            string baseName = fontName.TrimStart('@');
+            if (FontDetector.IsSystemFont(baseName))
+                return baseName;
+        }
+
+        // 用用户配置的 TrueType 替换字体
+        if (!string.IsNullOrEmpty(_repTrueTypeFont) && FontDetector.IsSystemFont(_repTrueTypeFont))
+            return _repTrueTypeFont;
 
         return null;
     }
