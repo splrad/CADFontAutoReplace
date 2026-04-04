@@ -43,6 +43,10 @@ internal static class FontReplacer
         if (!string.IsNullOrEmpty(trueTypeFont) && !trueTypeFontValid)
             log.Warning($"配置的 TrueType 替换字体 '{trueTypeFont}' 在当前环境中不可用，将跳过 TrueType 替换");
 
+        // FontDescriptor 和 GDI 查询要求字族名（如 "SimSun"），而非文件名（如 "simsun.ttc"）
+        if (trueTypeFontValid)
+            trueTypeFont = NormalizeTrueTypeName(trueTypeFont);
+
         // 预构建字典—O(1)查找替代线性搜索
         var missingMap = new Dictionary<string, FontCheckResult>(missingFonts.Count, StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < missingFonts.Count; i++)
@@ -173,11 +177,13 @@ internal static class FontReplacer
                         }
                         else
                         {
-                            var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(replacement.MainFontReplacement);
+                            // FontDescriptor 要求字族名，去除可能的文件扩展名
+                            var fontFamily = NormalizeTrueTypeName(replacement.MainFontReplacement);
+                            var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(fontFamily);
                             // 清空顺序: 先 BigFont 再 FileName，避免 eInvalidInput
                             style.BigFontFileName = string.Empty;
                             style.FileName = string.Empty;
-                            style.Font = new FontDescriptor(replacement.MainFontReplacement, false, false, charset, pitch);
+                            style.Font = new FontDescriptor(fontFamily, false, false, charset, pitch);
                             changed = true;
                         }
                     }
@@ -285,6 +291,25 @@ internal static class FontReplacer
 
         tr.Commit();
         return cleaned;
+    }
+
+    /// <summary>
+    /// 将 TrueType 字体名归一化为字族名。
+    /// FontDescriptor 和 GDI 查询要求纯字族名（如 "SimSun"），
+    /// 不能包含文件扩展名（如 "simsun.ttc"），否则 AutoCAD 找不到字体。
+    /// </summary>
+    private static string NormalizeTrueTypeName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return string.Empty;
+
+        if (name.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) ||
+            name.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase) ||
+            name.EndsWith(".otf", StringComparison.OrdinalIgnoreCase))
+        {
+            return Path.GetFileNameWithoutExtension(name);
+        }
+
+        return name;
     }
 
     }
