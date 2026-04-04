@@ -48,39 +48,50 @@ internal sealed class ExecutionController
                 // 创建独立的执行上下文 — 缓存生命周期与本次事务绑定，GC 自动回收
                 var context = new FontDetectionContext(doc.Database);
 
+                DiagnosticLogger.BeginDocument(doc.Name, config.MainFont, config.BigFont, config.TrueTypeFont);
+
                 // 第一阶段: 检测缺失字体（样式表原始状态）
+                DiagnosticLogger.BeginPhase("检测缺失字体");
                 var missingFonts = FontDetector.DetectMissingFonts(context);
 
                 // 存储检测结果供 AFRLOG 命令使用
                 contextMgr.StoreDetectionResults(doc, missingFonts);
+                DiagnosticLogger.EndPhase($"缺失: {missingFonts.Count}个");
 
                 if (missingFonts.Count == 0)
                 {
                     log.Info("未检测到缺失字体。");
                     contextMgr.MarkExecuted(doc);
+                    DiagnosticLogger.WriteSummary();
                     return;
                 }
 
                 // 第二阶段: 替换缺失字体 + Regen 刷新显示
-                FontReplacer.ReplaceMissingFonts(
+                DiagnosticLogger.BeginPhase("替换缺失字体");
+                int replaceCount = FontReplacer.ReplaceMissingFonts(
                     missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont, context);
+                DiagnosticLogger.EndPhase($"替换: {replaceCount}个");
 
                 // CleanupStaleShxReferences 仅在 Hook 启用时需要（防止 Hook 重定向导致内部状态不一致）
                 // 当前 Hook 已禁用，跳过清理以避免破坏性地删除原始 SHX 备用引用
                 // FontReplacer.CleanupStaleShxReferences(context);
 
                 // 诊断: Regen 前验证样式表状态（确认替换是否持久化到数据库）
+                DiagnosticLogger.BeginPhase("验证替换结果");
                 VerifyStyleTableAfterReplace(doc.Database, missingFonts, log);
+                DiagnosticLogger.EndPhase();
 
                 doc.Editor.Regen();
 
                 // 第三阶段: 扫描 MText 内联字体，交叉比对 Hook 重定向记录
                 // 正向扫描法: 解析 MText.Contents 中的 \F/\f 格式代码，
                 // 与 Hook 重定向记录交叉比对，精确识别被修复的内联字体。
+                DiagnosticLogger.BeginPhase("扫描MText内联字体");
                 var inlineFonts = MTextInlineFontScanner.ScanInlineFonts(doc.Database);
                 var redirectLog = LdFileHook.GetRawRedirectLog();
                 var inlineFixResults = BuildInlineFixRecords(inlineFonts, redirectLog);
                 contextMgr.StoreInlineFontFixResults(doc, inlineFixResults);
+                DiagnosticLogger.EndPhase($"内联字体: {inlineFonts.Count}个, 修复: {inlineFixResults.Count}个");
 
                 // 添加统计汇总
                 log.AddStatistics(missingFonts, inlineFixResults.Count);
@@ -94,6 +105,7 @@ internal sealed class ExecutionController
         }
         finally
         {
+            DiagnosticLogger.WriteSummary();
             log.Flush();
         }
     }

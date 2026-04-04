@@ -46,9 +46,13 @@ internal static class FontReplacer
         if (!string.IsNullOrEmpty(trueTypeFont) && !trueTypeFontValid)
             log.Warning($"配置的 TrueType 替换字体 '{trueTypeFont}' 在当前环境中不可用，将跳过 TrueType 替换");
 
+        DiagnosticLogger.LogPreValidation(mainFont ?? "", "SHX主字体", mainFontValid);
+        DiagnosticLogger.LogPreValidation(bigFont ?? "", "大字体", bigFontValid);
+        DiagnosticLogger.LogPreValidation(trueTypeFont ?? "", "TrueType", trueTypeFontValid);
+
         // FontDescriptor 和 GDI 查询要求字族名（如 "SimSun"），而非文件名（如 "simsun.ttc"）
         if (trueTypeFontValid)
-            trueTypeFont = NormalizeTrueTypeName(trueTypeFont, context);
+            trueTypeFont = NormalizeTrueTypeName(trueTypeFont!, context);
 
         // 预构建字典—O(1)查找替代线性搜索
         var missingMap = new Dictionary<string, FontCheckResult>(missingFonts.Count, StringComparer.OrdinalIgnoreCase);
@@ -68,7 +72,11 @@ internal static class FontReplacer
                 if (!missingMap.TryGetValue(style.Name, out var missing)) continue;
 
                 // ShapeFile 样式用于复杂线型（ltypeshp.shx 等），替换会破坏线型结构
-                if (style.IsShapeFile) continue;
+                if (style.IsShapeFile)
+                {
+                    DiagnosticLogger.LogSkipped(style.Name, "IsShapeFile=true");
+                    continue;
+                }
 
                 bool changed = false;
                 style.UpgradeOpen();
@@ -81,7 +89,7 @@ internal static class FontReplacer
                         // TrueType 只用 TrueType 字体替换（需通过可用性校验）
                         if (trueTypeFontValid)
                         {
-                            var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(trueTypeFont, context);
+                            var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(trueTypeFont!, context);
 
                             // 诊断: 替换前状态
                             var before = style.Font;
@@ -98,6 +106,9 @@ internal static class FontReplacer
                             // 诊断: 替换后读回验证
                             var after = style.Font;
                             log.Info($"[TT替换] 替换后: TypeFace='{after.TypeFace}' FileName='{style.FileName}' CharSet={after.CharacterSet} Pitch={after.PitchAndFamily}");
+
+                            DiagnosticLogger.LogReplacement(style.Name, "Font.TypeFace",
+                                missing.TypeFace, trueTypeFont ?? "");
 
                             changed = true;
                         }
@@ -116,6 +127,11 @@ internal static class FontReplacer
                             // 始终重建 BigFont 状态，避免旧值残留或与新主字体不匹配
                             style.BigFontFileName = bigFontValid ? bigFont : string.Empty;
 
+                            DiagnosticLogger.LogReplacement(style.Name, "FileName",
+                                missing.FileName, mainFont ?? "");
+                            DiagnosticLogger.LogReplacement(style.Name, "BigFontFileName",
+                                missing.BigFontFileName, bigFontValid ? bigFont ?? "" : "");
+
                             changed = true;
                         }
                     }
@@ -126,6 +142,8 @@ internal static class FontReplacer
                          && !string.IsNullOrEmpty(style.FileName))
                 {
                     style.BigFontFileName = bigFontValid ? bigFont : string.Empty;
+                    DiagnosticLogger.LogReplacement(style.Name, "BigFontFileName",
+                        missing.BigFontFileName, bigFontValid ? bigFont ?? "" : "");
                     changed = true;
                 }
 
@@ -169,7 +187,11 @@ internal static class FontReplacer
                 if (!map.TryGetValue(style.Name, out var replacement)) continue;
 
                 // ShapeFile 样式用于复杂线型（ltypeshp.shx 等），替换会破坏线型结构
-                if (style.IsShapeFile) continue;
+                if (style.IsShapeFile)
+                {
+                    DiagnosticLogger.LogSkipped(style.Name, "IsShapeFile=true (手动)");
+                    continue;
+                }
 
                 bool changed = false;
                 style.UpgradeOpen();
@@ -339,7 +361,10 @@ internal static class FontReplacer
                     var glyph = new GlyphTypeface(new Uri(path));
                     var familyName = glyph.FamilyNames.Values.FirstOrDefault();
                     if (!string.IsNullOrEmpty(familyName))
+                    {
+                        DiagnosticLogger.LogNormalize(name, familyName);
                         return familyName;
+                    }
                 }
             }
             catch
@@ -347,7 +372,9 @@ internal static class FontReplacer
                 // FindFile 或 GlyphTypeface 解析失败 — 降级为扩展名截断
             }
 
-            return Path.GetFileNameWithoutExtension(name);
+            var fallback = Path.GetFileNameWithoutExtension(name);
+            DiagnosticLogger.LogNormalize(name, $"{fallback} (降级)");
+            return fallback;
         }
 
         return name;

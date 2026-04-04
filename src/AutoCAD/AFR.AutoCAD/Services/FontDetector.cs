@@ -54,13 +54,20 @@ internal static class FontDetector
                 bool hasTT = safeFont.HasValue && !string.IsNullOrEmpty(safeFont.Value.TypeFace);
                 bool hasFile = !string.IsNullOrWhiteSpace(fileName);
 
+                DiagnosticLogger.LogStyleScan(styleName, fileName, bigFontName,
+                    safeFont.HasValue ? (safeFont.Value.TypeFace ?? "") : "<损坏>",
+                    hasTT && !hasFile, style.IsShapeFile);
+
                 // 纯 TrueType 样式（无 SHX FileName）: 验证字体可用且 GDI 度量有效才跳过
                 // 仅文件存在不足以判定可用 — 损坏字体或错误字符集仍需标记为缺失
                 if (hasTT && !hasFile)
                 {
-                    if (IsTrueTypeFontAvailable(safeFont!.Value.TypeFace, fileName, context))
+                    var typeFace = safeFont!.Value.TypeFace!;
+                    if (IsTrueTypeFontAvailable(typeFace, fileName, context))
                     {
-                        var metrics = GetTrueTypeFontMetrics(safeFont.Value.TypeFace, context);
+                        var metrics = GetTrueTypeFontMetrics(typeFace, context);
+                        DiagnosticLogger.LogFontAvailability(typeFace, "TrueType+GDI",
+                            metrics.CharacterSet != 0, $"CharSet={metrics.CharacterSet} Pitch={metrics.PitchAndFamily}");
                         if (metrics.CharacterSet != 0)
                             continue;
                     }
@@ -75,7 +82,10 @@ internal static class FontDetector
                 if (!isTrueType && !string.IsNullOrWhiteSpace(bigFontName))
                     isBigMissing = !IsShxFontAvailable(bigFontName, context) || IsShxTypeMismatch(bigFontName, context, expectBigFont: true);
                 if (isMainMissing || isBigMissing)
+                {
+                    DiagnosticLogger.LogMissing(styleName, isMainMissing, isBigMissing, isTrueType);
                     results.Add(new FontCheckResult(styleName, fileName, bigFontName, isMainMissing, isBigMissing, isTrueType, isTrueType ? (safeFont?.TypeFace ?? string.Empty) : string.Empty));
+                }
             }
             catch (Exception ex) { LogService.Instance.Warning($"检查样式时出错 {id}: {ex.Message}"); }
         }

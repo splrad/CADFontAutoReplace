@@ -69,6 +69,9 @@ public abstract class PluginEntryBase : IExtensionApplication
 
     public void Initialize()
     {
+        // ── 诊断日志（调试时启用，发布前注释掉）──
+        DiagnosticLogger.Enable();
+
         // 注册嵌入程序集解析（HandyControl 等第三方依赖）
         AppDomain.CurrentDomain.AssemblyResolve += OnResolveEmbeddedAssembly;
 
@@ -112,6 +115,7 @@ public abstract class PluginEntryBase : IExtensionApplication
 
     public void Terminate()
     {
+        DiagnosticLogger.Disable();
         PlatformManager.FontHook.Uninstall();
         UnregisterEvents();
     }
@@ -142,6 +146,7 @@ public abstract class PluginEntryBase : IExtensionApplication
 
         PlatformManager.FontHook.Uninstall();
         DocumentContextManager.Instance.Clear();
+        DiagnosticLogger.Disable();
     }
 
     // ── 事件与调度 ──
