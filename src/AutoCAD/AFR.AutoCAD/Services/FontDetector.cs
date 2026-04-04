@@ -42,10 +42,18 @@ internal static class FontDetector
                 var styleName = style.Name;
                 var fileName = style.FileName ?? string.Empty;
                 var bigFontName = style.BigFontFileName ?? string.Empty;
-                var font = style.Font;
-                bool hasTT = !string.IsNullOrEmpty(font.TypeFace);
+
+                // 隔离 style.Font 访问 — 损坏的 TrueType 描述符不应阻断 SHX 检测
+                FontDescriptor? safeFont = null;
+                try { safeFont = style.Font; }
+                catch (Exception fontEx)
+                {
+                    LogService.Instance.Warning($"样式 '{styleName}' 的 TrueType 描述符损坏，已跳过 TrueType 验证: {fontEx.Message}");
+                }
+
+                bool hasTT = safeFont.HasValue && !string.IsNullOrEmpty(safeFont.Value.TypeFace);
                 bool hasFile = !string.IsNullOrWhiteSpace(fileName);
-                if (hasTT && !hasFile && IsTrueTypeFontAvailable(font.TypeFace, fileName, context))
+                if (hasTT && !hasFile && IsTrueTypeFontAvailable(safeFont!.Value.TypeFace, fileName, context))
                     continue;
                 bool isTrueType = hasTT && !hasFile;
                 bool isMainMissing = false;
@@ -57,7 +65,7 @@ internal static class FontDetector
                 if (!isTrueType && !string.IsNullOrWhiteSpace(bigFontName))
                     isBigMissing = !IsShxFontAvailable(bigFontName, context) || IsShxTypeMismatch(bigFontName, context, expectBigFont: true);
                 if (isMainMissing || isBigMissing)
-                    results.Add(new FontCheckResult(styleName, fileName, bigFontName, isMainMissing, isBigMissing, isTrueType, isTrueType ? (font.TypeFace ?? string.Empty) : string.Empty));
+                    results.Add(new FontCheckResult(styleName, fileName, bigFontName, isMainMissing, isBigMissing, isTrueType, isTrueType ? (safeFont?.TypeFace ?? string.Empty) : string.Empty));
             }
             catch (Exception ex) { LogService.Instance.Warning($"检查样式时出错 {id}: {ex.Message}"); }
         }
@@ -94,7 +102,9 @@ internal static class FontDetector
             try
             {
                 var style = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
-                result[style.Name] = (style.FileName ?? string.Empty, style.BigFontFileName ?? string.Empty, style.Font.TypeFace ?? string.Empty);
+                string typeFace = string.Empty;
+                try { typeFace = style.Font.TypeFace ?? string.Empty; } catch { }
+                result[style.Name] = (style.FileName ?? string.Empty, style.BigFontFileName ?? string.Empty, typeFace);
             }
             catch { }
         }

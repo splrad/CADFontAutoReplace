@@ -149,15 +149,25 @@ internal sealed class ExecutionController
                 try
                 {
                     var style = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
-                    var font = style.Font;
                     bool isMissing = missingNames.Contains(style.Name);
                     bool isXref = style.IsDependent;
 
                     // 输出被替换的样式 + 所有外参样式（排查块内乱码）
                     if (isMissing || isXref)
                     {
+                        // 隔离 style.Font 访问 — 损坏的描述符不应中断诊断输出
+                        string typeFace = "<读取失败>", charSet = "?", pitchFamily = "?";
+                        try
+                        {
+                            var font = style.Font;
+                            typeFace = font.TypeFace ?? string.Empty;
+                            charSet = font.CharacterSet.ToString();
+                            pitchFamily = font.PitchAndFamily.ToString();
+                        }
+                        catch { }
+
                         string tag = isMissing ? "[已替换]" : "[未替换]";
-                        log.Info($"{tag} 样式='{style.Name}' TypeFace='{font.TypeFace}' FileName='{style.FileName}' BigFont='{style.BigFontFileName}' CharSet={font.CharacterSet} Pitch={font.PitchAndFamily}");
+                        log.Info($"{tag} 样式='{style.Name}' TypeFace='{typeFace}' FileName='{style.FileName}' BigFont='{style.BigFontFileName}' CharSet={charSet} Pitch={pitchFamily}");
                     }
                 }
                 catch { }

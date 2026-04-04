@@ -269,7 +269,17 @@ internal static class FontReplacer
             try
             {
                 var style = (TextStyleTableRecord)subTr.GetObject(id, OpenMode.ForRead);
-                var font = style.Font;
+
+                // 隔离 style.Font 访问 — 损坏的描述符不应触发 subTr.Abort()
+                FontDescriptor? safeFont = null;
+                try { safeFont = style.Font; }
+                catch (Exception fontEx)
+                {
+                    log.Warning($"[清理] 样式 '{style.Name}' 的 TrueType 描述符损坏，已跳过: {fontEx.Message}");
+                    subTr.Commit();
+                    continue;
+                }
+                var font = safeFont.Value;
 
                 // 仅处理有 TrueType 字族名的样式
                 if (string.IsNullOrEmpty(font.TypeFace)) { subTr.Commit(); continue; }
