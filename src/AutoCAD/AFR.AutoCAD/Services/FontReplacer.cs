@@ -272,30 +272,9 @@ internal static class FontReplacer
                     fileName.EndsWith(".otf", StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                // 检查 SHX 是否存在
-                bool shxExists;
-                try
-                {
-                    string result = HostApplicationServices.Current.FindFile(fileName, db, FindFileHint.CompiledShapeFile);
-                    shxExists = !string.IsNullOrEmpty(result);
-                }
-                catch { shxExists = false; }
-
-                if (!shxExists)
-                {
-                    // 不带扩展名时再尝试 +.shx
-                    if (!Path.HasExtension(fileName))
-                    {
-                        try
-                        {
-                            string result = HostApplicationServices.Current.FindFile(fileName + ".shx", db, FindFileHint.CompiledShapeFile);
-                            shxExists = !string.IsNullOrEmpty(result);
-                        }
-                        catch { shxExists = false; }
-                    }
-                }
-
-                if (shxExists) continue; // SHX 存在，无需清理
+                // 复用 FontDetector 的缓存查找，避免直接调用 FindFile 引发异常风暴
+                if (FontDetector.IsShxFontAvailable(fileName, db))
+                    continue; // SHX 存在，无需清理
 
                 // TrueType 可用 + SHX 缺失 → 清除残留 SHX 引用
                 style.UpgradeOpen();

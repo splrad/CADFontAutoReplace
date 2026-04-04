@@ -1,6 +1,5 @@
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
-using Autodesk.AutoCAD.GraphicsInterface;
 using AFR.FontMapping;
 using AFR.Models;
 using AFR.Services;
@@ -70,10 +69,6 @@ internal sealed class ExecutionController
                 // 诊断: Regen 前验证样式表状态（确认替换是否持久化到数据库）
                 VerifyStyleTableAfterReplace(doc.Database, missingFonts, log);
 
-                // 字体替换后，块参照的缓存图形可能仍使用旧字体渲染。
-                // 必须将所有块表记录标记为图形已修改，Regen 才会强制刷新块参照显示。
-                InvalidateBlockGraphics(doc.Database);
-
                 doc.Editor.Regen();
 
                 // 第三阶段: 扫描 MText 内联字体，交叉比对 Hook 重定向记录
@@ -115,12 +110,7 @@ internal sealed class ExecutionController
 
         foreach (var (fontName, inlineType) in inlineFonts)
         {
-            // 归一化: redirect log 的 key 是 "name.shx" 小写格式
-            string lookupKey = fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase)
-                ? fontName.ToLowerInvariant()
-                : fontName;
-
-            if (!redirectLog.TryGetValue(lookupKey, out var redirect))
+            if (!redirectLog.TryGetValue(fontName, out var redirect))
                 continue;
 
             string category = inlineType switch
@@ -176,42 +166,5 @@ internal sealed class ExecutionController
         {
             log.Warning($"[验证] 读回样式表失败: {ex.Message}");
         }
-    }
-
-    /// <summary>
-    /// 将所有块表记录标记为图形已修改，强制 Regen 刷新块参照的缓存显示。
-    /// 字体替换修改了样式表，但块参照的渲染缓存仍使用旧字体，
-    /// 不标记则 Regen 不会重新生成块参照内的文字图形。
-    /// </summary>
-    private static void InvalidateBlockGraphics(Database db)
-    {
-        try
-        {
-            using var tr = db.TransactionManager.StartTransaction();
-            var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-
-            foreach (ObjectId btrId in bt)
-            {
-                try
-                {
-                    var btr = (BlockTableRecord)tr.GetObject(btrId, OpenMode.ForRead);
-                    // 获取引用此块定义的所有块参照，标记图形已修改
-                    var refIds = btr.GetBlockReferenceIds(true, false);
-                    foreach (ObjectId refId in refIds)
-                    {
-                        try
-                        {
-                            var blkRef = (BlockReference)tr.GetObject(refId, OpenMode.ForWrite);
-                            blkRef.RecordGraphicsModified(true);
-                        }
-                        catch { }
-                    }
-                }
-                catch { }
-            }
-
-            tr.Commit();
-        }
-        catch { }
     }
 }

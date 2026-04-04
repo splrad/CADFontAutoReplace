@@ -283,15 +283,13 @@ internal static class FontDetector
         }
         catch
         {
-            // 临时 IO 错误或路径不可用 — 不缓存，避免偶发故障变成长期误判
-            return false;
+            found = false;
         }
 
-        // 仅缓存正面结果：找到的字体在会话期间不会消失。
-        // 负面结果不缓存：不同图纸可能有不同支持路径，且临时失败不应持久化。
-        if (found)
-            _findFileCache.TryAdd(cacheKey, true);
-
+        // 同时缓存正面和负面结果：
+        // FindFile 未找到时抛出 eFileNotFound 异常，不缓存会导致异常风暴。
+        // 跨图纸上下文安全由各入口处的 ClearCaches() 保证。
+        _findFileCache.TryAdd(cacheKey, found);
         return found;
     }
 
