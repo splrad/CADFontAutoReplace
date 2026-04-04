@@ -61,14 +61,13 @@ internal static class FontReplacer
 
         foreach (ObjectId id in styleTable)
         {
-            using var subTr = context.Db.TransactionManager.StartTransaction();
             try
             {
-                var style = (TextStyleTableRecord)subTr.GetObject(id, OpenMode.ForRead);
-                if (!missingMap.TryGetValue(style.Name, out var missing)) { subTr.Commit(); continue; }
+                var style = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
+                if (!missingMap.TryGetValue(style.Name, out var missing)) continue;
 
                 // ShapeFile 样式用于复杂线型（ltypeshp.shx 等），替换会破坏线型结构
-                if (style.IsShapeFile) { subTr.Commit(); continue; }
+                if (style.IsShapeFile) continue;
 
                 bool changed = false;
                 style.UpgradeOpen();
@@ -130,12 +129,10 @@ internal static class FontReplacer
                 }
 
                 if (changed) replaceCount++;
-                subTr.Commit();
             }
             catch (Exception ex)
             {
-                subTr.Abort();
-                log.Error($"替换样式 {id} 的字体失败并已回滚", ex);
+                log.Error($"替换样式 {id} 的字体失败（已跳过）", ex);
             }
         }
 
@@ -165,14 +162,13 @@ internal static class FontReplacer
 
         foreach (ObjectId id in styleTable)
         {
-            using var subTr = context.Db.TransactionManager.StartTransaction();
             try
             {
-                var style = (TextStyleTableRecord)subTr.GetObject(id, OpenMode.ForRead);
-                if (!map.TryGetValue(style.Name, out var replacement)) { subTr.Commit(); continue; }
+                var style = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
+                if (!map.TryGetValue(style.Name, out var replacement)) continue;
 
                 // ShapeFile 样式用于复杂线型（ltypeshp.shx 等），替换会破坏线型结构
-                if (style.IsShapeFile) { subTr.Commit(); continue; }
+                if (style.IsShapeFile) continue;
 
                 bool changed = false;
                 style.UpgradeOpen();
@@ -228,12 +224,10 @@ internal static class FontReplacer
                 }
 
                 if (changed) replaceCount++;
-                subTr.Commit();
             }
             catch (Exception ex)
             {
-                subTr.Abort();
-                log.Error($"手动替换样式 {id} 的字体失败并已回滚", ex);
+                log.Error($"手动替换样式 {id} 的字体失败（已跳过）", ex);
             }
         }
 
@@ -265,42 +259,40 @@ internal static class FontReplacer
 
         foreach (ObjectId id in styleTable)
         {
-            using var subTr = context.Db.TransactionManager.StartTransaction();
             try
             {
-                var style = (TextStyleTableRecord)subTr.GetObject(id, OpenMode.ForRead);
+                var style = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
 
-                // 隔离 style.Font 访问 — 损坏的描述符不应触发 subTr.Abort()
+                // 隔离 style.Font 访问 — 损坏的描述符不应阻断后续样式处理
                 FontDescriptor? safeFont = null;
                 try { safeFont = style.Font; }
                 catch (Exception fontEx)
                 {
                     log.Warning($"[清理] 样式 '{style.Name}' 的 TrueType 描述符损坏，已跳过: {fontEx.Message}");
-                    subTr.Commit();
                     continue;
                 }
                 var font = safeFont.Value;
 
                 // 仅处理有 TrueType 字族名的样式
-                if (string.IsNullOrEmpty(font.TypeFace)) { subTr.Commit(); continue; }
+                if (string.IsNullOrEmpty(font.TypeFace)) continue;
 
                 // TrueType 必须已安装（通过系统字体索引或 FindFile 双重验证）
                 if (!FontDetector.IsSystemFont(font.TypeFace)
                     && !FontDetector.IsTrueTypeFontAvailable(font.TypeFace, context))
-                { subTr.Commit(); continue; }
+                    continue;
 
                 var fileName = style.FileName ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(fileName)) { subTr.Commit(); continue; }
+                if (string.IsNullOrWhiteSpace(fileName)) continue;
 
                 // FileName 是 TrueType 文件 → 不需要清理
                 if (fileName.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) ||
                     fileName.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase) ||
                     fileName.EndsWith(".otf", StringComparison.OrdinalIgnoreCase))
-                { subTr.Commit(); continue; }
+                    continue;
 
                 // 复用 FontDetector 的缓存查找，避免直接调用 FindFile 引发异常风暴
                 if (FontDetector.IsShxFontAvailable(fileName, context))
-                { subTr.Commit(); continue; } // SHX 存在，无需清理
+                    continue; // SHX 存在，无需清理
 
                 // TrueType 可用 + SHX 缺失 → 清除残留 SHX 引用
                 style.UpgradeOpen();
@@ -309,12 +301,10 @@ internal static class FontReplacer
                 style.BigFontFileName = string.Empty;
                 style.FileName = string.Empty;
                 cleaned++;
-                subTr.Commit();
             }
             catch (Exception ex)
             {
-                subTr.Abort();
-                log.Warning($"[清理] 处理样式 {id} 时出错并已回滚: {ex.Message}");
+                log.Warning($"[清理] 处理样式 {id} 时出错（已跳过）: {ex.Message}");
             }
         }
 
