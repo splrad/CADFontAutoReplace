@@ -44,8 +44,27 @@ internal static class FontDetector
     {
         if (string.IsNullOrEmpty(name)) return false;
         var task = _systemFontNamesTask;
-        return task.IsCompleted && task.Result.Contains(name);
+        return task.IsCompletedSuccessfully && task.Result.Contains(name);
     }
+
+    /// <summary>
+    /// 清除 FindFile 和 SHX 分类缓存。
+    /// 应在切换图纸上下文前调用，因为不同图纸的支持路径可能不同，
+    /// 缓存的查找结果可能不适用于新图纸。
+    /// </summary>
+    public static void ClearCaches()
+    {
+        _findFileCache.Clear();
+        _shxTypeCache.Clear();
+    }
+
+    /// <summary>
+    /// 系统字体索引是否已成功构建。
+    /// 用于清理逻辑在索引未就绪时安全跳过，避免因空索引导致误操作。
+    /// </summary>
+    public static bool IsSystemFontIndexReady
+        => _systemFontNamesTask.IsCompletedSuccessfully
+           && _systemFontNamesTask.Result.Count > 0;
 
     /// <summary>
     /// 扫描数据库中所有文字样式，返回存在缺失字体的样式列表。
@@ -53,6 +72,9 @@ internal static class FontDetector
     public static List<FontCheckResult> DetectMissingFonts(Database db)
     {
         var results = new List<FontCheckResult>();
+
+        // 清除缓存，确保在当前图纸上下文中重新检测
+        ClearCaches();
 
         using var tr = db.TransactionManager.StartTransaction();
         var styleTable = (TextStyleTable)tr.GetObject(db.TextStyleTableId, OpenMode.ForRead);
@@ -189,7 +211,7 @@ internal static class FontDetector
     /// 检查 SHX 字体文件是否可被 AutoCAD 找到。
     /// 通过名称归一化处理 acad.fmp 兼容性。
     /// </summary>
-    private static bool IsShxFontAvailable(string fileName, Database db)
+    internal static bool IsShxFontAvailable(string fileName, Database db)
     {
         if (string.IsNullOrWhiteSpace(fileName)) return true;
 
@@ -211,6 +233,13 @@ internal static class FontDetector
 
     /// <summary>
     /// 检查 TrueType 字体是否通过系统字体或 AutoCAD 搜索路径可用。
+    /// 仅需字体族名即可验证，用于替换前的可用性校验。
+    /// </summary>
+    internal static bool IsTrueTypeFontAvailable(string typeface, Database db)
+        => IsTrueTypeFontAvailable(typeface, string.Empty, db);
+
+    /// <summary>
+    /// 检查 TrueType 字体是否通过系统字体或 AutoCAD 搜索路径可用。
     /// 第三方插件字体可能位于 CAD 支持路径而非系统目录。
     /// </summary>
     private static bool IsTrueTypeFontAvailable(string typeface, string fileName, Database db)
@@ -218,7 +247,8 @@ internal static class FontDetector
         if (string.IsNullOrWhiteSpace(typeface)) return true;
 
         // 检查系统已安装字体（包含本地化名称）
-        if (_systemFontNamesTask.Result.Contains(typeface))
+        if (_systemFontNamesTask.IsCompletedSuccessfully
+            && _systemFontNamesTask.Result.Contains(typeface))
             return true;
 
         // 若引用了具体字体文件名，通过 FindFile 检查
@@ -253,10 +283,15 @@ internal static class FontDetector
         }
         catch
         {
-            found = false;
+            // 临时 IO 错误或路径不可用 — 不缓存，避免偶发故障变成长期误判
+            return false;
         }
 
-        _findFileCache.TryAdd(cacheKey, found);
+        // 仅缓存正面结果：找到的字体在会话期间不会消失。
+        // 负面结果不缓存：不同图纸可能有不同支持路径，且临时失败不应持久化。
+        if (found)
+            _findFileCache.TryAdd(cacheKey, true);
+
         return found;
     }
 
@@ -307,7 +342,7 @@ internal static class FontDetector
         if (_shxTypeCache.TryGetValue(filePath, out bool cached))
             return cached;
 
-        bool isBigFont = false;
+        bool isBigFont;
         try
         {
             byte[] header = new byte[30];
@@ -318,8 +353,16 @@ internal static class FontDetector
                 string headerStr = System.Text.Encoding.ASCII.GetString(header, 0, bytesRead);
                 isBigFont = headerStr.Contains("bigfont", StringComparison.OrdinalIgnoreCase);
             }
+            else
+            {
+                isBigFont = false;
+            }
         }
-        catch { }
+        catch
+        {
+            // IO 异常不缓存 — 可能是临时文件锁定，下次重试可能成功
+            return false;
+        }
 
         _shxTypeCache.TryAdd(filePath, isBigFont);
         return isBigFont;
@@ -353,9 +396,11 @@ internal static class FontDetector
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // 系统字体枚举失败 — 安全降级
+            // 系统字体枚举失败 — 安全降级为空索引
+            // TrueType 可用性判断和清理逻辑将据此跳过，避免误操作
+            LogService.Instance.Error("系统字体索引构建失败，TrueType 可用性检查将不可靠", ex);
         }
         return names;
     }

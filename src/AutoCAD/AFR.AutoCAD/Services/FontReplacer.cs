@@ -28,6 +28,24 @@ internal static class FontReplacer
         var log = LogService.Instance;
         int replaceCount = 0;
 
+        // 清除缓存，确保在当前图纸上下文中重新验证字体可用性
+        FontDetector.ClearCaches();
+
+        // 预校验替换字体是否可用，避免将样式写成不可用字体
+        bool mainFontValid = !string.IsNullOrEmpty(mainFont)
+            && FontDetector.IsShxFontAvailable(mainFont, db);
+        bool bigFontValid = !string.IsNullOrEmpty(bigFont)
+            && FontDetector.IsShxFontAvailable(bigFont, db);
+        bool trueTypeFontValid = !string.IsNullOrEmpty(trueTypeFont)
+            && FontDetector.IsTrueTypeFontAvailable(trueTypeFont, db);
+
+        if (!string.IsNullOrEmpty(mainFont) && !mainFontValid)
+            log.Warning($"配置的 SHX 替换字体 '{mainFont}' 在当前环境中不可用，将跳过 SHX 主字体替换");
+        if (!string.IsNullOrEmpty(bigFont) && !bigFontValid)
+            log.Warning($"配置的大字体替换字体 '{bigFont}' 在当前环境中不可用，将跳过大字体替换");
+        if (!string.IsNullOrEmpty(trueTypeFont) && !trueTypeFontValid)
+            log.Warning($"配置的 TrueType 替换字体 '{trueTypeFont}' 在当前环境中不可用，将跳过 TrueType 替换");
+
         // 预构建字典—O(1)查找替代线性搜索
         var missingMap = new Dictionary<string, FontCheckResult>(missingFonts.Count, StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < missingFonts.Count; i++)
@@ -53,8 +71,8 @@ internal static class FontReplacer
                 {
                     if (missing.IsTrueType)
                     {
-                        // TrueType 只用 TrueType 字体替换
-                        if (!string.IsNullOrEmpty(trueTypeFont))
+                        // TrueType 只用 TrueType 字体替换（需通过可用性校验）
+                        if (trueTypeFontValid)
                         {
                             var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(trueTypeFont);
 
@@ -79,8 +97,8 @@ internal static class FontReplacer
                     }
                     else
                     {
-                        // SHX 只用 SHX 字体替换
-                        if (!string.IsNullOrEmpty(mainFont))
+                        // SHX 只用 SHX 字体替换（需通过可用性校验）
+                        if (mainFontValid)
                         {
                             // 必须先清除 TrueType 属性再设置 FileName，
                             // 否则设置 Font 可能重置 FileName
@@ -94,7 +112,7 @@ internal static class FontReplacer
 
                 // 若大字体缺失且已配置替换字体，则执行替换
                 // TrueType 样式不支持大字体，跳过
-                if (missing.IsBigFontMissing && !missing.IsTrueType && !string.IsNullOrEmpty(bigFont))
+                if (missing.IsBigFontMissing && !missing.IsTrueType && bigFontValid)
                 {
                     style.BigFontFileName = bigFont;
                     changed = true;
@@ -125,6 +143,9 @@ internal static class FontReplacer
         var log = LogService.Instance;
         int replaceCount = 0;
 
+        // 清除缓存，确保在当前图纸上下文中重新验证
+        FontDetector.ClearCaches();
+
         var map = new Dictionary<string, StyleFontReplacement>(replacements.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var r in replacements)
             map.TryAdd(r.StyleName, r);
@@ -146,26 +167,48 @@ internal static class FontReplacer
                 {
                     if (replacement.IsTrueType)
                     {
-                        var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(replacement.MainFontReplacement);
-                        style.FileName = string.Empty;
-                        style.BigFontFileName = string.Empty;
-                        style.Font = new FontDescriptor(replacement.MainFontReplacement, false, false, charset, pitch);
+                        if (!FontDetector.IsTrueTypeFontAvailable(replacement.MainFontReplacement, db))
+                        {
+                            log.Warning($"手动替换: 样式 '{replacement.StyleName}' 的 TrueType 替换字体 '{replacement.MainFontReplacement}' 不可用，跳过");
+                        }
+                        else
+                        {
+                            var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(replacement.MainFontReplacement);
+                            style.FileName = string.Empty;
+                            style.BigFontFileName = string.Empty;
+                            style.Font = new FontDescriptor(replacement.MainFontReplacement, false, false, charset, pitch);
+                            changed = true;
+                        }
                     }
                     else
                     {
-                        // 必须先清除 TrueType 属性再设置 FileName
-                        if (!string.IsNullOrEmpty(style.Font.TypeFace))
-                            style.Font = new FontDescriptor("", false, false, 0, 0);
-                        style.FileName = replacement.MainFontReplacement;
+                        if (!FontDetector.IsShxFontAvailable(replacement.MainFontReplacement, db))
+                        {
+                            log.Warning($"手动替换: 样式 '{replacement.StyleName}' 的 SHX 替换字体 '{replacement.MainFontReplacement}' 不可用，跳过");
+                        }
+                        else
+                        {
+                            // 必须先清除 TrueType 属性再设置 FileName
+                            if (!string.IsNullOrEmpty(style.Font.TypeFace))
+                                style.Font = new FontDescriptor("", false, false, 0, 0);
+                            style.FileName = replacement.MainFontReplacement;
+                            changed = true;
+                        }
                     }
-                    changed = true;
                 }
 
                 // TrueType 样式不支持大字体，跳过
                 if (!replacement.IsTrueType && !string.IsNullOrEmpty(replacement.BigFontReplacement))
                 {
-                    style.BigFontFileName = replacement.BigFontReplacement;
-                    changed = true;
+                    if (!FontDetector.IsShxFontAvailable(replacement.BigFontReplacement, db))
+                    {
+                        log.Warning($"手动替换: 样式 '{replacement.StyleName}' 的大字体替换字体 '{replacement.BigFontReplacement}' 不可用，跳过");
+                    }
+                    else
+                    {
+                        style.BigFontFileName = replacement.BigFontReplacement;
+                        changed = true;
+                    }
                 }
 
                 if (changed) replaceCount++;
@@ -192,6 +235,16 @@ internal static class FontReplacer
         var log = LogService.Instance;
         int cleaned = 0;
 
+        // 系统字体索引未就绪时跳过清理，避免误判
+        if (!FontDetector.IsSystemFontIndexReady)
+        {
+            log.Warning("[清理] 系统字体索引尚未就绪，跳过残留 SHX 清理以避免误操作");
+            return 0;
+        }
+
+        // 清除缓存，确保在当前图纸上下文中重新验证
+        FontDetector.ClearCaches();
+
         using var tr = db.TransactionManager.StartTransaction();
         var styleTable = (TextStyleTable)tr.GetObject(db.TextStyleTableId, OpenMode.ForRead);
 
@@ -205,8 +258,10 @@ internal static class FontReplacer
                 // 仅处理有 TrueType 字族名的样式
                 if (string.IsNullOrEmpty(font.TypeFace)) continue;
 
-                // TrueType 必须已安装
-                if (!FontDetector.IsSystemFont(font.TypeFace)) continue;
+                // TrueType 必须已安装（通过系统字体索引或 FindFile 双重验证）
+                if (!FontDetector.IsSystemFont(font.TypeFace)
+                    && !FontDetector.IsTrueTypeFontAvailable(font.TypeFace, db))
+                    continue;
 
                 var fileName = style.FileName ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(fileName)) continue;

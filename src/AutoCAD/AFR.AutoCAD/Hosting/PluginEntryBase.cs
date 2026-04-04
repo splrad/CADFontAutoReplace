@@ -79,8 +79,8 @@ public abstract class PluginEntryBase : IExtensionApplication
         try
         {
             // 第零阶段: 安装字体 Hook
-            if (PlatformManager.Platform.SupportsLdFileHook)
-                PlatformManager.FontHook.Install();
+            // if (PlatformManager.Platform.SupportsLdFileHook)
+            //    PlatformManager.FontHook.Install();
 
             // 第零阶段 B: 预热系统字体索引
             FontDetector.PrewarmSystemFonts();
@@ -90,19 +90,9 @@ public abstract class PluginEntryBase : IExtensionApplication
             if (isFirstRun)
             {
                 try { AcadApp.SetSystemVariable("FONTMAP", ""); } catch { }
+                try { AcadApp.SetSystemVariable("FONTALT", "."); } catch { }
                 log.Info("AFR 插件首次安装完成，请执行 AFR 命令配置替换字体。");
             }
-
-            // 每次启动: 将 FONTALT 设为配置的主字体
-            // FONTALT 由 AutoCAD 原生机制在 DWG 加载阶段处理缺失 SHX 主字体替代，
-            // 对块定义的字体缓存兼容（Hook 的 native 重定向会破坏块参照渲染）。
-            try
-            {
-                var mainFont = ConfigService.Instance.MainFont;
-                if (!string.IsNullOrEmpty(mainFont))
-                    AcadApp.SetSystemVariable("FONTALT", mainFont);
-            }
-            catch { }
 
             // 第二阶段: 注册文档事件
             var docMgr = AcadApp.DocumentManager;
