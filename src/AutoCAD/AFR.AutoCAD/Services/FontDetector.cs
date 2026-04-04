@@ -86,26 +86,23 @@ internal static class FontDetector
                 var bigFontName = style.BigFontFileName ?? string.Empty;
                 var font = style.Font;
 
-                // 判断 FileName 是否指向 SHX 文件（非 TrueType 文件格式）
-                bool fileNameIsSHX = !string.IsNullOrWhiteSpace(fileName)
-                    && !fileName.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase)
-                    && !fileName.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase)
-                    && !fileName.EndsWith(".otf", StringComparison.OrdinalIgnoreCase);
+                bool hasTT = !string.IsNullOrEmpty(font.TypeFace);
+                bool hasFile = !string.IsNullOrWhiteSpace(fileName);
 
                 // TrueType 字体可用性检查:
-                // 纯 TrueType（TypeFace 有效，无 SHX 引用）→ 跳过检测
-                // 混合状态（TypeFace + SHX FileName 共存）→ 脏数据，必须进入检测
-                if (!string.IsNullOrEmpty(font.TypeFace)
-                    && !fileNameIsSHX
+                // 纯 TrueType（TypeFace 有效，FileName 为空）→ 跳过检测
+                // 混合状态（TypeFace + 任意 FileName 共存）→ 脏数据，必须进入检测
+                // 不使用扩展名判断：FileName 为空字符串但内部残留 SHX 状态时也需检测
+                if (hasTT && !hasFile
                     && IsTrueTypeFontAvailable(font.TypeFace, fileName, db))
                 {
                     continue;
                 }
 
                 // 判断样式类型：SHX 还是 TrueType
-                // 规则：TypeFace 非空 且 FileName 不是 SHX 格式 → TrueType
-                //       其他情况（含混合状态）→ 按 SHX 处理
-                bool isTrueType = !string.IsNullOrEmpty(font.TypeFace) && !fileNameIsSHX;
+                // 纯 TrueType: TypeFace 非空 且 FileName 为空
+                // 其他情况（含混合状态、纯 SHX）→ 按 SHX 处理
+                bool isTrueType = hasTT && !hasFile;
                 bool isMainMissing = false;
                 bool isBigMissing = false;
 
