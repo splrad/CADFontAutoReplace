@@ -1,4 +1,5 @@
 using System.IO;
+using System.Windows.Media;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.GraphicsInterface;
 using AFR.Models;
@@ -46,7 +47,7 @@ internal static class FontReplacer
 
         // FontDescriptor 和 GDI 查询要求字族名（如 "SimSun"），而非文件名（如 "simsun.ttc"）
         if (trueTypeFontValid)
-            trueTypeFont = NormalizeTrueTypeName(trueTypeFont);
+            trueTypeFont = NormalizeTrueTypeName(trueTypeFont, context);
 
         // 预构建字典—O(1)查找替代线性搜索
         var missingMap = new Dictionary<string, FontCheckResult>(missingFonts.Count, StringComparer.OrdinalIgnoreCase);
@@ -187,7 +188,7 @@ internal static class FontReplacer
                         else
                         {
                             // FontDescriptor 要求字族名，去除可能的文件扩展名
-                            var fontFamily = NormalizeTrueTypeName(replacement.MainFontReplacement);
+                            var fontFamily = NormalizeTrueTypeName(replacement.MainFontReplacement, context);
                             var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(fontFamily, context);
                             // 清空顺序: 先 BigFont 再 FileName，避免 eInvalidInput
                             style.BigFontFileName = string.Empty;
@@ -315,8 +316,10 @@ internal static class FontReplacer
     /// 将 TrueType 字体名归一化为字族名。
     /// FontDescriptor 和 GDI 查询要求纯字族名（如 "SimSun"），
     /// 不能包含文件扩展名（如 "simsun.ttc"），否则 AutoCAD 找不到字体。
+    /// 优先通过 GlyphTypeface 解析字体文件内部的真实字族名，
+    /// 避免文件名与字族名不一致的问题（如 FZYTK.TTF → "方正姚体"）。
     /// </summary>
-    private static string NormalizeTrueTypeName(string name)
+    private static string NormalizeTrueTypeName(string name, FontDetectionContext context)
     {
         if (string.IsNullOrEmpty(name)) return string.Empty;
 
@@ -324,6 +327,24 @@ internal static class FontReplacer
             name.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase) ||
             name.EndsWith(".otf", StringComparison.OrdinalIgnoreCase))
         {
+            try
+            {
+                // 通过 AutoCAD 搜索路径定位字体文件，解析内部真实字族名
+                string path = HostApplicationServices.Current.FindFile(
+                    name, context.Db, FindFileHint.TrueTypeFontFile);
+                if (!string.IsNullOrEmpty(path))
+                {
+                    var glyph = new GlyphTypeface(new Uri(path));
+                    var familyName = glyph.FamilyNames.Values.FirstOrDefault();
+                    if (!string.IsNullOrEmpty(familyName))
+                        return familyName;
+                }
+            }
+            catch
+            {
+                // FindFile 或 GlyphTypeface 解析失败 — 降级为扩展名截断
+            }
+
             return Path.GetFileNameWithoutExtension(name);
         }
 
