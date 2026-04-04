@@ -65,17 +65,15 @@ internal static class FontDetector
                     safeFont.HasValue ? (safeFont.Value.TypeFace ?? "") : "<损坏>",
                     isTrueType, style.IsShapeFile);
 
-                // TrueType 样式: 验证字体可用且 GDI 度量有效才跳过
+                // TrueType 样式: 验证字体可用才跳过
+                // IsTrueTypeFontAvailable 通过系统字体索引 + FindFile + 本地化反查三重验证
                 if (isTrueType)
                 {
                     var typeFace = safeFont!.Value.TypeFace!;
                     if (IsTrueTypeFontAvailable(typeFace, fileName, context))
                     {
-                        var metrics = GetTrueTypeFontMetrics(typeFace, context);
-                        DiagnosticLogger.LogFontAvailability(typeFace, "TrueType+GDI",
-                            metrics.CharacterSet != 0, $"CharSet={metrics.CharacterSet} Pitch={metrics.PitchAndFamily}");
-                        if (metrics.CharacterSet != 0)
-                            continue;
+                        DiagnosticLogger.LogFontAvailability(typeFace, "TrueType", true);
+                        continue;
                     }
                 }
                 bool isMainMissing = false;
