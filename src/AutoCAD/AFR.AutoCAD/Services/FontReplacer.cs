@@ -97,22 +97,19 @@ internal static class FontReplacer
                         // SHX 只用 SHX 字体替换（需通过可用性校验）
                         if (mainFontValid)
                         {
-                            // 必须先清除 TrueType 属性再设置 FileName，
-                            // 否则设置 Font 可能重置 FileName
-                            if (!string.IsNullOrEmpty(style.Font.TypeFace))
-                                style.Font = new FontDescriptor("", false, false, 0, 0);
+                            // 无条件清空 FontDescriptor，确保不残留任何 TrueType 信息。
+                            // 不依赖 TypeFace 读回值判断 — AutoCAD 内部状态可能不一致。
+                            // 必须先清 Font 再设 FileName，否则设置 Font 可能重置 FileName。
+                            style.Font = new FontDescriptor("", false, false, 0, 0);
                             style.FileName = mainFont;
+
+                            // 大字体与主字体一并处理，确保三字段状态一致
+                            if (missing.IsBigFontMissing && bigFontValid)
+                                style.BigFontFileName = bigFont;
+
                             changed = true;
                         }
                     }
-                }
-
-                // 若大字体缺失且已配置替换字体，则执行替换
-                // TrueType 样式不支持大字体，跳过
-                if (missing.IsBigFontMissing && !missing.IsTrueType && bigFontValid)
-                {
-                    style.BigFontFileName = bigFont;
-                    changed = true;
                 }
 
                 if (changed) replaceCount++;
@@ -185,26 +182,21 @@ internal static class FontReplacer
                         }
                         else
                         {
-                            // 必须先清除 TrueType 属性再设置 FileName
-                            if (!string.IsNullOrEmpty(style.Font.TypeFace))
-                                style.Font = new FontDescriptor("", false, false, 0, 0);
+                            // 无条件清空 FontDescriptor，确保不残留任何 TrueType 信息
+                            style.Font = new FontDescriptor("", false, false, 0, 0);
                             style.FileName = replacement.MainFontReplacement;
+
+                            // 大字体与主字体一并处理，确保三字段状态一致
+                            if (!string.IsNullOrEmpty(replacement.BigFontReplacement))
+                            {
+                                if (FontDetector.IsShxFontAvailable(replacement.BigFontReplacement, db))
+                                    style.BigFontFileName = replacement.BigFontReplacement;
+                                else
+                                    log.Warning($"手动替换: 样式 '{replacement.StyleName}' 的大字体替换字体 '{replacement.BigFontReplacement}' 不可用，跳过");
+                            }
+
                             changed = true;
                         }
-                    }
-                }
-
-                // TrueType 样式不支持大字体，跳过
-                if (!replacement.IsTrueType && !string.IsNullOrEmpty(replacement.BigFontReplacement))
-                {
-                    if (!FontDetector.IsShxFontAvailable(replacement.BigFontReplacement, db))
-                    {
-                        log.Warning($"手动替换: 样式 '{replacement.StyleName}' 的大字体替换字体 '{replacement.BigFontReplacement}' 不可用，跳过");
-                    }
-                    else
-                    {
-                        style.BigFontFileName = replacement.BigFontReplacement;
-                        changed = true;
                     }
                 }
 
