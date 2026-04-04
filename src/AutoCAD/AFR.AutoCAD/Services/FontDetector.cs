@@ -165,7 +165,7 @@ internal static class FontDetector
         return null;
     }
 
-    private static bool IsShxTypeMismatch(string fileName, FontDetectionContext context, bool expectBigFont)
+    internal static bool IsShxTypeMismatch(string fileName, FontDetectionContext context, bool expectBigFont)
     {
         string? filePath = TryFindFilePath(fileName, context, FindFileHint.CompiledShapeFile);
         if (filePath == null) return false;

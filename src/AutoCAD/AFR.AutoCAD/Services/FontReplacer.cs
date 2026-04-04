@@ -34,14 +34,15 @@ internal static class FontReplacer
         bool mainFontValid = !string.IsNullOrEmpty(mainFont)
             && FontDetector.IsShxFontAvailable(mainFont, context);
         bool bigFontValid = !string.IsNullOrEmpty(bigFont)
-            && FontDetector.IsShxFontAvailable(bigFont, context);
+            && FontDetector.IsShxFontAvailable(bigFont, context)
+            && !FontDetector.IsShxTypeMismatch(bigFont, context, expectBigFont: true);
         bool trueTypeFontValid = !string.IsNullOrEmpty(trueTypeFont)
             && FontDetector.IsTrueTypeFontAvailable(trueTypeFont, context);
 
         if (!string.IsNullOrEmpty(mainFont) && !mainFontValid)
             log.Warning($"配置的 SHX 替换字体 '{mainFont}' 在当前环境中不可用，将跳过 SHX 主字体替换");
         if (!string.IsNullOrEmpty(bigFont) && !bigFontValid)
-            log.Warning($"配置的大字体替换字体 '{bigFont}' 在当前环境中不可用，将跳过大字体替换");
+            log.Warning($"配置的大字体替换字体 '{bigFont}' 不可用或类型不匹配（非 BigFont），将跳过大字体替换");
         if (!string.IsNullOrEmpty(trueTypeFont) && !trueTypeFontValid)
             log.Warning($"配置的 TrueType 替换字体 '{trueTypeFont}' 在当前环境中不可用，将跳过 TrueType 替换");
 
@@ -207,14 +208,15 @@ internal static class FontReplacer
 
                             // 始终重建 BigFont 状态，避免旧值残留或与新主字体不匹配
                             if (!string.IsNullOrEmpty(replacement.BigFontReplacement)
-                                && FontDetector.IsShxFontAvailable(replacement.BigFontReplacement, context))
+                                && FontDetector.IsShxFontAvailable(replacement.BigFontReplacement, context)
+                                && !FontDetector.IsShxTypeMismatch(replacement.BigFontReplacement, context, expectBigFont: true))
                             {
                                 style.BigFontFileName = replacement.BigFontReplacement;
                             }
                             else
                             {
                                 if (!string.IsNullOrEmpty(replacement.BigFontReplacement))
-                                    log.Warning($"手动替换: 样式 '{replacement.StyleName}' 的大字体替换字体 '{replacement.BigFontReplacement}' 不可用，已清空");
+                                    log.Warning($"手动替换: 样式 '{replacement.StyleName}' 的大字体替换字体 '{replacement.BigFontReplacement}' 不可用或类型不匹配，已清空");
                                 style.BigFontFileName = string.Empty;
                             }
 
