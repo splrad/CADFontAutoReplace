@@ -106,6 +106,19 @@ internal sealed class ExecutionController
                 DiagnosticLogger.BeginPhase("扫描MText内联字体");
                 var inlineFonts = MTextInlineFontScanner.ScanInlineFonts(doc.Database);
                 var redirectLog = LdFileHook.GetRawRedirectLog();
+
+                // 诊断: 记录交叉比对的两侧数据，便于排查匹配失败原因
+                if (inlineFonts.Count > 0)
+                {
+                    foreach (var (name, type) in inlineFonts)
+                        DiagnosticLogger.Log("MText内联", $"扫描到: '{name}' 类型={type}");
+                }
+                if (redirectLog.Count > 0)
+                {
+                    foreach (var (key, (rep, ft)) in redirectLog)
+                        DiagnosticLogger.Log("MText内联", $"重定向记录: '{key}' → '{rep}' param2={ft}");
+                }
+
                 var inlineFixResults = BuildInlineFixRecords(inlineFonts, redirectLog);
                 contextMgr.StoreInlineFontFixResults(doc, inlineFixResults);
                 DiagnosticLogger.EndPhase($"内联字体: {inlineFonts.Count}个, 修复: {inlineFixResults.Count}个");
