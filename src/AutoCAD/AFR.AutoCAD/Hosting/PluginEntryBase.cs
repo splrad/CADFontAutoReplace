@@ -84,8 +84,8 @@ public abstract class PluginEntryBase : IExtensionApplication
         try
         {
             // 第零阶段: 安装字体 Hook
-            // if (PlatformManager.Platform.SupportsLdFileHook)
-            //    PlatformManager.FontHook.Install();
+            if (PlatformManager.Platform.SupportsLdFileHook)
+                PlatformManager.FontHook.Install();
 
             // 第零阶段 B: 预热系统字体索引
             FontDetector.PrewarmSystemFonts();

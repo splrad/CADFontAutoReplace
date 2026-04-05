@@ -90,8 +90,7 @@ internal sealed class ExecutionController
                 }
 
                 // CleanupStaleShxReferences 仅在 Hook 启用时需要（防止 Hook 重定向导致内部状态不一致）
-                // 当前 Hook 已禁用，跳过清理以避免破坏性地删除原始 SHX 备用引用
-                // FontReplacer.CleanupStaleShxReferences(context);
+                FontReplacer.CleanupStaleShxReferences(context);
 
                 // 诊断: Regen 前验证样式表状态（确认替换是否持久化到数据库）
                 DiagnosticLogger.BeginPhase("验证替换结果");
