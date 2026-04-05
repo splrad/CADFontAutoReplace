@@ -149,8 +149,6 @@ internal sealed class LogService : ILogService
                     editor.WriteMessage(bucket[i]);
                 }
             }
-
-            editor.WriteMessage("\n");
         }
         catch
         {
