@@ -142,7 +142,7 @@ internal sealed class LogService : ILogService
             {
                 editor.WriteMessage(
                     "\n==========================================================================" +
-                    "\nAFR 缺失字体自动替换 v3.0" +
+                    "\nAFR 缺失字体自动替换 v4.0" +
                     "\ngithub.com/splrad/CADFontAutoReplace | gitee.com/splrad/CADFontAutoReplace" +
                     "\n命令: AFR(配置) AFRLOG(日志) AFRUNLOAD(卸载)" +
                     "\n==========================================================================");
