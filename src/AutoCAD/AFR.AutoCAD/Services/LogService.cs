@@ -41,7 +41,7 @@ internal sealed class LogService : ILogService
     /// 根据缺失字体检测结果直接计算并添加统计条目。
     /// 必须在 Flush 之前调用。
     /// </summary>
-    public void AddStatistics(IReadOnlyList<FontCheckResult> missingFonts, int mtextMappingCount = 0)
+    public void AddStatistics(IReadOnlyList<FontCheckResult> missingFonts, int stillMissingCount = 0, int mtextMappingCount = 0)
     {
         int trueTypeCount = 0, shxCount = 0, bigFontCount = 0;
         for (int i = 0; i < missingFonts.Count; i++)
@@ -56,8 +56,14 @@ internal sealed class LogService : ILogService
             if (item.IsBigFontMissing && !item.IsTrueType) bigFontCount++;
         }
         int total = trueTypeCount + shxCount + bigFontCount;
+        int replaced = total - stillMissingCount;
 
-        string msg = $"[字体修复]已替换缺失字体 {total} 个（SHX主字体：{shxCount}，SHX大字体：{bigFontCount}，TrueType：{trueTypeCount}）";
+        string msg;
+        if (stillMissingCount > 0)
+            msg = $"[字体修复]检测到缺失字体 {total} 个，已替换 {replaced} 个（SHX主字体：{shxCount}，SHX大字体：{bigFontCount}，TrueType：{trueTypeCount}）";
+        else
+            msg = $"[字体修复]已替换缺失字体 {total} 个（SHX主字体：{shxCount}，SHX大字体：{bigFontCount}，TrueType：{trueTypeCount}）";
+
         if (mtextMappingCount > 0)
             msg += $" | MText内联字体映射：{mtextMappingCount}";
 
@@ -65,6 +71,9 @@ internal sealed class LogService : ILogService
         {
             _buffer.Add((LogCategory.Statistics, msg, DateTime.Now));
         }
+
+        if (stillMissingCount > 0)
+            AddEntry(LogCategory.Warning, $"仍有 {stillMissingCount} 个字体未成功替换，请执行 AFRLOG 手动指定替换字体");
     }
 
     private void AddEntry(LogCategory category, string message)

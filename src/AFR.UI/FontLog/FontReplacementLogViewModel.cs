@@ -20,6 +20,9 @@ public sealed class FontReplacementRow : INotifyPropertyChanged
     public bool IsTrueType { get; }
     public bool IsBigFont { get; }
 
+    /// <summary>该缺失字体是否已被成功替换。</summary>
+    public bool IsReplaced { get; }
+
     /// <summary>可供选择的替换字体列表（根据字体类型自动匹配）。</summary>
     public ObservableCollection<string> AvailableFonts { get; }
 
@@ -40,6 +43,7 @@ public sealed class FontReplacementRow : INotifyPropertyChanged
         string missingFontName,
         bool isTrueType,
         bool isBigFont,
+        bool isReplaced,
         ObservableCollection<string> availableFonts,
         string autoReplacement)
     {
@@ -48,6 +52,7 @@ public sealed class FontReplacementRow : INotifyPropertyChanged
         MissingFontName = missingFontName;
         IsTrueType = isTrueType;
         IsBigFont = isBigFont;
+        IsReplaced = isReplaced;
         AvailableFonts = availableFonts;
         _selectedReplacement = autoReplacement;
     }
@@ -76,14 +81,20 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
     public int TrueTypeCount { get; }
     public int BigFontCount { get; }
     public int InlineFixCount { get; }
+    /// <summary>未成功替换的字体数量。</summary>
+    public int FailedCount { get; }
+    /// <summary>已成功替换的字体数量。</summary>
+    public int ReplacedCount { get; }
     public string ShxLabel => $"SHX主字体  {ShxCount}";
     public string TrueTypeLabel => $"TrueType  {TrueTypeCount}";
     public string BigFontLabel => $"SHX大字体  {BigFontCount}";
     public string InlineFixLabel => $"MText映射  {InlineFixCount}";
+    public string FailedLabel => $"未替换  {FailedCount}";
     public bool HasShx => ShxCount > 0;
     public bool HasTrueType => TrueTypeCount > 0;
     public bool HasBigFont => BigFontCount > 0;
     public bool HasInlineFix => InlineFixCount > 0;
+    public bool HasFailed => FailedCount > 0;
     public bool HasItems => Items.Count > 0;
     public bool HasNoItems => !HasItems && !HasInlineFix;
 
@@ -134,7 +145,8 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         string globalBigFont,
         string globalTrueTypeFont,
         Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? currentFonts = null,
-        IReadOnlyList<InlineFontFixRecord>? inlineFixResults = null)
+        IReadOnlyList<InlineFontFixRecord>? inlineFixResults = null,
+        HashSet<string>? stillMissingStyleNames = null)
     {
         var shxFonts = new ObservableCollection<string>(FontSelectionViewModel.ScanAvailableFonts());
         var ttFonts = new ObservableCollection<string>(FontSelectionViewModel.ScanSystemTrueTypeFonts());
@@ -144,15 +156,21 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         if (detectionResults != null && detectionResults.Count > 0)
         {
             int ttCount = 0, shxCount = 0, bigCount = 0;
-            var shxRows = new List<FontReplacementRow>();
-            var ttRows = new List<FontReplacementRow>();
-            var bigRows = new List<FontReplacementRow>();
+            int failedCount = 0, replacedCount = 0;
+            // 未替换行置顶，已替换行在后
+            var failedRows = new List<FontReplacementRow>();
+            var replacedRows = new List<FontReplacementRow>();
 
             foreach (var r in detectionResults)
             {
                 // 尝试获取该样式在图纸中的当前实际字体
                 var current = (FileName: string.Empty, BigFontFileName: string.Empty, TypeFace: string.Empty);
                 currentFonts?.TryGetValue(r.StyleName, out current);
+
+                // 判断该样式是否仍然缺失（未成功替换）
+                bool isStillMissing = stillMissingStyleNames != null
+                    && stillMissingStyleNames.Contains(r.StyleName);
+                bool isReplaced = !isStillMissing;
 
                 if (r.IsMainFontMissing)
                 {
@@ -177,10 +195,13 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
 
                     var row = new FontReplacementRow(
                         r.StyleName, category, missingName,
-                        r.IsTrueType, false, fonts, replacement);
+                        r.IsTrueType, false, isReplaced, fonts, replacement);
 
-                    if (r.IsTrueType) { ttRows.Add(row); ttCount++; }
-                    else { shxRows.Add(row); shxCount++; }
+                    if (r.IsTrueType) ttCount++;
+                    else shxCount++;
+
+                    if (isReplaced) { replacedRows.Add(row); replacedCount++; }
+                    else { failedRows.Add(row); failedCount++; }
                 }
 
                 // TrueType 样式不支持大字体，不显示大字体行
@@ -189,24 +210,31 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
                     string currentBig = current.BigFontFileName;
                     string replacement = !string.IsNullOrEmpty(currentBig) ? currentBig : globalBigFont;
 
-                    bigRows.Add(new FontReplacementRow(
+                    var row = new FontReplacementRow(
                         r.StyleName, "SHX大字体", r.BigFontFileName,
-                        false, true, shxFonts, replacement));
+                        false, true, isReplaced, shxFonts, replacement);
                     bigCount++;
+
+                    if (isReplaced) { replacedRows.Add(row); replacedCount++; }
+                    else { failedRows.Add(row); failedCount++; }
                 }
             }
 
-            // 按类型分组排序：SHX主字体 → SHX大字体 → TrueType
-            foreach (var row in shxRows) Items.Add(row);
-            foreach (var row in bigRows) Items.Add(row);
-            foreach (var row in ttRows) Items.Add(row);
+            // 排序：未替换置顶 → 已替换在后
+            foreach (var row in failedRows) Items.Add(row);
+            foreach (var row in replacedRows) Items.Add(row);
 
             ShxCount = shxCount;
             TrueTypeCount = ttCount;
             BigFontCount = bigCount;
+            FailedCount = failedCount;
+            ReplacedCount = replacedCount;
 
             int total = ttCount + shxCount + bigCount;
-            SummaryText = $"{detectionResults.Count} 个样式 · {total} 个缺失";
+            if (failedCount > 0)
+                SummaryText = $"{total} 个缺失 · 已替换 {replacedCount} · 未替换 {failedCount}";
+            else
+                SummaryText = $"{total} 个缺失 · 全部已替换";
         }
         else
         {

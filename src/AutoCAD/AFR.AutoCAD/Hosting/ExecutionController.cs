@@ -72,6 +72,21 @@ internal sealed class ExecutionController
                     missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont, context);
                 DiagnosticLogger.EndPhase($"替换: {replaceCount}个");
 
+                // 替换后二次检测：确认哪些字体仍然缺失（替换字体不可用时会发生）
+                // 使用全新 context 避免缓存干扰
+                var postContext = new FontDetectionContext(doc.Database);
+                var stillMissing = FontDetector.DetectMissingFonts(postContext);
+                contextMgr.StoreStillMissingResults(doc, stillMissing);
+                DiagnosticLogger.Log("验证", $"替换后仍缺失: {stillMissing.Count}个");
+
+                // 计算未替换的字体槽位数（主字体+大字体）
+                int stillMissingSlotCount = 0;
+                for (int i = 0; i < stillMissing.Count; i++)
+                {
+                    if (stillMissing[i].IsMainFontMissing) stillMissingSlotCount++;
+                    if (stillMissing[i].IsBigFontMissing && !stillMissing[i].IsTrueType) stillMissingSlotCount++;
+                }
+
                 // CleanupStaleShxReferences 仅在 Hook 启用时需要（防止 Hook 重定向导致内部状态不一致）
                 // 当前 Hook 已禁用，跳过清理以避免破坏性地删除原始 SHX 备用引用
                 // FontReplacer.CleanupStaleShxReferences(context);
@@ -95,7 +110,7 @@ internal sealed class ExecutionController
                 DiagnosticLogger.EndPhase($"内联字体: {inlineFonts.Count}个, 修复: {inlineFixResults.Count}个");
 
                 // 统计汇总 — Regen 之后输出，确保统计信息是最后一行实质内容
-                log.AddStatistics(missingFonts, inlineFixResults.Count);
+                log.AddStatistics(missingFonts, stillMissingSlotCount, inlineFixResults.Count);
                 DiagnosticLogger.WriteSummary();
                 log.Flush();
             }

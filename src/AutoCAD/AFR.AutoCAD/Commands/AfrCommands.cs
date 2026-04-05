@@ -80,6 +80,7 @@ public class AfrCommands
             }
 
             List<FontCheckResult>? results;
+            HashSet<string>? stillMissingStyleNames = null;
             Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? currentFonts = null;
 
             using (doc.LockDocument())
@@ -88,20 +89,30 @@ public class AfrCommands
                 var context = new FontDetectionContext(doc.Database);
 
                 // 从数据库重新检测当前缺失字体
-                results = FontDetector.DetectMissingFonts(context);
+                var currentMissing = FontDetector.DetectMissingFonts(context);
 
-                if (results.Count > 0)
+                // 合并策略：以存储的原始检测结果为基础，用当前检测标记仍缺失的样式
+                var stored = DocumentContextManager.Instance.GetDetectionResults(doc);
+                if (stored != null && stored.Count > 0)
                 {
-                    // 仍有缺失字体 → 更新存储结果，反映最新状态
-                    DocumentContextManager.Instance.StoreDetectionResults(doc, results);
+                    // 以原始检测结果为基础，确保已替换的字体也能显示
+                    results = stored;
+                    // 构建仍缺失的样式名集合
+                    stillMissingStyleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    for (int i = 0; i < currentMissing.Count; i++)
+                        stillMissingStyleNames.Add(currentMissing[i].StyleName);
                 }
                 else
                 {
-                    // 当前无缺失 → 尝试使用自动替换阶段存储的检测结果
-                    // 这样用户可以看到哪些字体被自动替换过
-                    var stored = DocumentContextManager.Instance.GetDetectionResults(doc);
-                    if (stored != null && stored.Count > 0)
-                        results = stored;
+                    // 无存储结果（首次打开 AFRLOG 且未执行过自动替换）
+                    results = currentMissing;
+                    if (currentMissing.Count > 0)
+                    {
+                        // 全部视为未替换
+                        stillMissingStyleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        for (int i = 0; i < currentMissing.Count; i++)
+                            stillMissingStyleNames.Add(currentMissing[i].StyleName);
+                    }
                 }
 
                 // 读取图纸中各样式的当前实际字体（反映替换/ST命令修改后的状态）
@@ -114,7 +125,8 @@ public class AfrCommands
             var config = ConfigService.Instance;
             var inlineFixResults = DocumentContextManager.Instance.GetInlineFontFixResults(doc);
             var vm = new FontReplacementLogViewModel(
-                results, config.MainFont, config.BigFont, config.TrueTypeFont, currentFonts, inlineFixResults);
+                results, config.MainFont, config.BigFont, config.TrueTypeFont,
+                currentFonts, inlineFixResults, stillMissingStyleNames);
 
             var window = new FontReplacementLogWindow(vm);
             window.ApplyReplacementsHandler = replacements =>

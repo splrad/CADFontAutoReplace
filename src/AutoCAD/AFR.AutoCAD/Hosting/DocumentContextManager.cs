@@ -20,6 +20,7 @@ internal sealed class DocumentContextManager
     // Value: 首次处理时间
     private readonly Dictionary<string, DateTime> _executedDocuments = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<FontCheckResult>> _detectionResults = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<FontCheckResult>> _stillMissingResults = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<InlineFontFixRecord>> _inlineFontFixResults = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
 
@@ -56,6 +57,7 @@ internal sealed class DocumentContextManager
         {
             _executedDocuments.Remove(key);
             _detectionResults.Remove(key);
+            _stillMissingResults.Remove(key);
             _inlineFontFixResults.Remove(key);
         }
         LogService.Instance.ResetHeaderForDocument(key);
@@ -67,6 +69,7 @@ internal sealed class DocumentContextManager
         {
             _executedDocuments.Clear();
             _detectionResults.Clear();
+            _stillMissingResults.Clear();
             _inlineFontFixResults.Clear();
         }
     }
@@ -96,6 +99,34 @@ internal sealed class DocumentContextManager
         lock (_lock)
         {
             return _detectionResults.TryGetValue(key, out var r) ? r : null;
+        }
+    }
+
+    /// <summary>
+    /// 存储替换后仍然缺失的字体检测结果。
+    /// </summary>
+    public void StoreStillMissingResults(Document doc, List<FontCheckResult> results)
+    {
+        if (doc == null) return;
+        var key = GetDocumentKey(doc);
+        if (key == null) return;
+        lock (_lock)
+        {
+            _stillMissingResults[key] = results;
+        }
+    }
+
+    /// <summary>
+    /// 获取替换后仍然缺失的字体检测结果。
+    /// </summary>
+    public List<FontCheckResult>? GetStillMissingResults(Document doc)
+    {
+        if (doc == null) return null;
+        var key = GetDocumentKey(doc);
+        if (key == null) return null;
+        lock (_lock)
+        {
+            return _stillMissingResults.TryGetValue(key, out var r) ? r : null;
         }
     }
 
