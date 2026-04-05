@@ -23,6 +23,9 @@ public sealed class FontReplacementRow : INotifyPropertyChanged
     /// <summary>该缺失字体是否已被成功替换。</summary>
     public bool IsReplaced { get; }
 
+    /// <summary>构造时预填的初始替换字体（用于判断用户是否修改了选择）。</summary>
+    public string OriginalReplacement { get; }
+
     /// <summary>显示用缺失字体名（未替换时加 ⚠ 前缀）。</summary>
     public string DisplayMissingFontName => IsReplaced ? MissingFontName : $"⚠ {MissingFontName}";
 
@@ -57,6 +60,7 @@ public sealed class FontReplacementRow : INotifyPropertyChanged
         IsBigFont = isBigFont;
         IsReplaced = isReplaced;
         AvailableFonts = availableFonts;
+        OriginalReplacement = autoReplacement;
         _selectedReplacement = autoReplacement;
     }
 

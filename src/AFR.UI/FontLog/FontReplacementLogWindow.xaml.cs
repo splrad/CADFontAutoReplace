@@ -46,6 +46,10 @@ public partial class FontReplacementLogWindow : Window
                 string font = row.SelectedReplacement?.Trim() ?? string.Empty;
                 if (string.IsNullOrEmpty(font)) continue;
 
+                // 已替换行仅在用户修改了选择时才纳入（避免重复提交未变更的替换）
+                if (row.IsReplaced && string.Equals(font, row.OriginalReplacement?.Trim(),
+                    StringComparison.OrdinalIgnoreCase)) continue;
+
                 if (!map.TryGetValue(row.StyleName, out var existing))
                     existing = new StyleFontReplacement(row.StyleName, false, string.Empty, string.Empty);
 
