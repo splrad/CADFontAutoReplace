@@ -79,6 +79,28 @@ public partial class FontReplacementLogWindow : Window
         }
     }
 
+    private void OnTablePreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is System.Windows.Controls.ScrollViewer scrollViewer)
+        {
+            // 主表固定行高约为 25 像素 (ComboBox Height 22 + Padding 1+1 + Border 1)
+            double rowHeight = 25.0;
+
+            // 每次滚动 3 行
+            double step = rowHeight * 3.0;
+
+            // 计算新的偏移量并修正到整行边界，实现“整行滚动”触感
+            double newOffset = scrollViewer.VerticalOffset - Math.Sign(e.Delta) * step;
+            newOffset = Math.Round(newOffset / rowHeight) * rowHeight;
+
+            if (newOffset < 0) newOffset = 0;
+            if (newOffset > scrollViewer.ScrollableHeight) newOffset = scrollViewer.ScrollableHeight;
+
+            scrollViewer.ScrollToVerticalOffset(newOffset);
+            e.Handled = true;
+        }
+    }
+
     private void OnClose(object sender, RoutedEventArgs e)
     {
         Close();

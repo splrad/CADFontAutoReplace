@@ -96,6 +96,15 @@
 					BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
 					Visibility="{Binding HasItems, Converter={StaticResource BoolToVis}}">
 				<Grid>
+					<Grid.OpacityMask>
+						<VisualBrush>
+							<VisualBrush.Visual>
+								<Border Background="Black" CornerRadius="5"
+										Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=Grid}}"
+										Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=Grid}}"/>
+							</VisualBrush.Visual>
+						</VisualBrush>
+					</Grid.OpacityMask>
 					<Grid.RowDefinitions>
 						<RowDefinition Height="Auto"/>  <!-- 表头（固定） -->
 						<RowDefinition Height="*"/>     <!-- 数据行（滚动） -->
@@ -128,7 +137,7 @@
 					</Border>
 
 					<!-- 数据行（可滚动） -->
-					<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+					<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" PreviewMouseWheel="OnTablePreviewMouseWheel">
 						<StackPanel>
 							<!-- 主表数据行 -->
 							<ItemsControl ItemsSource="{Binding Items}">
