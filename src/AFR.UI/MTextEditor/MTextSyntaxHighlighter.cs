@@ -18,7 +18,7 @@ internal static partial class MTextSyntaxHighlighter
     /// \P \~ \\ \{ \} 等 — 转义序列
     /// \S...;      — 堆叠/分数
     /// </summary>
-    private const string FormatCodePattern = @"\{\\[A-Za-z][^;]*;|\}|\\[PpOoLlUu~\\{}]|\\S[^;]*;";
+    private const string FormatCodePattern = @"\{\\[A-Za-z][^;]*;|\}|\\[Ff][^;]*;|\\[PpOoLlUu~\\{}]|\\S[^;]*;";
 
 #if NET7_0_OR_GREATER
     [GeneratedRegex(FormatCodePattern)]
@@ -32,6 +32,7 @@ internal static partial class MTextSyntaxHighlighter
     private static readonly SolidColorBrush FormatCodeBrush = CreateFrozenBrush(0, 120, 212);
     private static readonly SolidColorBrush EscapeBrush = CreateFrozenBrush(16, 136, 68);
     private static readonly SolidColorBrush BraceBrush = CreateFrozenBrush(212, 118, 10);
+    private static readonly SolidColorBrush FontCodeBrush = CreateFrozenBrush(199, 36, 105);
 
     private static SolidColorBrush CreateFrozenBrush(byte r, byte g, byte b)
     {
@@ -93,6 +94,12 @@ internal static partial class MTextSyntaxHighlighter
             {
                 run.Foreground = BraceBrush;
                 run.FontWeight = FontWeights.SemiBold;
+            }
+            else if (match.Value.StartsWith("{\\F", StringComparison.OrdinalIgnoreCase)
+                     || match.Value.StartsWith("\\F", StringComparison.OrdinalIgnoreCase))
+            {
+                run.Foreground = FontCodeBrush;
+                run.FontWeight = FontWeights.Bold;
             }
             else if (match.Value.StartsWith("{\\"))
             {
