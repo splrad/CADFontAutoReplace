@@ -6,10 +6,12 @@ using AFR.Services;
 using AFR.UI;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
+#if DEBUG
+
 namespace AFR.Commands;
 
 /// <summary>
-/// MText 查看器的 AutoCAD 命令定义。
+/// MText 查看器的 AutoCAD 命令定义。仅在 Debug 构建时可用。
 /// </summary>
 public class MTextEditorCommand
 {
@@ -59,3 +61,5 @@ public class MTextEditorCommand
         }
     }
 }
+
+#endif
