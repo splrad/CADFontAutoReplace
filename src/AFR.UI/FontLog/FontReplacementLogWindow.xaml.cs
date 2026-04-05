@@ -83,13 +83,25 @@ public partial class FontReplacementLogWindow : Window
     {
         if (sender is System.Windows.Controls.ScrollViewer scrollViewer)
         {
-            // 主表固定行高约为 25 像素 (ComboBox Height 22 + Padding 1+1 + Border 1)
-            double rowHeight = 25.0;
+            // 动态探测真实行高（ComboBox 和 Padding 会将行高撑到 30px 或随 DPI 变化）
+            double rowHeight = 30.0;
 
-            // 每次滚动 3 行
+            if (scrollViewer.Content is System.Windows.Controls.StackPanel stackPanel &&
+                stackPanel.Children.Count > 0 && 
+                stackPanel.Children[0] is System.Windows.Controls.ItemsControl itemsControl &&
+                itemsControl.Items.Count > 0)
+            {
+                var container = itemsControl.ItemContainerGenerator.ContainerFromIndex(0) as FrameworkElement;
+                if (container != null && container.ActualHeight > 0)
+                {
+                    rowHeight = container.ActualHeight;
+                }
+            }
+
+            // 每次滚动 3 行的真实高度
             double step = rowHeight * 3.0;
 
-            // 计算新的偏移量并修正到整行边界，实现“整行滚动”触感
+            // 计算新的偏移量并修正到整行边界
             double newOffset = scrollViewer.VerticalOffset - Math.Sign(e.Delta) * step;
             newOffset = Math.Round(newOffset / rowHeight) * rowHeight;
 
@@ -98,6 +110,25 @@ public partial class FontReplacementLogWindow : Window
 
             scrollViewer.ScrollToVerticalOffset(newOffset);
             e.Handled = true;
+        }
+    }
+
+    private void OnTableLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.ScrollViewer scrollViewer &&
+            scrollViewer.Content is System.Windows.Controls.StackPanel stackPanel &&
+            stackPanel.Children.Count > 0 &&
+            stackPanel.Children[0] is System.Windows.Controls.ItemsControl itemsControl)
+        {
+            // 延缓到底层 UI 完全渲染后，以提取真实的物理像素高度
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (itemsControl.Items.Count > 0 && itemsControl.ItemContainerGenerator.ContainerFromIndex(0) is FrameworkElement container && container.ActualHeight > 0)
+                {
+                    // 动态获取因 Windows 缩放（DPI）、字体渲染引擎可能引起的略微波动的单行真实行高，并乘以需求行距
+                    scrollViewer.Height = Math.Ceiling(container.ActualHeight * 12.0);
+                }
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
         }
     }
 
