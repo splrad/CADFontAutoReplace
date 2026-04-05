@@ -157,9 +157,13 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         {
             int ttCount = 0, shxCount = 0, bigCount = 0;
             int failedCount = 0, replacedCount = 0;
-            // 未替换行置顶，已替换行在后
-            var failedRows = new List<FontReplacementRow>();
-            var replacedRows = new List<FontReplacementRow>();
+            // 每组内部按类型分桶：SHX主字体 → SHX大字体 → TrueType
+            var failedShx = new List<FontReplacementRow>();
+            var failedBig = new List<FontReplacementRow>();
+            var failedTT = new List<FontReplacementRow>();
+            var replacedShx = new List<FontReplacementRow>();
+            var replacedBig = new List<FontReplacementRow>();
+            var replacedTT = new List<FontReplacementRow>();
 
             foreach (var r in detectionResults)
             {
@@ -200,8 +204,16 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
                     if (r.IsTrueType) ttCount++;
                     else shxCount++;
 
-                    if (isReplaced) { replacedRows.Add(row); replacedCount++; }
-                    else { failedRows.Add(row); failedCount++; }
+                    if (isReplaced)
+                    {
+                        (r.IsTrueType ? replacedTT : replacedShx).Add(row);
+                        replacedCount++;
+                    }
+                    else
+                    {
+                        (r.IsTrueType ? failedTT : failedShx).Add(row);
+                        failedCount++;
+                    }
                 }
 
                 // TrueType 样式不支持大字体，不显示大字体行
@@ -215,14 +227,18 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
                         false, true, isReplaced, shxFonts, replacement);
                     bigCount++;
 
-                    if (isReplaced) { replacedRows.Add(row); replacedCount++; }
-                    else { failedRows.Add(row); failedCount++; }
+                    if (isReplaced) { replacedBig.Add(row); replacedCount++; }
+                    else { failedBig.Add(row); failedCount++; }
                 }
             }
 
-            // 排序：未替换置顶 → 已替换在后
-            foreach (var row in failedRows) Items.Add(row);
-            foreach (var row in replacedRows) Items.Add(row);
+            // 排序：未替换置顶(SHX→大字体→TrueType) → 已替换在后(SHX→大字体→TrueType)
+            foreach (var row in failedShx) Items.Add(row);
+            foreach (var row in failedBig) Items.Add(row);
+            foreach (var row in failedTT) Items.Add(row);
+            foreach (var row in replacedShx) Items.Add(row);
+            foreach (var row in replacedBig) Items.Add(row);
+            foreach (var row in replacedTT) Items.Add(row);
 
             ShxCount = shxCount;
             TrueTypeCount = ttCount;
