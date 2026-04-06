@@ -31,6 +31,7 @@ public partial class FontReplacementLogWindow : Window
         ViewModel = vm;
         DataContext = vm;
         InitializeComponent();
+        MaxHeight = SystemParameters.WorkArea.Height;
     }
 
     private void OnApply(object sender, RoutedEventArgs e)
@@ -145,11 +146,21 @@ public partial class FontReplacementLogWindow : Window
             // 延缓到底层 UI 完全渲染后，以提取真实的物理像素高度
             Dispatcher.BeginInvoke(new Action(() =>
             {
-                if (itemsControl.Items.Count > 0 && itemsControl.ItemContainerGenerator.ContainerFromIndex(0) is FrameworkElement container && container.ActualHeight > 0)
+                if (itemsControl.Items.Count == 0) return;
+
+                // 动态获取单行真实行高（因 DPI 缩放、字体渲染引擎可能略有波动），30 DIP 兜底
+                double rowHeight = 30.0;
+                if (itemsControl.ItemContainerGenerator.ContainerFromIndex(0) is FrameworkElement container
+                    && container.ActualHeight > 0)
                 {
-                    // 动态获取因 Windows 缩放（DPI）、字体渲染引擎可能引起的略微波动的单行真实行高，并乘以需求行距
-                    scrollViewer.Height = Math.Ceiling(container.ActualHeight * 12.0);
+                    rowHeight = container.ActualHeight;
                 }
+
+                // 理想显示 12 行，但不超过屏幕可用空间
+                // 预留 ~200 DIP 给标题、状态条、表头、按钮栏等固定 UI 区域
+                double idealHeight = Math.Ceiling(rowHeight * 12.0);
+                double maxAvailable = SystemParameters.WorkArea.Height - 200.0;
+                scrollViewer.Height = Math.Min(idealHeight, Math.Max(maxAvailable, rowHeight * 4.0));
             }), System.Windows.Threading.DispatcherPriority.Loaded);
         }
     }
