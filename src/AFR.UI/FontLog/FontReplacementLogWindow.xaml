@@ -118,7 +118,7 @@
 					</Grid.RowDefinitions>
 
 					<!-- 表头 -->
-					<Border Grid.Row="0" Padding="8,4,24,4"
+					<Border Grid.Row="0" Padding="8,7,24,7"
 							Background="{DynamicResource SecondaryRegionBrush}"
 							BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
 						<Grid>
@@ -240,7 +240,7 @@
 							</ItemsControl>
 
 							<!-- MText 内联字体映射 — 分组标题 -->
-							<Border Padding="8,3"
+							<Border Padding="8,7"
 									Background="{DynamicResource SecondaryRegionBrush}"
 									BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,1"
 									Visibility="{Binding HasInlineFix, Converter={StaticResource BoolToVis}}">
@@ -264,7 +264,7 @@
 												BorderThickness="3,0,0,0"
 												BorderBrush="{DynamicResource SuccessBrush}"
 												Background="#06009688">
-											<Grid MinHeight="24">
+											<Grid MinHeight="28">
 												<Grid.ColumnDefinitions>
 													<ColumnDefinition Width="3*"/>
 													<ColumnDefinition Width="100"/>
