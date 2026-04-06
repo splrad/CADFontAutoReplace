@@ -13,7 +13,8 @@ namespace AFR.Services;
 /// <para>
 /// 遍历所有文字样式，通过多重验证（系统字体索引、FindFile、SHX 文件头分类）
 /// 判断每个样式引用的主字体和大字体是否在当前环境中可用。
-/// 所有缓存通过 <see cref="FontDetectionContext"/> 实例管理，单次事务结束后由 GC 回收。
+/// FindFile 和 TrueType 度量缓存通过 <see cref="FontDetectionContext"/> 实例管理，
+/// SHX 类型分类缓存由全局 <see cref="FontManager.FontCache"/> 统一管理。
 /// </para>
 /// </summary>
 internal static class FontDetector
@@ -252,7 +253,7 @@ internal static class FontDetector
         string? filePath = TryFindFilePath(fileName, context, FindFileHint.CompiledShapeFile);
         if (filePath == null) return false;
 
-        bool? classified = ClassifyShxFile(filePath, context);
+        bool? classified = ClassifyShxFile(filePath);
         // 分类失败 → 保守处理为不匹配，触发替换修复而非放行
         if (!classified.HasValue) return true;
 
@@ -260,23 +261,26 @@ internal static class FontDetector
     }
 
     /// <summary>
-    /// 读取 SHX 文件头判断是否为大字体文件，结果缓存在 context 中。
-    /// 返回 null 表示文件读取失败。
+    /// 判断 SHX 文件是否为大字体，优先查询全局 <see cref="FontManager.FontCache"/>，
+    /// 未命中时通过 <see cref="ShxFontAnalyzer.IsBigFont"/> 读取文件头并回填缓存。
+    /// 返回 null 表示文件读取失败（损坏、权限不足等），调用方应按保守策略处理。
     /// </summary>
-    private static bool? ClassifyShxFile(string filePath, FontDetectionContext context)
+    private static bool? ClassifyShxFile(string filePath)
     {
-        if (context.ShxTypeCache.TryGetValue(filePath, out bool cached)) return cached;
-        bool isBigFont;
-        try
-        {
-            byte[] header = new byte[30];
-            using var fs = File.OpenRead(filePath);
-            int bytesRead = fs.Read(header, 0, 30);
-            isBigFont = bytesRead >= 25 && System.Text.Encoding.ASCII.GetString(header, 0, bytesRead).Contains("bigfont", StringComparison.OrdinalIgnoreCase);
-        }
-        catch { return null; }
-        context.ShxTypeCache.TryAdd(filePath, isBigFont);
-        return isBigFont;
+        string fileName = Path.GetFileName(filePath);
+
+        // 优先查询全局缓存（缓存中只有确定性结果，命中即可信）
+        if (FontManager.FontCache.TryGetValue(fileName, out bool cached))
+            return cached;
+
+        // 全局缓存未命中 → 读取文件头判断
+        bool? result = ShxFontAnalyzer.IsBigFont(filePath);
+
+        // 仅缓存确定性结果；读取失败（null）不写入缓存，下次访问时重试
+        if (result.HasValue)
+            FontManager.FontCache.TryAdd(fileName, result.Value);
+
+        return result;
     }
 
     /// <summary>去除路径前缀，仅保留文件名并去除首尾空白。</summary>

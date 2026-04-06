@@ -6,7 +6,8 @@ namespace AFR.Services;
 /// <summary>
 /// 单次字体检测/替换事务的执行上下文。
 /// <para>
-/// 封装 Database 引用和三类查询缓存（FindFile、SHX 类型分类、TrueType 字体度量）。
+/// 封装 Database 引用和两类查询缓存（FindFile、TrueType 字体度量）。
+/// SHX 类型分类已统一由全局 <see cref="FontManager.FontCache"/> 管理。
 /// 生命周期与单次 Execute 事务绑定，事务结束后整个上下文及缓存由 GC 自动回收。
 /// 不同图纸、不同执行次数之间实现 100% 内存隔离，避免缓存污染。
 /// </para>
@@ -21,12 +22,6 @@ public sealed class FontDetectionContext
     /// Key: "{FindFileHint数值}:{归一化文件名}"，Value: 是否找到。
     /// </summary>
     public ConcurrentDictionary<string, bool> FindFileCache { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// SHX 文件类型分类缓存，避免对同一文件重复读取文件头。
-    /// Key: SHX 文件完整路径，Value: 是否为大字体（true=bigfont，false=常规字体）。
-    /// </summary>
-    public ConcurrentDictionary<string, bool> ShxTypeCache { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// TrueType 字体度量缓存，避免对同一字体重复调用 GDI API。

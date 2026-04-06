@@ -48,8 +48,6 @@ internal static class LdFileHook
     // ── 字体解析状态 ──
     // 可用字体集合：包含 SHX 文件名 + TrueType 文件名 + 系统字族名
     private static readonly HashSet<string> _availableFonts = new(StringComparer.OrdinalIgnoreCase);
-    // 已识别的大字体 SHX 文件名集合（通过读取 SHX 文件头判断）
-    private static readonly HashSet<string> _bigFontFiles = new(StringComparer.OrdinalIgnoreCase);
     // 用户配置的替换字体（运行时副本）
     private static string _repMainFont = "";
     private static string _repBigFont = "";
@@ -102,7 +100,7 @@ internal static class LdFileHook
                 return;
             }
 
-            // 扫描系统中可用的字体文件，构建 _availableFonts 和 _bigFontFiles 集合
+            // 扫描系统中可用的字体文件，构建 _availableFonts 集合并填充 FontManager.FontCache
             ScanAvailableFonts();
 
             // --- Inline Hook 安装流程 ---
@@ -300,7 +298,7 @@ internal static class LdFileHook
             string baseShx = EnsureShx(baseName);
             if (_availableFonts.Contains(baseShx))
             {
-                if (fontType != FontTypeBigFont || _bigFontFiles.Contains(baseShx))
+                if (fontType != FontTypeBigFont || (FontManager.FontCache.TryGetValue(baseShx, out bool isBaseBig) && isBaseBig))
                     return baseShx;
             }
         }
@@ -315,10 +313,10 @@ internal static class LdFileHook
             if (!string.IsNullOrEmpty(_repBigFont) && _availableFonts.Contains(_repBigFont))
                 return _repBigFont;
 
-            foreach (var bf in _bigFontFiles)
+            foreach (var kvp in FontManager.FontCache)
             {
-                if (_availableFonts.Contains(bf))
-                    return bf;
+                if (kvp.Value && _availableFonts.Contains(kvp.Key))
+                    return kvp.Key;
             }
             return null;
         }
@@ -446,23 +444,15 @@ internal static class LdFileHook
     }
 
     /// <summary>
-    /// 读取 SHX 文件头，识别是否为大字体文件。
-    /// 文件头格式: "AutoCAD-86 bigfont 1.0" / "AutoCAD-86 unifont 1.0" / "AutoCAD-86 shapes 1.0"
+    /// 读取 SHX 文件头，识别是否为大字体文件，结果写入全局 <see cref="FontManager.FontCache"/>。
+    /// 文件不可读时跳过，不写入缓存（下次访问时重试）。
     /// </summary>
     private static void ClassifyShxFont(string filePath, string fileName)
     {
-        try
-        {
-            byte[] header = new byte[30];
-            using var fs = File.OpenRead(filePath);
-            int bytesRead = fs.Read(header, 0, 30);
-            if (bytesRead < 25) return;
-
-            string headerStr = System.Text.Encoding.ASCII.GetString(header, 0, bytesRead);
-            if (headerStr.Contains("bigfont", StringComparison.OrdinalIgnoreCase))
-                _bigFontFiles.Add(fileName);
-        }
-        catch { }
+        if (FontManager.FontCache.ContainsKey(fileName)) return;
+        bool? result = ShxFontAnalyzer.IsBigFont(filePath);
+        if (result.HasValue)
+            FontManager.FontCache.TryAdd(fileName, result.Value);
     }
 
     #endregion
