@@ -47,7 +47,23 @@ public class AfrCommands
             // 更新 Hook 的替换字体配置，使新配置在后续字体加载时生效
             PlatformManager.FontHook.UpdateConfig();
 
-            // 对当前文档立即执行字体替换
+            // 首次安装时 Hook 因无配置而跳过安装，此时 DWG 解析阶段的字体拦截不可用。
+            // Hook 必须在文档打开之前安装才能生效，当前会话已无法补救。
+            // 提示用户重启 CAD，使 Hook 在下次启动时读取已保存的配置并正确安装。
+            if (!PlatformManager.FontHook.IsInstalled)
+            {
+                log.Warning("首次配置完成，请重启 AutoCAD 使字体替换完整生效。");
+                DiagnosticLogger.Info("命令", "Hook 未安装，跳过执行，提示用户重启");
+
+                System.Windows.MessageBox.Show(
+                    "字体配置已保存。\n\n请重启 AutoCAD 使字体替换功能完整生效。",
+                    "AFR — 首次配置",
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Information);
+                return;
+            }
+
+            // Hook 已安装（非首次安装，用户修改配置）→ 对当前文档立即执行字体替换
             var doc = AcadApp.DocumentManager.MdiActiveDocument;
             if (doc != null)
             {

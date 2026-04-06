@@ -111,6 +111,7 @@ public abstract class PluginEntryBase : IExtensionApplication
                 try { AcadApp.SetSystemVariable("FONTMAP", ""); } catch { }
                 try { AcadApp.SetSystemVariable("FONTALT", "."); } catch { }
                 log.Info("首次加载，请输入 AFR 命令配置替换字体。");
+                log.Flush();
             }
 
             // 第二阶段: 注册文档事件 — 监听新建/关闭文档，自动触发字体替换
@@ -119,8 +120,11 @@ public abstract class PluginEntryBase : IExtensionApplication
             docMgr.DocumentToBeDestroyed += OnDocumentToBeDestroyed;
 
             // 第三阶段: 延迟启动执行 — 对当前已打开的文档安排字体替换
+            // 首次安装时跳过：用户尚未配置替换字体且 Hook 未安装，执行无意义
+            // 且会触发 ExecutionController 中的重复提示（"请输入 AFR 命令配置替换字体"）
             _unloaded = false;
-            ScheduleExecution(null, "Startup");
+            if (!isFirstRun)
+                ScheduleExecution(null, "Startup");
         }
         catch (System.Exception ex)
         {
