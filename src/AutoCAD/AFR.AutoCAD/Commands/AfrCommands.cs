@@ -63,13 +63,25 @@ public class AfrCommands
                 return;
             }
 
-            // Hook 已安装（非首次安装，用户修改配置）→ 对当前文档立即执行字体替换
+            // Hook 已安装（非首次安装，用户修改配置）→ 对当前文档执行字体替换
             var doc = AcadApp.DocumentManager.MdiActiveDocument;
             if (doc != null)
             {
-                // 重置执行跟踪，以便重新处理当前文档
-                DocumentContextManager.Instance.Remove(doc);
-                ExecutionController.Instance.Execute(doc, "AFR Command");
+                var contextMgr = DocumentContextManager.Instance;
+                var storedResults = contextMgr.GetDetectionResults(doc);
+
+                if (storedResults != null && storedResults.Count > 0)
+                {
+                    // 有历史检测结果 → 样式已被替换为旧字体，重新检测会误判为"不缺失"。
+                    // 复用存储的原始检测结果，用新配置的字体重新覆盖这些样式。
+                    ReapplyWithNewConfig(doc, storedResults, config, log);
+                }
+                else
+                {
+                    // 无历史结果（从未执行过自动替换）→ 走正常检测替换流程
+                    contextMgr.Remove(doc);
+                    ExecutionController.Instance.Execute(doc, "AFR Command");
+                }
             }
         }
         catch (System.Exception ex)
@@ -237,6 +249,81 @@ public class AfrCommands
         {
             log.Error("卸载失败", ex);
             log.Flush();
+        }
+    }
+
+    /// <summary>
+    /// 用新配置的替换字体重新覆盖已替换过的样式。
+    /// <para>
+    /// 复用存储的原始检测结果构建 <see cref="StyleFontReplacement"/> 列表，
+    /// 通过 <see cref="FontReplacer.ReplaceByStyleMapping"/> 直接按样式名覆盖字体，
+    /// 绕过缺失检测（因为旧替换字体已可用，重新检测会误判为"不缺失"）。
+    /// 不包含 MText 内联字体扫描。
+    /// </para>
+    /// </summary>
+    private static void ReapplyWithNewConfig(
+        Autodesk.AutoCAD.ApplicationServices.Document doc,
+        List<FontCheckResult> storedResults,
+        ConfigService config,
+        LogService log)
+    {
+        DiagnosticLogger.Info("命令", $"用新配置重新替换 {storedResults.Count} 个样式");
+
+        using (doc.LockDocument())
+        {
+            var context = new FontDetectionContext(doc.Database);
+
+            // 将原始检测结果转换为 StyleFontReplacement 列表
+            // 每个原本缺失的样式都用新配置的字体覆盖
+            var replacements = new List<StyleFontReplacement>();
+            for (int i = 0; i < storedResults.Count; i++)
+            {
+                var r = storedResults[i];
+                if (r.IsTrueType)
+                {
+                    if (r.IsMainFontMissing && !string.IsNullOrEmpty(config.TrueTypeFont))
+                        replacements.Add(new StyleFontReplacement(r.StyleName, true, config.TrueTypeFont, string.Empty));
+                }
+                else
+                {
+                    if (r.IsMainFontMissing && !string.IsNullOrEmpty(config.MainFont))
+                        replacements.Add(new StyleFontReplacement(r.StyleName, false, config.MainFont, config.BigFont));
+                    else if (r.IsBigFontMissing && !string.IsNullOrEmpty(config.BigFont))
+                        replacements.Add(new StyleFontReplacement(r.StyleName, false, string.Empty, config.BigFont));
+                }
+            }
+
+            if (replacements.Count == 0)
+            {
+                log.Info("未检测到需要重新替换的样式。");
+                return;
+            }
+
+            DiagnosticLogger.Info("命令", $"构建 {replacements.Count} 条替换指令");
+            int replaceCount = FontReplacer.ReplaceByStyleMapping(replacements, context);
+
+            // 二次验证
+            var postContext = new FontDetectionContext(doc.Database);
+            var stillMissing = FontDetector.DetectMissingFonts(postContext);
+            var contextMgr = DocumentContextManager.Instance;
+            contextMgr.StoreStillMissingResults(doc, stillMissing);
+
+            int stillMissingSlotCount = 0;
+            for (int i = 0; i < stillMissing.Count; i++)
+            {
+                if (stillMissing[i].IsMainFontMissing) stillMissingSlotCount++;
+                if (stillMissing[i].IsBigFontMissing && !stillMissing[i].IsTrueType) stillMissingSlotCount++;
+            }
+
+            // 清理残留 SHX 引用
+            FontReplacer.CleanupStaleShxReferences(context);
+
+            // Regen 刷新显示
+            if (replaceCount > 0) doc.Editor.Regen();
+
+            // 输出统计（不含 MText 内联扫描）
+            log.AddStatistics(storedResults, stillMissingSlotCount);
+            contextMgr.MarkExecuted(doc);
         }
     }
 }

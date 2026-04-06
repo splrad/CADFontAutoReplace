@@ -96,7 +96,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         var log = LogService.Instance;
         try
         {
-            // 第零阶段: 安装字体 Hook — 在字体加载前就位，才能拦截缺失字体请求
+            // 第零阶段 A: 安装字体 Hook — 在字体加载前就位，才能拦截缺失字体请求
             if (PlatformManager.Platform.SupportsLdFileHook)
                 PlatformManager.FontHook.Install();
 
