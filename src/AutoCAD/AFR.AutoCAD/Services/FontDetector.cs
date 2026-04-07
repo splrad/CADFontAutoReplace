@@ -22,6 +22,10 @@ internal static class FontDetector
     // 在后台线程异步构建系统字体索引（字族名集合），供 IsSystemFont 快速查询
     private static readonly Task<HashSet<string>> _systemFontNamesTask = Task.Run(BuildSystemFontIndex);
 
+    // FindFile 缓存 key 前缀（预计算，避免每次调用 int.ToString()）
+    private static readonly string FindFilePrefixShx = ((int)FindFileHint.CompiledShapeFile).ToString() + ":";
+    private static readonly string FindFilePrefixTtf = ((int)FindFileHint.TrueTypeFontFile).ToString() + ":";
+
     /// <summary>预热系统字体索引。调用此方法会触发后台索引构建（如果尚未开始）。</summary>
     public static void PrewarmSystemFonts() { }
 
@@ -201,15 +205,20 @@ internal static class FontDetector
         if (TryFindFile(typeface + ".ttf", context, FindFileHint.TrueTypeFontFile)) return true;
         if (TryFindFile(typeface + ".ttc", context, FindFileHint.TrueTypeFontFile)) return true;
 
-        // 本地化名称反查: 通过 WPF 字体家族匹配本地名称（如 "宋体" → "SimSun"）
-        try
+        // 本地化名称反查（同步降级）: 仅当异步索引尚未就绪时执行 WPF 全量扫描。
+        // 索引就绪后 BuildSystemFontIndex 已将所有 FamilyNames.Values 收入 HashSet，
+        // 上方 Contains 返回 false 即表示字体确实不存在，LINQ 不会有不同结果。
+        if (!_systemFontNamesTask.IsCompletedSuccessfully)
         {
-            var family = System.Windows.Media.Fonts.SystemFontFamilies
-                .FirstOrDefault(f => f.FamilyNames.Values.Any(
-                    n => string.Equals(n, typeface, StringComparison.OrdinalIgnoreCase)));
-            if (family != null) return true;
+            try
+            {
+                var family = System.Windows.Media.Fonts.SystemFontFamilies
+                    .FirstOrDefault(f => f.FamilyNames.Values.Any(
+                        n => string.Equals(n, typeface, StringComparison.OrdinalIgnoreCase)));
+                if (family != null) return true;
+            }
+            catch { }
         }
-        catch { }
 
         return false;
     }
@@ -217,7 +226,9 @@ internal static class FontDetector
     /// <summary>通过 HostApplicationServices.FindFile 查找字体文件，结果缓存在 context 中。</summary>
     private static bool TryFindFile(string fileName, FontDetectionContext context, FindFileHint hint)
     {
-        var cacheKey = string.Concat(((int)hint).ToString(), ":", fileName);
+        var cacheKey = string.Concat(
+            hint == FindFileHint.CompiledShapeFile ? FindFilePrefixShx : FindFilePrefixTtf,
+            fileName);
         if (context.FindFileCache.TryGetValue(cacheKey, out var cached)) return cached;
         bool found;
         try { var r = HostApplicationServices.Current.FindFile(fileName, context.Db, hint); found = !string.IsNullOrEmpty(r); }

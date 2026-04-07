@@ -82,10 +82,11 @@ internal sealed class ExecutionController
                     missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont, context);
                 DiagnosticLogger.EndPhase($"替换: {replaceCount}个");
 
-                // 替换后二次检测：用全新 context 重新检测，确认哪些字体仍然缺失
+                // 替换后二次检测：重新检测确认哪些字体仍然缺失
                 // （当用户配置的替换字体本身也不可用时会出现此情况）
-                var postContext = new FontDetectionContext(doc.Database);
-                var stillMissing = FontDetector.DetectMissingFonts(postContext);
+                // 复用原 context — 同一次 Execute 内磁盘字体文件和系统字体注册未变化，
+                // FindFileCache 和 FontMetricsCache 仍然有效，避免重复的 FindFile/GDI 调用
+                var stillMissing = FontDetector.DetectMissingFonts(context);
                 contextMgr.StoreStillMissingResults(doc, stillMissing);
                 DiagnosticLogger.Log("验证", $"替换后仍缺失: {stillMissing.Count}个");
 
@@ -100,10 +101,12 @@ internal sealed class ExecutionController
                 // 清理 Hook 可能导致的陈旧 SHX 引用（仅在 Hook 启用时需要）
                 FontReplacer.CleanupStaleShxReferences(context);
 
+                #if DEBUG
                 // 诊断: 在 Regen 前读回样式表，验证替换是否已持久化到数据库
                 DiagnosticLogger.BeginPhase("验证替换结果");
                 VerifyStyleTableAfterReplace(doc.Database, missingFonts);
                 DiagnosticLogger.EndPhase();
+#endif
 
                 // Regen 刷新显示 — 使替换后的字体立即可见
                 doc.Editor.Regen();
@@ -115,6 +118,7 @@ internal sealed class ExecutionController
                 var inlineFonts = MTextInlineFontScanner.ScanInlineFonts(doc.Database);
                 var redirectLog = LdFileHook.GetRawRedirectLog();
 
+                #if DEBUG
                 // 诊断: 记录交叉比对的两侧数据，便于排查匹配失败原因
                 if (inlineFonts.Count > 0)
                 {
@@ -126,6 +130,7 @@ internal sealed class ExecutionController
                     foreach (var (key, (rep, ft)) in redirectLog)
                         DiagnosticLogger.Log("MText内联", $"重定向记录: '{key}' → '{rep}' param2={ft}");
                 }
+#endif
 
                 var inlineFixResults = BuildInlineFixRecords(inlineFonts, redirectLog);
                 contextMgr.StoreInlineFontFixResults(doc, inlineFixResults);
@@ -186,7 +191,9 @@ internal sealed class ExecutionController
 
     /// <summary>
     /// 诊断: 在 Regen 前读回样式表，验证 FontReplacer 的修改是否已写入数据库。
+    /// 仅 DEBUG 构建有效 — Release 中调用点被 #if DEBUG 排除。
     /// </summary>
+#if DEBUG
     private static void VerifyStyleTableAfterReplace(
         Database db, IReadOnlyList<FontCheckResult> missingFonts)
     {
@@ -235,4 +242,5 @@ internal sealed class ExecutionController
             DiagnosticLogger.Log("验证", $"读回样式表失败: {ex.Message}");
         }
     }
+#endif
 }

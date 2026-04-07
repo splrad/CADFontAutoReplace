@@ -222,15 +222,18 @@ internal static class LdFileHook
             if (param2 == FontTypeShape)
                 return _trampolineDelegate(fileName, param2, db, desc);
 
-            string shxName = EnsureShx(fontName);
-            bool fontExists = _availableFonts.Contains(fontName) || _availableFonts.Contains(shxName);
-
-            // 字体文件存在 → 直接放行
-            if (fontExists)
+            // 字体存在性检查 — 先用原名查找（零分配快速路径），
+            // 仅在未命中且名称不以 .shx 结尾时才拼接后缀重试
+            if (_availableFonts.Contains(fontName))
                 return _trampolineDelegate(fileName, param2, db, desc);
 
-            // 系统 TrueType 字族名放行
-            string baseName = fontName.TrimStart('@');
+            bool isShxRequest = fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase);
+            if (!isShxRequest && _availableFonts.Contains(fontName + ".shx"))
+                return _trampolineDelegate(fileName, param2, db, desc);
+
+            // 系统 TrueType 字族名放行（复用 baseName 避免后续重复 TrimStart）
+            bool hasAtPrefix = fontName[0] == '@';
+            string baseName = hasAtPrefix ? fontName.TrimStart('@') : fontName;
             if (FontDetector.IsSystemFont(baseName))
                 return _trampolineDelegate(fileName, param2, db, desc);
 
@@ -240,7 +243,6 @@ internal static class LdFileHook
             //   注意: AutoCAD 可能传入不带 .shx 后缀的字体名（如 'REALSZ'、'2'）
             // SHX 大字体（param2=4）→ Hook 处理（FONTALT 不区分大/主字体，无法正确替换）
             // TrueType（非 .shx 且非大字体）→ Hook 处理（FONTALT 不处理 TrueType 字族名）
-            bool isShxRequest = fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase);
 
             // 常规主字体 → 放行，由 FONTALT 处理
             if (param2 == FontTypeRegular)
@@ -255,9 +257,9 @@ internal static class LdFileHook
                 : ResolveMissingTrueTypeFont(fontName);
             if (resolved != null)
             {
-                string normalizedName = isShxRequest
-                    ? shxName.ToLowerInvariant()
-                    : fontName.TrimStart('@');
+                // 直接用 fontName / baseName 作为 key — _redirectLog 使用 OrdinalIgnoreCase，
+                // 无需 ToLowerInvariant；复用已计算的 baseName 避免重复 TrimStart
+                string normalizedName = isShxRequest ? EnsureShx(fontName) : baseName;
                 _redirectLog.TryAdd(normalizedName, (resolved, param2));
 
                 DiagnosticLogger.Log("Hook", $"重定向: '{fontName}' param2={param2} → '{resolved}'");
