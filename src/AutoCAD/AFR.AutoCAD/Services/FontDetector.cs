@@ -197,7 +197,15 @@ internal static class FontDetector
     private static bool IsTrueTypeFontAvailable(string typeface, string fileName, FontDetectionContext context)
     {
         if (string.IsNullOrWhiteSpace(typeface)) return true;
-        if (_systemFontNamesTask.IsCompletedSuccessfully && _systemFontNamesTask.Result.Contains(typeface)) return true;
+
+        // 一次性快照任务状态，避免 TOCTOU 竞态：
+        // 若在 FindFile 检查期间索引任务恰好完成，不快照会导致
+        // 第一处检查（跳过索引）和第二处检查（跳过 WPF 回退）同时成立，
+        // 使已安装的 TrueType 字体被误判为缺失。
+        var task = _systemFontNamesTask;
+        bool indexReady = task.IsCompletedSuccessfully;
+
+        if (indexReady && task.Result.Contains(typeface)) return true;
         if (!string.IsNullOrWhiteSpace(fileName))
         {
             if (TryFindFile(NormalizeFontName(fileName), context, FindFileHint.TrueTypeFontFile)) return true;
@@ -205,10 +213,10 @@ internal static class FontDetector
         if (TryFindFile(typeface + ".ttf", context, FindFileHint.TrueTypeFontFile)) return true;
         if (TryFindFile(typeface + ".ttc", context, FindFileHint.TrueTypeFontFile)) return true;
 
-        // 本地化名称反查（同步降级）: 仅当异步索引尚未就绪时执行 WPF 全量扫描。
-        // 索引就绪后 BuildSystemFontIndex 已将所有 FamilyNames.Values 收入 HashSet，
-        // 上方 Contains 返回 false 即表示字体确实不存在，LINQ 不会有不同结果。
-        if (!_systemFontNamesTask.IsCompletedSuccessfully)
+        // 本地化名称反查（同步降级）: 仅当方法入口时异步索引尚未就绪时执行 WPF 全量扫描。
+        // 使用快照值 indexReady 而非重新读取 IsCompletedSuccessfully，
+        // 确保索引未就绪时 WPF 回退始终执行，不会被竞态窗口跳过。
+        if (!indexReady)
         {
             try
             {
