@@ -128,9 +128,7 @@ internal sealed class ExecutionController
                 }
 #endif
 
-                var inlineFixResults = BuildInlineFixRecords(
-                    inlineFonts, redirectLog, context,
-                    config.MainFont, config.BigFont, config.TrueTypeFont);
+                var inlineFixResults = BuildInlineFixRecords(inlineFonts, redirectLog);
                 contextMgr.StoreInlineFontFixResults(doc, inlineFixResults);
                 DiagnosticLogger.EndPhase($"内联字体: {inlineFonts.Count}个, 修复: {inlineFixResults.Count}个");
 
@@ -162,64 +160,29 @@ internal sealed class ExecutionController
     /// <summary>
     /// 交叉比对 MText 内联字体引用与 Hook 重定向记录，
     /// 构建精确的内联字体修复记录。
-    /// 返回满足以下任一条件的记录:
-    ///   1. 在 Hook 重定向记录中存在（确认被 Hook 修复）
-    ///   2. Hook 未记录但字体在系统中不可用（MText 内联 TrueType 由 GDI/DirectWrite
-    ///      直接渲染不经过 ldfile；SHX 主字体由 FONTALT 机制处理，Hook 不记录）
+    /// 仅返回同时满足以下条件的记录:
+    ///   1. 在 MText 内联字体引用中出现（正向识别）
+    ///   2. 在 Hook 重定向记录中存在（确认被修复）
     /// </summary>
     private static List<InlineFontFixRecord> BuildInlineFixRecords(
         Dictionary<string, InlineFontType> inlineFonts,
-        IReadOnlyDictionary<string, (string Replacement, int FontType)> redirectLog,
-        FontDetectionContext context,
-        string mainFont, string bigFont, string trueTypeFont)
+        IReadOnlyDictionary<string, (string Replacement, int FontType)> redirectLog)
     {
         var records = new List<InlineFontFixRecord>();
 
         foreach (var (fontName, inlineType) in inlineFonts)
         {
-            // 路径1: Hook 已记录重定向 → 直接使用 Hook 提供的替换信息
-            if (redirectLog.TryGetValue(fontName, out var redirect))
-            {
-                string category = inlineType switch
-                {
-                    InlineFontType.ShxBigFont => "SHX大字体",
-                    InlineFontType.TrueType => "TrueType",
-                    _ => "SHX主字体"
-                };
-                records.Add(new InlineFontFixRecord(fontName, redirect.Replacement, "MText内联", category));
+            if (!redirectLog.TryGetValue(fontName, out var redirect))
                 continue;
-            }
 
-            // 路径2: Hook 未记录 → 独立检查字体可用性
-            // MText 内联 TrueType 字体由 GDI/DirectWrite 直接渲染，不经过 ldfile；
-            // SHX 主字体（param2=0）由 FONTALT 机制处理，Hook 不记录。
-            bool isMissing;
-            string? replacement;
-            string fallbackCategory;
-
-            switch (inlineType)
+            string category = inlineType switch
             {
-                case InlineFontType.ShxMain:
-                    isMissing = !FontDetector.IsShxFontAvailable(fontName, context);
-                    replacement = mainFont;
-                    fallbackCategory = "SHX主字体";
-                    break;
-                case InlineFontType.ShxBigFont:
-                    isMissing = !FontDetector.IsShxFontAvailable(fontName, context);
-                    replacement = bigFont;
-                    fallbackCategory = "SHX大字体";
-                    break;
-                case InlineFontType.TrueType:
-                    isMissing = !FontDetector.IsTrueTypeFontAvailable(fontName, context);
-                    replacement = trueTypeFont;
-                    fallbackCategory = "TrueType";
-                    break;
-                default:
-                    continue;
-            }
+                InlineFontType.ShxBigFont => "SHX大字体",
+                InlineFontType.TrueType => "TrueType",
+                _ => "SHX主字体"
+            };
 
-            if (isMissing && !string.IsNullOrEmpty(replacement))
-                records.Add(new InlineFontFixRecord(fontName, replacement, "MText内联", fallbackCategory));
+            records.Add(new InlineFontFixRecord(fontName, redirect.Replacement, "MText内联", category));
         }
 
         return records;

@@ -238,28 +238,20 @@ internal static class LdFileHook
                 return _trampolineDelegate(fileName, param2, db, desc);
 
             // 字体缺失 → 按字体类型选择替换策略
-            // 常规 SHX 主字体（param2=0）→ 放行给 FONTALT 原生机制处理，不通过 Hook 重定向
-            //   原因: Hook 级别的重定向会干扰块参照的字体缓存渲染
-            //   注意: AutoCAD 可能传入不带 .shx 后缀的字体名（如 'REALSZ'、'2'）
-            // SHX 大字体（param2=4）→ Hook 处理（FONTALT 不区分大/主字体，无法正确替换）
-            // TrueType（非 .shx 且非大字体）→ Hook 处理（FONTALT 不处理 TrueType 字族名）
+            // SHX 主字体（param2=0）和大字体（param2=4）→ Hook 统一重定向
+            //   注意: AutoCAD 可能传入不带 .shx 后缀的小写字体名（如 'noexistshx'、'2'）
+            // TrueType（非 SHX 类型请求）→ Hook 处理（FONTALT 不处理 TrueType 字族名）
 
-            // 常规主字体 → 放行，由 FONTALT 处理
-            if (param2 == FontTypeRegular)
-            {
-                DiagnosticLogger.Log("Hook", $"FONTALT 放行: '{fontName}' param2={param2}");
-                return _trampolineDelegate(fileName, param2, db, desc);
-            }
-
-            // 大字体请求始终按 SHX 处理（即使不带 .shx 后缀）；其余按文件名后缀分类
-            string? resolved = (param2 == FontTypeBigFont || isShxRequest)
+            // SHX 字体判定: param2 明确为 SHX 类型（主字体/大字体），或文件名以 .shx 结尾
+            bool isShxFont = param2 == FontTypeRegular || param2 == FontTypeBigFont || isShxRequest;
+            string? resolved = isShxFont
                 ? ResolveMissingShxFont(fontName, param2)
                 : ResolveMissingTrueTypeFont(fontName);
             if (resolved != null)
             {
-                // 直接用 fontName / baseName 作为 key — _redirectLog 使用 OrdinalIgnoreCase，
-                // 无需 ToLowerInvariant；复用已计算的 baseName 避免重复 TrimStart
-                string normalizedName = isShxRequest ? EnsureShx(fontName) : baseName;
+                // 归一化 key: SHX 字体确保 .shx 后缀（AutoCAD 可能传入无后缀的名称如 'noexistshx'），
+                // TrueType 使用去 @ 后的字族名。两者均与 MTextFontParser 的归一化规则对齐。
+                string normalizedName = isShxFont ? EnsureShx(baseName) : baseName;
                 _redirectLog.TryAdd(normalizedName, (resolved, param2));
 
                 DiagnosticLogger.Log("Hook", $"重定向: '{fontName}' param2={param2} → '{resolved}'");
