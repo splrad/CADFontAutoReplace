@@ -263,6 +263,22 @@ internal static class FontReplacer
                         }
                     }
                 }
+                // 仅大字体需要替换（主字体未变更）— 与 ReplaceMissingFonts 的 BigFont-only 分支对齐
+                else if (!replacement.IsTrueType
+                         && !string.IsNullOrEmpty(replacement.BigFontReplacement)
+                         && !string.IsNullOrEmpty(style.FileName))
+                {
+                    if (FontDetector.IsShxFontAvailable(replacement.BigFontReplacement, context)
+                        && !FontDetector.IsShxTypeMismatch(replacement.BigFontReplacement, context, expectBigFont: true))
+                    {
+                        style.BigFontFileName = replacement.BigFontReplacement;
+                        changed = true;
+                    }
+                    else
+                    {
+                        log.Warning($"样式 '{replacement.StyleName}': 大字体 '{replacement.BigFontReplacement}' 不可用或类型不匹配，已跳过");
+                    }
+                }
 
                 if (changed) replaceCount++;
             }

@@ -76,7 +76,7 @@ internal static class FontDetector
                     DiagnosticLogger.Log("检测", $"样式 '{styleName}' 的 TrueType 描述符损坏，已跳过 TrueType 验证: {fontEx.Message}");
                 }
 
-                bool hasTT = safeFont.HasValue && !string.IsNullOrEmpty(safeFont.Value.TypeFace);
+                bool hasTT = safeFont.HasValue && !string.IsNullOrWhiteSpace(safeFont.Value.TypeFace);
                 bool hasFile = !string.IsNullOrWhiteSpace(fileName);
 
                 // FileName 为 TrueType 文件时，该样式仍属于 TrueType（AutoCAD 常同时写入 TypeFace 和 .ttf FileName）
@@ -237,21 +237,48 @@ internal static class FontDetector
         return found;
     }
 
-    /// <summary>通过 FindFile 查找字体文件并返回完整路径，找不到返回 null。</summary>
+    /// <summary>通过 FindFile 查找字体文件并返回完整路径，找不到返回 null。复用 FindFileCache 避免重复调用。</summary>
     private static string? TryFindFilePath(string fileName, FontDetectionContext context, FindFileHint hint)
     {
+        string normalized = NormalizeFontName(fileName);
+
+        string? path = FindFilePathCached(normalized, context, hint);
+        if (path != null) return path;
+
+        if (!Path.HasExtension(normalized))
+        {
+            path = FindFilePathCached(normalized + ".shx", context, hint);
+            if (path != null) return path;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 单文件名的 FindFile 带缓存路径返回：
+    /// 缓存已记录为不存在时直接短路；否则调用 FindFile 并回填 bool 缓存。
+    /// </summary>
+    private static string? FindFilePathCached(string normalized, FontDetectionContext context, FindFileHint hint)
+    {
+        var cacheKey = string.Concat(
+            hint == FindFileHint.CompiledShapeFile ? FindFilePrefixShx : FindFilePrefixTtf,
+            normalized);
+
+        if (context.FindFileCache.TryGetValue(cacheKey, out var cached) && !cached)
+            return null;
+
         try
         {
-            string normalized = NormalizeFontName(fileName);
             string result = HostApplicationServices.Current.FindFile(normalized, context.Db, hint);
-            if (!string.IsNullOrEmpty(result)) return result;
-            if (!Path.HasExtension(normalized))
+            if (!string.IsNullOrEmpty(result))
             {
-                result = HostApplicationServices.Current.FindFile(normalized + ".shx", context.Db, hint);
-                if (!string.IsNullOrEmpty(result)) return result;
+                context.FindFileCache.TryAdd(cacheKey, true);
+                return result;
             }
         }
         catch { }
+
+        context.FindFileCache.TryAdd(cacheKey, false);
         return null;
     }
 
@@ -308,6 +335,7 @@ internal static class FontDetector
 
     /// <summary>
     /// 后台构建系统字体索引：枚举所有已安装的 TrueType 字族名（含本地化名称）。
+    /// 逐字体容错，确保单个损坏字体不会中断后续索引。
     /// </summary>
     private static HashSet<string> BuildSystemFontIndex()
     {
@@ -316,8 +344,21 @@ internal static class FontDetector
         {
             foreach (var family in Fonts.SystemFontFamilies)
             {
-                names.Add(family.Source);
-                foreach (var localizedName in family.FamilyNames.Values) names.Add(localizedName);
+                try
+                {
+                    if (!string.IsNullOrEmpty(family.Source))
+                        names.Add(family.Source);
+
+                    foreach (var localizedName in family.FamilyNames.Values)
+                    {
+                        if (!string.IsNullOrEmpty(localizedName))
+                            names.Add(localizedName);
+                    }
+                }
+                catch
+                {
+                    // 跳过单个损坏字体，继续索引后续字体
+                }
             }
         }
         catch (Exception ex) { DiagnosticLogger.LogError("系统字体索引构建失败", ex); }
