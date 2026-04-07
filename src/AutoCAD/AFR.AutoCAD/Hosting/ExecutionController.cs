@@ -67,51 +67,47 @@ internal sealed class ExecutionController
                 contextMgr.StoreDetectionResults(doc, missingFonts);
                 DiagnosticLogger.EndPhase($"缺失: {missingFonts.Count}个");
 
-                if (missingFonts.Count == 0)
-                {
-                    log.Info("未检测到缺失字体。");
-                    contextMgr.MarkExecuted(doc);
-                    DiagnosticLogger.WriteSummary();
-                    summarized = true;
-                    return;
-                }
-
-                // 第二阶段: 将缺失字体替换为用户配置的替换字体
-                DiagnosticLogger.BeginPhase("替换缺失字体");
-                int replaceCount = FontReplacer.ReplaceMissingFonts(
-                    missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont, context);
-                DiagnosticLogger.EndPhase($"替换: {replaceCount}个");
-
-                // 替换后二次检测：重新检测确认哪些字体仍然缺失
-                // （当用户配置的替换字体本身也不可用时会出现此情况）
-                // 复用原 context — 同一次 Execute 内磁盘字体文件和系统字体注册未变化，
-                // FindFileCache 和 FontMetricsCache 仍然有效，避免重复的 FindFile/GDI 调用
-                var stillMissing = FontDetector.DetectMissingFonts(context);
-                contextMgr.StoreStillMissingResults(doc, stillMissing);
-                DiagnosticLogger.Log("验证", $"替换后仍缺失: {stillMissing.Count}个");
-
-                // 计算未替换的字体槽位数（一个样式可能同时缺失主字体和大字体，各算一个槽位）
                 int stillMissingSlotCount = 0;
-                for (int i = 0; i < stillMissing.Count; i++)
+
+                // 第二阶段: 将缺失字体替换为用户配置的替换字体（仅在有缺失时执行）
+                if (missingFonts.Count > 0)
                 {
-                    if (stillMissing[i].IsMainFontMissing) stillMissingSlotCount++;
-                    if (stillMissing[i].IsBigFontMissing && !stillMissing[i].IsTrueType) stillMissingSlotCount++;
-                }
+                    DiagnosticLogger.BeginPhase("替换缺失字体");
+                    int replaceCount = FontReplacer.ReplaceMissingFonts(
+                        missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont, context);
+                    DiagnosticLogger.EndPhase($"替换: {replaceCount}个");
 
-                // 清理 Hook 可能导致的陈旧 SHX 引用（仅在 Hook 启用时需要）
-                FontReplacer.CleanupStaleShxReferences(context);
+                    // 替换后二次检测：重新检测确认哪些字体仍然缺失
+                    // （当用户配置的替换字体本身也不可用时会出现此情况）
+                    // 复用原 context — 同一次 Execute 内磁盘字体文件和系统字体注册未变化，
+                    // FindFileCache 和 FontMetricsCache 仍然有效，避免重复的 FindFile/GDI 调用
+                    var stillMissing = FontDetector.DetectMissingFonts(context);
+                    contextMgr.StoreStillMissingResults(doc, stillMissing);
+                    DiagnosticLogger.Log("验证", $"替换后仍缺失: {stillMissing.Count}个");
 
-                #if DEBUG
-                // 诊断: 在 Regen 前读回样式表，验证替换是否已持久化到数据库
-                DiagnosticLogger.BeginPhase("验证替换结果");
-                VerifyStyleTableAfterReplace(doc.Database, missingFonts);
-                DiagnosticLogger.EndPhase();
+                    // 计算未替换的字体槽位数（一个样式可能同时缺失主字体和大字体，各算一个槽位）
+                    for (int i = 0; i < stillMissing.Count; i++)
+                    {
+                        if (stillMissing[i].IsMainFontMissing) stillMissingSlotCount++;
+                        if (stillMissing[i].IsBigFontMissing && !stillMissing[i].IsTrueType) stillMissingSlotCount++;
+                    }
+
+                    // 清理 Hook 可能导致的陈旧 SHX 引用（仅在 Hook 启用时需要）
+                    FontReplacer.CleanupStaleShxReferences(context);
+
+#if DEBUG
+                    // 诊断: 在 Regen 前读回样式表，验证替换是否已持久化到数据库
+                    DiagnosticLogger.BeginPhase("验证替换结果");
+                    VerifyStyleTableAfterReplace(doc.Database, missingFonts);
+                    DiagnosticLogger.EndPhase();
 #endif
 
-                // Regen 刷新显示 — 使替换后的字体立即可见
-                doc.Editor.Regen();
+                    // Regen 刷新显示 — 使替换后的字体立即可见
+                    doc.Editor.Regen();
+                }
 
                 // 第三阶段: 扫描 MText 内联字体，交叉比对 Hook 重定向记录
+                // 始终执行：即使文字样式表无缺失，MText 内联字体仍可能引用缺失字体
                 // 正向扫描法: 解析 MText.Contents 中的 \F/\f 格式代码，
                 // 与 Hook 重定向记录交叉比对，精确识别被修复的内联字体。
                 DiagnosticLogger.BeginPhase("扫描MText内联字体");
@@ -137,7 +133,10 @@ internal sealed class ExecutionController
                 DiagnosticLogger.EndPhase($"内联字体: {inlineFonts.Count}个, 修复: {inlineFixResults.Count}个");
 
                 // 统计汇总 — Regen 之后输出，确保统计信息是最后一行实质内容
-                log.AddStatistics(missingFonts, stillMissingSlotCount, inlineFixResults.Count);
+                if (missingFonts.Count > 0 || inlineFixResults.Count > 0)
+                    log.AddStatistics(missingFonts, stillMissingSlotCount, inlineFixResults.Count);
+                else
+                    log.Info("未检测到缺失字体。");
                 DiagnosticLogger.WriteSummary();
                 summarized = true;
                 log.Flush();

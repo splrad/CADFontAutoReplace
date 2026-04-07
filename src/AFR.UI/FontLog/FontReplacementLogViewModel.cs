@@ -105,6 +105,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
     public bool HasFailed => FailedCount > 0;
     public bool HasItems => Items.Count > 0;
     public bool HasNoItems => !HasItems && !HasInlineFix;
+    public bool HasAnyContent => HasItems || HasInlineFix;
 
     /// <summary>批量操作可选的 SHX 主字体列表（常规字体）。</summary>
     public ObservableCollection<string> AvailableMainFonts { get; }
