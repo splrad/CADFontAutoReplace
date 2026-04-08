@@ -8,6 +8,10 @@ namespace AFR.Hosting;
 /// </summary>
 internal sealed class AutoCadHost : ICadHost
 {
+    /// <inheritdoc/>
+    public nint MainWindowHandle =>
+        Autodesk.AutoCAD.ApplicationServices.Core.Application.MainWindow.Handle;
+
     /// <summary>
     /// 通过 AutoCAD 专用 API 显示模态 WPF 窗口。
     /// 必须使用此方法而非 Window.ShowDialog()，否则窗口不会正确绑定到 AutoCAD 主窗口。

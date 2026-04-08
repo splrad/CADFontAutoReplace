@@ -4,7 +4,7 @@
         xmlns:hc="https://handyorg.github.io/handycontrol"
 		Title="AFR — 字体替换日志"
 		Width="610" Height="650"
-		WindowStartupLocation="CenterScreen"
+		WindowStartupLocation="Manual"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         WindowStyle="None"

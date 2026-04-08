@@ -34,5 +34,7 @@
     </Compile>
     <Compile Include="$(MSBuildThisFileDirectory)MTextEditor\MTextEditorViewModel.cs" Link="MTextEditor\MTextEditorViewModel.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)MTextEditor\MTextSyntaxHighlighter.cs" Link="MTextEditor\MTextSyntaxHighlighter.cs" />
+    <!-- Shared -->
+    <Compile Include="$(MSBuildThisFileDirectory)WindowPositionHelper.cs" Link="WindowPositionHelper.cs" />
   </ItemGroup>
 </Project>

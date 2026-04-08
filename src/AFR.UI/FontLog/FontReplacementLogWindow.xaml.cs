@@ -42,6 +42,7 @@ public partial class FontReplacementLogWindow : Window
         ViewModel = vm;
         DataContext = vm;
         InitializeComponent();
+        WindowPositionHelper.SetupCenterOnParent(this);
 
         // 确保窗口不超过屏幕可用高度
         double workArea = SystemParameters.WorkArea.Height;

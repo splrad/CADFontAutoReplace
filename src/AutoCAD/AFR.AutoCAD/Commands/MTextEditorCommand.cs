@@ -49,7 +49,6 @@ public class MTextEditorCommand
             DiagnosticLogger.Log("AFRVIEW", $"已读取 MText 内容 (长度={contents.Length})");
 
             var window = new MTextEditorWindow(contents);
-            window.ParentWindowHandle = AcadApp.MainWindow.Handle;
             PlatformManager.Host.ShowModalWindow(window);
         }
         catch (System.Exception ex)

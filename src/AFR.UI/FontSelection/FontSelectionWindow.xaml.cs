@@ -25,6 +25,7 @@ public partial class FontSelectionWindow : Window
         ViewModel = new FontSelectionViewModel();
         DataContext = ViewModel;
         InitializeComponent();
+        WindowPositionHelper.SetupCenterOnParent(this);
     }
 
     private void OnConfirm(object sender, RoutedEventArgs e)

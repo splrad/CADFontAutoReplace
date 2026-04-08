@@ -11,6 +11,12 @@ namespace AFR.Abstractions;
 public interface ICadHost
 {
     /// <summary>
+    /// CAD 主窗口的原生窗口句柄 (HWND)。
+    /// 用于将 WPF 弹出窗口定位到 CAD 所在屏幕的中心位置。
+    /// </summary>
+    nint MainWindowHandle { get; }
+
+    /// <summary>
     /// 以模态方式显示一个 WPF 窗口。
     /// CAD 平台负责将窗口正确挂载到宿主应用程序的窗口层级中。
     /// </summary>
