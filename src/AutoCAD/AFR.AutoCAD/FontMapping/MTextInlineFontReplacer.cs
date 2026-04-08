@@ -28,7 +28,8 @@ internal static class MTextInlineFontReplacer
         foreach (var (fontName, inlineType) in inlineFonts)
         {
             if (inlineType == InlineFontType.TrueType
-                && !FontDetector.IsTrueTypeFontAvailable(fontName, context))
+                && !FontDetector.IsTrueTypeFontAvailable(fontName, context)
+                && !ContainsGarbledChars(fontName))
             {
                 missingTrueType.Add(fontName);
             }
@@ -232,6 +233,22 @@ internal static class MTextInlineFontReplacer
 
     private static string EnsureShx(string name) =>
         name.EndsWith(".shx", StringComparison.OrdinalIgnoreCase) ? name : name + ".shx";
+
+    /// <summary>
+    /// 检查字体名是否包含编码异常字符（U+FE00 以上）。
+    /// DWG 文件使用旧版编码（GBK 等）时，MText Contents 中的中文字体名
+    /// 可能被错误解码为 U+FFxx 区域的无意义字符。此类字体名不是合法字体，
+    /// 不应参与 \f→\F 转换或出现在 AFRLOG 面板中。
+    /// </summary>
+    private static bool ContainsGarbledChars(string fontName)
+    {
+        for (int i = 0; i < fontName.Length; i++)
+        {
+            if (fontName[i] >= '\uFE00')
+                return true;
+        }
+        return false;
+    }
 
     #endregion
 }

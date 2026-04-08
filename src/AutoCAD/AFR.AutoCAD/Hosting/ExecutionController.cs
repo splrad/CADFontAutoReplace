@@ -114,6 +114,7 @@ internal sealed class ExecutionController
                 var inlineFonts = MTextInlineFontScanner.ScanInlineFonts(doc.Database);
 
                 // 将缺失 TrueType \f 转换为 SHX \F，使后续渲染走 ldfile → Hook 统一管理
+                // 排除编码乱码字体名（DWG 旧版编码产生的 U+FE00+ 无效字符）
                 var ttfFixRecords = MTextInlineFontReplacer.ConvertMissingTrueTypeToShx(
                     doc.Database, inlineFonts, context,
                     config.MainFont, config.BigFont);
@@ -187,6 +188,27 @@ internal sealed class ExecutionController
         foreach (var (fontName, inlineType) in inlineFonts)
         {
             if (!redirectLog.TryGetValue(fontName, out var redirect))
+            {
+                // @ 前缀兼容: Hook 以 baseName（去 @）为 key 存储重定向记录，
+                // 但 MText 解析器保留了原始的 @ 前缀（如 \Fmain,@big|）。
+                // 去掉 @ 后重试匹配，匹配成功时记录仍使用原始带 @ 的字体名。
+                if (fontName.Length > 1 && fontName[0] == '@'
+                    && redirectLog.TryGetValue(fontName.TrimStart('@'), out redirect))
+                {
+                    // 匹配成功，继续处理
+                }
+                else
+                {
+                    continue;
+                }
+            }
+
+            // 过滤自重定向: Hook 处理 @big.shx 时以 baseName（big.shx）为 key 存入 redirect log，
+            // 解析结果为 big.shx → big.shx（字体文件本身存在）。若 MText 同时包含无 @ 的引用
+            // （如 \Fmain,big|），该引用会匹配到这条自重定向记录，产生误报。
+            // 仅过滤无 @ 前缀的自重定向；@ 变体的重定向是有意义的（Hook 剥离 @ 后定位到文件）。
+            if (fontName[0] != '@'
+                && string.Equals(fontName, redirect.Replacement, StringComparison.OrdinalIgnoreCase))
                 continue;
 
             string category = inlineType switch
