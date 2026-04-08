@@ -100,9 +100,8 @@ internal sealed class LogService : ILogService
         else
             msg = $"[字体修复]已替换缺失字体 {total} 个(SHX主字体:{shxCount},SHX大字体:{bigFontCount},TrueType:{trueTypeCount})";
 
-        // 如果有 MText 内联字体映射，追加到汇总消息末尾
-        if (mtextMappingCount > 0)
-            msg += $" | MText内联字体映射：{mtextMappingCount}";
+        // MText 内联字体映射统计始终追加到汇总消息末尾
+        msg += $" | MText内联字体映射：{mtextMappingCount}";
 
         // --- 第三步：将汇总消息写入缓冲区 ---
         lock (_lock)
