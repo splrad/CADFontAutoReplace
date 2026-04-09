@@ -1,0 +1,55 @@
+name: PR 合并规范检查
+
+on:
+  pull_request:
+    branches:
+      - master
+    types: [opened, synchronize, reopened]
+
+jobs:
+  branch-policy-check:
+    runs-on: ubuntu-latest
+    # 授予写入权限，以便 Action 可以发表评论和修改标签
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: 验证分支流向
+        id: check
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          CUR_REPO: ${{ github.repository }}
+        # 使用 bash 变量处理，防止 Shell 注入攻击
+        run: |
+          echo "Checking merge request: $HEAD_REPO:$HEAD_REF -> $CUR_REPO:$BASE_REF"
+          
+          if [ "$HEAD_REPO" != "$CUR_REPO" ]; then
+            echo "error_msg=❌ 错误：禁止从外部 Fork 仓库直接向 master 提交 PR。" >> $GITHUB_ENV
+            exit 1
+          fi
+          
+          if [ "$HEAD_REF" != "test" ]; then
+            echo "error_msg=❌ 拒绝合并：根据 Git Flow 规范，只有 'test' 分支可以合并到 'master'。当前分支为: $HEAD_REF" >> $GITHUB_ENV
+            exit 1
+          fi
+          
+          echo "✅ 验证通过：符合工作流规范。"
+
+      - name: 违规自动反馈
+        # 仅在上述步骤失败时运行
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const errorMsg = process.env.error_msg || "❌ 分支检查失败：请确保来源分支为 `test`。";
+            const commentBody = `### 🤖 流程自动检查失败\n\n${errorMsg}\n\n**操作指引：**\n1. 请关闭此 Pull Request。\n2. 确保代码已合并至 \`test\` 分支并完成测试。\n3. 从 \`test\` 分支发起新的 PR 指向 \`master\`。`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: commentBody
+            })
