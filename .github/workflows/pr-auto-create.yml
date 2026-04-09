@@ -1,4 +1,4 @@
-name: 🚀 代码变更自动化准入与集成机制
+name: 🚀 合并请求自动创建
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   automation-integration:
-    name: 🤖 合并请求自动生成与集成控制
+    name: 🤖 合并请求生成与自动化集成控制
     runs-on: ubuntu-latest
 
     permissions:
@@ -15,8 +15,38 @@ jobs:
       contents: read
 
     steps:
-      - name: 📦 执行代码检出
+      - name: 📦 执行代码全量检出
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # ❗ 获取完整提交历史，供 AI 分析差异
+
+      - name: 🤖 执行 AI 变更摘要生成
+        id: ai-summary
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          # 提取 master 与当前分支之间的差异记录（最近 15 条）
+          CHANGES=$(git log origin/master..HEAD --pretty=format:"- %s" -n 15)
+          
+          # 调用 OpenAI 接口进行语义化总结
+          RESPONSE=$(curl https://api.openai.com/v1/chat/completions \
+            -s \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"model\": \"gpt-4o-mini\",
+              \"messages\": [
+                {\"role\": \"system\", \"content\": \"你是一个高级软件审计助手。请将 Commit 记录整理为专业的 PR 描述。要求包含：1.变更核心；2.技术点总结。使用 Markdown 格式。\"},
+                {\"role\": \"user\", \"content\": \"以下是代码提交记录，请总结为规范的 PR 描述：\n$CHANGES\"}
+              ]
+            }")
+          
+          SUMMARY=$(echo $RESPONSE | jq -r '.choices[0].message.content')
+          
+          # 将 AI 摘要注入环境变量（处理多行文本的安全性写法）
+          echo "AI_PR_BODY<<EOF" >> $GITHUB_ENV
+          echo "$SUMMARY" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: 🔁 执行合并请求生成与状态判定
         env:
@@ -30,13 +60,19 @@ jobs:
             gh pr create \
               --base master \
               --head test \
-              --title "🔄 [自动集成] 分支同步：从 test 交付至 master" \
-              --body "### 🤖 自动化交付报告
+              --title "🔄 [AI 审计] 分支同步：从 test 交付至 master" \
+              --body "### 🤖 AI 自动化交付报告
               
-              **集成路径：** \`test\` ➔ \`master\`
-              **触发源：** 代码推送 (Push)
+              ${{ env.AI_PR_BODY }}
               
-              > 本请求由 **代码变更自动化准入与集成机制** 依据工程规范自动生成，请进行最终审计。"
+              ---
+              > 本请求由 **代码变更自动化集成与合并准入机制** 自动生成。"
           else
-            echo "检测到已存在的集成请求: $PR_EXISTS，系统将跳过重复创建。"
+            echo "检测到已存在的集成请求，正在同步更新 AI 审计描述..."
+            gh pr edit --body "### 🤖 AI 自动化交付报告 (已更新)
+            
+            ${{ env.AI_PR_BODY }}
+            
+            ---
+            > 本请求由 **代码变更自动化集成与合并准入机制** 自动维护更新。"
           fi

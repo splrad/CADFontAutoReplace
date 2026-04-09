@@ -1,5 +1,5 @@
 # GitHub Actions 页面显示的名称：彰显流程的系统化和治理感
-name: 🛡️ 核心开发者身份鉴权与准入机制
+name: 🛡️ 核心开发自动审批
 
 on:
   pull_request_target:
@@ -20,5 +20,6 @@ jobs:
       - name: 🧩 触发核心开发者准入判定
         uses: hmarr/auto-approve-action@v4
         with:
+          github-token: ${{ secrets.APPROVE_TOKEN }}
           # 机器人留下的评论：采用“协议响应”式的措辞
           review-message: "🤖 已完成核心开发者身份校验，自动准入流程已授权。"
