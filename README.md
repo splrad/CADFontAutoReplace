@@ -342,7 +342,7 @@ Debug 构建会在插件 DLL 所在目录生成 `AFR_Diag_*.log` 诊断日志，
 |---|---|---|
 | [AutoCAD 原版字体](docs/autodesk-fonts.md) | Autodesk | 点击查看完整清单 |
 | `tssdchn.shx` `tssdeng.shx` `cadzxw.shx` | 探索者软件 (TSSD) | 探索者结构设计字体 |
-| `cadzxw-e.shx` | ChenYong (longfly199@sina.com) | 探索者英文字体，基于 ROMANS 修改 |
+| `cadzxw-e.shx` | ChenYong longfly199@sina.com) | 探索者英文字体，基于 ROMANS 修改 |
 | `whgdtxt.shx` `whgtxt.shx` `whtgtxt.shx` `whtmtxt.shx` | 天正建筑 | 天正系列中文大字体 |
 | `yjkeng.shx` | 盈建科 (YJK) | 基于 TSSD 英文字体修改 |
 | `CDM_NC.shx` `Cdm.shx` | CDM 软件 | 工程设计字体 |
