@@ -20,13 +20,17 @@ jobs:
         with:
           fetch-depth: 0 # ❗ 获取完整提交历史，供 AI 分析差异
 
-      - name: 🤖 执行 AI 变更摘要生成
+      - name: 🧠 生成变更说明
         id: ai-summary
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           # 提取 master 与当前分支之间的差异记录（最近 15 条）
           CHANGES=$(git log origin/master..HEAD --pretty=format:"- %s" -n 15)
+
+          if [ -z "$CHANGES" ]; then
+            CHANGES="无明显变更"
+          fi
           
           # 调用 OpenAI 接口进行语义化总结
           RESPONSE=$(curl https://api.openai.com/v1/chat/completions \
@@ -36,21 +40,22 @@ jobs:
             -d "{
               \"model\": \"gpt-4o-mini\",
               \"messages\": [
-                {\"role\": \"system\", \"content\": \"你是一个高级软件审计助手。请将 Commit 记录整理为专业的 PR 描述。要求包含：1.变更核心；2.技术点总结。使用 Markdown 格式。\"},
-                {\"role\": \"user\", \"content\": \"以下是代码提交记录，请总结为规范的 PR 描述：\n$CHANGES\"}
+                {\"role\": \"system\", \"content\": \"你是一位资深系统架构师。请将 Git 提交记录转化为简洁清晰的 PR 描述，使用开发者常见表达，避免官话。包含：变更内容、影响范围。使用 Markdown 格式。\"},
+                {\"role\": \"user\", \"content\": \"提交记录如下：\n$CHANGES\"}
               ]
             }")
           
-          SUMMARY=$(echo $RESPONSE | jq -r '.choices[0].message.content')
+          SUMMARY=$(echo $RESPONSE | jq -r '.choices[0].message.content // "⚠️ 生成失败，请手动填写说明。"')
           
-          # 将 AI 摘要注入环境变量（处理多行文本的安全性写法）
+          # 将审计内容注入环境变量（处理多行文本的安全性写法）
           echo "AI_PR_BODY<<EOF" >> $GITHUB_ENV
           echo "$SUMMARY" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
       - name: 🔁 执行合并请求生成与状态判定
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # ❗ 关键点：必须使用个人访问令牌 (PAT)
+          GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
           # 检查是否已经存在从 test 到 master 的 PR
           PR_EXISTS=$(gh pr list --head test --base master --json url --jq '.[0].url')
@@ -60,16 +65,16 @@ jobs:
             gh pr create \
               --base master \
               --head test \
-              --title "🔄 [AI 审计] 分支同步：从 test 交付至 master" \
-              --body "### 🤖 AI 自动化交付报告
+              --title "🔄 分支同步： test ➔ master" \
+              --body "### 🤖 变更说明
               
               ${{ env.AI_PR_BODY }}
               
               ---
               > 本请求由 **代码变更自动化集成与合并准入机制** 自动生成。"
           else
-            echo "检测到已存在的集成请求，正在同步更新 AI 审计描述..."
-            gh pr edit --body "### 🤖 AI 自动化交付报告 (已更新)
+            echo "检测到已存在的集成请求，正在同步更新变更说明..."
+            gh pr edit --body "### 🤖 变更说明 (已更新)
             
             ${{ env.AI_PR_BODY }}
             
