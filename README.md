@@ -126,9 +126,9 @@
 
    | 字体类型 | 说明 | 推荐选择 |
    |:---:|---|---|
-   | **SHX 主字体（西文）** | 替换所有缺失的 SHX 字体 | `txt.shx` 或 `simplex.shx` |
-   | **SHX 大字体（中文）** | 替换缺失的中文大字体 | `hztxt.shx` 或 `gbcbig.shx` |
-   | **TrueType 字体** | 替换缺失的 TrueType 字体 | `宋体` 或 `黑体` |
+   | **SHX 主字体（西文）** | 替换所有缺失的 SHX 字体 | `ming.shx` |
+   | **SHX 大字体（中文）** | 替换缺失的中文大字体 | `hztxt.shx` |
+   | **TrueType 字体** | 替换缺失的 TrueType 字体 | `宋体` |
 
    > 下拉框支持直接输入搜索，比如输入 `txt` 就会筛选出 `txt.shx`
 
