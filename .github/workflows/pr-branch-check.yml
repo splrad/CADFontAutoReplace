@@ -1,7 +1,7 @@
 name: 🔒 主支合并规则校验
 
 on:
-  pull_request:
+  pull_request_target:
     branches:
       - master
     types: [opened, synchronize, reopened]
