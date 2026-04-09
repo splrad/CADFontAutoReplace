@@ -13,10 +13,11 @@ jobs:
         run: |
           echo "Base branch: ${{ github.base_ref }}"
           echo "Head branch: ${{ github.head_ref }}"
+          echo "Head repository: ${{ github.event.pull_request.head.repo.full_name }}"
           
-          if [ "${{ github.head_ref }}" != "test" ]; then
-            echo "❌ Only test branch can merge into master!"
+          if [ "${{ github.head_ref }}" != "test" ] || [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            echo "❌ Only the test branch from this repository can merge into master!"
             exit 1
           else
-            echo "✅ Valid PR from test branch"
+            echo "✅ Valid PR from this repository's test branch"
           fi
