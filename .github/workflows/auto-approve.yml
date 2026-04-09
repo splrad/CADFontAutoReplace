@@ -20,6 +20,7 @@ jobs:
       - name: 🧩 触发核心开发者准入判定
         uses: hmarr/auto-approve-action@v4
         with:
-          github-token: ${{ secrets.APPROVE_TOKEN }}
+          # ❗ 关键：这里必须使用内置 token，代表“机器人”审批“你”的 PR
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           # 机器人留下的评论：采用“协议响应”式的措辞
           review-message: "🤖 已完成核心开发者身份校验，自动准入流程已授权。"
