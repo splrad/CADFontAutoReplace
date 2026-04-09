@@ -1,0 +1,42 @@
+name: 🚀 代码变更自动化准入与集成机制
+
+on:
+  push:
+    branches:
+      - test
+
+jobs:
+  automation-integration:
+    name: 🤖 合并请求自动生成与集成控制
+    runs-on: ubuntu-latest
+
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: 📦 执行代码检出
+        uses: actions/checkout@v4
+
+      - name: 🔁 执行合并请求生成与状态判定
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 检查是否已经存在从 test 到 master 的 PR
+          PR_EXISTS=$(gh pr list --head test --base master --json url --jq '.[0].url')
+          
+          if [ -z "$PR_EXISTS" ]; then
+            echo "未检测到现有集成请求，正在初始化交付程序..."
+            gh pr create \
+              --base master \
+              --head test \
+              --title "🔄 [自动集成] 分支同步：从 test 交付至 master" \
+              --body "### 🤖 自动化交付报告
+              
+              **集成路径：** \`test\` ➔ \`master\`
+              **触发源：** 代码推送 (Push)
+              
+              > 本请求由 **代码变更自动化准入与集成机制** 依据工程规范自动生成，请进行最终审计。"
+          else
+            echo "检测到已存在的集成请求: $PR_EXISTS，系统将跳过重复创建。"
+          fi
