@@ -359,8 +359,9 @@ Debug 构建会在插件 DLL 所在目录生成 `AFR_Diag_*.log` 诊断日志，
 如果本插件对你有帮助，欢迎请开发者喝杯咖啡 ☕ 你的支持是持续开发的动力！
 
 <p align="center">
-  <img src="https://splrad-img.oss-cn-chengdu.aliyuncs.com/20260406215922295.jpg" width="460" />
+  <img src="https://splrad-img.oss-cn-chengdu.aliyuncs.com/20260406215922295.jpg" width="560" />
 </p>
+
 
 ---
 
