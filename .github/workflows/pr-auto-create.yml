@@ -23,7 +23,7 @@ jobs:
       - name: 🧠 生成变更说明
         id: ai-summary
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DeepSeek_API_KEY }}
         run: |
           # 提取 master 与当前分支之间的差异记录（最近 15 条）
           CHANGES=$(git log origin/master..HEAD --pretty=format:"- %s" -n 15)
@@ -32,20 +32,31 @@ jobs:
             CHANGES="无明显变更"
           fi
           
-          # 调用 OpenAI 接口进行语义化总结
-          RESPONSE=$(curl https://api.openai.com/v1/chat/completions \
-            -s \
-            -H "Authorization: Bearer $OPENAI_API_KEY" \
+          # 调用 DeepSeek 接口进行语义化总结
+          RESPONSE=$(curl https://api.deepseek.com/v1/chat/completions \
+            -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
             -H "Content-Type: application/json" \
             -d "{
-              \"model\": \"gpt-4o-mini\",
+              \"model\": \"deepseek-chat\",
               \"messages\": [
-                {\"role\": \"system\", \"content\": \"你是一位资深系统架构师。请将 Git 提交记录转化为简洁清晰的 PR 描述，使用开发者常见表达，避免官话。包含：变更内容、影响范围。使用 Markdown 格式。\"},
-                {\"role\": \"user\", \"content\": \"提交记录如下：\n$CHANGES\"}
+                {
+                \"role\": \"system\", 
+                \"content\": \"你是一位资深系统架构师。请将 Git 提交记录转化为简洁清晰的 PR 描述，使用开发者常见表达，避免官话。包含：变更内容、影响范围。使用 Markdown 格式。\"
+                },
+                {
+                \"role\": \"user\", 
+                \"content\": \"提交记录如下：\n$CHANGES\"
+                }
               ]
             }")
           
-          SUMMARY=$(echo $RESPONSE | jq -r '.choices[0].message.content // "⚠️ 生成失败，请手动填写说明。"')
+          # 解析返回
+          SUMMARY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content')
+
+          # 兜底（防止 API 异常）
+          if [ -z "$SUMMARY" ] || [ "$SUMMARY" = "null" ]; then
+            SUMMARY="⚠️ 自动生成失败，请手动填写变更说明。"
+          fi
           
           # 将审计内容注入环境变量（处理多行文本的安全性写法）
           echo "AI_PR_BODY<<EOF" >> $GITHUB_ENV
@@ -68,16 +79,12 @@ jobs:
               --title "🔄 分支同步： test ➔ master" \
               --body "### 🤖 变更说明
               
-              ${{ env.AI_PR_BODY }}
+              ${{ env.PR_SUMMARY_BODY }}
               
-              ---
-              > 本请求由 **代码变更自动化集成与合并准入机制** 自动生成。"
           else
             echo "检测到已存在的集成请求，正在同步更新变更说明..."
             gh pr edit --body "### 🤖 变更说明 (已更新)
             
-            ${{ env.AI_PR_BODY }}
+            ${{ env.PR_SUMMARY_BODY }}
             
-            ---
-            > 本请求由 **代码变更自动化集成与合并准入机制** 自动维护更新。"
           fi
