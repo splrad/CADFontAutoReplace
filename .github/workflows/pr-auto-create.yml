@@ -69,6 +69,7 @@ jobs:
           GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
           # 检查是否已经存在从 test 到 master 的 PR
+          
           PR_EXISTS=$(gh pr list --head test --base master --json url --jq '.[0].url')
           
           if [ -z "$PR_EXISTS" ]; then
@@ -79,12 +80,13 @@ jobs:
               --title "🔄 分支同步： test ➔ master" \
               --body "### 🤖 变更说明
               
-              ${{ env.PR_SUMMARY_BODY }}
+              ${{ env.AI_PR_BODY }}
               
+              ---"
           else
             echo "检测到已存在的集成请求，正在同步更新变更说明..."
-            gh pr edit --body "### 🤖 变更说明 (已更新)
+            gh pr edit "$PR_EXISTS" --body "### 🤖 变更说明 (已更新)
             
-            ${{ env.PR_SUMMARY_BODY }}
+            ${{ env.AI_PR_BODY }}"
             
           fi
