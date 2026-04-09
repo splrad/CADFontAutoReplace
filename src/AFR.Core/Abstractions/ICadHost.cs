@@ -14,7 +14,7 @@ public interface ICadHost
     /// CAD 主窗口的原生窗口句柄 (HWND)。
     /// 用于将 WPF 弹出窗口定位到 CAD 所在屏幕的中心位置。
     /// </summary>
-    nint MainWindowHandle { get; }
+    IntPtr MainWindowHandle { get; }
 
     /// <summary>
     /// 以模态方式显示一个 WPF 窗口。

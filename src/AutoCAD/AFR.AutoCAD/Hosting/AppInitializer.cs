@@ -39,7 +39,7 @@ internal static class AppInitializer
             var profiles = GetAcadProfiles();
             if (profiles.Count == 0)
             {
-                DiagnosticLogger.Log("初始化", "未找到有效的 AutoCAD R25.1 配置文件 (ACAD-xxxx:xxx)");
+                DiagnosticLogger.Log("初始化", $"未找到有效的 AutoCAD 配置文件 (ACAD-xxxx:xxx)，注册表路径: {PlatformManager.Platform.RegistryBasePath}");
                 return false;
             }
 

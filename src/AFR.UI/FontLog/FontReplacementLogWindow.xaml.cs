@@ -71,13 +71,15 @@ public partial class FontReplacementLogWindow : Window
                     existing = new StyleFontReplacement(row.StyleName, false, string.Empty, string.Empty);
 
                 map[row.StyleName] = row.IsBigFont
-                    ? existing with { BigFontReplacement = font }
-                    : existing with { MainFontReplacement = font, IsTrueType = row.IsTrueType };
+                    ? existing.With(bigFontReplacement: font)
+                    : existing.With(mainFontReplacement: font, isTrueType: row.IsTrueType);
             }
 
             DiagnosticLogger.Info("UI", $"应用替换: 从 {ViewModel.Items.Count} 行构建 {map.Count} 条替换指令");
-            foreach (var (name, rep) in map)
+            foreach (var kvp in map)
             {
+                var name = kvp.Key;
+                var rep = kvp.Value;
                 DiagnosticLogger.Info("UI",
                     $"  样式='{name}' Main='{rep.MainFontReplacement}' Big='{rep.BigFontReplacement}' IsTT={rep.IsTrueType}");
             }

@@ -80,7 +80,7 @@ internal static class LdFileHook
         try
         {
             IntPtr module = GetModuleHandle(AcDbDll);
-            if (module == IntPtr.Zero) { DiagnosticLogger.Log("FontMapping", "acdb25.dll 未加载"); return; }
+            if (module == IntPtr.Zero) { DiagnosticLogger.Log("FontMapping", $"{AcDbDll} 未加载"); return; }
 
             _targetAddr = GetProcAddress(module, LdFileExport);
             if (_targetAddr == IntPtr.Zero) { DiagnosticLogger.Log("FontMapping", "未找到 ldfile 导出"); return; }
@@ -132,7 +132,8 @@ internal static class LdFileHook
 
             // 先用 NOP 填充整个序言区域，再写入跳转指令（确保不留残余的旧指令）
             byte[] hookPatch = new byte[PrologueSize];
-            Array.Fill(hookPatch, (byte)0x90);
+            for (int i = 0; i < hookPatch.Length; i++)
+                hookPatch[i] = 0x90;
             WriteAbsoluteJumpBytes(hookPatch, 0, hookAddr);
             Marshal.Copy(hookPatch, 0, _targetAddr, PrologueSize);
 
@@ -252,7 +253,7 @@ internal static class LdFileHook
                 // 归一化 key: SHX 字体确保 .shx 后缀（AutoCAD 可能传入无后缀的名称如 'noexistshx'），
                 // TrueType 使用去 @ 后的字族名。两者均与 MTextFontParser 的归一化规则对齐。
                 string normalizedName = isShxFont ? EnsureShx(baseName) : baseName;
-                _redirectLog.TryAdd(normalizedName, (resolved, param2));
+                if (!_redirectLog.ContainsKey(normalizedName)) _redirectLog.TryAdd(normalizedName, (resolved, param2));
 
                 DiagnosticLogger.Log("Hook", $"重定向: '{fontName}' param2={param2} → '{resolved}'");
 
@@ -286,7 +287,7 @@ internal static class LdFileHook
     private static string? ResolveMissingShxFont(string fontName, int fontType)
     {
         // @xxx.shx → 优先尝试去掉 @ 的基础字体（支持 @@xxx 双前缀）
-        if (fontName.StartsWith('@'))
+        if (fontName.StartsWith("@"))
         {
             string baseName = fontName.TrimStart('@');
             string baseShx = EnsureShx(baseName);
@@ -329,7 +330,7 @@ internal static class LdFileHook
     private static string? ResolveMissingTrueTypeFont(string fontName)
     {
         // @xxx → 优先尝试去掉 @ 的基础字族名（竖排 TrueType）
-        if (fontName.StartsWith('@'))
+        if (fontName.StartsWith("@"))
         {
             string baseName = fontName.TrimStart('@');
             if (FontDetector.IsSystemFont(baseName))

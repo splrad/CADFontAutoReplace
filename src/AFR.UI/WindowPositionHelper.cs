@@ -11,7 +11,7 @@ namespace AFR.UI;
 internal static class WindowPositionHelper
 {
     [DllImport("user32.dll")]
-    private static extern bool GetWindowRect(nint hWnd, out RECT lpRect);
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }
@@ -31,8 +31,8 @@ internal static class WindowPositionHelper
 
     private static void CenterOnParentWindow(Window window)
     {
-        nint handle = PlatformManager.Host.MainWindowHandle;
-        if (handle == 0) return;
+        IntPtr handle = PlatformManager.Host.MainWindowHandle;
+        if (handle == IntPtr.Zero) return;
         if (!GetWindowRect(handle, out var rect)) return;
 
         // GetWindowRect 返回屏幕像素，WPF Left/Top 使用逻辑单位（96 DPI 基准）

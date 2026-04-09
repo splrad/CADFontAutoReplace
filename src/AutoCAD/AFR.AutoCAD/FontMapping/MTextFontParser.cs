@@ -95,7 +95,7 @@ internal static class MTextFontParser
         int end = FindTerminator(text, i, '|');
 
         // 提取 \F 到 | 之间的内容
-        string segment = text[i..end];
+        string segment = text.Substring(i, end - i);
         i = end < len ? end + 1 : end;
 
         if (string.IsNullOrWhiteSpace(segment)) return;
@@ -112,8 +112,8 @@ internal static class MTextFontParser
         else
         {
             // 主字体 + 大字体
-            string mainFont = segment[..commaPos].Trim();
-            string bigFont = segment[(commaPos + 1)..].Trim();
+            string mainFont = segment.Substring(0, commaPos).Trim();
+            string bigFont = segment.Substring(commaPos + 1).Trim();
 
             if (mainFont.Length > 0)
                 AddShxFont(mainFont, InlineFontType.ShxMain, result);
@@ -144,17 +144,17 @@ internal static class MTextFontParser
             if (c == ';')
             {
                 // 分号 → 确定的结束符
-                string fontName = text[nameStart..i].Trim();
+                string fontName = text.Substring(nameStart, i - nameStart).Trim();
                 i++; // 跳过 ;
                 if (fontName.Length > 0)
-                    result.TryAdd(fontName, InlineFontType.TrueType);
+                    if (!result.ContainsKey(fontName)) result.Add(fontName, InlineFontType.TrueType);
                 return;
             }
 
             if (c == '|')
             {
                 // | → 可能是结束符，也可能是参数分隔符
-                string fontName = text[nameStart..i].Trim();
+                string fontName = text.Substring(nameStart, i - nameStart).Trim();
                 i++; // 跳过 |
 
                 if (IsParameterStart(text, i))
@@ -165,16 +165,16 @@ internal static class MTextFontParser
 
                 // 无论哪种情况，字族名已确定
                 if (fontName.Length > 0)
-                    result.TryAdd(fontName, InlineFontType.TrueType);
+                    if (!result.ContainsKey(fontName)) result.Add(fontName, InlineFontType.TrueType);
                 return;
             }
 
             if (c == '\\')
             {
                 // 遇到新的转义序列 → 缺少终止符，容错截断
-                string fontName = text[nameStart..i].Trim();
+                string fontName = text.Substring(nameStart, i - nameStart).Trim();
                 if (fontName.Length > 0)
-                    result.TryAdd(fontName, InlineFontType.TrueType);
+                    if (!result.ContainsKey(fontName)) result.Add(fontName, InlineFontType.TrueType);
                 return;
             }
 
@@ -182,9 +182,9 @@ internal static class MTextFontParser
         }
 
         // 到达字符串末尾，缺少终止符 → 容错
-        string remaining = text[nameStart..].Trim();
+        string remaining = text.Substring(nameStart).Trim();
         if (remaining.Length > 0)
-            result.TryAdd(remaining, InlineFontType.TrueType);
+            if (!result.ContainsKey(remaining)) result.Add(remaining, InlineFontType.TrueType);
     }
 
     #region 辅助方法
@@ -211,11 +211,11 @@ internal static class MTextFontParser
         if (pos >= text.Length) return false;
 
         char c = text[pos];
-        if (c is not ('b' or 'i' or 'c' or 'p')) return false;
+        if (c != 'b' && c != 'i' && c != 'c' && c != 'p') return false;
 
         // 参数字母后必须紧跟数字
         int next = pos + 1;
-        return next < text.Length && char.IsAsciiDigit(text[next]);
+        return next < text.Length && char.IsDigit(text[next]);
     }
 
     /// <summary>
@@ -249,7 +249,7 @@ internal static class MTextFontParser
             ? fontName
             : fontName + ".shx";
 
-        result.TryAdd(normalized, fontType);
+        if (!result.ContainsKey(normalized)) result.Add(normalized, fontType);
     }
 
     #endregion

@@ -69,7 +69,13 @@ public abstract class PluginEntryBase : IExtensionApplication
         if (stream == null) return null;
 
         var data = new byte[stream.Length];
-        stream.ReadExactly(data);
+        int offset = 0;
+        while (offset < data.Length)
+        {
+            int read = stream.Read(data, offset, data.Length - offset);
+            if (read == 0) break;
+            offset += read;
+        }
         _resolvedHandyControl = Assembly.Load(data);
         return _resolvedHandyControl;
     }

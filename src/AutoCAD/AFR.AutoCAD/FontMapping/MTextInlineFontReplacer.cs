@@ -25,8 +25,10 @@ internal static class MTextInlineFontReplacer
         string mainFont, string bigFont)
     {
         var missingTrueType = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (fontName, inlineType) in inlineFonts)
+        foreach (var kvp in inlineFonts)
         {
+            var fontName = kvp.Key;
+            var inlineType = kvp.Value;
             if (inlineType == InlineFontType.TrueType
                 && !FontDetector.IsTrueTypeFontAvailable(fontName, context)
                 && !ContainsGarbledChars(fontName))
@@ -35,7 +37,7 @@ internal static class MTextInlineFontReplacer
             }
         }
 
-        if (missingTrueType.Count == 0) return [];
+        if (missingTrueType.Count == 0) return new List<InlineFontFixRecord>();
 
         string shxMain = StripShx(mainFont);
         string shxBig = StripShx(bigFont);
@@ -46,7 +48,7 @@ internal static class MTextInlineFontReplacer
         if (string.IsNullOrEmpty(shxMain) && string.IsNullOrEmpty(shxBig))
         {
             DiagnosticLogger.Log("MText替换", "未配置 SHX 替换字体，跳过 TrueType→SHX 转换");
-            return [];
+            return new List<InlineFontFixRecord>();
         }
 
         int modifiedCount = 0;
@@ -151,7 +153,7 @@ internal static class MTextInlineFontReplacer
         while (i < len && text[i] != '|' && text[i] != ';' && text[i] != '\\')
             i++;
 
-        string fontName = text[nameStart..i].Trim();
+        string fontName = text.Substring(nameStart, i - nameStart).Trim();
 
         if (fontName.Length > 0 && missingFonts.Contains(fontName))
         {
@@ -182,7 +184,7 @@ internal static class MTextInlineFontReplacer
 
         // 不需要转换 → 原样输出
         sb.Append('\\').Append('f');
-        sb.Append(text.AsSpan(nameStart, i - nameStart));
+        sb.Append(text.Substring(nameStart, i - nameStart));
 
         if (i < len)
         {
@@ -201,7 +203,7 @@ internal static class MTextInlineFontReplacer
                         i++;
                     if (i < len && text[i] == ';')
                         i++;
-                    sb.Append(text.AsSpan(paramStart, i - paramStart));
+                    sb.Append(text.Substring(paramStart, i - paramStart));
                 }
                 else
                 {
@@ -222,14 +224,14 @@ internal static class MTextInlineFontReplacer
     {
         if (pos >= text.Length) return false;
         char c = text[pos];
-        if (c is not ('b' or 'i' or 'c' or 'p')) return false;
+        if (c != 'b' && c != 'i' && c != 'c' && c != 'p') return false;
         int next = pos + 1;
-        return next < text.Length && char.IsAsciiDigit(text[next]);
+        return next < text.Length && char.IsDigit(text[next]);
     }
 
     private static string StripShx(string name) =>
         string.IsNullOrEmpty(name) ? "" :
-        name.EndsWith(".shx", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
+        name.EndsWith(".shx", StringComparison.OrdinalIgnoreCase) ? name.Substring(0, name.Length - 4) : name;
 
     private static string EnsureShx(string name) =>
         name.EndsWith(".shx", StringComparison.OrdinalIgnoreCase) ? name : name + ".shx";

@@ -70,7 +70,7 @@ internal static class FontReplacer
         var missingMap = new Dictionary<string, FontCheckResult>(missingFonts.Count, StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < missingFonts.Count; i++)
         {
-            missingMap.TryAdd(missingFonts[i].StyleName, missingFonts[i]);
+            if (!missingMap.ContainsKey(missingFonts[i].StyleName)) missingMap.Add(missingFonts[i].StyleName, missingFonts[i]);
         }
 
         using var tr = context.Db.TransactionManager.StartTransaction();
@@ -191,7 +191,7 @@ internal static class FontReplacer
 
         var map = new Dictionary<string, StyleFontReplacement>(replacements.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var r in replacements)
-            map.TryAdd(r.StyleName, r);
+            if (!map.ContainsKey(r.StyleName)) map.Add(r.StyleName, r);
 
         using var tr = context.Db.TransactionManager.StartTransaction();
         var styleTable = (TextStyleTable)tr.GetObject(context.Db.TextStyleTableId, OpenMode.ForRead);

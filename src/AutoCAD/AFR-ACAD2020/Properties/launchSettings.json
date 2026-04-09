@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "AFR-ACAD2020": {
+      "commandName": "Project"
+    },
+    "AutoCAD 2020": {
+      "commandName": "Executable",
+      "executablePath": "C:\\Program Files\\Autodesk\\AutoCAD 2020\\acad.exe",
+      "workingDirectory": "C:\\Program Files\\Autodesk\\AutoCAD 2020"
+    }
+  }
+}
