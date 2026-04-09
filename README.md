@@ -214,7 +214,7 @@ AFR 缺失字体自动替换 v7.0
 
 - Visual Studio 2022 或更高版本
 - .NET 8 SDK
-- AutoCAD 2026（运行时测试）
+- 对应的ACD软件（运行时测试）
 
 ### 构建
 
