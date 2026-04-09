@@ -7,7 +7,10 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
+  # ❗ ID 保持英文，方便系统识别和状态检查关联
   branch-policy-check:
+    # ✅ Name 使用中文，在 PR 界面显示更直观
+    name: 🔒 PR合并规范检查
     runs-on: ubuntu-latest
     # 授予写入权限，以便 Action 可以发表评论和修改标签
     permissions:
