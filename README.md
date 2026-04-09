@@ -115,7 +115,7 @@
 
 > ✅ 加载成功后，命令行会显示插件信息。此后每次打开 AutoCAD 都会**自动加载**，无需重复操作。
 
-> ⚠️ **字体精简建议**：**强烈建议**将 CAD 安装目录下 `Fonts` 文件夹中的 SHX 字体精简至 100 个以内（保留 `sas_____.pfb`、`MstnFontConfig.xml`、`internat.rsc`、`font.rsc` 等非 SHX 文件）。**字体数量过多会导致插件首次加载时明显卡顿。** 建议清理后将本项目提供的 CAD 字体包解压拷贝进去，该字体包在 CAD 原版基础上仅增加了几款常用通用字体（如探索者等），可放心使用。
+> ⚠️ **字体精简建议：强烈建议将 CAD 安装目录下 `Fonts` 文件夹中的 SHX 字体精简至 100 个以内（保留 `sas_____.pfb`、`MstnFontConfig.xml`、`internat.rsc`、`font.rsc` 等非 SHX 文件）。字体数量过多会导致插件加载UI界面时明显卡顿。 建议清理后将本项目提供的 CAD 字体包解压拷贝进去，该字体包在 CAD 原版基础上仅增加了几款常用通用字体（如探索者等），可放心使用**。
 >
 > 👉 **[点击下载 CAD 字体包（Fonts.zip）](https://github.com/splrad/CADFontAutoReplace/releases)**
 
