@@ -1,4 +1,4 @@
-name: PR 合并规范检查
+name: 🔒 代码变更分支策略与合并准入机制
 
 on:
   pull_request:
@@ -9,8 +9,8 @@ on:
 jobs:
   # ❗ ID 保持英文，方便系统识别和状态检查关联
   branch-policy-check:
-    # ✅ Name 使用中文，在 PR 界面显示更直观
-    name: 🔒 PR合并规范检查
+    # ✅ 在 PR 检查列表显示的名称：专业且具有威慑力
+    name: ⚙️ 分支策略与合并准入检查
     runs-on: ubuntu-latest
     # 授予写入权限，以便 Action 可以发表评论和修改标签
     permissions:
@@ -18,7 +18,7 @@ jobs:
       contents: read
 
     steps:
-      - name: 验证分支流向
+      - name: 🔍 执行分支来源与流向校验
         id: check
         env:
           HEAD_REF: ${{ github.head_ref }}
@@ -35,13 +35,13 @@ jobs:
           fi
           
           if [ "$HEAD_REF" != "test" ]; then
-            echo "error_msg=❌ 拒绝合并：根据 Git Flow 规范，只有 'test' 分支可以合并到 'master'。当前分支为: $HEAD_REF" >> $GITHUB_ENV
+            echo "error_msg=❌ 合并被拒绝：仅允许 test 分支向 master 发起变更合并请求。当前来源分支为: $HEAD_REF" >> $GITHUB_ENV
             exit 1
           fi
           
           echo "✅ 验证通过：符合工作流规范。"
 
-      - name: 违规自动反馈
+      - name: 💬 执行违规合并自动反馈
         # 仅在上述步骤失败时运行
         if: failure()
         uses: actions/github-script@v7

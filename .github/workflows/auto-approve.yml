@@ -1,22 +1,24 @@
-name: 自动批准本人 PR
+# GitHub Actions 页面显示的名称：彰显流程的系统化和治理感
+name: 🛡️ 核心开发者身份鉴权与准入机制
 
 on:
   pull_request_target:
     types: [opened, reopened, synchronize]
     branches:
-      - master  # ✅ 只在向 master 提交 PR 时触发自动批准
+      - master
 
 jobs:
-  auto-approve:
+  privileged-access:
+    # ✅ 在 PR 检查列表显示的名称：专业且具有威慑力
+    name: 🔐 身份鉴权与自动化准入控制
     runs-on: ubuntu-latest
-    # ❗ 记得替换这里的用户名为你自己的
     if: github.actor == 'splrad'
     permissions:
       pull-requests: write
 
     steps:
-      - name: 自动批准
+      - name: 🧩 触发核心开发者准入判定
         uses: hmarr/auto-approve-action@v4
         with:
-          # 可选：如果你想让批准消息更有个性
-          review-message: "🤖 开发者本人提交，系统已自动通过验证。"
+          # 机器人留下的评论：采用“协议响应”式的措辞
+          review-message: "🤖 已完成核心开发者身份校验，自动准入流程已授权。"
