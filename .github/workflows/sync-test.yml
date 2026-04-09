@@ -28,17 +28,17 @@ jobs:
           git fetch githup
 
           echo "🔍 检查远程 test 分支是否存在..."
-          if git ls-remote --exit-code --heads githup test; then
+          if git ls-remote --exit-code --heads github test; then
             echo "✔ test 分支存在，基于远程检出"
-            git checkout -B test githup/test
+            git checkout -B test github/test
           else
             echo "⚠ test 分支不存在，创建新分支"
-            git checkout -B test githup/master
+            git checkout -B test github/master
           fi
 
           echo "🔄 执行状态回拨..."
-          git reset --hard githup/master
+          git reset --hard github/master
 
           echo "🚀 强制同步到远程..."
-          git push githup test --force
+          git push github test --force
           echo "✅ 同步完成！"
