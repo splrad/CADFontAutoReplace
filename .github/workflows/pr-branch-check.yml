@@ -1,4 +1,4 @@
-name: 🔒 代码变更分支策略与合并准入机制
+name: 🔒 主支合并规则校验
 
 on:
   pull_request:
