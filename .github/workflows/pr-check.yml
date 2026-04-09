@@ -1,0 +1,22 @@
+name: PR Branch Check
+
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  check-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check source branch
+        run: |
+          echo "Base branch: ${{ github.base_ref }}"
+          echo "Head branch: ${{ github.head_ref }}"
+          
+          if [ "${{ github.head_ref }}" != "test" ]; then
+            echo "❌ Only test branch can merge into master!"
+            exit 1
+          else
+            echo "✅ Valid PR from test branch"
+          fi
