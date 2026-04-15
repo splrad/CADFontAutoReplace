@@ -218,6 +218,13 @@ internal static class LdFileHook
             if (string.IsNullOrEmpty(fontName))
                 return _trampolineDelegate(fileName, param2, db, desc);
 
+            // 剥离目录路径，仅保留文件名或字族名
+            // DWG 中 style.FileName 和 MText \F 格式代码可能存储来自旧版 AutoCAD
+            // 安装目录的完整路径（如 "C:/Software/Autodesk/AutoCAD 2024/Support/txt.shx"），
+            // 但 _availableFonts 仅含纯文件名，未归一化会导致可用字体被误判为缺失。
+            // Path.GetFileName 对纯文件名和字族名（如 "宋体"）是无操作，安全适用。
+            fontName = Path.GetFileName(fontName);
+
             // 形文件请求 → 不拦截，由 AutoCAD 自行处理
             if (param2 == FontTypeShape)
                 return _trampolineDelegate(fileName, param2, db, desc);

@@ -68,16 +68,17 @@ AFR-ACAD20XX（版本适配壳，仅 PluginEntry + ICadPlatform 实现）
 ## 添加新 CAD 版本支持
 
 在 `src/AutoCAD/` 下创建新目录（如 `AFR-ACAD2025/`），包含：
-1. `PluginEntry.cs` — 继承 `PluginEntryBase`，实现 `CreatePlatform()` / `CreateFontHook()` / `CreateHost()`
-2. `AutoCad20XXPlatform.cs` — 实现 `ICadPlatform`，填入版本特定常量
-3. `.csproj` — 导入三个 Shared Project 的 `.projitems`，引用对应版本的 AutoCAD.NET NuGet 包
+1. `PluginEntry.cs` — 继承 `PluginEntryBase`，实现 `CreatePlatform()` / `CreateFontHook()` / `CreateHost()`。注意必须添加 `[assembly: ExtensionApplication(typeof(AFR.PluginEntry))]` 及命令类的特性标签（包括 DEBUG 下的 MTextEditorCommand），且 Hook 和 Host 可直接返回共享层的 `new AutoCadFontHook()` 和 `new AutoCadHost()`。
+2. `AutoCad20XXPlatform.cs` — 实现 `ICadPlatform`，填入版本特定常量。
+3. `.csproj` — 导入三个 Shared Project 的 `.projitems`。由于开启了中心化包管理（`Directory.Packages.props`），需通过 `VersionOverride="xx.x.x"` 设置对应版本的 AutoCAD.NET，且必须包含相应的 `ExcludeAssets="runtime"` 配置和 `EmbedHandyControl` 目标实现 DLL 嵌入。
 
 ## 关键设计约束
 
+- **统一执行控制**：`ExecutionController` 统一协调执行流程，处理 Startup/Command/DocumentCreated 事件，内部实行同文档单次执行防重复保护和 `IsInitialized` 门控（未配置时跳过）。
 - TrueType 替换策略分两个层面：
   - **样式表级别**（ldfile Hook + FontReplacer）：TrueType 必须用 TrueType 替换，不可用 SHX（否则污染 AutoCAD 内部字体缓存，导致乱码 + ST 弹窗）
   - **MText 内联字体**（MTextInlineFontReplacer）：缺失的 TrueType `\f` 格式代码转换为 SHX `\F` 格式代码（指向用户配置的 SHX 主字体+大字体），使渲染走 ldfile 路径由 Hook 统一管理
-- SHX 大字体（bigfont）通过 Hook 处理，SHX 主字体（unifont）交由 FONTALT 原生机制
+- SHX 主字体（param2=0）和大字体（param2=4）均通过 ldfile Hook 统一重定向；形文件（param2=2）跳过
 - `Marshal.StringToHGlobalUni` 分配的原生字符串指针**永不释放**（AutoCAD 可能缓存指针）
 - `FontDetectionContext` 按事务隔离，不同图纸/执行次数之间零共享
 - ShapeFile 样式（`ltypeshp.shx` 等）始终跳过，不参与替换

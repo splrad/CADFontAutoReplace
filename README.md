@@ -236,6 +236,7 @@ src/
 ├── AFR.UI/                Shared Project — WPF 用户界面（字体选择 / 替换日志 / MText 查看器）
 │   ├── FontSelection/       AFR 命令的字体配置窗口
 │   ├── FontLog/             AFRLOG 命令的替换日志窗口（支持逐行和批量替换）
+│   ├── Helpers/             UI 辅助类（如 WindowPositionHelper 窗口定位辅助）
 │   └── MTextEditor/         AFRVIEW 命令的 MText 格式代码查看器（仅 Debug）
 └── AutoCAD/
     ├── AFR.AutoCAD/        Shared Project — AutoCAD 通用逻辑
@@ -295,9 +296,9 @@ AutoCAD 启动
   │   └─ 配置已初始化 → ExecutionController.Execute()
   │       ├─ 检测缺失字体
   │       ├─ 替换缺失字体
-  │       ├─ 清理残留引用
-  │       ├─ MText 内联字体扫描与比对
-  │       ├─ 二次验证
+  │       ├─ 替换后二次验证
+  │       ├─ 清理残留引用并刷新显示 (Regen)
+  │       ├─ MText 内联字体扫描与比对转换
   │       └─ 输出日志到命令行
   │
   └─ AFRUNLOAD 命令
@@ -312,8 +313,7 @@ AutoCAD 启动
 | 决策 | 原因 |
 |---|---|
 | TrueType 必须用 TrueType 替换，不能用 SHX | 若将 TrueType 误重定向为 SHX，会污染 AutoCAD 内部字体缓存，导致文字乱码 + ST 弹窗 |
-| 常规 SHX 主字体（param2=0）不通过 Hook 重定向 | Hook 级别的重定向会干扰块参照的字体缓存渲染，交由 FONTALT 原生机制处理更稳定 |
-| SHX 大字体（param2=4）必须通过 Hook 处理 | FONTALT 不区分大字体和主字体，无法正确替换大字体 |
+| 常规 SHX 主字体（param2=0）和大字体（param2=4）均通过 Hook 重定向 | FONTALT 不区分主字体和大字体，通过 Hook 能从底层（0 和 4）精确拦截并重定向到各自的替换字体，还能统一管理 MText 转换后的渲染 |
 | 原生字符串指针缓存不释放 | ldfile 可能将 fileName 指针存入全局字体表，释放后成为悬空指针导致崩溃 |
 | FontDetectionContext 按事务隔离 | 不同图纸、不同执行次数之间 100% 内存隔离，避免缓存污染 |
 | ShapeFile 样式始终跳过 | 替换 ShapeFile 样式会破坏复杂线型结构（ltypeshp.shx 等） |
