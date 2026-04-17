@@ -19,17 +19,9 @@ internal enum LogCategory
 
 /// <summary>
 /// 日志服务，负责收集并输出日志到 AutoCAD 命令行。
-/// <para>
-/// 采用全局单例模式，通过 <see cref="Instance"/> 访问唯一实例。
-/// </para>
-/// <para>
 /// 使用"先缓冲、后输出"策略：
-/// <list type="number">
-///   <item>调用 <see cref="Info"/>、<see cref="Warning"/>、<see cref="Error(string)"/> 将日志写入内存缓冲区；</item>
-///   <item>调用 <see cref="Flush"/> 将缓冲区中的日志按「错误 → 警告 → 信息 → 统计」顺序一次性输出到 AutoCAD 命令行。</item>
-/// </list>
+/// 将缓冲区中的日志按「错误 → 警告 → 信息 → 统计」顺序一次性输出到 AutoCAD 命令行。
 /// 这样做是为了避免在替换过程中频繁写入命令行导致输出混乱。
-/// </para>
 /// </summary>
 internal sealed class LogService : ILogService
 {
