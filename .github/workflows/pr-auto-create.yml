@@ -51,14 +51,25 @@ jobs:
           fi
 
           # 使用 jq 安全构建 JSON（防止提交信息中的特殊字符导致注入）
+          SYSTEM_PROMPT=$(printf '%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+            '你是一个 PR 描述生成器。根据 Git 提交记录，写一段简短的变更说明。' \
+            '要求：' \
+            '- 像真人开发者随手写的，不要有 AI 味（禁止「本次更新」「旨在」「致力于」「进一步」等套话）' \
+            '- 用短句，直接说改了什么、为什么改' \
+            '- 如果涉及多个方面，用无序列表分条，每条一句话' \
+            '- 有技术含量但不堆砌术语' \
+            '- Markdown 格式，不要加标题' \
+            '- 总长度控制在 3~8 行')
+
           PAYLOAD=$(jq -n \
             --arg changes "$CHANGES" \
+            --arg system_prompt "$SYSTEM_PROMPT" \
             '{
               model: "deepseek-chat",
               messages: [
                 {
                   role: "system",
-                  content: "你是一个 PR 描述生成器。根据 Git 提交记录，写一段简短的变更说明。\n\n要求：\n- 像真人开发者随手写的，不要有 AI 味（禁止"本次更新"、"旨在"、"致力于"、"进一步"等套话）\n- 用短句，直接说改了什么、为什么改\n- 如果涉及多个方面，用无序列表分条，每条一句话\n- 有技术含量但不堆砌术语\n- Markdown 格式，不要加标题\n- 总长度控制在 3~8 行"
+                  content: $system_prompt
                 },
                 {
                   role: "user",

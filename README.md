@@ -2,7 +2,7 @@
 
 # AFR — CAD 缺失字体自动替换工具
 
-**打开图纸不再弹出"缺少 SHX 文件"，所有缺失字体自动搞定**
+**打开图纸不再出现文字不显示、乱码，所有缺失字体自动搞定**
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE.txt)
 [![AutoCAD](https://img.shields.io/badge/AutoCAD-2026-red.svg)](#已支持的-autocad-版本)
