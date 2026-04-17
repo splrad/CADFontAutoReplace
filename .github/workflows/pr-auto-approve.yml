@@ -15,6 +15,10 @@ concurrency:
   group: auto-approve-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+env:
+  # 提前启用 Node.js 24 运行环境，消除 Node.js 20 弃用警告
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   privileged-access:
     # ✅ 在 PR 检查列表显示的名称
