@@ -10,6 +10,9 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- FontSelection -->
+    <Compile Include="$(MSBuildThisFileDirectory)MTextInsert\MTextInsertWindow.xaml.cs">
+      <DependentUpon>MTextInsertWindow.xaml</DependentUpon>
+    </Compile>
     <Page Include="$(MSBuildThisFileDirectory)FontSelection\FontSelectionWindow.xaml" Link="FontSelection\FontSelectionWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
@@ -36,5 +39,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)MTextEditor\MTextSyntaxHighlighter.cs" Link="MTextEditor\MTextSyntaxHighlighter.cs" />
     <!-- Shared -->
     <Compile Include="$(MSBuildThisFileDirectory)WindowPositionHelper.cs" Link="WindowPositionHelper.cs" />
+    <Page Include="$(MSBuildThisFileDirectory)MTextInsert\MTextInsertWindow.xaml" />
   </ItemGroup>
 </Project>

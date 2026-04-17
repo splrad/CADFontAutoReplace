@@ -1,0 +1,133 @@
+<Window x:Class="AFR.UI.MTextInsertWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:hc="https://handyorg.github.io/handycontrol"
+        Title="AFR — MText 插入器"
+        Width="620" Height="580"
+        WindowStartupLocation="Manual"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/HandyControl;component/Themes/SkinDefault.xaml"/>
+                <ResourceDictionary Source="pack://application:,,,/HandyControl;component/Themes/Theme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Border CornerRadius="10" Background="{DynamicResource RegionBrush}"
+            TextElement.FontFamily="鸿蒙黑体, 微软雅黑, 黑体"
+            MouseLeftButtonDown="Window_MouseLeftButtonDown">
+        <Grid Margin="20,14,20,14">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>  <!-- 0: 标题 -->
+                <RowDefinition Height="10"/>    <!-- 1: 间距 -->
+                <RowDefinition Height="Auto"/>  <!-- 2: 模式选择 -->
+                <RowDefinition Height="10"/>    <!-- 3: 间距 -->
+                <RowDefinition Height="*"/>     <!-- 4: 内容区 -->
+                <RowDefinition Height="10"/>    <!-- 5: 间距 -->
+                <RowDefinition Height="Auto"/>  <!-- 6: 按钮 -->
+            </Grid.RowDefinitions>
+
+            <!-- 标题 -->
+            <StackPanel Grid.Row="0">
+                <TextBlock Text="MText 插入器"
+                           FontSize="16" FontWeight="Bold"
+                           Foreground="{DynamicResource PrimaryTextBrush}"/>
+                <TextBlock Text="选择预设模板或输入自定义格式代码，插入到图纸中"
+                           FontSize="11" Margin="0,3,0,0"
+                           Foreground="{DynamicResource SecondaryTextBrush}"/>
+            </StackPanel>
+
+            <!-- 模式选择 -->
+            <StackPanel Grid.Row="2" Orientation="Horizontal">
+                <RadioButton x:Name="RbTemplate" Content="预设模板" IsChecked="True"
+                             FontSize="13" Margin="0,0,20,0"
+                             Checked="OnModeChanged"/>
+                <RadioButton x:Name="RbCustom" Content="自定义输入"
+                             FontSize="13"
+                             Checked="OnModeChanged"/>
+            </StackPanel>
+
+            <!-- 内容区：模板选择 / 自定义输入 -->
+            <Grid Grid.Row="4">
+                <!-- 模板选择面板 -->
+                <Grid x:Name="TemplatePanel">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="8"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <ComboBox x:Name="CbTemplates" Grid.Row="0"
+                              FontSize="13" Height="34"
+                              hc:BorderElement.CornerRadius="6"
+                              SelectionChanged="OnTemplateChanged"/>
+
+                    <Border Grid.Row="2" CornerRadius="6" ClipToBounds="True"
+                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                        <TextBox x:Name="TbTemplatePreview"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 FontFamily="JetBrains Maple Mono Regular, Cascadia Code, Consolas, 微软雅黑" FontSize="12"
+                                 Padding="8,6"
+                                 BorderThickness="0"
+                                 Background="{DynamicResource SecondaryRegionBrush}"
+                                 Foreground="{DynamicResource PrimaryTextBrush}"/>
+                    </Border>
+                </Grid>
+
+                <!-- 自定义输入面板 -->
+                <Grid x:Name="CustomPanel" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="8"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Orientation="Horizontal">
+                        <TextBlock Text="输入 MText 格式代码（使用 \\P 表示换行）"
+                                   FontSize="12" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"/>
+                        <Button Content="从剪贴板粘贴" Height="26" MinWidth="90" FontSize="11"
+                                Margin="12,0,0,0"
+                                hc:BorderElement.CornerRadius="4"
+                                Click="OnPasteFromClipboard"/>
+                    </StackPanel>
+
+                    <Border Grid.Row="2" CornerRadius="6" ClipToBounds="True"
+                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                        <TextBox x:Name="TbCustomInput"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 FontFamily="JetBrains Maple Mono Regular, Cascadia Code, Consolas, 微软雅黑" FontSize="12"
+                                 Padding="8,6"
+                                 BorderThickness="0"
+                                 Background="{DynamicResource SecondaryRegionBrush}"
+                                 Foreground="{DynamicResource PrimaryTextBrush}"/>
+                    </Border>
+                </Grid>
+            </Grid>
+
+            <!-- 按钮 -->
+            <DockPanel Grid.Row="6">
+                <Button DockPanel.Dock="Right" Content="取消" Height="32" MinWidth="80" FontSize="12"
+                        hc:BorderElement.CornerRadius="6"
+                        IsCancel="True" Click="OnCancel" Margin="10,0,0,0"/>
+                <Button DockPanel.Dock="Right" Content="插入" Height="32" MinWidth="80" FontSize="12"
+                        hc:BorderElement.CornerRadius="6"
+                        Style="{DynamicResource ButtonPrimary}"
+                        Click="OnInsert"/>
+                <StackPanel/><!-- 占位 -->
+            </DockPanel>
+        </Grid>
+    </Border>
+</Window>
