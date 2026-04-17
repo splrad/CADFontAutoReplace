@@ -41,13 +41,10 @@ internal sealed class LogService : ILogService
     private LogService() { }
 
     /// <summary>记录一条信息级别日志到缓冲区。</summary>
-    /// <param name="message">日志内容。</param>
     public void Info(string message) => AddEntry(LogCategory.Info, message);
     /// <summary>记录一条警告级别日志到缓冲区。</summary>
-    /// <param name="message">日志内容。</param>
     public void Warning(string message) => AddEntry(LogCategory.Warning, message);
     /// <summary>记录一条错误级别日志到缓冲区。</summary>
-    /// <param name="message">日志内容。</param>
     public void Error(string message) => AddEntry(LogCategory.Error, message);
     /// <summary>记录一条包含异常信息的错误级别日志到缓冲区。会自动拼接异常消息。</summary>
     /// <param name="message">错误描述。</param>
