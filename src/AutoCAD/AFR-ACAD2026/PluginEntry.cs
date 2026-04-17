@@ -7,6 +7,7 @@ using AFR.Hosting;
 [assembly: CommandClass(typeof(AFR.Commands.AfrCommands))]
 #if DEBUG
 [assembly: CommandClass(typeof(AFR.Commands.MTextEditorCommand))]
+[assembly: CommandClass(typeof(AFR.Commands.MTextInsertCommand))]
 #endif
 
 namespace AFR;

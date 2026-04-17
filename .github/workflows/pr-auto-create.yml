@@ -1,3 +1,8 @@
+# 📋 复用到新项目时的配置步骤：
+#   1. 在仓库中创建以下 Secrets（路径：设置 → 机密与变量 → 操作 → 新建仓库机密）：
+#      - DeepSeek_API_KEY：DeepSeek API 密钥
+#      - MY_PAT：GitHub 个人访问令牌（需要 repo 权限）
+#   2. 修改下方 on.push.branches 中的触发分支名，以及 env 中的 TARGET_BRANCH
 name: 🚀 合并请求自动创建
 
 on:
@@ -5,88 +10,104 @@ on:
     branches:
       - test
 
+concurrency:
+  group: pr-auto-create-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # SOURCE_BRANCH 自动从推送事件中提取，无需手动配置
+  SOURCE_BRANCH: ${{ github.ref_name }}
+  # TARGET_BRANCH 需要根据实际情况修改为主分支名称，常见为 master 或 main
+  TARGET_BRANCH: master
+
 jobs:
   automation-integration:
-    name: 🤖 合并请求生成与自动化集成控制
+    # ✅ 在 PR 检查列表显示的名称
+    name: 🤖 请求管理
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     permissions:
       pull-requests: write
       contents: read
 
     steps:
-      - name: 📦 执行代码全量检出
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # ❗ 获取完整提交历史，供 AI 分析差异
+      - name: 📦 执行代码检出
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: 🧠 生成变更说明
         id: ai-summary
         env:
+          # 关键：使用 Secrets 传递 API 密钥，避免泄露风险
           DEEPSEEK_API_KEY: ${{ secrets.DeepSeek_API_KEY }}
         run: |
-          # 提取 master 与当前分支之间的差异记录（最近 15 条）
-          CHANGES=$(git log origin/master..HEAD --pretty=format:"- %s" -n 15)
+          # 提取本次推送包含的提交记录
+          CHANGES=$(git log "${{ github.event.before }}..${{ github.event.after }}" --pretty=format:"- %s" -n 15)
 
           if [ -z "$CHANGES" ]; then
             CHANGES="无明显变更"
           fi
-          
-          # 调用 DeepSeek 接口进行语义化总结
-          RESPONSE=$(curl https://api.deepseek.com/v1/chat/completions \
-            -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"model\": \"deepseek-chat\",
-              \"messages\": [
+
+          # 使用 jq 安全构建 JSON（防止提交信息中的特殊字符导致注入）
+          PAYLOAD=$(jq -n \
+            --arg changes "$CHANGES" \
+            '{
+              model: "deepseek-chat",
+              messages: [
                 {
-                \"role\": \"system\", 
-                \"content\": \"你是一位资深系统架构师。请将 Git 提交记录转化为简洁清晰的 PR 描述，使用开发者常见表达，避免官话。包含：变更内容、影响范围。使用 Markdown 格式。\"
+                  role: "system",
+                  content: "你是一个 PR 描述生成器。根据 Git 提交记录，写一段简短的变更说明。\n\n要求：\n- 像真人开发者随手写的，不要有 AI 味（禁止"本次更新"、"旨在"、"致力于"、"进一步"等套话）\n- 用短句，直接说改了什么、为什么改\n- 如果涉及多个方面，用无序列表分条，每条一句话\n- 有技术含量但不堆砌术语\n- Markdown 格式，不要加标题\n- 总长度控制在 3~8 行"
                 },
                 {
-                \"role\": \"user\", 
-                \"content\": \"提交记录如下：\n$CHANGES\"
+                  role: "user",
+                  content: ("提交记录：\n" + $changes)
                 }
               ]
-            }")
+            }')
+
+          # 调用 DeepSeek 接口进行语义化总结（限时 30s，失败重试 2 次）
+          RESPONSE=$(curl -sf --max-time 30 --retry 2 --retry-max-time 60 \
+            https://api.deepseek.com/v1/chat/completions \
+            -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD") || RESPONSE=""
           
           # 解析返回
-          SUMMARY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content')
+          SUMMARY=""
+          if [ -n "$RESPONSE" ]; then
+            SUMMARY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+          fi
 
-          # 兜底（防止 API 异常）
-          if [ -z "$SUMMARY" ] || [ "$SUMMARY" = "null" ]; then
+          # 兜底（防止 API 异常或网络失败）
+          if [ -z "$SUMMARY" ]; then
             SUMMARY="⚠️ 自动生成失败，请手动填写变更说明。"
           fi
           
           # 将审计内容注入环境变量（处理多行文本的安全性写法）
-          echo "AI_PR_BODY<<EOF" >> $GITHUB_ENV
-          echo "$SUMMARY" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          echo "AI_PR_BODY<<EOF" >> "$GITHUB_ENV"
+          echo "$SUMMARY" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
 
       - name: 🔁 执行合并请求生成与状态判定
         env:
           # ❗ 关键点：必须使用个人访问令牌 (PAT)
           GH_TOKEN: ${{ secrets.MY_PAT }}
+          # 通过环境变量传递 AI 内容，避免 shell 注入
+          PR_BODY_CONTENT: ${{ env.AI_PR_BODY }}
         run: |
-          # 检查是否已经存在从 test 到 master 的 PR
-          
-          PR_EXISTS=$(gh pr list --head test --base master --json url --jq '.[0].url')
+          # 检查是否已经存在对应的 PR
+          PR_EXISTS=$(gh pr list --head "$SOURCE_BRANCH" --base "$TARGET_BRANCH" --json url --jq '.[0].url')
           
           if [ -z "$PR_EXISTS" ]; then
             echo "未检测到现有集成请求，正在初始化交付程序..."
+            PR_BODY=$(printf '### 🤖 变更说明\n\n%s\n\n---' "$PR_BODY_CONTENT")
             gh pr create \
-              --base master \
-              --head test \
-              --title "🔄 分支同步： test ➔ master" \
-              --body "### 🤖 变更说明
-              
-              ${{ env.AI_PR_BODY }}
-              
-              ---"
+              --base "$TARGET_BRANCH" \
+              --head "$SOURCE_BRANCH" \
+              --title "🔄 分支同步： $SOURCE_BRANCH ➔ $TARGET_BRANCH" \
+              --body "$PR_BODY"
           else
             echo "检测到已存在的集成请求，正在同步更新变更说明..."
-            gh pr edit "$PR_EXISTS" --body "### 🤖 变更说明 (已更新)
-            
-            ${{ env.AI_PR_BODY }}"
-            
+            PR_BODY=$(printf '### 🤖 变更说明 (已更新)\n\n%s' "$PR_BODY_CONTENT")
+            gh pr edit "$PR_EXISTS" --body "$PR_BODY"
           fi

@@ -241,10 +241,14 @@ internal static class MTextFontParser
     }
 
     /// <summary>
-    /// 添加 SHX 字体到结果集。归一化处理：确保 .shx 后缀。
+    /// 添加 SHX 字体到结果集。归一化处理：剥离目录路径 + 确保 .shx 后缀。
     /// </summary>
     private static void AddShxFont(string fontName, InlineFontType fontType, Dictionary<string, InlineFontType> result)
     {
+        // MText \F 格式代码可能存储完整路径（如旧版 CAD 安装目录），
+        // 剥离路径确保与 Hook 重定向日志和 _availableFonts 的纯文件名 key 对齐
+        fontName = Path.GetFileName(fontName);
+
         string normalized = fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase)
             ? fontName
             : fontName + ".shx";

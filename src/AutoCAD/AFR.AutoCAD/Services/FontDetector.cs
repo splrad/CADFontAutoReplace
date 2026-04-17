@@ -65,8 +65,10 @@ internal static class FontDetector
             {
                 var style = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
                 var styleName = style.Name;
-                var fileName = style.FileName ?? string.Empty;
-                var bigFontName = style.BigFontFileName ?? string.Empty;
+                // Path.GetFileName 剥离目录路径：DWG 中 style.FileName 可能存储
+                // 旧版 CAD 安装目录的完整路径，归一化为纯文件名供显示和检测
+                var fileName = Path.GetFileName(style.FileName ?? string.Empty);
+                var bigFontName = Path.GetFileName(style.BigFontFileName ?? string.Empty);
 
                 // 隔离 style.Font 访问 — 损坏的 TrueType 描述符不应阻断 SHX 检测
                 FontDescriptor? safeFont = null;

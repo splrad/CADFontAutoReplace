@@ -1,0 +1,74 @@
+# 📋 复用到新项目时的配置步骤：
+#   修改下方 env 中的 ALLOWED_SOURCE_BRANCH 为允许向主分支合并的来源分支名
+#   修改 on.pull_request_target.branches 为实际的主分支名（master 或 main）
+name: 🔒 主支合并规则校验
+
+on:
+  pull_request_target:
+    branches:
+      - master
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-branch-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  ALLOWED_SOURCE_BRANCH: test
+
+jobs:
+  # ❗ ID 保持英文，方便系统识别和状态检查关联
+  branch-policy-check:
+    # ✅ 在 PR 检查列表显示的名称
+    name: ⚙️ 合并校验
+    runs-on: ubuntu-latest
+    # 设置合理的超时时间，防止长时间占用资源
+    timeout-minutes: 5
+    # 授予写入权限，以便 Action 可以发表评论和修改标签
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: 🔍 执行分支来源与流向校验
+        id: check
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          CUR_REPO: ${{ github.repository }}
+        # 使用 bash 变量处理，防止 Shell 注入攻击
+        run: |
+          echo "Checking merge request: $HEAD_REPO:$HEAD_REF -> $CUR_REPO:$BASE_REF"
+          
+          if [ "$HEAD_REPO" != "$CUR_REPO" ]; then
+            echo "error_msg=❌ 错误：禁止从外部 Fork 仓库直接向 $BASE_REF 提交 PR。" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          
+          if [ "$HEAD_REF" != "$ALLOWED_SOURCE_BRANCH" ]; then
+            echo "error_msg=❌ 合并被拒绝：仅允许 $ALLOWED_SOURCE_BRANCH 分支向 $BASE_REF 发起变更合并请求。当前来源分支为: $HEAD_REF" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          
+          echo "✅ 验证通过：符合工作流规范。"
+
+      - name: 💬 执行违规合并自动反馈
+        # 仅在上述步骤失败时运行
+        if: failure()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          ERROR_MSG: ${{ steps.check.outputs.error_msg }}
+        with:
+          script: |
+            const errorMsg = process.env.ERROR_MSG || `❌ 分支检查失败：请确保来源分支为 \`${process.env.ALLOWED_SOURCE_BRANCH}\`。`;
+            const allowedBranch = process.env.ALLOWED_SOURCE_BRANCH;
+            const baseBranch = context.payload.pull_request.base.ref;
+            const commentBody = `### 🤖 流程自动检查失败\n\n${errorMsg}\n\n**操作指引：**\n1. 请关闭此 Pull Request。\n2. 确保代码已合并至 \`${allowedBranch}\` 分支并完成测试。\n3. 从 \`${allowedBranch}\` 分支发起新的 PR 指向 \`${baseBranch}\`。`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: commentBody
+            })

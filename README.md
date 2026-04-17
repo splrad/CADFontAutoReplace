@@ -16,49 +16,31 @@
 
 ## ✨ 为什么选择 AFR
 
-<table>
-<tr>
-<td width="50%">
+### 🔍 核心亮点速览
 
-### 🚀 全自动，零操作
-打开图纸即自动检测并替换所有缺失字体，无需手动干预。
-首次配置好替换字体后，以后打开任何图纸都不再需要操心字体问题。
+- 🚀 **自动化执行**：配置一次后，后续打开图纸自动检测并替换缺失字体。
+- 🎯 **三类字体全覆盖**：支持 `SHX 主字体`、`SHX 大字体`、`TrueType` 缺失修复。
+- 🧠 **类型安全替换**：自动区分主字体/大字体，避免替换类型错配。
+- 🔧 **底层 Hook + 样式表双阶段修复**：兼顾 DWG 解析阶段与样式表持久化修复。
+- 🧾 **采用 Hook 方案修复多行文字乱码**：针对 MText 内联字体（`\F` / `\f`）在解析阶段重定向，能有效解决多行文字乱码问题，而不只处理样式表字体。
+- 📦 **单 DLL 部署**：第三方 UI 依赖已嵌入，分发简单。
+- 🖥️ **可视化人工兜底**：`AFRLOG` 支持逐行与批量修正。
+- 🔄 **可回退可卸载**：仅修改当前图纸，不强制保存，支持 `AFRUNLOAD`。
 
-### 🎯 三种字体全覆盖
-- **SHX 主字体**（西文） — 如 `txt.shx`、`simplex.shx`
-- **SHX 大字体**（中文） — 如 `hztxt.shx`、`gbcbig.shx`
-- **TrueType 字体** — 如 `宋体`、`黑体`
+### 🆚 与常见同类插件相比
 
-插件会自动读取 SHX 文件头区分主字体与大字体，
-配置时**不会选错类型**，无需人工判断。
+| 常见做法 | 典型短板 | AFR 的增强点 |
+|---|---|---|
+| 仅依赖 `FONTALT` 回退 | 对复杂场景覆盖有限，人工干预多 | 自动检测 + 自动替换，减少手工操作 |
+| 仅改样式表字体 | 对 MText 内联字体覆盖不足 | 同时处理样式表与 MText 内联字体 |
+| 只替换 SHX | TrueType 缺失场景处理不完整 | SHX/大字体/TrueType 三类统一纳管 |
+| 只做“替换不验证” | 可能写入不可用字体 | 内置替换后二次验证与统计输出 |
+| 纯命令行流程 | 批量调整和复核成本高 | 配置窗口 + 日志窗口 + 手动兜底闭环 |
 
-### 🔧 底层 Hook 修复多行文本
-通过 Inline Hook 拦截 AutoCAD 底层字体加载函数，
-在 DWG 解析阶段就完成 MText（多行文本）内联字体的重定向，
-确保多行文本的内嵌字体也能正确显示。
+### 🌟 适合真实工程场景的附加亮点
 
-</td>
-<td width="50%">
-
-### 📦 单文件分发
-只需一个 DLL 文件，无需额外依赖。
-第三方库（HandyControl）已嵌入程序集资源。
-
-### 🖥️ 现代化界面
-采用 WPF + HandyControl 构建，提供美观的配置窗口和替换日志界面。
-
-### 📋 详细日志 + 手动调整
-`AFRLOG` 命令可查看所有缺失字体的检测结果，
-支持逐行修改或按类型批量填充替换字体。
-
-### 🔄 安全可靠
-- 替换后二次验证，确认替换字体确实可用
-- 仅修改当前图纸内存中的字体引用，不自动保存文件
-- 提供 `AFRUNLOAD` 一键完整卸载
-
-</td>
-</tr>
-</table>
+- 支持 `AFRVIEW` / `AFRINSERT`（Debug）进行内联字体问题复现与定位。
+- 诊断日志可追踪执行阶段、Hook 重定向与替换结果，便于问题排查。
 
 ### 界面预览
 
@@ -81,16 +63,15 @@
 
 ### 开发计划
 
-**AutoCAD**
-- [x] AutoCAD 2026
-- [ ] AutoCAD 2025
-- [ ] AutoCAD 2024
-- [ ] AutoCAD 2023
-- [ ] AutoCAD 2022
-
-**中望CAD**
-- [ ] 中望CAD 2026
-- [ ] 中望CAD 2025
+| 平台 | 版本 | 状态 |
+|---|---|---|
+| AutoCAD | 2026 | ✅ **已支持** |
+| AutoCAD | 2025 | ⬜ 计划中 |
+| AutoCAD | 2024 | ⬜ 计划中 |
+| AutoCAD | 2023 | ⬜ 计划中 |
+| AutoCAD | 2022 | ⬜ 计划中 |
+| 中望CAD | 2026 | ⬜ 计划中 |
+| 中望CAD | 2025 | ⬜ 计划中 |
 
 ---
 
@@ -101,16 +82,16 @@
 ### 第一步：下载插件
 
 1. 前往 [Releases](https://github.com/splrad/CADFontAutoReplace/releases) 页面
-2. 根据你的 AutoCAD 版本下载对应的 DLL 文件（例如 AutoCAD 2026 → `AFR-ACAD2026.dll`）
+2. 根据你的 AutoCAD 版本下载对应的 DLL 文件（命名格式：`AFR-ACAD20XX.dll`）
 3. 保存到一个**固定位置**，不要放在桌面或临时文件夹
 
-> 💡 推荐路径：`D:\CADPlugins\AFR-ACAD2026.dll`
+> 💡 推荐路径：`D:\CADPlugins\AFR-ACAD20XX.dll`
 
 ### 第二步：加载插件
 
 1. 打开 AutoCAD
 2. 在底部命令行输入 `NETLOAD`，按回车
-3. 在弹出的文件选择窗口中，找到 `AFR-ACAD2026.dll`，点击"打开"
+3. 在弹出的文件选择窗口中，找到对应版本的 DLL（如 `AFR-ACAD20XX.dll`），点击"打开"
 4. 如果弹出安全警告，选择 **"始终加载"**
 
 > ✅ 加载成功后，命令行会显示插件信息。此后每次打开 AutoCAD 都会**自动加载**，无需重复操作。
@@ -198,6 +179,16 @@ AFR 缺失字体自动替换 v7.0
 
 </details>
 
+<details>
+<summary><b>为什么 AFR 能修复多行文字（MText）乱码？</b></summary>
+
+AFR 采用了底层 `ldfile` Hook 方案，在 DWG 解析阶段拦截字体加载请求。对 MText 内联字体（`\F` / `\f`）缺失场景，
+会在解析链路中完成重定向，再由样式表替换阶段做统一收敛，因此不仅能修复普通样式表缺失，也能覆盖多行文字乱码问题。
+
+> 注意：若图纸内容字符本身已经被错误编码后保存（文字数据已损坏），任何字体替换都无法还原原文。
+
+</details>
+
 ### 命令速查
 
 | 命令 | 说明 |
@@ -208,119 +199,45 @@ AFR 缺失字体自动替换 v7.0
 
 ---
 
-## 🛠️ 开发者指南
+## 🛠️ 开发者说明
 
-### 环境要求
+开发相关内容已拆分到独立文档：
 
-- Visual Studio 2022 或更高版本
-- .NET 8 SDK
-- 对应的ACD软件（运行时测试）
+- [开发者指南入口](docs/developer-guide.md)
+- [纯新手：开发者指南](docs/developer-guide-beginner.md)
+- [老手进阶：开发者指南](docs/developer-guide-advanced.md)
 
-### 构建
+`README.md` 仅保留项目简介与用户使用说明。
+
+---
+
+## 🤝 贡献者指南（简短版）
+
+欢迎提交 Issue 和 PR，一起完善 AFR。
+
+### 提交流程
+
+1. 从 `test` 分支拉取最新代码并完成你的修改。
+2. 完成修改后本地执行构建：
 
 ```bash
-# 打开解决方案后，构建 AFR-ACAD2026 项目
-# 所有 Shared Project 源码会自动编译进最终的 DLL
-dotnet build src/AutoCAD/AFR-ACAD2026/AFR-ACAD2026.csproj
+dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 ```
 
-### 项目结构
+> 说明：请将 `20XX` 替换为你当前要开发/验证的版本壳工程（例如 `2026`）。
 
-```
-src/
-├── AFR.Core/              Shared Project — 接口、模型、基础服务（纯 .NET，无 CAD 依赖）
-│   ├── Abstractions/        接口定义（ICadPlatform / IFontHook / ICadHost / IFontScanner / ILogService）
-│   ├── Models/              数据模型（FontCheckResult / InlineFontFixRecord / StyleFontReplacement）
-│   ├── Platform/            平台管理器（PlatformManager — 全局服务注册中心）
-│   └── Services/            基础服务（ConfigService / RegistryService — 注册表配置读写）
-├── AFR.UI/                Shared Project — WPF 用户界面（字体选择 / 替换日志 / MText 查看器）
-│   ├── FontSelection/       AFR 命令的字体配置窗口
-│   ├── FontLog/             AFRLOG 命令的替换日志窗口（支持逐行和批量替换）
-│   └── MTextEditor/         AFRVIEW 命令的 MText 格式代码查看器（仅 Debug）
-└── AutoCAD/
-    ├── AFR.AutoCAD/        Shared Project — AutoCAD 通用逻辑
-    │   ├── Commands/          命令定义（AFR / AFRLOG / AFRUNLOAD / AFRVIEW）
-    │   ├── FontMapping/       字体 Hook 与 MText 内联字体解析
-    │   ├── Hosting/           插件生命周期、事件注册、执行控制
-    │   └── Services/          字体检测、替换、日志、诊断
-    └── AFR-ACAD2026/       版本适配壳 — 仅 PluginEntry + 平台常量（2 个文件）
-```
+3. 确认关键命令可用（`AFR` / `AFRLOG` / `AFRUNLOAD`，Debug 下可验证 `AFRVIEW` / `AFRINSERT`）。
+4. 将代码推送到仓库后，PR 会自动拉取到 `test` 分支。
+5. 提交说明与 PR 描述由流程自动生成，无需手动编写。
 
-> AFR.Core、AFR.UI、AFR.AutoCAD 均为 Shared Project，所有源码在编译时直接嵌入最终的 `AFR-ACAD2026.dll`，实现**单 DLL 分发**。
+> 如自动生成的说明与实际改动不一致，请在 PR 评论区补充变更摘要（修改目的、影响范围、验证方式）。
 
-### 添加新 AutoCAD 版本支持
+### 贡献约定
 
-1. 在 `src/AutoCAD/` 下创建新的版本目录（如 `AFR-ACAD2025/`）
-2. 创建 `PluginEntry.cs` — 继承 `PluginEntryBase`，实现三个工厂方法
-3. 创建 `AutoCad2025Platform.cs` — 实现 `ICadPlatform`，填入版本特定常量（注册表路径、DLL 名、导出符号、序言长度）
-4. 创建 `.csproj`，导入三个 Shared Project 的 `.projitems`
-
-### 技术架构
-
-#### 两阶段字体修复
-
-插件采用两阶段协作策略，覆盖从 DWG 解析到样式表修改的完整流程：
-
-```
-┌─ 阶段 1：DWG 解析阶段（ldfile Hook） ──────────────────────────────┐
-│  拦截 AutoCAD 底层的字体文件加载函数                                  │
-│  ├─ 缺失 SHX 大字体（param2=4）→ 重定向到配置的 BigFont              │
-│  ├─ 缺失 TrueType 字族名       → 重定向到配置的 TrueType 字体        │
-│  └─ 缺失 SHX 主字体（param2=0）→ 重定向到配置的 SHX主字体         │
-└────────────────────────────────────────────────────────────────────┘
-                                ↓
-┌─ 阶段 2：Execute 阶段（FontReplacer） ─────────────────────────────┐
-│  修改图纸 TextStyleTable 中的字体引用                                │
-│  ├─ 检测缺失字体（FontDetector）                                    │
-│  ├─ 预校验替换字体可用性                                             │
-│  ├─ 按类型分流替换（SHX 主字体 / 大字体 / TrueType）                 │
-│  ├─ 清理 TrueType 可用但 SHX 缺失的残留引用                         │
-│  └─ 二次验证：替换后重新检测，确认修复效果                             │
-└────────────────────────────────────────────────────────────────────┘
-```
-
-#### 插件生命周期
-
-```
-AutoCAD 启动
-  │
-  ├─ PluginEntryBase.Initialize()
-  │   ├─ 注册平台服务（PlatformManager）
-  │   ├─ 安装 ldfile Hook（LdFileHook.Install）
-  │   ├─ 写入注册表自动加载项
-  │   └─ 注册 DocumentOpened 事件
-  │
-  ├─ 文档打开事件
-  │   ├─ 配置未初始化 → 延迟入队，等待用户执行 AFR 命令后统一处理
-  │   └─ 配置已初始化 → ExecutionController.Execute()
-  │       ├─ 检测缺失字体
-  │       ├─ 替换缺失字体
-  │       ├─ 清理残留引用
-  │       ├─ MText 内联字体扫描与比对
-  │       ├─ 二次验证
-  │       └─ 输出日志到命令行
-  │
-  └─ AFRUNLOAD 命令
-      ├─ 注销所有事件监听
-      ├─ 卸载 ldfile Hook
-      ├─ 删除注册表自动加载项
-      └─ 清空运行状态
-```
-
-#### 关键设计决策
-
-| 决策 | 原因 |
-|---|---|
-| TrueType 必须用 TrueType 替换，不能用 SHX | 若将 TrueType 误重定向为 SHX，会污染 AutoCAD 内部字体缓存，导致文字乱码 + ST 弹窗 |
-| 常规 SHX 主字体（param2=0）不通过 Hook 重定向 | Hook 级别的重定向会干扰块参照的字体缓存渲染，交由 FONTALT 原生机制处理更稳定 |
-| SHX 大字体（param2=4）必须通过 Hook 处理 | FONTALT 不区分大字体和主字体，无法正确替换大字体 |
-| 原生字符串指针缓存不释放 | ldfile 可能将 fileName 指针存入全局字体表，释放后成为悬空指针导致崩溃 |
-| FontDetectionContext 按事务隔离 | 不同图纸、不同执行次数之间 100% 内存隔离，避免缓存污染 |
-| ShapeFile 样式始终跳过 | 替换 ShapeFile 样式会破坏复杂线型结构（ltypeshp.shx 等） |
-
-### 调试日志
-
-Debug 构建会在插件 DLL 所在目录生成 `AFR_Diag_*.log` 诊断日志，记录完整的字体检测、替换、Hook 重定向过程。日志自动按 10MB 分包，保留 7 天。
+- 遵守分层依赖方向：`AFR.Core` / `AFR.UI` 不引用 AutoCAD SDK。
+- 新增命令必须在 `PluginEntry.cs` 注册，否则 CAD 无法识别。
+- 仅调试使用的功能请使用 `#if DEBUG` 包裹（并在命令注册处同步控制）。
+- 仅修复当前问题，避免无关重构。
 
 ---
 
@@ -340,7 +257,7 @@ Debug 构建会在插件 DLL 所在目录生成 `AFR_Diag_*.log` 诊断日志，
 
 | 字体文件 | 来源 / 作者 | 备注 |
 |---|---|---|
-| [AutoCAD 原版字体](docs/autodesk-fonts.md) | Autodesk | 点击查看完整清单 |
+| [AutoCAD 原版字体清单](docs/autodesk-fonts.md) | Autodesk | 基于 CAD 初始安装释放的 SHX 清单 |
 | `tssdchn.shx` `tssdeng.shx` `cadzxw.shx` | 探索者软件 (TSSD) | 探索者结构设计字体 |
 | `cadzxw-e.shx` | ChenYong longfly199@sina.com) | 探索者英文字体，基于 ROMANS 修改 |
 | `whgdtxt.shx` `whgtxt.shx` `whtgtxt.shx` `whtmtxt.shx` | 天正建筑 | 天正系列中文大字体 |
