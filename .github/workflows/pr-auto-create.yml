@@ -44,7 +44,16 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DeepSeek_API_KEY }}
         run: |
           # 提取本次推送包含的提交记录
-          CHANGES=$(git log "${{ github.event.before }}..${{ github.event.after }}" --pretty=format:"- %s" -n 15)
+          # 强制推送时 before 指向的旧 commit 可能已不存在，需要降级处理
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
+
+          if git cat-file -e "$BEFORE" 2>/dev/null; then
+            CHANGES=$(git log "${BEFORE}..${AFTER}" --pretty=format:"- %s" -n 15)
+          else
+            # 降级：对比目标分支，获取本分支独有的提交
+            CHANGES=$(git log "origin/${TARGET_BRANCH}..${AFTER}" --pretty=format:"- %s" -n 15)
+          fi
 
           if [ -z "$CHANGES" ]; then
             CHANGES="无明显变更"
