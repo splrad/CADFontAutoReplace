@@ -51,15 +51,26 @@ jobs:
           fi
 
           # 使用 jq 安全构建 JSON（防止提交信息中的特殊字符导致注入）
-          SYSTEM_PROMPT=$(printf '%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
-            '你是一个 PR 描述生成器。根据 Git 提交记录，写一段简短的变更说明。' \
-            '要求：' \
-            '- 像真人开发者随手写的，不要有 AI 味（禁止「本次更新」「旨在」「致力于」「进一步」等套话）' \
-            '- 用短句，直接说改了什么、为什么改' \
-            '- 如果涉及多个方面，用无序列表分条，每条一句话' \
-            '- 有技术含量但不堆砌术语' \
-            '- Markdown 格式，不要加标题' \
-            '- 总长度控制在 3~8 行')
+          SYSTEM_PROMPT=$(cat <<'PROMPT'
+          你是一个 PR 描述生成器。根据 Git 提交记录，生成标题和变更说明。
+
+          严格按以下 JSON 格式输出，不要输出任何其他内容：
+          {"title": "一句话标题", "body": "变更说明正文"}
+
+          标题要求：
+          - 不超过 50 个中文字符
+          - 直接说改了什么，例如「修复字体回退逻辑」「重构配置加载流程」
+          - 不要加 emoji、不要加分支名、不要写「更新」「优化」等模糊词
+
+          正文要求：
+          - 像真人开发者随手写的，不要有 AI 味（禁止「本次更新」「旨在」「致力于」「进一步」等套话）
+          - 用短句，直接说改了什么、为什么改
+          - 如果涉及多个方面，用无序列表分条，每条一句话
+          - 有技术含量但不堆砌术语
+          - Markdown 格式，不要加标题
+          - 总长度控制在 3~8 行
+          PROMPT
+          )
 
           PAYLOAD=$(jq -n \
             --arg changes "$CHANGES" \
@@ -87,16 +98,25 @@ jobs:
           
           # 解析返回
           SUMMARY=""
+          AI_TITLE=""
           if [ -n "$RESPONSE" ]; then
-            SUMMARY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+            AI_CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+            # 提取 JSON 中的 title 和 body（兼容 AI 输出被 markdown 代码块包裹的情况）
+            AI_CONTENT_CLEAN=$(echo "$AI_CONTENT" | sed 's/^```json//;s/^```//')
+            AI_TITLE=$(echo "$AI_CONTENT_CLEAN" | jq -r '.title // empty' 2>/dev/null)
+            SUMMARY=$(echo "$AI_CONTENT_CLEAN" | jq -r '.body // empty' 2>/dev/null)
           fi
 
           # 兜底（防止 API 异常或网络失败）
+          if [ -z "$AI_TITLE" ]; then
+            AI_TITLE="$SOURCE_BRANCH ➔ $TARGET_BRANCH"
+          fi
           if [ -z "$SUMMARY" ]; then
             SUMMARY="⚠️ 自动生成失败，请手动填写变更说明。"
           fi
           
-          # 将审计内容注入环境变量（处理多行文本的安全性写法）
+          # 将内容注入环境变量（处理多行文本的安全性写法）
+          echo "AI_PR_TITLE=$AI_TITLE" >> "$GITHUB_ENV"
           echo "AI_PR_BODY<<EOF" >> "$GITHUB_ENV"
           echo "$SUMMARY" >> "$GITHUB_ENV"
           echo "EOF" >> "$GITHUB_ENV"
@@ -106,6 +126,7 @@ jobs:
           # ❗ 关键点：必须使用个人访问令牌 (PAT)
           GH_TOKEN: ${{ secrets.MY_PAT }}
           # 通过环境变量传递 AI 内容，避免 shell 注入
+          PR_TITLE: ${{ env.AI_PR_TITLE }}
           PR_BODY_CONTENT: ${{ env.AI_PR_BODY }}
         run: |
           # 检查是否已经存在对应的 PR
@@ -117,10 +138,10 @@ jobs:
             gh pr create \
               --base "$TARGET_BRANCH" \
               --head "$SOURCE_BRANCH" \
-              --title "🔄 分支同步： $SOURCE_BRANCH ➔ $TARGET_BRANCH" \
+              --title "$PR_TITLE" \
               --body "$PR_BODY"
           else
             echo "检测到已存在的集成请求，正在同步更新变更说明..."
             PR_BODY=$(printf '### 🤖 变更说明 (已更新)\n\n%s' "$PR_BODY_CONTENT")
-            gh pr edit "$PR_EXISTS" --body "$PR_BODY"
+            gh pr edit "$PR_EXISTS" --title "$PR_TITLE" --body "$PR_BODY"
           fi
