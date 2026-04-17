@@ -8,7 +8,7 @@
 [![AutoCAD](https://img.shields.io/badge/AutoCAD-2026-red.svg)](#已支持的-autocad-版本)
 [![.NET](https://img.shields.io/badge/.NET-8.0-purple.svg)](https://dotnet.microsoft.com/)
 
-[GitHub](https://github.com/splrad/CADFontAutoReplace) · [Gitee（国内镜像）](https://gitee.com/splrad/CADFontAutoReplace) · [下载最新版](https://github.com/splrad/CADFontAutoReplace/releases)
+[GitHub](https://github.com/splrad/CADFontAutoReplace) · [Gitee（国内镜像）](https://gitee.com/splrad/CADFontAutoReplace) 
 
 </div>
 
