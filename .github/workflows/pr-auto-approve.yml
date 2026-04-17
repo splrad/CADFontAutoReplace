@@ -15,10 +15,6 @@ concurrency:
   group: auto-approve-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-env:
-  # 提前启用 Node.js 24 运行环境，消除 Node.js 20 弃用警告
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   privileged-access:
     # ✅ 在 PR 检查列表显示的名称
@@ -34,9 +30,12 @@ jobs:
 
     steps:
       - name: 🧩 触发核心开发者准入判定
-        uses: hmarr/auto-approve-action@f0939ea97e9205ef24d872e76833fa908a770363 # v4.0.0
-        with:
-          # ❗ 关键：这里必须使用内置 token，代表“机器人”审批“你”的 PR
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # 机器人留下的评论：采用“协议响应”式的措辞
-          review-message: "🤖 已完成核心开发者身份校验，自动准入流程已授权。"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
+            -f event='APPROVE' \
+            -f body='🤖 已完成核心开发者身份校验，自动准入流程已授权。'
