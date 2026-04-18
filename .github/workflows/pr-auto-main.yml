@@ -3,7 +3,7 @@
 #      - DeepSeek_API_KEY：DeepSeek API 密钥
 #      - MY_PAT：GitHub 个人访问令牌（需要 repo 权限）
 #   2. 修改下方 on.push.branches 中的触发分支名，以及 env 中的 TARGET_BRANCH
-name: 🚀 合并请求自动创建
+name: 🚀 主支合并请求创建
 
 on:
   push:
@@ -18,12 +18,12 @@ env:
   # SOURCE_BRANCH 自动从推送事件中提取，无需手动配置
   SOURCE_BRANCH: ${{ github.ref_name }}
   # TARGET_BRANCH 需要根据实际情况修改为主分支名称，常见为 master 或 main
-  TARGET_BRANCH: master
+  TARGET_BRANCH: main
 
 jobs:
   automation-integration:
     # ✅ 在 PR 检查列表显示的名称
-    name: 🤖 请求管理
+    name: 🤖 合并变更至主干分支
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
