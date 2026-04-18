@@ -15,20 +15,15 @@ concurrency:
   group: auto-approve-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-env:
-  # 提前启用 Node.js 24 运行环境，消除 Node.js 20 弃用警告
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   privileged-access:
     # ✅ 在 PR 检查列表显示的名称
     name: 🔐 访问控制
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # 只有当 PR 作者在受信任开发者列表中，并且 PR 的目标分支是默认分支时，才执行审批流程
+    # 只有当 PR 作者在受信任开发者列表中时，执行自动审批（覆盖 feature→test 和 test→main 两层 PR）
     if: >-
-      contains(fromJSON(vars.TRUSTED_DEVELOPERS), github.actor) &&
-      github.event.pull_request.base.ref == github.event.repository.default_branch
+      contains(fromJSON(vars.TRUSTED_DEVELOPERS), github.actor)
     permissions:
       pull-requests: write
 

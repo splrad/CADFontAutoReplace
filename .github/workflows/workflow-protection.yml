@@ -1,0 +1,115 @@
+# 📋 复用到新项目时的配置步骤：
+#   1. 确保仓库已创建 TRUSTED_DEVELOPERS 变量（JSON 数组格式的用户名列表）
+#   2. 在分支保护规则中将「🔒 工作流保护」添加为必须通过的状态检查
+#   3. 如需修改受保护路径，调整下方 env.PROTECTED_PATHS
+name: 🔒 工作流文件变更审计
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: workflow-protection-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # 受保护的路径模式（以换行分隔，支持多个路径）
+  PROTECTED_PATHS: .github/workflows/
+
+jobs:
+  workflow-file-audit:
+    name: 🔒 工作流保护
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: 🔍 检测工作流文件变更与提交者身份
+        id: audit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_ACTOR: ${{ github.actor }}
+          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "📋 PR #$PR_NUMBER 提交者: $PR_ACTOR"
+          
+          # 获取 PR 中所有变更的文件列表
+          CHANGED_FILES=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$REPO/pulls/$PR_NUMBER/files" \
+            --paginate \
+            --jq '.[].filename')
+          
+          # 检查是否有受保护路径下的文件被修改
+          WORKFLOW_CHANGES=""
+          while IFS= read -r file; do
+            if [[ "$file" == .github/workflows/* ]]; then
+              WORKFLOW_CHANGES="${WORKFLOW_CHANGES}${file}\n"
+            fi
+          done <<< "$CHANGED_FILES"
+          
+          if [ -z "$WORKFLOW_CHANGES" ]; then
+            echo "✅ 未检测到工作流文件变更，跳过审计。"
+            echo "has_violation=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          
+          echo "⚠️ 检测到以下工作流文件被修改："
+          echo -e "$WORKFLOW_CHANGES"
+          
+          # 检查 PR 提交者是否在白名单中
+          IS_TRUSTED=$(echo "$TRUSTED_LIST" | jq -r --arg actor "$PR_ACTOR" 'if . == null then "false" elif (. | index($actor)) then "true" else "false" end')
+          
+          if [ "$IS_TRUSTED" = "true" ]; then
+            echo "✅ 提交者 $PR_ACTOR 在受信任开发者名单中，允许修改工作流文件。"
+            echo "has_violation=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          
+          # 非白名单用户修改了工作流文件 → 违规
+          echo "❌ 提交者 $PR_ACTOR 不在受信任开发者名单中，禁止修改工作流文件。"
+          echo "has_violation=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "changed_files<<EOF"
+            echo -e "$WORKFLOW_CHANGES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 💬 发布违规通知并阻断合并
+        if: steps.audit.outputs.has_violation == 'true'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          CHANGED_FILES: ${{ steps.audit.outputs.changed_files }}
+          PR_ACTOR: ${{ github.actor }}
+        with:
+          script: |
+            const actor = process.env.PR_ACTOR;
+            const files = process.env.CHANGED_FILES.trim();
+            const fileList = files.split('\n').map(f => `- \`${f}\``).join('\n');
+            
+            const body = [
+              '### 🚨 工作流文件变更审计未通过',
+              '',
+              `提交者 **${actor}** 不在受信任开发者名单中，无权修改 CI/CD 工作流文件。`,
+              '',
+              '**涉及的受保护文件：**',
+              fileList,
+              '',
+              '**处理方式：**',
+              '1. 撤回对 `.github/workflows/` 目录下文件的修改',
+              '2. 或联系仓库管理员取得本仓库的核心开发者权限',
+            ].join('\n');
+            
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+            
+            core.setFailed('非授权用户修改了工作流文件，合并被阻断。');

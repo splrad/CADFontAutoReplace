@@ -1,0 +1,152 @@
+# 📋 复用到新项目时的配置步骤：
+#   1. 在仓库中创建以下 Secrets（路径：设置 → 机密与变量 → 操作 → 新建仓库机密）：
+#      - DeepSeek_API_KEY：DeepSeek API 密钥
+#      - MY_PAT：GitHub 个人访问令牌（需要 repo 权限）
+#   2. 修改下方 branches-ignore 中的排除分支名，以及 env 中的 TARGET_BRANCH
+name: 🚀 集成分支请求创建
+
+on:
+  push:
+    branches-ignore:
+      - test
+      - main
+
+concurrency:
+  group: pr-to-test-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_BRANCH: ${{ github.ref_name }}
+  TARGET_BRANCH: test
+
+jobs:
+  automation-integration:
+    # ✅ 在 PR 检查列表显示的名称
+    name: 🤖 合并变更至测试分支
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: 📦 执行代码检出
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: 🧠 生成变更说明
+        id: ai-summary
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DeepSeek_API_KEY }}
+        run: |
+          # 提取本次推送包含的提交记录
+          # 强制推送时 before 指向的旧 commit 可能已不存在，需要降级处理
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
+
+          if git cat-file -e "$BEFORE" 2>/dev/null; then
+            CHANGES=$(git log "${BEFORE}..${AFTER}" --pretty=format:"- %s" -n 15)
+          else
+            # 降级：对比目标分支，获取本分支独有的提交
+            CHANGES=$(git log "origin/${TARGET_BRANCH}..${AFTER}" --pretty=format:"- %s" -n 15)
+          fi
+
+          if [ -z "$CHANGES" ]; then
+            CHANGES="无明显变更"
+          fi
+
+          # 使用 jq 安全构建 JSON（防止提交信息中的特殊字符导致注入）
+          SYSTEM_PROMPT=$(cat <<'PROMPT'
+          你是一个 PR 描述生成器。根据 Git 提交记录，生成标题和变更说明。
+
+          严格按以下 JSON 格式输出，不要输出任何其他内容：
+          {"title": "一句话标题", "body": "变更说明正文"}
+
+          标题要求：
+          - 不超过 50 个中文字符
+          - 直接说改了什么，例如「修复字体回退逻辑」「重构配置加载流程」
+          - 不要加 emoji、不要加分支名、不要写「更新」「优化」等模糊词
+
+          正文要求：
+          - 像真人开发者随手写的，不要有 AI 味（禁止「本次更新」「旨在」「致力于」「进一步」等套话）
+          - 用短句，直接说改了什么、为什么改
+          - 如果涉及多个方面，用无序列表分条，每条一句话
+          - 有技术含量但不堆砌术语
+          - Markdown 格式，不要加标题
+          - 总长度控制在 3~8 行
+          PROMPT
+          )
+
+          PAYLOAD=$(jq -n \
+            --arg changes "$CHANGES" \
+            --arg system_prompt "$SYSTEM_PROMPT" \
+            '{
+              model: "deepseek-chat",
+              messages: [
+                {
+                  role: "system",
+                  content: $system_prompt
+                },
+                {
+                  role: "user",
+                  content: ("提交记录：\n" + $changes)
+                }
+              ]
+            }')
+
+          # 调用 DeepSeek 接口进行语义化总结（限时 30s，失败重试 2 次）
+          RESPONSE=$(curl -sf --max-time 30 --retry 2 --retry-max-time 60 \
+            https://api.deepseek.com/v1/chat/completions \
+            -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD") || RESPONSE=""
+          
+          # 解析返回
+          SUMMARY=""
+          AI_TITLE=""
+          if [ -n "$RESPONSE" ]; then
+            AI_CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+            # 提取 JSON 中的 title 和 body（兼容 AI 输出被 markdown 代码块包裹的情况）
+            AI_CONTENT_CLEAN=$(echo "$AI_CONTENT" | sed 's/^```json//;s/^```//')
+            AI_TITLE=$(echo "$AI_CONTENT_CLEAN" | jq -r '.title // empty' 2>/dev/null)
+            SUMMARY=$(echo "$AI_CONTENT_CLEAN" | jq -r '.body // empty' 2>/dev/null)
+          fi
+
+          # 兜底（防止 API 异常或网络失败）
+          if [ -z "$AI_TITLE" ]; then
+            AI_TITLE="$SOURCE_BRANCH ➔ $TARGET_BRANCH"
+          fi
+          if [ -z "$SUMMARY" ]; then
+            SUMMARY="⚠️ 自动生成失败，请手动填写变更说明。"
+          fi
+          
+          # 将内容注入环境变量（处理多行文本的安全性写法）
+          echo "AI_PR_TITLE=$AI_TITLE" >> "$GITHUB_ENV"
+          echo "AI_PR_BODY<<EOF" >> "$GITHUB_ENV"
+          echo "$SUMMARY" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+      - name: 🔁 执行合并请求生成与状态判定
+        env:
+          GH_TOKEN: ${{ secrets.MY_PAT }}
+          PR_TITLE: ${{ env.AI_PR_TITLE }}
+          PR_BODY_CONTENT: ${{ env.AI_PR_BODY }}
+        run: |
+          # 检查是否已经存在对应的 PR
+          PR_EXISTS=$(gh pr list --head "$SOURCE_BRANCH" --base "$TARGET_BRANCH" --json url --jq '.[0].url')
+          
+          if [ -z "$PR_EXISTS" ]; then
+            echo "未检测到现有集成请求，正在初始化交付程序..."
+            PR_BODY=$(printf '### 🤖 变更说明\n\n%s\n\n---' "$PR_BODY_CONTENT")
+            gh pr create \
+              --base "$TARGET_BRANCH" \
+              --head "$SOURCE_BRANCH" \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY"
+          else
+            echo "检测到已存在的集成请求，正在同步更新变更说明..."
+            PR_BODY=$(printf '### 🤖 变更说明 (已更新)\n\n%s' "$PR_BODY_CONTENT")
+            gh pr edit "$PR_EXISTS" --title "$PR_TITLE" --body "$PR_BODY"
+          fi
