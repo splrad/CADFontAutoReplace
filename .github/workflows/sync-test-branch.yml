@@ -6,7 +6,7 @@
 #      （路径：设置 → 规则 → 规则集 → 选择 test 分支规则 → 旁路列表 → 添加旁路 → 勾选「仓库管理员」）
 #   4. 修改下方 env 中的 TEST_BRANCH 和 MAIN_BRANCH 为实际分支名
 #   5. 当核心开发者跳过 test 分支直接向 main 合并 PR 后，test 分支将自动同步至 main 最新提交
-name: 🔄 测试分支同步主支
+name: 🔄 重置 test 分支到主分支
 
 on:
   pull_request_target:
@@ -25,7 +25,7 @@ env:
 jobs:
   sync-test-to-main:
     # ✅ 在 PR 检查列表显示的名称
-    name: 🔄 同步测试分支至主支最新提交
+    name: 🔄 同步 test 分支至主支最新提交
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # 仅当 PR 被合并、来源分支不是 test（即快速通道 PR）、且 PR 作者是核心开发者时执行
@@ -45,7 +45,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.MY_PAT }}
 
-      - name: 🔄 将测试分支重置为主支最新提交
+      - name: 🔄 将 test 分支重置为主支最新提交
         env:
           GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |

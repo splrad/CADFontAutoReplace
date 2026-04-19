@@ -158,6 +158,13 @@ jobs:
           PR_TITLE: ${{ env.AI_PR_TITLE }}
           PR_BODY_CONTENT: ${{ env.AI_PR_BODY }}
         run: |
+          # 检查源分支相对目标分支是否有新提交，若无差异则跳过（如 test 刚被同步至 main）
+          AHEAD_COUNT=$(git rev-list --count "origin/$TARGET_BRANCH".."origin/$SOURCE_BRANCH" 2>/dev/null || echo "0")
+          if [ "$AHEAD_COUNT" -eq 0 ]; then
+            echo "⏭️ $SOURCE_BRANCH 与 $TARGET_BRANCH 无差异提交，跳过 PR 创建。"
+            exit 0
+          fi
+
           # 检查是否已经存在对应的 PR
           PR_EXISTS=$(gh pr list --head "$SOURCE_BRANCH" --base "$TARGET_BRANCH" --json url --jq '.[0].url')
           
