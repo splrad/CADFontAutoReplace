@@ -22,7 +22,7 @@ internal static class EmbeddedFontDeployer
     internal const string DefaultBigFont = "tssdchn.shx";
 
     /// <summary>内嵌的默认 TrueType 替换字体文件名。</summary>
-    internal const string DefaultTrueTypeFont = "simsun.ttc";
+    internal const string DefaultTrueTypeFont = "宋体";
 
     // 嵌入资源名称前缀
     private const string ResourcePrefix = "AFR.Fonts.";
