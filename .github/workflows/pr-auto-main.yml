@@ -59,6 +59,10 @@ jobs:
             CHANGES="无明显变更"
           fi
 
+          # 清除提交信息中已有的 PR 编号引用（如 (#31)），
+          # 避免 AI 将旧编号带入标题，压缩合并时 GitHub 会自动追加当前 PR 编号
+          CHANGES=$(echo "$CHANGES" | sed 's/ (#[0-9]*)//g')
+
           # 使用 jq 安全构建 JSON（防止提交信息中的特殊字符导致注入）
           SYSTEM_PROMPT=$(cat <<'PROMPT'
           你是一个 PR 描述生成器。根据 Git 提交记录，生成符合 Conventional Commits 规范的标题和结构化变更说明。
