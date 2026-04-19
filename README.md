@@ -225,7 +225,7 @@ AFR 在 DWG 解析阶段通过 `ldfile` Hook 拦截字体加载请求。针对 M
 
 - [新手：开发者指南](docs/developer-guide-beginner.md)
 - [进阶：开发者指南](docs/developer-guide-advanced.md)
-- [规范：Git 分支管理摘要](docs/git-branch-guidelines.md)
+- [规范：Git 分支模板](docs/git-branch-guidelines.md)
 
 ---
 
