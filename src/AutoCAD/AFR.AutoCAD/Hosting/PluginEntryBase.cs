@@ -228,7 +228,7 @@ public abstract class PluginEntryBase : IExtensionApplication
             AcadApp.Idle -= OnDeferredIdle;
             _idleHandlerRegistered = false;
             if (_unloaded || _pendingExecutions.Count == 0) return;
-            pending = _pendingExecutions.ToArray();
+            pending = [.. _pendingExecutions];
             _pendingExecutions.Clear();
         }
 

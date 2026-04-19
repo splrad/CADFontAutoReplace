@@ -42,7 +42,7 @@ internal static class MTextFontParser
     {
         if (string.IsNullOrEmpty(contents)) return;
 
-        int len = contents.Length;
+        int len = contents!.Length;
         int i = 0;
 
         while (i < len - 1)
