@@ -2,13 +2,15 @@
 #   1. 在仓库中创建以下 Secrets（路径：设置 → 机密与变量 → 操作 → 新建仓库机密）：
 #      - DeepSeek_API_KEY：DeepSeek API 密钥
 #      - MY_PAT：GitHub 个人访问令牌（需要 repo 权限）
-#   2. 修改下方 on.push.branches 中的触发分支名，以及 env 中的 TARGET_BRANCH
+#   2. 修改下方 env 中的 TARGET_BRANCH
+#   3. 核心开发者（TRUSTED_DEVELOPERS 变量中的用户）从任意非主分支推送时，
+#      将跳过测试分支直接创建向主分支合并的 PR
 name: 🚀 主支合并请求创建
 
 on:
   push:
-    branches:
-      - test
+    branches-ignore:
+      - main
 
 concurrency:
   group: pr-auto-create-${{ github.ref }}
@@ -26,6 +28,10 @@ jobs:
     name: 🤖 合并变更至主干分支
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # test 分支推送走正常流程；核心开发者从其他分支推送走快速通道直达主分支
+    if: >-
+      github.ref_name == 'test' ||
+      contains(fromJSON(vars.TRUSTED_DEVELOPERS || '[]'), github.actor)
 
     permissions:
       pull-requests: write

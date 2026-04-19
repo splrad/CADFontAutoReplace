@@ -3,6 +3,8 @@
 #      - DeepSeek_API_KEY：DeepSeek API 密钥
 #      - MY_PAT：GitHub 个人访问令牌（需要 repo 权限）
 #   2. 修改下方 branches-ignore 中的排除分支名，以及 env 中的 TARGET_BRANCH
+#   3. 核心开发者（TRUSTED_DEVELOPERS 变量中的用户）推送时会跳过本流程，
+#      直接进入向主分支合并的 PR 流程
 name: 🚀 集成分支请求创建
 
 on:
@@ -25,6 +27,9 @@ jobs:
     name: 🤖 合并变更至测试分支
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # 核心开发者跳过本流程，直接走主分支快速通道
+    if: >-
+      !contains(fromJSON(vars.TRUSTED_DEVELOPERS || '[]'), github.actor)
 
     permissions:
       pull-requests: write

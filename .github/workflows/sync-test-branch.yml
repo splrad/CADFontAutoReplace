@@ -1,0 +1,56 @@
+# 📋 复用到新项目时的配置步骤：
+#   1. 在仓库中创建以下 Secrets（路径：设置 → 机密与变量 → 操作 → 新建仓库机密）：
+#      - MY_PAT：GitHub 个人访问令牌（需要 repo 权限，用于推送受保护分支）
+#   2. 确保仓库已创建 TRUSTED_DEVELOPERS 变量（JSON 数组格式的用户名列表）
+#   3. 修改下方 env 中的 TEST_BRANCH 和 MAIN_BRANCH 为实际分支名
+#   4. 当核心开发者跳过 test 分支直接向 main 合并 PR 后，test 分支将自动同步至 main 最新提交
+name: 🔄 测试分支同步主支
+
+on:
+  pull_request_target:
+    branches:
+      - main
+    types: [closed]
+
+concurrency:
+  group: sync-test-branch
+  cancel-in-progress: true
+
+env:
+  TEST_BRANCH: test
+  MAIN_BRANCH: main
+
+jobs:
+  sync-test-to-main:
+    # ✅ 在 PR 检查列表显示的名称
+    name: 🔄 同步测试分支至主支最新提交
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # 仅当 PR 被合并、来源分支不是 test（即快速通道 PR）、且 PR 作者是核心开发者时执行
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref != 'test' &&
+      contains(fromJSON(vars.TRUSTED_DEVELOPERS), github.event.pull_request.user.login)
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: 📦 执行代码检出
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.MAIN_BRANCH }}
+          fetch-depth: 0
+          token: ${{ secrets.MY_PAT }}
+
+      - name: 🔄 将测试分支重置为主支最新提交
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          MAIN_SHA=$(git rev-parse HEAD)
+          echo "📋 主支最新提交: $MAIN_SHA"
+
+          # 强制将 test 分支指向 main 的最新提交
+          git push origin "HEAD:refs/heads/$TEST_BRANCH" --force
+          echo "✅ 已将 $TEST_BRANCH 分支重置为 $MAIN_BRANCH 的最新提交 ($MAIN_SHA)"
