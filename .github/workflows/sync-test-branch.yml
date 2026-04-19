@@ -2,8 +2,10 @@
 #   1. 在仓库中创建以下 Secrets（路径：设置 → 机密与变量 → 操作 → 新建仓库机密）：
 #      - MY_PAT：GitHub 个人访问令牌（需要 repo 权限，用于推送受保护分支）
 #   2. 确保仓库已创建 TRUSTED_DEVELOPERS 变量（JSON 数组格式的用户名列表）
-#   3. 修改下方 env 中的 TEST_BRANCH 和 MAIN_BRANCH 为实际分支名
-#   4. 当核心开发者跳过 test 分支直接向 main 合并 PR 后，test 分支将自动同步至 main 最新提交
+#   3. 在 test 分支的规则集中将「仓库管理员」角色添加到旁路列表
+#      （路径：设置 → 规则 → 规则集 → 选择 test 分支规则 → 旁路列表 → 添加旁路 → 勾选「仓库管理员」）
+#   4. 修改下方 env 中的 TEST_BRANCH 和 MAIN_BRANCH 为实际分支名
+#   5. 当核心开发者跳过 test 分支直接向 main 合并 PR 后，test 分支将自动同步至 main 最新提交
 name: 🔄 测试分支同步主支
 
 on:
@@ -44,13 +46,14 @@ jobs:
           token: ${{ secrets.MY_PAT }}
 
       - name: 🔄 将测试分支重置为主支最新提交
+        env:
+          GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           MAIN_SHA=$(git rev-parse HEAD)
           echo "📋 主支最新提交: $MAIN_SHA"
 
-          # 强制将 test 分支指向 main 的最新提交
-          git push origin "HEAD:refs/heads/$TEST_BRANCH" --force
+          # 通过 GitHub API 强制更新 test 分支引用，绕过 git push 限制
+          gh api --method PATCH "repos/${{ github.repository }}/git/refs/heads/$TEST_BRANCH" \
+            -f sha="$MAIN_SHA" \
+            -F force=true
           echo "✅ 已将 $TEST_BRANCH 分支重置为 $MAIN_BRANCH 的最新提交 ($MAIN_SHA)"
