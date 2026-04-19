@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <MSBuildAllProjects Condition="'$(MSBuildVersion)' == '' Or '$(MSBuildVersion)' &lt; '16.0'">$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <HasSharedItems>true</HasSharedItems>
+    <SharedGUID>{A1B2C3D4-E5F6-7A8B-9C0D-1E2F3A4B5C6E}</SharedGUID>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration">
+    <Import_RootNamespace>AFR</Import_RootNamespace>
+  </PropertyGroup>
+  <!--
+    仅在 .NET 5 以下的目标框架（net48 / net47 等）中编译。
+    .NET 5+ 已内置这些 API，无需 polyfill。
+  -->
+  <ItemGroup Condition="!$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net5.0'))">
+    <Compile Include="$(MSBuildThisFileDirectory)GlobalUsings.cs" Link="Polyfills\GlobalUsings.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)IsExternalInit.cs" Link="Polyfills\IsExternalInit.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)RangePolyfill.cs" Link="Polyfills\RangePolyfill.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)StringExtensions.cs" Link="Polyfills\StringExtensions.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DictionaryPolyfill.cs" Link="Polyfills\DictionaryPolyfill.cs" />
+  </ItemGroup>
+</Project>
