@@ -10,6 +10,7 @@ namespace AFR.Hosting;
 /// <para>
 /// 仅在首次安装（注册表键不存在）时由 <see cref="AppInitializer"/> 调用。
 /// 若目标目录已存在同名文件则跳过，不覆盖用户自行放置的字体。
+/// 不影响用户已安装的字体文件，且不会删除任何文件。仅确保内嵌的默认字体在目标环境中可用，确保插件开箱即用。
 /// </para>
 /// </summary>
 internal static class EmbeddedFontDeployer
