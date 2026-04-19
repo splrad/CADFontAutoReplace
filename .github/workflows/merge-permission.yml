@@ -7,7 +7,6 @@
 #   4. 在 test 分支保护规则中将「🔒 流程配置保护规则」添加为必须通过的状态检查
 #   5. 在 main 分支保护规则中将「🔐 主干合并权限审计」添加为必须通过的状态检查
 #   6. 取消勾选「要求代码所有者进行审查」，本工作流的权限校验 Job 已替代该功能
-#   7. （可选）配置完成后删除 workflow_dispatch 触发器和 register-checks Job
 name: 🛡️ 合并审批权限校验
 
 on:
@@ -15,31 +14,12 @@ on:
     types: [opened, synchronize, reopened]
   pull_request_review:
     types: [submitted, dismissed]
-  # ⚡ 临时触发：推送后手动运行一次，让 GitHub 识别状态检查名称，
-  #    以便在分支保护规则中添加为必须通过的检查。配置完成后可删除此触发器。
-  workflow_dispatch:
 
 concurrency:
   group: merge-permission-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
-  # ────────────────────────────────────────────────────────
-  # ⚡ 临时 Job：手动触发时让两个状态检查名称注册到 GitHub
-  #    配置完分支保护规则后，可连同 workflow_dispatch 一起删除
-  # ────────────────────────────────────────────────────────
-  register-checks:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 1
-    strategy:
-      matrix:
-        include:
-          - name: 🔒 流程配置保护规则
-          - name: 🔐 主干合并权限审计
-    name: ${{ matrix.name }}
-    steps:
-      - run: echo "✅ 状态检查「${{ matrix.name }}」已注册，可在分支保护规则中选取。"
   # ────────────────────────────────────────────────────────
   # 场景一：PR → test 分支
   # 仅检查是否修改了 .github/workflows 下的文件
