@@ -5,29 +5,46 @@
 **打开图纸不再出现文字不显示、乱码，所有缺失字体自动搞定**
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE.txt)
-[![AutoCAD](https://img.shields.io/badge/AutoCAD-2026-red.svg)](#已支持的-autocad-版本)
+[![AutoCAD](https://img.shields.io/badge/AutoCAD-2026-red.svg)](#-已支持版本)
 [![.NET](https://img.shields.io/badge/.NET-8.0-purple.svg)](https://dotnet.microsoft.com/)
 
-[GitHub](https://github.com/splrad/CADFontAutoReplace) · [Gitee（国内镜像）](https://gitee.com/splrad/CADFontAutoReplace) 
+[GitHub](https://github.com/splrad/CADFontAutoReplace) · [Gitee（国内镜像）](https://gitee.com/splrad/CADFontAutoReplace) · [Releases](https://github.com/splrad/CADFontAutoReplace/releases) · [提交 Issue](https://github.com/splrad/CADFontAutoReplace/issues)
 
 </div>
 
 ---
 
-## ✨ 为什么选择 AFR
+## 📚 目录
 
-### 🔍 核心亮点速览
+- [✨ 项目亮点](#-项目亮点)
+- [🖼️ 界面预览](#️-界面预览)
+- [✅ 已支持版本](#-已支持版本)
+- [🗺️ 开发计划](#️-开发计划)
+- [🚀 快速开始](#-快速开始)
+- [⌨️ 命令速查](#️-命令速查)
+- [❓ 常见问题](#-常见问题)
+- [🐞 问题反馈（高效定位）](#-问题反馈高效定位)
+- [🛠️ 开发者说明](#️-开发者说明)
+- [🤝 贡献者指南](#-贡献者指南)
+- [📜 第三方开源库](#-第三方开源库)
+- [📜 字体来源声明](#-字体来源声明)
+
+---
+
+## ✨ 项目亮点
+
+### 核心能力
 
 - 🚀 **自动化执行**：配置一次后，后续打开图纸自动检测并替换缺失字体。
 - 🎯 **三类字体全覆盖**：支持 `SHX 主字体`、`SHX 大字体`、`TrueType` 缺失修复。
 - 🧠 **类型安全替换**：自动区分主字体/大字体，避免替换类型错配。
-- 🔧 **底层 Hook + 样式表双阶段修复**：兼顾 DWG 解析阶段与样式表持久化修复。
-- 🧾 **采用 Hook 方案修复多行文字乱码**：针对 MText 内联字体（`\F` / `\f`）在解析阶段重定向，能有效解决多行文字乱码问题，而不只处理样式表字体。
-- 📦 **单 DLL 部署**：第三方 UI 依赖已嵌入，分发简单。
-- 🖥️ **可视化人工兜底**：`AFRLOG` 支持逐行与批量修正。
+- 🔧 **双阶段修复链路**：`ldfile Hook` + 样式表替换，兼顾解析阶段与持久化结果。
+- 🧾 **MText 乱码专项处理**：对 MText 内联字体（`\F` / `\f`）缺失场景提供重定向修复能力。
+- 📦 **单 DLL 部署**：第三方 UI 依赖已嵌入，分发与部署成本低。
+- 🖥️ **可视化兜底**：`AFRLOG` 支持逐条调整与批量填充。
 - 🔄 **可回退可卸载**：仅修改当前图纸，不强制保存，支持 `AFRUNLOAD`。
 
-### 🆚 与常见同类插件相比
+### 与常见方案对比
 
 | 常见做法 | 典型短板 | AFR 的增强点 |
 |---|---|---|
@@ -37,12 +54,14 @@
 | 只做“替换不验证” | 可能写入不可用字体 | 内置替换后二次验证与统计输出 |
 | 纯命令行流程 | 批量调整和复核成本高 | 配置窗口 + 日志窗口 + 手动兜底闭环 |
 
-### 🌟 适合真实工程场景的附加亮点
+### 工程化补充
 
-- 支持 `AFRVIEW` / `AFRINSERT`（Debug）进行内联字体问题复现与定位。
-- 诊断日志可追踪执行阶段、Hook 重定向与替换结果，便于问题排查。
+- 支持 `AFRVIEW` / `AFRINSERT`（Debug）用于内联字体问题复现与定位。
+- 诊断日志覆盖执行阶段、Hook 重定向与替换结果，便于问题排查。
 
-### 界面预览
+---
+
+## 🖼️ 界面预览
 
 <table>
 <tr>
@@ -55,13 +74,17 @@
 </tr>
 </table>
 
-### 已支持的 AutoCAD 版本
+---
+
+## ✅ 已支持版本
 
 | DLL 文件名 | AutoCAD 版本 | .NET |
 |:---:|:---:|:---:|
 | `AFR-ACAD2026.dll` | AutoCAD **2026**（R25.1） | .NET 8 |
 
-### 开发计划
+---
+
+## 🗺️ 开发计划
 
 | 平台 | 版本 | 状态 |
 |---|---|---|
@@ -75,52 +98,53 @@
 
 ---
 
-## 📖 使用指南
+## 🚀 快速开始
 
-> 以下教程面向**从未使用过 AutoCAD 插件**的新手用户，老手可直接跳到[命令速查](#命令速查)。
+> 面向首次使用 AutoCAD 插件的用户；有经验用户可直接查看[命令速查](#️-命令速查)。
 
-### 第一步：下载插件
+### 1) 下载插件
 
-1. 前往 [Releases](https://github.com/splrad/CADFontAutoReplace/releases) 页面
-2. 根据你的 AutoCAD 版本下载对应的 DLL 文件（命名格式：`AFR-ACAD20XX.dll`）
-3. 保存到一个**固定位置**，不要放在桌面或临时文件夹
+1. 前往 [Releases](https://github.com/splrad/CADFontAutoReplace/releases)
+2. 下载与你 AutoCAD 版本对应的 DLL（命名：`AFR-ACAD20XX.dll`）
+3. 存放到固定路径（不要放桌面或临时目录）
 
 > 💡 推荐路径：`D:\CADPlugins\AFR-ACAD20XX.dll`
 
-### 第二步：加载插件
+### 2) 加载插件
 
 1. 打开 AutoCAD
-2. 在底部命令行输入 `NETLOAD`，按回车
-3. 在弹出的文件选择窗口中，找到对应版本的 DLL（如 `AFR-ACAD20XX.dll`），点击"打开"
-4. 如果弹出安全警告，选择 **"始终加载"**
+2. 命令行输入 `NETLOAD`
+3. 选择对应 DLL 并打开
+4. 如有安全提示，选择“始终加载”
 
-> ✅ 加载成功后，命令行会显示插件信息。此后每次打开 AutoCAD 都会**自动加载**，无需重复操作。
+> ✅ 成功后，后续启动 AutoCAD 会自动加载，无需重复操作。
 
-> ⚠️ **字体精简建议：强烈建议将 CAD 安装目录下 `Fonts` 文件夹中的 SHX 字体精简至 100 个以内（保留 `sas_____.pfb`、`MstnFontConfig.xml`、`internat.rsc`、`font.rsc` 等非 SHX 文件）。字体数量过多会导致插件加载UI界面时明显卡顿。 建议清理后将本项目提供的 CAD 字体包解压拷贝进去，该字体包在 CAD 原版基础上仅增加了几款常用通用字体（如探索者等），可放心使用**。
+> ⚠️ 字体精简建议：
+> - 建议将 CAD 安装目录 `Fonts` 中 SHX 字体精简至 100 个以内
+> - 保留 `sas_____.pfb`、`MstnFontConfig.xml`、`internat.rsc`、`font.rsc` 等非 SHX 文件
+> - 字体过多会导致插件界面加载明显卡顿
 >
-> 👉 **[点击下载 CAD 字体包（Fonts.zip）](https://github.com/splrad/CADFontAutoReplace/releases)**
+> 👉 [点击下载 CAD 字体包（Fonts.zip）](https://github.com/splrad/CADFontAutoReplace/releases)
 
-### 第三步：首次配置替换字体
+### 3) 首次配置字体
 
-1. 命令行输入 `AFR`，按回车
-2. 在弹出的字体选择窗口中配置三种替换字体：
+1. 命令行输入 `AFR`
+2. 在窗口中配置三类替换字体：
 
-   | 字体类型 | 说明 | 推荐选择 |
-   |:---:|---|---|
-   | **SHX 主字体（西文）** | 替换所有缺失的 SHX 字体 | `ming.shx` |
-   | **SHX 大字体（中文）** | 替换缺失的中文大字体 | `hztxt.shx` |
-   | **TrueType 字体** | 替换缺失的 TrueType 字体 | `宋体` |
+| 字体类型 | 说明 | 推荐值 |
+|:---:|---|---|
+| SHX 主字体（西文） | 替换缺失 SHX 主字体 | `ming.shx` |
+| SHX 大字体（中文） | 替换缺失中文大字体 | `hztxt.shx` |
+| TrueType 字体 | 替换缺失 TrueType 字体 | `宋体` |
 
-   > 下拉框支持直接输入搜索，比如输入 `txt` 就会筛选出 `txt.shx`
+> 下拉框支持输入关键字搜索（如输入 `txt`）。
 
-3. 点击 **确认**
-4. **重启 CAD**（首次配置需要重启以安装 Hook 模块，此后无需再重启）
+3. 点击“确认”
+4. 首次配置后重启 CAD（用于安装 Hook 模块）
 
-> ✅ 配置完成！此后打开任何图纸，插件都会自动替换缺失字体。
+### 4) 验证效果
 
-### 第四步：验证效果
-
-打开一张有缺失字体的 DWG 文件，观察命令行输出：
+打开有缺失字体的 DWG，看到类似日志即说明工作正常：
 
 ```
 ====================================================================================
@@ -132,118 +156,134 @@ AFR 缺失字体自动替换 v7.0
 [字体修复]已替换缺失字体 3 个(SHX主字体:1,SHX大字体:1,TrueType:1) | MText内联字体映射：1
 ```
 
-看到类似的替换记录，说明插件正在正常工作 🎉
+### 5) 手动兜底（可选）
 
-### 第五步：手动调整（可选）
+如果自动替换结果不理想：
 
-如果自动替换的字体不理想，可以手动调整：
+1. 输入 `AFRLOG`
+2. 查看缺失字体与当前替换目标
+3. 逐条调整或使用批量填充
+4. 点击“应用替换”写入当前图纸
 
-1. 命令行输入 `AFRLOG`，按回车
-2. 查看每个缺失字体的当前替换状态
-3. 逐行修改替换字体，或使用底部的**批量填充**功能
-4. 点击 **应用替换** 写入当前图纸
+> 💡 `AFRLOG` 每次打开都会重新读取图纸实时状态（含 `STYLE` 修改结果）。
+>
+> ⚠️ MText 内联字体采用 Hook 重定向自动修复，不支持手动替换。
 
-> 💡 `AFRLOG` 每次打开都会重新读取图纸中的实际字体状态，即使通过 `STYLE`（样式管理器）命令修改过也会正确显示。
+---
 
-> ⚠ MText 内联字体（多行文本中的嵌入字体）采用 Hook 重定向方案自动修复，不支持手动替换。
+## ⌨️ 命令速查
 
-### 常见问题
+| 命令 | 说明 |
+|:---:|---|
+| `AFR` | 打开字体配置界面，选择 SHX 主字体、大字体和 TrueType 替换字体 |
+| `AFRLOG` | 打开替换日志，查看检测结果，支持手动调整和批量填充 |
+| `AFRUNLOAD` | 完整卸载插件（注销事件、删除注册表项、清空运行状态） |
+
+---
+
+## ❓ 常见问题
 
 <details>
 <summary><b>如何修改替换字体配置？</b></summary>
 
-随时输入 `AFR` 命令，重新选择字体并确认即可。新配置会立即对当前图纸生效。
+随时输入 `AFR`，重新选择字体并确认即可。新配置会立即对当前图纸生效。
 
 </details>
 
 <details>
 <summary><b>替换后文字显示异常怎么办？</b></summary>
 
-**不要保存图纸！** 使用 `AFRLOG` 命令打开日志窗口，选择其他字体进行替换，直到文字显示正常。
+**不要保存图纸。** 使用 `AFRLOG` 重新选择替换字体，直至显示正常。
 
 </details>
 
 <details>
 <summary><b>如何卸载插件？</b></summary>
 
-命令行输入 `AFRUNLOAD`，插件会自动停止所有功能并删除注册表中的自动加载配置。下次启动 AutoCAD 将不再加载。
+输入 `AFRUNLOAD` 后，插件会停止功能并删除自动加载配置。下次启动 AutoCAD 不再加载。
 
-如需重新安装，重启 AutoCAD 后再次 `NETLOAD` 即可。
+如需恢复，重启 AutoCAD 后再次执行 `NETLOAD`。
 
 </details>
 
 <details>
-<summary><b>CAD 打开图纸时还是弹出"缺少 SHX 文件"对话框？</b></summary>
+<summary><b>CAD 打开图纸仍弹出“缺少 SHX 文件”对话框？</b></summary>
 
-本插件不会主动关闭该对话框。建议在弹出时选择 **"忽略缺少的 SHX 文件并继续"**，并勾选 **"始终执行我的当前选择"**。之后插件会自动完成字体替换。
+本插件不会主动关闭该对话框。建议选择“忽略缺少的 SHX 文件并继续”，并勾选“始终执行我的当前选择”。
 
 </details>
 
 <details>
 <summary><b>为什么 AFR 能修复多行文字（MText）乱码？</b></summary>
 
-AFR 采用了底层 `ldfile` Hook 方案，在 DWG 解析阶段拦截字体加载请求。对 MText 内联字体（`\F` / `\f`）缺失场景，
-会在解析链路中完成重定向，再由样式表替换阶段做统一收敛，因此不仅能修复普通样式表缺失，也能覆盖多行文字乱码问题。
+AFR 在 DWG 解析阶段通过 `ldfile` Hook 拦截字体加载请求。针对 MText 内联字体（`\F` / `\f`）缺失场景，会优先在解析链路中重定向，再由样式表替换阶段统一收敛。
 
-> 注意：若图纸内容字符本身已经被错误编码后保存（文字数据已损坏），任何字体替换都无法还原原文。
+> 注意：若图纸正文字符已经被错误编码保存（文字数据已损坏），字体替换无法恢复原文。
 
 </details>
 
-### 命令速查
+---
 
-| 命令 | 说明 |
-|:---:|---|
-| `AFR` | 打开字体配置界面，选择 SHX 主字体、大字体和 TrueType 替换字体 |
-| `AFRLOG` | 打开替换日志，查看检测结果，支持手动调整和批量填充 |
-| `AFRUNLOAD` | 完整卸载插件 — 注销事件、删除注册表项、清空运行状态 |
+## 🐞 问题反馈（高效定位）
+
+如果使用插件后仍出现“字体不显示”或“乱码”，欢迎提交 [Issues](https://github.com/splrad/CADFontAutoReplace/issues)。
+
+为便于快速定位，请尽量附上：
+
+1. 脱敏后的问题图纸（可最小化为单个问题区域）
+2. 同一图纸中“正常显示部分”截图
+3. 同一图纸中“不正常显示部分”截图
+4. AutoCAD 版本 + 插件 DLL 版本 + 插件配置
+
+信息越完整，定位越快。
 
 ---
 
 ## 🛠️ 开发者说明
 
-开发相关内容已拆分到独立文档：
-
-- [开发者指南入口](docs/developer-guide.md)
-- [纯新手：开发者指南](docs/developer-guide-beginner.md)
-- [老手进阶：开发者指南](docs/developer-guide-advanced.md)
-
-`README.md` 仅保留项目简介与用户使用说明。
+- [新手：开发者指南](docs/developer-guide-beginner.md)
+- [进阶：开发者指南](docs/developer-guide-advanced.md)
 
 ---
 
-## 🤝 贡献者指南（简短版）
+## 🤝 贡献者指南
 
 欢迎提交 Issue 和 PR，一起完善 AFR。
 
 ### 提交流程
 
-1. 从 `test` 分支拉取最新代码并完成你的修改。
-2. 完成修改后本地执行构建：
+1. 拉取仓库 `main` 最新代码。
+2. 从 `main` 切出功能分支并完成修改（本仓库禁止直接向 `main` 分支推送）。
+3. 本地构建：
 
 ```bash
 dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 ```
 
-> 说明：请将 `20XX` 替换为你当前要开发/验证的版本壳工程（例如 `2026`）。
+> 将 `20XX` 替换为当前目标版本（例如 `2026`）。
 
-3. 确认关键命令可用（`AFR` / `AFRLOG` / `AFRUNLOAD`，Debug 下可验证 `AFRVIEW` / `AFRINSERT`）。
-4. 将代码推送到仓库后，PR 会自动拉取到 `test` 分支。
-5. 提交说明与 PR 描述由流程自动生成，无需手动编写。
+4. 验证关键命令（`AFR` / `AFRLOG` / `AFRUNLOAD`，Debug 下可验证 `AFRVIEW` / `AFRINSERT`）。
+5. 推送分支后，流程会自动创建/更新 `你的分支 -> test` 的 PR。
+6. `test` 合并后，流程会自动创建/更新 `test -> main` 的 PR。
+7. 提交说明与 PR 描述会自动生成；不准确时请在 PR 评论补充。
 
-> 如自动生成的说明与实际改动不一致，请在 PR 评论区补充变更摘要（修改目的、影响范围、验证方式）。
+### 审批与权限规则
+
+- 核心开发者（`TRUSTED_DEVELOPERS`）提交的 PR 会自动审批授权。
+- 非核心开发者提交到 `main` 的 PR，需要至少 1 位核心开发者有效审批。
+- 非核心开发者向 `test` 提交 PR 时，禁止修改 `.github/workflows/` 下文件。
+- `main` 仅允许 `test` 分支发起合并，且禁止外部 Fork 直接向 `main` 提 PR。
 
 ### 贡献约定
 
 - 遵守分层依赖方向：`AFR.Core` / `AFR.UI` 不引用 AutoCAD SDK。
 - 新增命令必须在 `PluginEntry.cs` 注册，否则 CAD 无法识别。
-- 仅调试使用的功能请使用 `#if DEBUG` 包裹（并在命令注册处同步控制）。
-- 仅修复当前问题，避免无关重构。
+- 仅调试使用的功能请用 `#if DEBUG` 包裹（并在命令注册处同步控制）。
+- 聚焦当前问题，避免无关重构。
 
 ---
 
 ## 📜 第三方开源库
-
-本项目使用了以下开源库，感谢各位作者的贡献：
 
 | 库名 | 版本 | 作者 | 用途 | 许可协议 |
 |---|:---:|---|---|:---:|
@@ -253,7 +293,7 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 
 ## 📜 字体来源声明
 
-本项目提供的 CAD 字体包中，部分字体从互联网收集整理。为尊重原作者的知识产权，现将字体包中所有字体的来源逐一列出，部分字体来源已无法追溯：
+本项目提供的 CAD 字体包中，部分字体来自互联网整理。为尊重原作者知识产权，现将可追溯来源列出如下：
 
 | 字体文件 | 来源 / 作者 | 备注 |
 |---|---|---|
@@ -265,7 +305,7 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 | `CDM_NC.shx` `Cdm.shx` | CDM 软件 | 工程设计字体 |
 | `ming.shx` `ming1.shx` `ming2.shx` | 淘宝店铺：CAD专家 Q421259113 | 基于 tssdeng / Roman Simplex 修改 |
 
-> ⚠️ 部分字体来源已无法追溯。如果你是某款字体的原作者，且认为本项目的收录方式不当，请通过 [Issues](https://github.com/splrad/CADFontAutoReplace/issues) 联系我，我会**立即处理**（移除或补充署名）。
+> ⚠️ 若你是某款字体原作者，且认为收录方式不当，请通过 [Issues](https://github.com/splrad/CADFontAutoReplace/issues) 联系，我会第一时间处理（移除或补充署名）。
 >
 > 本项目字体包仅供学习与辅助使用，不以任何形式进行商业销售。
 
@@ -273,12 +313,11 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 
 ## ☕ 打赏支持
 
-如果本插件对你有帮助，欢迎请开发者喝杯咖啡 ☕ 你的支持是持续开发的动力！
+如果本插件对你有帮助，欢迎请开发者喝杯咖啡 ☕
 
 <p align="center">
   <img src="https://splrad-img.oss-cn-chengdu.aliyuncs.com/20260406215922295.jpg" width="560" />
 </p>
-
 
 ---
 
