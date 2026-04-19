@@ -37,7 +37,7 @@ internal static class CadEnvironmentSettings
             var prefix = (string)AcadApp.GetSystemVariable("ACADPREFIX");
             if (!string.IsNullOrEmpty(prefix))
             {
-                foreach (var dir in prefix.Split(';', StringSplitOptions.RemoveEmptyEntries))
+                foreach (var dir in prefix.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
                     TryAdd(dir.Trim(), paths, seen);
             }
         }
@@ -46,8 +46,7 @@ internal static class CadEnvironmentSettings
         // ── 2. AutoCAD 安装目录 Fonts ──
         try
         {
-            var processPath = Environment.ProcessPath
-                ?? Process.GetCurrentProcess().MainModule?.FileName;
+            var processPath = Process.GetCurrentProcess().MainModule?.FileName;
             if (processPath != null)
                 TryAdd(Path.Combine(Path.GetDirectoryName(processPath)!, "Fonts"), paths, seen);
         }

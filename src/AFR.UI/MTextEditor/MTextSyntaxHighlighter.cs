@@ -86,7 +86,7 @@ internal static partial class MTextSyntaxHighlighter
         {
             if (match.Index > lastIndex)
             {
-                paragraph.Inlines.Add(new Run(line[lastIndex..match.Index]));
+                paragraph.Inlines.Add(new Run(line.Substring(lastIndex, match.Index - lastIndex)));
             }
 
             var run = new Run(match.Value);
@@ -118,7 +118,7 @@ internal static partial class MTextSyntaxHighlighter
 
         if (lastIndex < line.Length)
         {
-            paragraph.Inlines.Add(new Run(line[lastIndex..]));
+            paragraph.Inlines.Add(new Run(line.Substring(lastIndex)));
         }
     }
 }

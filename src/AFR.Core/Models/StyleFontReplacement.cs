@@ -4,12 +4,36 @@ namespace AFR.Models;
 /// 单个文字样式的字体替换规格，描述应该用什么字体来替换缺失的字体。
 /// 由用户配置或自动匹配生成，供 FontReplacer 执行实际替换时使用。
 /// </summary>
-/// <param name="StyleName">要替换的文字样式名称。</param>
-/// <param name="IsTrueType">是否为 TrueType 字体样式（决定替换策略和可选字体范围）。</param>
-/// <param name="MainFontReplacement">主字体的替换目标（空字符串表示不替换主字体）。</param>
-/// <param name="BigFontReplacement">大字体的替换目标（仅 SHX 样式有效，空字符串表示不替换）。</param>
-public sealed record StyleFontReplacement(
-    string StyleName,
-    bool IsTrueType,
-    string MainFontReplacement,
-    string BigFontReplacement);
+public sealed class StyleFontReplacement
+{
+    public string StyleName { get; }
+    public bool IsTrueType { get; }
+    public string MainFontReplacement { get; }
+    public string BigFontReplacement { get; }
+
+    public StyleFontReplacement(
+        string styleName,
+        bool isTrueType,
+        string mainFontReplacement,
+        string bigFontReplacement)
+    {
+        StyleName = styleName;
+        IsTrueType = isTrueType;
+        MainFontReplacement = mainFontReplacement;
+        BigFontReplacement = bigFontReplacement;
+    }
+
+    /// <summary>创建副本并替换指定属性（等效于 record 的 with 表达式）。</summary>
+    public StyleFontReplacement With(
+        string? styleName = null,
+        bool? isTrueType = null,
+        string? mainFontReplacement = null,
+        string? bigFontReplacement = null)
+    {
+        return new StyleFontReplacement(
+            styleName ?? StyleName,
+            isTrueType ?? IsTrueType,
+            mainFontReplacement ?? MainFontReplacement,
+            bigFontReplacement ?? BigFontReplacement);
+    }
+}

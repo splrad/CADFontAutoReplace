@@ -37,12 +37,12 @@ internal static class FontDetector
     {
         if (string.IsNullOrEmpty(name)) return false;
         var task = _systemFontNamesTask;
-        return task.IsCompletedSuccessfully && task.Result.Contains(name);
+        return task.IsCompleted && !task.IsFaulted && task.Result.Contains(name);
     }
 
     /// <summary>系统字体索引是否已构建完成且包含有效数据。</summary>
     public static bool IsSystemFontIndexReady
-        => _systemFontNamesTask.IsCompletedSuccessfully
+        => _systemFontNamesTask.IsCompleted && !_systemFontNamesTask.IsFaulted
            && _systemFontNamesTask.Result.Count > 0;
 
     /// <summary>
@@ -205,7 +205,7 @@ internal static class FontDetector
         // 第一处检查（跳过索引）和第二处检查（跳过 WPF 回退）同时成立，
         // 使已安装的 TrueType 字体被误判为缺失。
         var task = _systemFontNamesTask;
-        bool indexReady = task.IsCompletedSuccessfully;
+        bool indexReady = task.IsCompleted && !task.IsFaulted;
 
         if (indexReady && task.Result.Contains(typeface)) return true;
         if (!string.IsNullOrWhiteSpace(fileName))

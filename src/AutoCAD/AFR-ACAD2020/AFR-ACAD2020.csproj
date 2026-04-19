@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <RootNamespace>AFR</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <LangVersion>latest</LangVersion>
+    <!-- .NET Framework 不支持 ArtifactsPath，使用默认输出路径 -->
+    <ArtifactsPath>$(MSBuildProjectDirectory)/artifacts</ArtifactsPath>
+    <UseArtifactsIntermediateOutput>false</UseArtifactsIntermediateOutput>
+    <!-- 独立管理 NuGet 版本，不使用中央包管理 -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <!-- 导入共享源码 -->
+  <Import Project="..\..\AFR.Core\AFR.Core.projitems" Label="Shared" />
+  <Import Project="..\..\AFR.UI\AFR.UI.projitems" Label="Shared" />
+  <Import Project="..\AFR.AutoCAD\AFR.AutoCAD.projitems" Label="Shared" />
+
+  <ItemGroup>
+    <PackageReference Include="AutoCAD.NET">
+      <Version>23.1.0</Version>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="HandyControl" Version="3.5.1" />
+  </ItemGroup>
+
+  <!-- 将 HandyControl DLL 嵌入为程序集资源，实现单 DLL 分发 -->
+  <Target Name="EmbedHandyControl" AfterTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <EmbeddedResource Include="@(ReferenceCopyLocalPaths)" Condition="'%(Filename)' == 'HandyControl'">
+        <LogicalName>%(Filename)%(Extension)</LogicalName>
+      </EmbeddedResource>
+      <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)" Condition="'%(Filename)' == 'HandyControl'" />
+    </ItemGroup>
+  </Target>
+</Project>

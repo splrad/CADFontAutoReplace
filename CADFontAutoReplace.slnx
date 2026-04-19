@@ -5,6 +5,7 @@
   </Folder>
   <Folder Name="/AutoCAD/">
     <Project Path="src/AutoCAD/AFR.AutoCAD/AFR.AutoCAD.shproj" />
+    <Project Path="src/AutoCAD/AFR-ACAD2020/AFR-ACAD2020.csproj" />
     <Project Path="src/AutoCAD/AFR-ACAD2026/AFR-ACAD2026.csproj" />
   </Folder>
 </Solution>

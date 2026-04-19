@@ -124,13 +124,13 @@ internal sealed class ExecutionController
                 #if DEBUG
                 if (inlineFonts.Count > 0)
                 {
-                    foreach (var (name, type) in inlineFonts)
-                        DiagnosticLogger.Log("MText内联", $"扫描到: '{name}' 类型={type}");
+                    foreach (var kvp in inlineFonts)
+                        DiagnosticLogger.Log("MText内联", $"扫描到: '{kvp.Key}' 类型={kvp.Value}");
                 }
                 if (redirectLog.Count > 0)
                 {
-                    foreach (var (key, (rep, ft)) in redirectLog)
-                        DiagnosticLogger.Log("MText内联", $"重定向记录: '{key}' → '{rep}' param2={ft}");
+                    foreach (var kvp in redirectLog)
+                        DiagnosticLogger.Log("MText内联", $"重定向记录: '{kvp.Key}' → '{kvp.Value.Replacement}' param2={kvp.Value.FontType}");
                 }
 #endif
 
@@ -185,8 +185,10 @@ internal sealed class ExecutionController
     {
         var records = new List<InlineFontFixRecord>();
 
-        foreach (var (fontName, inlineType) in inlineFonts)
+        foreach (var kvp in inlineFonts)
         {
+            var fontName = kvp.Key;
+            var inlineType = kvp.Value;
             if (!redirectLog.TryGetValue(fontName, out var redirect))
             {
                 // @ 前缀兼容: Hook 以 baseName（去 @）为 key 存储重定向记录，

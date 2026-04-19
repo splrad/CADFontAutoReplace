@@ -9,7 +9,7 @@ namespace AFR.Hosting;
 internal sealed class AutoCadHost : ICadHost
 {
     /// <inheritdoc/>
-    public nint MainWindowHandle =>
+    public IntPtr MainWindowHandle =>
         Autodesk.AutoCAD.ApplicationServices.Core.Application.MainWindow.Handle;
 
     /// <summary>

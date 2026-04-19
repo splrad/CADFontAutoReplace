@@ -39,7 +39,7 @@ public static class ShxFontAnalyzer
             if (bytesRead < 25) return false;
 
             string headerStr = Encoding.ASCII.GetString(header, 0, bytesRead);
-            return headerStr.Contains("bigfont", StringComparison.OrdinalIgnoreCase);
+            return headerStr.IndexOf("bigfont", StringComparison.OrdinalIgnoreCase) >= 0;
         }
         catch
         {

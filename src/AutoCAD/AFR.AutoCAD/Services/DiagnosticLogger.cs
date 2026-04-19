@@ -426,8 +426,8 @@ internal static class DiagnosticLogger
         {
             if (_context.Count == 0) return "";
             var sb = new StringBuilder(" |");
-            foreach (var (key, value) in _context)
-                sb.Append($" {key}={value}");
+            foreach (var kvp in _context)
+                sb.Append($" {kvp.Key}={kvp.Value}");
             return sb.ToString();
         }
     }

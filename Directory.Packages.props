@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <!-- AutoCAD SDK — 各版本通过 VersionOverride 指定不同版本号 -->
+    <!-- 25.1.0 = AutoCAD 2026 (net8.0), 23.1.0 = AutoCAD 2020 (net472) -->
     <PackageVersion Include="AutoCAD.NET" Version="25.1.0" />
     <!-- UI 控件库 -->
     <PackageVersion Include="HandyControl" Version="3.5.1" />
