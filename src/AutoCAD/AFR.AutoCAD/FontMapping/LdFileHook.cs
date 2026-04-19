@@ -132,7 +132,7 @@ internal static class LdFileHook
 
             // 先用 NOP 填充整个序言区域，再写入跳转指令（确保不留残余的旧指令）
             byte[] hookPatch = new byte[PrologueSize];
-            Array.Fill(hookPatch, (byte)0x90);
+            for (int i = 0; i < hookPatch.Length; i++) hookPatch[i] = 0x90;
             WriteAbsoluteJumpBytes(hookPatch, 0, hookAddr);
             Marshal.Copy(hookPatch, 0, _targetAddr, PrologueSize);
 
@@ -293,7 +293,7 @@ internal static class LdFileHook
     private static string? ResolveMissingShxFont(string fontName, int fontType)
     {
         // @xxx.shx → 优先尝试去掉 @ 的基础字体（支持 @@xxx 双前缀）
-        if (fontName.StartsWith('@'))
+        if (fontName[0] == '@')
         {
             string baseName = fontName.TrimStart('@');
             string baseShx = EnsureShx(baseName);
@@ -336,7 +336,7 @@ internal static class LdFileHook
     private static string? ResolveMissingTrueTypeFont(string fontName)
     {
         // @xxx → 优先尝试去掉 @ 的基础字族名（竖排 TrueType）
-        if (fontName.StartsWith('@'))
+        if (fontName[0] == '@')
         {
             string baseName = fontName.TrimStart('@');
             if (FontDetector.IsSystemFont(baseName))

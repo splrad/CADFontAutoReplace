@@ -74,13 +74,27 @@ internal static class AppInitializer
         WriteIfChanged(appPath, "MANAGED", Managed);
         WriteIfChanged(appPath, "DESCRIPTION", Description);
 
-        // 首次初始化时写入默认配置（空字体名 + 未初始化标记），等待用户通过 AFR 命令配置
+        // 首次初始化时部署内嵌字体并写入默认配置
         if (isNewKey)
         {
-            RegistryService.WriteString(Registry.CurrentUser, appPath, "MainFont", string.Empty);
-            RegistryService.WriteString(Registry.CurrentUser, appPath, "BigFont", string.Empty);
-            RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", 0);
-            DiagnosticLogger.Log("初始化", "首次安装 — 已写入默认配置");
+            bool deployed = EmbeddedFontDeployer.Deploy();
+            if (deployed)
+            {
+                // 字体部署成功：写入默认替换字体 + 已初始化标记，重启后即可自动工作
+                RegistryService.WriteString(Registry.CurrentUser, appPath, "MainFont", EmbeddedFontDeployer.DefaultMainFont);
+                RegistryService.WriteString(Registry.CurrentUser, appPath, "BigFont", EmbeddedFontDeployer.DefaultBigFont);
+                RegistryService.WriteString(Registry.CurrentUser, appPath, "TrueTypeFont", EmbeddedFontDeployer.DefaultTrueTypeFont);
+                RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", 1);
+                DiagnosticLogger.Log("初始化", "首次安装 — 已部署默认字体并写入配置");
+            }
+            else
+            {
+                // 字体部署失败：回退为空值 + 未初始化，等待用户手动运行 AFR 命令
+                RegistryService.WriteString(Registry.CurrentUser, appPath, "MainFont", string.Empty);
+                RegistryService.WriteString(Registry.CurrentUser, appPath, "BigFont", string.Empty);
+                RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", 0);
+                DiagnosticLogger.Log("初始化", "首次安装 — 字体部署失败，等待用户手动配置");
+            }
         }
         return isNewKey;
     }

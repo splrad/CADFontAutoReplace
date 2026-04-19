@@ -14,14 +14,14 @@ public partial class MTextInsertWindow : Window
     /// <summary>用户确认的 MText 内容。为 null 表示取消。</summary>
     public string? ResultContents { get; private set; }
 
-    private readonly (string Name, string Contents)[] _templates =
-    [
+    private readonly (string Name, string Contents)[] _templates = new[]
+    {
         ("综合测试 — 全部边界情况", BuildComprehensiveTemplate()),
         ("SHX 缺失字体组合", BuildShxTemplate()),
         ("TrueType 格式变体", BuildTrueTypeTemplate()),
         ("路径残留（旧版 CAD 安装目录）", BuildPathTemplate()),
         ("混合字体切换", BuildMixedTemplate()),
-    ];
+    };
 
     /// <summary>
     /// 初始化 MText 插入器窗口。

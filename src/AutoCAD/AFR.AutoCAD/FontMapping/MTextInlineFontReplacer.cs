@@ -35,7 +35,7 @@ internal static class MTextInlineFontReplacer
             }
         }
 
-        if (missingTrueType.Count == 0) return [];
+        if (missingTrueType.Count == 0) return new List<InlineFontFixRecord>();
 
         string shxMain = StripShx(mainFont);
         string shxBig = StripShx(bigFont);
@@ -46,7 +46,7 @@ internal static class MTextInlineFontReplacer
         if (string.IsNullOrEmpty(shxMain) && string.IsNullOrEmpty(shxBig))
         {
             DiagnosticLogger.Log("MText替换", "未配置 SHX 替换字体，跳过 TrueType→SHX 转换");
-            return [];
+            return new List<InlineFontFixRecord>();
         }
 
         int modifiedCount = 0;
@@ -182,7 +182,7 @@ internal static class MTextInlineFontReplacer
 
         // 不需要转换 → 原样输出
         sb.Append('\\').Append('f');
-        sb.Append(text.AsSpan(nameStart, i - nameStart));
+        sb.Append(text, nameStart, i - nameStart);
 
         if (i < len)
         {
@@ -201,7 +201,7 @@ internal static class MTextInlineFontReplacer
                         i++;
                     if (i < len && text[i] == ';')
                         i++;
-                    sb.Append(text.AsSpan(paramStart, i - paramStart));
+                    sb.Append(text, paramStart, i - paramStart);
                 }
                 else
                 {
@@ -224,7 +224,7 @@ internal static class MTextInlineFontReplacer
         char c = text[pos];
         if (c is not ('b' or 'i' or 'c' or 'p')) return false;
         int next = pos + 1;
-        return next < text.Length && char.IsAsciiDigit(text[next]);
+        return next < text.Length && text[next] >= '0' && text[next] <= '9';
     }
 
     private static string StripShx(string name) =>

@@ -42,7 +42,7 @@ internal static class MTextFontParser
     {
         if (string.IsNullOrEmpty(contents)) return;
 
-        int len = contents.Length;
+        int len = contents!.Length;
         int i = 0;
 
         while (i < len - 1)
@@ -215,7 +215,7 @@ internal static class MTextFontParser
 
         // 参数字母后必须紧跟数字
         int next = pos + 1;
-        return next < text.Length && char.IsAsciiDigit(text[next]);
+        return next < text.Length && text[next] >= '0' && text[next] <= '9';
     }
 
     /// <summary>

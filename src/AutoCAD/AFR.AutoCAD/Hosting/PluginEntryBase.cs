@@ -69,7 +69,13 @@ public abstract class PluginEntryBase : IExtensionApplication
         if (stream == null) return null;
 
         var data = new byte[stream.Length];
-        stream.ReadExactly(data);
+        int totalRead = 0;
+        while (totalRead < data.Length)
+        {
+            int read = stream.Read(data, totalRead, data.Length - totalRead);
+            if (read == 0) break;
+            totalRead += read;
+        }
         _resolvedHandyControl = Assembly.Load(data);
         return _resolvedHandyControl;
     }
@@ -79,6 +85,10 @@ public abstract class PluginEntryBase : IExtensionApplication
     /// <summary>
     /// AutoCAD 加载插件时调用。按阶段依次完成：
     /// 平台注册 → Hook 安装 → 注册表初始化 → 文档事件注册 → 延迟启动执行。
+    /// <para>
+    /// 首次加载（通过 NETLOAD 手动加载）时仅完成注册表初始化和字体部署，
+    /// 跳过 Hook 安装、事件注册和执行调度，提示用户重启 CAD。
+    /// </para>
     /// </summary>
     public void Initialize()
     {
@@ -96,6 +106,22 @@ public abstract class PluginEntryBase : IExtensionApplication
         var log = LogService.Instance;
         try
         {
+            // 第一阶段: 注册表初始化 — 检查/创建自动加载注册表项和默认配置
+            // 首次安装时还会部署内嵌字体到 CAD Fonts 目录并写入默认替换字体
+            bool isFirstRun = AppInitializer.Initialize();
+            if (isFirstRun)
+            {
+                // 首次通过 NETLOAD 加载：CAD 已启动，Hook 无法拦截已加载的字体。
+                // 仅完成注册表写入和字体部署，提示用户重启 CAD 后自动生效。
+                try { AcadApp.SetSystemVariable("FONTMAP", ""); } catch { }
+                try { AcadApp.SetSystemVariable("FONTALT", "."); } catch { }
+                log.Info("首次加载完成，默认替换字体已部署。请重启 CAD 使插件自动生效。");
+                log.Flush();
+                return;
+            }
+
+            // ── 以下仅在非首次加载（注册表自动启动）时执行 ──
+
             // 第零阶段 A: 安装字体 Hook — 在字体加载前就位，才能拦截缺失字体请求
             if (PlatformManager.Platform.SupportsLdFileHook)
                 PlatformManager.FontHook.Install();
@@ -103,28 +129,14 @@ public abstract class PluginEntryBase : IExtensionApplication
             // 第零阶段 B: 预热系统字体索引 — 提前扫描可用字体，加速后续检测
             FontDetector.PrewarmSystemFonts();
 
-            // 第一阶段: 注册表初始化 — 检查/创建自动加载注册表项和默认配置
-            bool isFirstRun = AppInitializer.Initialize();
-            if (isFirstRun)
-            {
-                // 首次安装时清空 AutoCAD 内置的字体映射/备用字体，避免与 AFR 冲突
-                try { AcadApp.SetSystemVariable("FONTMAP", ""); } catch { }
-                try { AcadApp.SetSystemVariable("FONTALT", "."); } catch { }
-                log.Info("首次加载，请输入 AFR 命令配置替换字体。");
-                log.Flush();
-            }
-
             // 第二阶段: 注册文档事件 — 监听新建/关闭文档，自动触发字体替换
             var docMgr = AcadApp.DocumentManager;
             docMgr.DocumentCreated += OnDocumentCreated;
             docMgr.DocumentToBeDestroyed += OnDocumentToBeDestroyed;
 
             // 第三阶段: 延迟启动执行 — 对当前已打开的文档安排字体替换
-            // 首次安装时跳过：用户尚未配置替换字体且 Hook 未安装，执行无意义
-            // 且会触发 ExecutionController 中的重复提示（"请输入 AFR 命令配置替换字体"）
             _unloaded = false;
-            if (!isFirstRun)
-                ScheduleExecution(null, "Startup");
+            ScheduleExecution(null, "Startup");
         }
         catch (System.Exception ex)
         {
@@ -216,7 +228,7 @@ public abstract class PluginEntryBase : IExtensionApplication
             AcadApp.Idle -= OnDeferredIdle;
             _idleHandlerRegistered = false;
             if (_unloaded || _pendingExecutions.Count == 0) return;
-            pending = _pendingExecutions.ToArray();
+            pending = [.. _pendingExecutions];
             _pendingExecutions.Clear();
         }
 

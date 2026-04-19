@@ -31,7 +31,7 @@ internal sealed class LogService : ILogService
     public static LogService Instance => _instance.Value;
 
     // 日志缓冲区：暂存所有日志条目（分类 + 消息 + 时间戳），Flush 时统一排序输出
-    private readonly List<(LogCategory Category, string Message, DateTime Timestamp)> _buffer = [];
+    private readonly List<(LogCategory Category, string Message, DateTime Timestamp)> _buffer = new();
     // 记录已显示过 AFR 版本信息头的文档名，确保每个文档在整个会话中只显示一次横幅
     private readonly HashSet<string> _headerShownDocuments = new(StringComparer.OrdinalIgnoreCase);
     // 同步锁：保护 _buffer 和 _headerShownDocuments 的并发访问（AutoCAD 可能从不同线程触发日志写入）
@@ -226,7 +226,7 @@ internal sealed class LogService : ILogService
                         _ => $"\n{message}"
                     };
                     // ??= 表示：如果该桶还没创建列表就先创建，然后再添加格式化后的消息
-                    (buckets[idx] ??= []).Add(formatted);
+                    (buckets[idx] ??= new List<string>()).Add(formatted);
                 }
                 _buffer.Clear();
 

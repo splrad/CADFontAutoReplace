@@ -73,7 +73,7 @@
 |---|---|---|
 | AutoCAD | 2026 | ✅ **已支持** |
 | AutoCAD | 2025 | ⬜ 计划中 |
-| AutoCAD | 2024 | ⬜ 计划中 |
+| AutoCAD | 2024 | ✅ **已支持** |
 | AutoCAD | 2023 | ⬜ 计划中 |
 | AutoCAD | 2022 | ⬜ 计划中 |
 | 中望CAD | 2026 | ⬜ 计划中 |
@@ -100,7 +100,22 @@
 3. 选择对应 DLL 并打开
 4. 如有安全提示，选择“始终加载”
 
-> ✅ 成功后，后续启动 AutoCAD 会自动加载，无需重复操作。
+> ✅ 成功加载后，插件会在当前配置下写入自动启动项，后续重启 AutoCAD 会自动运行，无需重复使用 `NETLOAD` 操作。
+
+### 3) 首次配置字体
+
+1. 此时插件已自动将内置的默认字体释放到 CAD 的 Fonts 目录。
+2. 并在注册表中写入了默认配置：
+   - SHX 主字体：`K_roms.shx`
+   - SHX 大字体：`tssdchn.shx`
+   - TrueType 字体：`宋体`
+3. 提示信息显示“首次加载完成，默认替换字体已部署。请重启 CAD 使插件自动生效。”
+4. **重新启动 AutoCAD**（必须重启才能使 Hook 拦截模块生效）。
+
+如果需要修改默认配置，可在重启 CAD 后：
+1. 命令行输入 `AFR`
+2. 在弹出窗口中重新配置三类替换字体（下拉框支持跨类型搜索和关键字搜索）
+3. 点击“确认”即可立即生效。
 
 > ⚠️ 字体精简建议：
 > - 建议将 CAD 安装目录 `Fonts` 中 SHX 字体精简至 100 个以内
@@ -108,22 +123,6 @@
 > - 字体过多会导致插件界面加载明显卡顿
 >
 > 👉 [点击下载 CAD 字体包（Fonts.zip）](https://github.com/splrad/CADFontAutoReplace/releases)
-
-### 3) 首次配置字体
-
-1. 命令行输入 `AFR`
-2. 在窗口中配置三类替换字体：
-
-| 字体类型 | 说明 | 推荐值 |
-|:---:|---|---|
-| SHX 主字体（西文） | 替换缺失 SHX 主字体 | `ming.shx` |
-| SHX 大字体（中文） | 替换缺失中文大字体 | `hztxt.shx` |
-| TrueType 字体 | 替换缺失 TrueType 字体 | `宋体` |
-
-> 下拉框支持输入关键字搜索（如输入 `txt`）。
-
-3. 点击“确认”
-4. 首次配置后重启 CAD（用于安装 Hook 模块）
 
 ### 4) 验证效果
 
@@ -207,7 +206,7 @@ AFR 在 DWG 解析阶段通过 `ldfile` Hook 拦截字体加载请求。针对 M
 
 ---
 
-## 🐞 问题反馈（高效定位）
+## 🐞 问题反馈
 
 如果使用插件后仍出现“字体不显示”或“乱码”，欢迎提交 [Issues](https://github.com/splrad/CADFontAutoReplace/issues)。
 
@@ -226,6 +225,7 @@ AFR 在 DWG 解析阶段通过 `ldfile` Hook 拦截字体加载请求。针对 M
 
 - [新手：开发者指南](docs/developer-guide-beginner.md)
 - [进阶：开发者指南](docs/developer-guide-advanced.md)
+- [规范：Git 分支模板](docs/git-branch-guidelines.md)
 
 ---
 
