@@ -1,4 +1,5 @@
 # 📋 复用到新项目时的配置步骤：
+#   在 main 分支保护规则中将「⚙️ 合并规则校验」添加为必须通过的状态检查
 #   修改下方 env 中的 ALLOWED_SOURCE_BRANCH 为允许向主分支合并的来源分支名
 #   修改 on.pull_request_target.branches 为实际的主分支名（master 或 main）
 name: 🔒 主支合并规则校验
@@ -20,7 +21,7 @@ jobs:
   # ❗ ID 保持英文，方便系统识别和状态检查关联
   branch-policy-check:
     # ✅ 在 PR 检查列表显示的名称
-    name: ⚙️ 合并校验
+    name: ⚙️ 合并规则校验
     runs-on: ubuntu-latest
     # 设置合理的超时时间，防止长时间占用资源
     timeout-minutes: 5

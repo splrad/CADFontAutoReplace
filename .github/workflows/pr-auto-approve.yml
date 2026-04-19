@@ -5,7 +5,7 @@
 #   示例值：["splrad", "another-user"]
 #   路径：仓库主页 → 设置 → 机密与变量（左侧边栏"安全"分类下）→ 操作 → 变量 → 新建仓库变量
 #   英文路径参考：Settings → Secrets and variables → Actions → Variables → New repository variable
-name: 🛡️ 核心开发审批授权
+name: 🛡️ 合并审批自动授权
 
 on:
   pull_request_target:
@@ -18,10 +18,10 @@ concurrency:
 jobs:
   privileged-access:
     # ✅ 在 PR 检查列表显示的名称
-    name: 🔐 访问控制
+    name: 🔐 自动审批授权
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # 只有当 PR 作者在受信任开发者列表中时，执行自动审批（覆盖 feature→test 和 test→main 两层 PR）
+    # 只有当 PR 作者在核心开发者列表中时，执行自动审批（覆盖 feature→test 和 test→main 两层 PR）
     if: >-
       contains(fromJSON(vars.TRUSTED_DEVELOPERS), github.actor)
     permissions:
@@ -38,3 +38,46 @@ jobs:
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
             -f event='APPROVE' \
             -f body='🤖 已完成核心开发者身份校验，自动准入流程已授权。'
+
+  # 非核心开发者时显示提示信息，避免 PR 检查列表只有灰色 Skipped
+  access-denied:
+    name: 🔐 自动审批授权
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >-
+      !contains(fromJSON(vars.TRUSTED_DEVELOPERS), github.actor)
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: 💬 提示需要人工审批
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            // 避免重复评论：检查是否已经发过相同提示
+            const marker = '<!-- auto-approve-notice -->';
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            if (comments.some(c => c.body.includes(marker))) {
+              core.info('已存在审批提示评论，跳过。');
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: [
+                marker,
+                '### 🔐 此PR需要核心开发者审批',
+                '',
+                `提交者 **${context.actor}** 未在核心开发者名单中，已跳过自动审批流程。`,
+                '',
+                '**后续步骤：**',
+                '- 等待核心开发者 Review 并批准此 PR',
+                '- 或联系仓库管理员将你添加至核心开发者名单',
+              ].join('\n'),
+            });

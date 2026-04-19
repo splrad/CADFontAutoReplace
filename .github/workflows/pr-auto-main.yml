@@ -61,23 +61,33 @@ jobs:
 
           # 使用 jq 安全构建 JSON（防止提交信息中的特殊字符导致注入）
           SYSTEM_PROMPT=$(cat <<'PROMPT'
-          你是一个 PR 描述生成器。根据 Git 提交记录，生成标题和变更说明。
+          你是一个 PR 描述生成器。根据 Git 提交记录，生成符合 Conventional Commits 规范的标题和结构化变更说明。
 
           严格按以下 JSON 格式输出，不要输出任何其他内容：
-          {"title": "一句话标题", "body": "变更说明正文"}
+          {"title": "type(scope): 简短描述", "body": "变更说明正文"}
 
-          标题要求：
-          - 不超过 50 个中文字符
-          - 直接说改了什么，例如「修复字体回退逻辑」「重构配置加载流程」
-          - 不要加 emoji、不要加分支名、不要写「更新」「优化」等模糊词
+          标题要求（Conventional Commits 规范）：
+          - 格式：type(scope): 简短描述
+          - type 必须是以下之一：feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+          - scope 可选，用括号包裹，表示影响范围（如模块名、功能名），只用英文小写
+          - 描述部分用中文，不超过 40 个字符
+          - 不要加 emoji、不要加分支名
+          - 示例：feat(font): 添加字体回退匹配逻辑、fix(config): 修复配置文件加载空指针、refactor(core): 重构插件初始化流程
+          - 如果有破坏性变更，在 type 后加 !，如 feat!: xxx
 
           正文要求：
+          - 必须输出合法的 Markdown 格式，用 \n 表示换行
+          - 段落之间用 \n\n（空行）分隔，确保 GitHub 能正确渲染
+          - 按以下 Markdown 模板输出（仅保留有内容的段落，没有的就不写）：
+
+            **变更类型：** type 的中文说明（如：新功能 / 缺陷修复 / 重构 / 性能优化 等）\n\n**变更摘要：**\n用 1~3 句话概括这次改了什么、为什么改。\n\n**主要改动：**\n- 具体改动点1\n- 具体改动点2
+
+          - 示例输出（注意 \n 换行）：
+            **变更类型：** 新功能\n\n**变更摘要：**\n给字体替换加了模糊匹配，之前只能精确匹配，遇到相似字体名就没辙。\n\n**主要改动：**\n- FontMatcher 新增 FuzzyMatch() 方法，基于编辑距离做相似度计算\n- 替换流程优先走精确匹配，没命中再走模糊\n- 配置文件新增 fuzzyThreshold 字段控制匹配阈值
           - 像真人开发者随手写的，不要有 AI 味（禁止「本次更新」「旨在」「致力于」「进一步」等套话）
           - 用短句，直接说改了什么、为什么改
-          - 如果涉及多个方面，用无序列表分条，每条一句话
           - 有技术含量但不堆砌术语
-          - Markdown 格式，不要加标题
-          - 总长度控制在 3~8 行
+          - 总长度控制在 4~12 行
           PROMPT
           )
 
@@ -143,14 +153,12 @@ jobs:
           
           if [ -z "$PR_EXISTS" ]; then
             echo "未检测到现有集成请求，正在初始化交付程序..."
-            PR_BODY=$(printf '### 🤖 变更说明\n\n%s\n\n---' "$PR_BODY_CONTENT")
             gh pr create \
               --base "$TARGET_BRANCH" \
               --head "$SOURCE_BRANCH" \
               --title "$PR_TITLE" \
-              --body "$PR_BODY"
+              --body "$PR_BODY_CONTENT"
           else
             echo "检测到已存在的集成请求，正在同步更新变更说明..."
-            PR_BODY=$(printf '### 🤖 变更说明 (已更新)\n\n%s' "$PR_BODY_CONTENT")
-            gh pr edit "$PR_EXISTS" --title "$PR_TITLE" --body "$PR_BODY"
+            gh pr edit "$PR_EXISTS" --title "$PR_TITLE" --body "$PR_BODY_CONTENT"
           fi

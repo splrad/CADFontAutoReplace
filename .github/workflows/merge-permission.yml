@@ -1,0 +1,187 @@
+# 📋 复用到新项目时的配置步骤：
+#   1. 确保仓库已创建 TRUSTED_DEVELOPERS 变量（JSON 数组格式的用户名列表）
+#   2. 在 test 分支保护规则中将「🔒 流程配置保护规则」添加为必须通过的状态检查
+#   3. 在 main 分支保护规则中将「🔐 主干合并权限审计」添加为必须通过的状态检查
+#   4. 取消勾选「要求代码所有者进行审查」，本工作流的权限校验 Job 已替代该功能
+name: 🛡️ 合并审批权限校验
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+concurrency:
+  group: merge-permission-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # ────────────────────────────────────────────────────────
+  # 场景一：PR → test 分支
+  # 仅检查是否修改了 .github/workflows 下的文件
+  # 未修改工作流文件 → 直接放行；修改了 → 仅允许核心开发者
+  # ────────────────────────────────────────────────────────
+  workflow-file-audit:
+    name: 🔒 流程配置保护规则
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event.pull_request.base.ref == 'test'
+
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: 🔍 检测工作流文件变更与提交者身份
+        id: audit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_ACTOR: ${{ github.actor }}
+          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "📋 PR #$PR_NUMBER 提交者: $PR_ACTOR"
+          
+          # 获取 PR 中所有变更的文件列表
+          CHANGED_FILES=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$REPO/pulls/$PR_NUMBER/files" \
+            --paginate \
+            --jq '.[].filename')
+          
+          # 检查是否有 .github/workflows 下的文件被修改
+          WORKFLOW_CHANGES=""
+          while IFS= read -r file; do
+            if [[ "$file" == .github/workflows/* ]]; then
+              WORKFLOW_CHANGES="${WORKFLOW_CHANGES}${file}\n"
+            fi
+          done <<< "$CHANGED_FILES"
+          
+          if [ -z "$WORKFLOW_CHANGES" ]; then
+            echo "✅ 未检测到工作流文件变更，放行。"
+            echo "has_violation=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          
+          echo "⚠️ 检测到以下工作流文件被修改："
+          echo -e "$WORKFLOW_CHANGES"
+          
+          # 检查 PR 提交者是否在受信任开发者名单中
+          IS_TRUSTED=$(echo "$TRUSTED_LIST" | jq -r --arg actor "$PR_ACTOR" 'if . == null then "false" elif (. | index($actor)) then "true" else "false" end')
+          
+          if [ "$IS_TRUSTED" = "true" ]; then
+            echo "✅ 提交者 $PR_ACTOR 在核心开发者名单中，允许修改工作流文件。"
+            echo "has_violation=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          
+          # 非核心开发者修改了工作流文件 → 违规
+          echo "❌ 提交者 $PR_ACTOR 不在核心开发者名单中，禁止修改工作流文件。"
+          echo "has_violation=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "changed_files<<EOF"
+            echo -e "$WORKFLOW_CHANGES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 💬 发布违规通知并阻断合并
+        if: steps.audit.outputs.has_violation == 'true'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          CHANGED_FILES: ${{ steps.audit.outputs.changed_files }}
+          PR_ACTOR: ${{ github.actor }}
+        with:
+          script: |
+            const actor = process.env.PR_ACTOR;
+            const files = process.env.CHANGED_FILES.trim();
+            const fileList = files.split('\n').map(f => `- \`${f}\``).join('\n');
+            
+            const body = [
+              '### 🚨 工作流文件变更审计未通过',
+              '',
+              `提交者 **${actor}** 不在核心开发者名单中，无权修改 CI/CD 工作流文件。`,
+              '',
+              '**涉及的受保护文件：**',
+              fileList,
+              '',
+              '**处理方式：**',
+              '1. 撤回对 `.github/workflows/` 目录下文件的修改',
+              '2. 或联系仓库管理员取得本仓库的核心开发者权限',
+            ].join('\n');
+            
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+            
+            core.setFailed('非授权用户修改了工作流文件，合并被阻断。');
+
+  # ────────────────────────────────────────────────────────
+  # 场景二：test → main 分支
+  # 检查审批人是否为核心开发者（PR 作者是核心开发者也直接通过）
+  # ────────────────────────────────────────────────────────
+  approval-gate:
+    name: 🔐 主干合并权限审计
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event.pull_request.base.ref == 'main'
+
+    permissions:
+      pull-requests: read
+
+    steps:
+      - name: 🔍 校验审批来源授权
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "📋 PR #$PR_NUMBER 作者: $PR_AUTHOR"
+          
+          # 如果 PR 作者在核心开发者名单中，直接通过（配合 pr-auto-approve 自动满足审批数要求）
+          IS_AUTHOR_TRUSTED=$(echo "$TRUSTED_LIST" | jq -r --arg actor "$PR_AUTHOR" \
+            'if . == null then "false" elif (. | index($actor)) then "true" else "false" end')
+          
+          if [ "$IS_AUTHOR_TRUSTED" = "true" ]; then
+            echo "✅ PR 作者 $PR_AUTHOR 是核心开发者，校验通过。"
+            exit 0
+          fi
+          
+          echo "⚠️ PR 作者不在核心开发者名单中，检查审批记录..."
+          
+          # 获取每位审批人的最新审批状态，筛选仍然有效的 APPROVED
+          APPROVERS=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+            --jq '
+              group_by(.user.login)
+              | map(sort_by(.submitted_at) | last)
+              | [.[] | select(.state == "APPROVED") | .user.login]
+            ')
+          
+          echo "当前有效审批人: $APPROVERS"
+          
+          # 检查审批人中是否有核心开发者
+          HAS_TRUSTED="false"
+          for approver in $(echo "$APPROVERS" | jq -r '.[]'); do
+            IS_TRUSTED=$(echo "$TRUSTED_LIST" | jq -r --arg user "$approver" \
+              'if . == null then "false" elif (. | index($user)) then "true" else "false" end')
+            if [ "$IS_TRUSTED" = "true" ]; then
+              echo "✅ 核心开发者 $approver 已审批，校验通过。"
+              HAS_TRUSTED="true"
+              break
+            fi
+          done
+          
+          if [ "$HAS_TRUSTED" = "true" ]; then
+            echo "✅ 授权审批校验通过。"
+          else
+            echo "❌ 合并被阻断：需要核心开发者审批。"
+            echo "📋 核心开发者名单: $TRUSTED_LIST"
+            exit 1
+          fi
