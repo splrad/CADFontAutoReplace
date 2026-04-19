@@ -29,5 +29,14 @@
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetector.cs" Link="Services\FontDetector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontReplacer.cs" Link="Services\FontReplacer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\LogService.cs" Link="Services\LogService.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Hosting\EmbeddedFontDeployer.cs" Link="Hosting\EmbeddedFontDeployer.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)Fonts\K_roms.shx">
+      <LogicalName>AFR.Fonts.K_roms.shx</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)Fonts\tssdchn.shx">
+      <LogicalName>AFR.Fonts.tssdchn.shx</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 </Project>
