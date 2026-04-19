@@ -46,8 +46,7 @@ internal static class CadEnvironmentSettings
         // ── 2. AutoCAD 安装目录 Fonts ──
         try
         {
-            var processPath = Environment.ProcessPath
-                ?? Process.GetCurrentProcess().MainModule?.FileName;
+            var processPath = Process.GetCurrentProcess().MainModule?.FileName;
             if (processPath != null)
                 TryAdd(Path.Combine(Path.GetDirectoryName(processPath)!, "Fonts"), paths, seen);
         }
