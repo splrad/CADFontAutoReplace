@@ -64,6 +64,7 @@
 | DLL 文件名 | AutoCAD 版本 | .NET |
 |:---:|:---:|:---:|
 | `AFR-ACAD2026.dll` | AutoCAD **2026**（R25.1） | .NET 8 |
+| `AFR-ACAD2024.dll` | AutoCAD **2024**（R24.3） | .NET 4.8 |
 
 ---
 
