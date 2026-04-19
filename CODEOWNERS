@@ -1,6 +1,0 @@
-# CODEOWNERS — AFR (CAD 缺失字体自动替换工具)
-# https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
-
-# CI / 构建配置
-# 保护 workflow（最重要）
-.github/workflows/*  @splrad

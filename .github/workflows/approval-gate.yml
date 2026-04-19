@@ -1,0 +1,82 @@
+# 📋 复用到新项目时的配置步骤：
+#   1. 确保仓库已创建 TRUSTED_DEVELOPERS 变量（JSON 数组格式的用户名列表）
+#   2. 在分支规则集中将「🔐 授权审批」添加为必须通过的状态检查
+#   3. 取消勾选「要求代码所有者进行审查」，本工作流已替代该功能
+name: 🛡️ 合并授权审批校验
+
+on:
+  pull_request_target:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+concurrency:
+  group: approval-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  approval-gate:
+    name: 🔐 权限核验
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # pull_request_target 已通过 branches 过滤；pull_request_review 需要在此额外判断
+    if: github.event.pull_request.base.ref == 'main'
+    permissions:
+      pull-requests: read
+
+    steps:
+      - name: 🔍 校验审批来源授权
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 受信任开发者名单（JSON 数组格式）
+          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "📋 PR #$PR_NUMBER 作者: $PR_AUTHOR"
+          
+          # 如果 PR 作者在受信任名单中，直接通过（配合 pr-auto-approve 自动满足审批数要求）
+          IS_AUTHOR_TRUSTED=$(echo "$TRUSTED_LIST" | jq -r --arg actor "$PR_AUTHOR" \
+            'if . == null then "false" elif (. | index($actor)) then "true" else "false" end')
+          
+          if [ "$IS_AUTHOR_TRUSTED" = "true" ]; then
+            echo "✅ PR 作者 $PR_AUTHOR 是受信任开发者，校验通过。"
+            exit 0
+          fi
+          
+          echo "⚠️ PR 作者不在受信任名单中，检查审批记录..."
+          
+          # 获取每位审批人的最新审批状态，筛选仍然有效的 APPROVED
+          APPROVERS=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+            --jq '
+              group_by(.user.login)
+              | map(sort_by(.submitted_at) | last)
+              | [.[] | select(.state == "APPROVED") | .user.login]
+            ')
+          
+          echo "当前有效审批人: $APPROVERS"
+          
+          # 检查审批人中是否有受信任开发者
+          HAS_TRUSTED="false"
+          for approver in $(echo "$APPROVERS" | jq -r '.[]'); do
+            IS_TRUSTED=$(echo "$TRUSTED_LIST" | jq -r --arg user "$approver" \
+              'if . == null then "false" elif (. | index($user)) then "true" else "false" end')
+            if [ "$IS_TRUSTED" = "true" ]; then
+              echo "✅ 受信任开发者 $approver 已审批，校验通过。"
+              HAS_TRUSTED="true"
+              break
+            fi
+          done
+          
+          if [ "$HAS_TRUSTED" = "true" ]; then
+            echo "✅ 授权审批校验通过。"
+          else
+            echo "❌ 合并被阻断：需要受信任开发者审批。"
+            echo "📋 受信任开发者名单: $TRUSTED_LIST"
+            exit 1
+          fi

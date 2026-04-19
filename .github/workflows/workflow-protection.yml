@@ -14,7 +14,9 @@ concurrency:
 
 env:
   # 受保护的路径模式（以换行分隔，支持多个路径）
-  PROTECTED_PATHS: .github/workflows/
+  PROTECTED_PATHS: .github
+  # 排除不需要保护的文件（以换行分隔，支持多个路径）
+  EXCLUDED_PATHS: .github/copilot-instructions.md
 
 jobs:
   workflow-file-audit:
@@ -45,10 +47,10 @@ jobs:
             --paginate \
             --jq '.[].filename')
           
-          # 检查是否有受保护路径下的文件被修改
+          # 检查是否有受保护路径下的文件被修改（排除白名单文件）
           WORKFLOW_CHANGES=""
           while IFS= read -r file; do
-            if [[ "$file" == .github/workflows/* ]]; then
+            if [[ "$file" == .github/* && "$file" != "$EXCLUDED_PATHS" ]]; then
               WORKFLOW_CHANGES="${WORKFLOW_CHANGES}${file}\n"
             fi
           done <<< "$CHANGED_FILES"
