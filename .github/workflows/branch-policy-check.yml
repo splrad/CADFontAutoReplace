@@ -6,6 +6,7 @@
 #   3. 在 main 分支保护规则中将「⚙️ 主干合并来源校验」添加为必须通过的状态检查
 #   4. 修改下方 env 中的 ALLOWED_SOURCE_BRANCH 为允许向主分支合并的来源分支名
 #   5. 修改 on.pull_request_target.branches 为实际的主分支名（master 或 main）
+#   6. 核心开发者（TRUSTED_DEVELOPERS 变量中的用户）发起的 PR 将自动放行来源校验
 name: 🔒 主支合并规则校验
 
 on:
@@ -42,6 +43,8 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           CUR_REPO: ${{ github.repository }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
         # 使用 bash 变量处理，防止 Shell 注入攻击
         run: |
           echo "Checking merge request: $HEAD_REPO:$HEAD_REF -> $CUR_REPO:$BASE_REF"
@@ -52,8 +55,16 @@ jobs:
           fi
           
           if [ "$HEAD_REF" != "$ALLOWED_SOURCE_BRANCH" ]; then
-            echo "error_msg=❌ 合并被拒绝：仅允许 $ALLOWED_SOURCE_BRANCH 分支向 $BASE_REF 发起变更合并请求。当前来源分支为: $HEAD_REF" >> "$GITHUB_OUTPUT"
-            exit 1
+            # 核心开发者允许从任意分支直接向主分支发起 PR（快速通道）
+            IS_TRUSTED=$(echo "$TRUSTED_LIST" | jq -r --arg actor "$PR_AUTHOR" \
+              'if . == null then "false" elif (. | index($actor)) then "true" else "false" end')
+            
+            if [ "$IS_TRUSTED" = "true" ]; then
+              echo "✅ 核心开发者 $PR_AUTHOR 快速通道放行：允许 $HEAD_REF 直接向 $BASE_REF 合并。"
+            else
+              echo "error_msg=❌ 合并被拒绝：仅允许 $ALLOWED_SOURCE_BRANCH 分支向 $BASE_REF 发起变更合并请求。当前来源分支为: $HEAD_REF" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
           fi
           
           echo "✅ 验证通过：符合工作流规范。"
