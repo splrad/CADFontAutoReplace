@@ -1,7 +1,12 @@
 # 📋 复用到新项目时的配置步骤：
-#   在 main 分支保护规则中将「⚙️ 合并规则校验」添加为必须通过的状态检查
-#   修改下方 env 中的 ALLOWED_SOURCE_BRANCH 为允许向主分支合并的来源分支名
-#   修改 on.pull_request_target.branches 为实际的主分支名（master 或 main）
+#   1. 在 main 分支保护规则中勾选「Require a pull request before merging」，
+#      禁止任何人直接推送到主分支，所有变更必须通过 PR 合入
+#   2. 推送本文件后，在 Actions 页面手动运行一次本工作流（workflow_dispatch），
+#      使「⚙️ 主干合并来源校验」注册到 GitHub
+#   3. 在 main 分支保护规则中将「⚙️ 主干合并来源校验」添加为必须通过的状态检查
+#   4. 修改下方 env 中的 ALLOWED_SOURCE_BRANCH 为允许向主分支合并的来源分支名
+#   5. 修改 on.pull_request_target.branches 为实际的主分支名（master 或 main）
+#   6. （可选）配置完成后删除 workflow_dispatch 触发器和 register-checks Job
 name: 🔒 主支合并规则校验
 
 on:
@@ -9,19 +14,34 @@ on:
     branches:
       - main
     types: [opened, synchronize, reopened]
+  # ⚡ 临时触发：推送后手动运行一次，让 GitHub 识别状态检查名称，
+  #    以便在分支保护规则中添加为必须通过的检查。配置完成后可删除此触发器。
+  workflow_dispatch:
 
 concurrency:
-  group: pr-branch-check-${{ github.event.pull_request.number }}
+  group: pr-branch-check-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 env:
   ALLOWED_SOURCE_BRANCH: test
 
 jobs:
+  # ────────────────────────────────────────────────────────
+  # ⚡ 临时 Job：手动触发时让状态检查名称注册到 GitHub
+  #    配置完分支保护规则后，可连同 workflow_dispatch 一起删除
+  # ────────────────────────────────────────────────────────
+  register-checks:
+    if: github.event_name == 'workflow_dispatch'
+    name: ⚙️ 主干合并来源校验
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "✅ 状态检查「⚙️ 主干合并来源校验」已注册，可在分支保护规则中选取。"
+
   # ❗ ID 保持英文，方便系统识别和状态检查关联
   branch-policy-check:
     # ✅ 在 PR 检查列表显示的名称
-    name: ⚙️ 合并规则校验
+    name: ⚙️ 主干合并来源校验
     runs-on: ubuntu-latest
     # 设置合理的超时时间，防止长时间占用资源
     timeout-minutes: 5
