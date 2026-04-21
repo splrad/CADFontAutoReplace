@@ -10,6 +10,8 @@
 
 [GitHub](https://github.com/splrad/CADFontAutoReplace) · [Gitee（国内镜像）](https://gitee.com/splrad/CADFontAutoReplace) · [Releases](https://github.com/splrad/CADFontAutoReplace/releases) · [提交 Issue](https://github.com/splrad/CADFontAutoReplace/issues)
 
+**📥 补充下载链接：[蓝奏云网盘](https://wwbcq.lanzouv.com/b01jt1w7of) （密码: exsc）**
+
 </div>
 
 ---
