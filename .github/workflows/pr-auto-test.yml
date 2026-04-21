@@ -46,87 +46,39 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DeepSeek_API_KEY }}
         run: |
-          # 仅提取“本次 push”包含的提交记录，避免回溯分支历史
+          # 仅提取“本次 push”包含的代码差异，避免回溯分支历史
           BEFORE="${{ github.event.before }}"
           AFTER="${{ github.event.after }}"
 
           if git cat-file -e "$BEFORE" 2>/dev/null; then
-            # 正常场景：before..after 就是这次 push 的提交区间
-            RAW_CHANGES=$(git log "${BEFORE}..${AFTER}" --pretty=format:"%s" -n 50)
+            # 正常场景：before..after 就是这次 push 的代码差异范围
+            CHANGED_FILES=$(git diff --name-status "$BEFORE" "$AFTER")
+            DIFF_SNIPPET=$(git diff --unified=0 --no-color "$BEFORE" "$AFTER" | head -c 20000)
           else
-            # 强推等场景：before 不可达时，改从 push 事件 payload 读取本次提交
-            RAW_CHANGES=$(jq -r '.commits[]? | (.message // "" | split("\\n")[0])' "$GITHUB_EVENT_PATH" | head -n 50)
+            # 强推等场景：before 不可达时，从 push 事件 payload 读取本次提交并拼接代码差异
+            PUSHED_SHAS=$(jq -r '.commits[]?.id' "$GITHUB_EVENT_PATH")
+            CHANGED_FILES=$(for sha in $PUSHED_SHAS; do git show --name-status --pretty="" "$sha"; done | sed '/^[[:space:]]*$/d' | awk '!seen[$0]++')
+            DIFF_SNIPPET=$(for sha in $PUSHED_SHAS; do git show --unified=0 --no-color --pretty=format:"commit $sha" "$sha"; echo; done | head -c 20000)
           fi
 
-          if [ -z "$RAW_CHANGES" ]; then
-            # 极端兜底：payload 也取不到时，仅保留当前 after 提交
-            RAW_CHANGES=$(git show -s --format="%s" "$AFTER" 2>/dev/null || echo "")
+          if [ -z "$CHANGED_FILES" ]; then
+            CHANGED_FILES="无代码文件变更"
           fi
 
-          # 清理提交信息并去重，避免同一语义在说明中重复出现
-          CHANGES=$(echo "$RAW_CHANGES" \
-            | sed 's/ (#[0-9][0-9]*)//g' \
-            | sed '/^[[:space:]]*$/d' \
-            | awk '!seen[$0]++' \
-            | sed 's/^/- /')
-
-          if [ -z "$CHANGES" ]; then
-            CHANGES="- 无明显变更"
+          if [ -z "$DIFF_SNIPPET" ]; then
+            # 极端兜底：无可用差异时仅保留 after 的代码改动片段
+            DIFF_SNIPPET=$(git show --unified=0 --no-color --pretty=format:"commit $AFTER" "$AFTER" 2>/dev/null | head -c 20000)
           fi
 
-          CHANGES_BY_TYPE=$(echo "$CHANGES" | awk '
-          function normalize(msg, lower) {
-            lower=tolower(msg)
-            if (lower ~ /^feat(\([^)]+\))?!?:[[:space:]]*/) return "feat"
-            if (lower ~ /^fix(\([^)]+\))?!?:[[:space:]]*/) return "fix"
-            if (lower ~ /^docs(\([^)]+\))?!?:[[:space:]]*/) return "docs"
-            if (lower ~ /^refactor(\([^)]+\))?!?:[[:space:]]*/) return "refactor"
-            if (lower ~ /^perf(\([^)]+\))?!?:[[:space:]]*/) return "perf"
-            if (lower ~ /^test(\([^)]+\))?!?:[[:space:]]*/) return "test"
-            if (lower ~ /^build(\([^)]+\))?!?:[[:space:]]*/) return "build"
-            if (lower ~ /^ci(\([^)]+\))?!?:[[:space:]]*/) return "ci"
-            if (lower ~ /^style(\([^)]+\))?!?:[[:space:]]*/) return "style"
-            if (lower ~ /^chore(\([^)]+\))?!?:[[:space:]]*/) return "chore"
-            if (lower ~ /^revert(\([^)]+\))?!?:[[:space:]]*/) return "revert"
-            return "other"
-          }
-          {
-            msg=$0
-            sub(/^- /, "", msg)
-            type=normalize(msg)
-            bucket[type]=bucket[type] "- " msg "\\n"
-          }
-          END {
-            label["feat"]="新功能"
-            label["fix"]="缺陷修复"
-            label["docs"]="文档更新"
-            label["refactor"]="重构"
-            label["perf"]="性能优化"
-            label["test"]="测试"
-            label["build"]="构建"
-            label["ci"]="持续集成"
-            label["style"]="样式调整"
-            label["chore"]="杂项"
-            label["revert"]="回滚"
-            label["other"]="其他"
-            order[1]="feat"; order[2]="fix"; order[3]="docs"; order[4]="refactor"; order[5]="perf"; order[6]="test"; order[7]="build"; order[8]="ci"; order[9]="style"; order[10]="chore"; order[11]="revert"; order[12]="other"
-            printed=0
-            for (i=1; i<=12; i++) {
-              key=order[i]
-              if (bucket[key] != "") {
-                printed=1
-                printf("[%s]\\n%s\\n", label[key], bucket[key])
-              }
-            }
-            if (printed == 0) {
-              print "[其他]\\n- 无明显变更"
-            }
-          }')
+          if [ -z "$DIFF_SNIPPET" ]; then
+            DIFF_SNIPPET="无可用代码差异片段"
+          fi
 
           # 使用 jq 安全构建 JSON（防止提交信息中的特殊字符导致注入）
           SYSTEM_PROMPT=$(cat <<'PROMPT'
-          你是一个 PR 描述生成器。根据 Git 提交记录，生成符合 Conventional Commits 规范的标题和结构化变更说明。
-          无论提交有多少条，只能输出一份最终 PR 说明；若包含多种类型（如 feat/fix/docs），必须在同一份正文中合并呈现，禁止按提交或按类型重复整套模板。
+          你是一个 PR 描述生成器。根据本次 push 的代码差异（文件清单与 diff 片段），生成符合 Conventional Commits 规范的标题和结构化变更说明。
+          仅依据输入中“本次 push 的代码差异”进行描述，禁止引用分支历史、历史 PR 或历史提交。
+          无论本次 push 包含多少提交，只能输出一份最终 PR 说明；若包含多种类型（如 feat/fix/docs），必须在同一份正文中合并呈现，禁止按提交或按类型重复整套模板。
 
           严格按以下 JSON 格式输出，不要输出任何其他内容：
           {"title": "type(scope): 简短描述", "body": "变更说明正文"}
@@ -164,8 +116,8 @@ jobs:
           )
 
           PAYLOAD=$(jq -n \
-            --arg changes "$CHANGES" \
-            --arg changes_by_type "$CHANGES_BY_TYPE" \
+            --arg changed_files "$CHANGED_FILES" \
+            --arg diff_snippet "$DIFF_SNIPPET" \
             --arg system_prompt "$SYSTEM_PROMPT" \
             '{
               model: "deepseek-chat",
@@ -176,7 +128,7 @@ jobs:
                 },
                 {
                   role: "user",
-                  content: ("提交记录（去重后）：\n" + $changes + "\n\n按类型归并：\n" + $changes_by_type)
+                  content: ("本次 push 代码文件变更：\n" + $changed_files + "\n\n本次 push 代码差异片段：\n" + $diff_snippet)
                 }
               ]
             }')
