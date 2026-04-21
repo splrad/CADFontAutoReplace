@@ -5,10 +5,13 @@
 #   3. 在 test 分支的规则集中将「仓库管理员」角色添加到旁路列表
 #      （路径：设置 → 规则 → 规则集 → 选择 test 分支规则 → 旁路列表 → 添加旁路 → 勾选「仓库管理员」）
 #   4. 修改下方 env 中的 TEST_BRANCH 和 MAIN_BRANCH 为实际分支名
-#   5. 当核心开发者跳过 test 分支直接向 main 合并 PR 后，test 分支将自动同步至 main 最新提交
+#   5. 当 main 分支发生 push（含强制推送）或核心开发者跳过 test 分支直接向 main 合并 PR 后，test 分支将自动同步至 main 最新提交
 name: 🔄 重置 test 分支到主分支
 
 on:
+  push:
+    branches:
+      - main
   pull_request_target:
     branches:
       - main
@@ -28,11 +31,15 @@ jobs:
     name: 🔄 同步 test 分支至主支最新提交
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # 仅当 PR 被合并、来源分支不是 test（即快速通道 PR）、且 PR 作者是核心开发者时执行
+    # 在 main push（含强制推送）时执行；或在快速通道 PR 被核心开发者合并时执行
     if: >-
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.head.ref != 'test' &&
-      contains(fromJSON(vars.TRUSTED_DEVELOPERS), github.event.pull_request.user.login)
+      github.event_name == 'push' ||
+      (
+        github.event_name == 'pull_request_target' &&
+        github.event.pull_request.merged == true &&
+        github.event.pull_request.head.ref != 'test' &&
+        contains(fromJSON(vars.TRUSTED_DEVELOPERS), github.event.pull_request.user.login)
+      )
 
     permissions:
       contents: write
