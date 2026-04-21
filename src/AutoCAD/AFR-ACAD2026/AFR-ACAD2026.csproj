@@ -20,18 +20,6 @@
     <PackageReference Include="AutoCAD.NET">
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <!-- UI 控件库 — 嵌入为程序集资源，不复制到输出 -->
-    <PackageReference Include="HandyControl" />
   </ItemGroup>
-
-  <!-- 将 HandyControl DLL 嵌入为程序集资源，实现单 DLL 分发 -->
-  <Target Name="EmbedHandyControl" AfterTargets="ResolveAssemblyReferences">
-    <ItemGroup>
-      <EmbeddedResource Include="@(ReferenceCopyLocalPaths)" Condition="'%(Filename)' == 'HandyControl'">
-        <LogicalName>%(Filename)%(Extension)</LogicalName>
-      </EmbeddedResource>
-      <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)" Condition="'%(Filename)' == 'HandyControl'" />
-    </ItemGroup>
-  </Target>
 
 </Project>
