@@ -49,29 +49,87 @@ jobs:
           # 关键：使用 Secrets 传递 API 密钥，避免泄露风险
           DEEPSEEK_API_KEY: ${{ secrets.DeepSeek_API_KEY }}
         run: |
-          # 提取本次推送包含的提交记录
-          # 强制推送时 before 指向的旧 commit 可能已不存在，需要降级处理
+          # 仅提取“本次 push”包含的提交记录，避免回溯分支历史
           BEFORE="${{ github.event.before }}"
           AFTER="${{ github.event.after }}"
 
           if git cat-file -e "$BEFORE" 2>/dev/null; then
-            CHANGES=$(git log "${BEFORE}..${AFTER}" --pretty=format:"- %s" -n 15)
+            # 正常场景：before..after 就是这次 push 的提交区间
+            RAW_CHANGES=$(git log "${BEFORE}..${AFTER}" --pretty=format:"%s" -n 50)
           else
-            # 降级：对比目标分支，获取本分支独有的提交
-            CHANGES=$(git log "origin/${TARGET_BRANCH}..${AFTER}" --pretty=format:"- %s" -n 15)
+            # 强推等场景：before 不可达时，改从 push 事件 payload 读取本次提交
+            RAW_CHANGES=$(jq -r '.commits[]? | (.message // "" | split("\\n")[0])' "$GITHUB_EVENT_PATH" | head -n 50)
           fi
+
+          if [ -z "$RAW_CHANGES" ]; then
+            # 极端兜底：payload 也取不到时，仅保留当前 after 提交
+            RAW_CHANGES=$(git show -s --format="%s" "$AFTER" 2>/dev/null || echo "")
+          fi
+
+          # 清理提交信息并去重，避免同一语义在说明中重复出现
+          CHANGES=$(echo "$RAW_CHANGES" \
+            | sed 's/ (#[0-9][0-9]*)//g' \
+            | sed '/^[[:space:]]*$/d' \
+            | awk '!seen[$0]++' \
+            | sed 's/^/- /')
 
           if [ -z "$CHANGES" ]; then
-            CHANGES="无明显变更"
+            CHANGES="- 无明显变更"
           fi
 
-          # 清除提交信息中已有的 PR 编号引用（如 (#31)），
-          # 避免 AI 将旧编号带入标题，压缩合并时 GitHub 会自动追加当前 PR 编号
-          CHANGES=$(echo "$CHANGES" | sed 's/ (#[0-9]*)//g')
+          CHANGES_BY_TYPE=$(echo "$CHANGES" | awk '
+          function normalize(msg, lower) {
+            lower=tolower(msg)
+            if (lower ~ /^feat(\([^)]+\))?!?:[[:space:]]*/) return "feat"
+            if (lower ~ /^fix(\([^)]+\))?!?:[[:space:]]*/) return "fix"
+            if (lower ~ /^docs(\([^)]+\))?!?:[[:space:]]*/) return "docs"
+            if (lower ~ /^refactor(\([^)]+\))?!?:[[:space:]]*/) return "refactor"
+            if (lower ~ /^perf(\([^)]+\))?!?:[[:space:]]*/) return "perf"
+            if (lower ~ /^test(\([^)]+\))?!?:[[:space:]]*/) return "test"
+            if (lower ~ /^build(\([^)]+\))?!?:[[:space:]]*/) return "build"
+            if (lower ~ /^ci(\([^)]+\))?!?:[[:space:]]*/) return "ci"
+            if (lower ~ /^style(\([^)]+\))?!?:[[:space:]]*/) return "style"
+            if (lower ~ /^chore(\([^)]+\))?!?:[[:space:]]*/) return "chore"
+            if (lower ~ /^revert(\([^)]+\))?!?:[[:space:]]*/) return "revert"
+            return "other"
+          }
+          {
+            msg=$0
+            sub(/^- /, "", msg)
+            type=normalize(msg)
+            bucket[type]=bucket[type] "- " msg "\\n"
+          }
+          END {
+            label["feat"]="新功能"
+            label["fix"]="缺陷修复"
+            label["docs"]="文档更新"
+            label["refactor"]="重构"
+            label["perf"]="性能优化"
+            label["test"]="测试"
+            label["build"]="构建"
+            label["ci"]="持续集成"
+            label["style"]="样式调整"
+            label["chore"]="杂项"
+            label["revert"]="回滚"
+            label["other"]="其他"
+            order[1]="feat"; order[2]="fix"; order[3]="docs"; order[4]="refactor"; order[5]="perf"; order[6]="test"; order[7]="build"; order[8]="ci"; order[9]="style"; order[10]="chore"; order[11]="revert"; order[12]="other"
+            printed=0
+            for (i=1; i<=12; i++) {
+              key=order[i]
+              if (bucket[key] != "") {
+                printed=1
+                printf("[%s]\\n%s\\n", label[key], bucket[key])
+              }
+            }
+            if (printed == 0) {
+              print "[其他]\\n- 无明显变更"
+            }
+          }')
 
           # 使用 jq 安全构建 JSON（防止提交信息中的特殊字符导致注入）
           SYSTEM_PROMPT=$(cat <<'PROMPT'
           你是一个 PR 描述生成器。根据 Git 提交记录，生成符合 Conventional Commits 规范的标题和结构化变更说明。
+          无论提交有多少条，只能输出一份最终 PR 说明；若包含多种类型（如 feat/fix/docs），必须在同一份正文中合并呈现，禁止按提交或按类型重复整套模板。
 
           严格按以下 JSON 格式输出，不要输出任何其他内容：
           {"title": "type(scope): 简短描述", "body": "变更说明正文"}
@@ -88,12 +146,13 @@ jobs:
           正文要求：
           - 必须输出合法的 Markdown 格式，用 \n 表示换行
           - 段落之间用 \n\n（空行）分隔，确保 GitHub 能正确渲染
+          - 只允许出现 1 次“变更类型”和 1 次“变更摘要”标题
           - 按以下 Markdown 模板输出（仅保留有内容的段落，没有的就不写）：
 
-            **变更类型：** type 的中文说明（如：新功能 / 缺陷修复 / 重构 / 性能优化 等）\n\n**变更摘要：**\n用 1~3 句话概括这次改了什么、为什么改。\n\n**主要改动：**\n- 具体改动点1\n- 具体改动点2
+            **变更类型：** 单类型写具体类型；多类型写“混合变更（feat/fix/docs）”\n\n**变更摘要：**\n用 1~3 句话概括这次改了什么、为什么改。\n\n**主要改动：**\n- 新功能：按需填写\n- 缺陷修复：按需填写\n- 文档更新：按需填写\n- 其他：按需填写
 
           - 示例输出（注意 \n 换行）：
-            **变更类型：** 新功能\n\n**变更摘要：**\n给字体替换加了模糊匹配，之前只能精确匹配，遇到相似字体名就没辙。\n\n**主要改动：**\n- FontMatcher 新增 FuzzyMatch() 方法，基于编辑距离做相似度计算\n- 替换流程优先走精确匹配，没命中再走模糊\n- 配置文件新增 fuzzyThreshold 字段控制匹配阈值
+            **变更类型：** 混合变更（feat/fix/docs）\n\n**变更摘要：**\n字体替换流程这次既补了能力，也补了稳定性和文档可读性。\n\n**主要改动：**\n- 新功能：新增模糊匹配逻辑，提升相似字体名命中率\n- 缺陷修复：修复配置为空时的空指针问题\n- 文档更新：补充 fuzzyThreshold 配置示例与说明
           - 像真人开发者随手写的，不要有 AI 味（禁止「本次更新」「旨在」「致力于」「进一步」等套话）
           - 用短句，直接说改了什么、为什么改
           - 有技术含量但不堆砌术语
@@ -103,6 +162,7 @@ jobs:
 
           PAYLOAD=$(jq -n \
             --arg changes "$CHANGES" \
+            --arg changes_by_type "$CHANGES_BY_TYPE" \
             --arg system_prompt "$SYSTEM_PROMPT" \
             '{
               model: "deepseek-chat",
@@ -113,7 +173,7 @@ jobs:
                 },
                 {
                   role: "user",
-                  content: ("提交记录：\n" + $changes)
+                  content: ("提交记录（去重后）：\n" + $changes + "\n\n按类型归并：\n" + $changes_by_type)
                 }
               ]
             }')
