@@ -81,6 +81,7 @@ jobs:
           SYSTEM_PROMPT=$(cat <<'PROMPT'
           你是一个 PR 描述生成器。根据本次 push 的代码差异（文件清单与 diff 片段），生成符合 Conventional Commits 规范的标题和结构化变更说明。
           仅依据输入中“本次 push 的代码差异”进行描述，禁止引用分支历史、历史 PR 或历史提交。
+          禁止复用、拼接或改写任何已有 PR 描述文本（包括当前已打开 PR 的正文）；正文必须完全基于当前输入重新生成。
           无论本次 push 包含多少提交，只能输出一份最终 PR 说明；若包含多种类型（如 feat/fix/docs），必须在同一份正文中合并呈现，禁止按提交或按类型重复整套模板。
 
           严格按以下 JSON 格式输出，不要输出任何其他内容：
@@ -142,16 +143,29 @@ jobs:
             -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD") || RESPONSE=""
+
+          # 规范化正文：剔除代码块包裹，并在模型重复输出模板时只保留最后一份
+          normalize_pr_body() {
+            local raw="$1"
+            local cleaned last_section_line
+            cleaned=$(printf '%s\n' "$raw" | sed -e 's/\r$//' -e '/^```json[[:space:]]*$/d' -e '/^```[[:space:]]*$/d')
+            last_section_line=$(printf '%s\n' "$cleaned" | awk '/\*\*变更类型：\*\*/ { line=NR } END { if (line) print line }')
+            if [ -n "$last_section_line" ]; then
+              cleaned=$(printf '%s\n' "$cleaned" | tail -n +"$last_section_line")
+            fi
+            printf '%s' "$cleaned"
+          }
           
           # 解析返回
           SUMMARY=""
           AI_TITLE=""
           if [ -n "$RESPONSE" ]; then
             AI_CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
-            # 提取 JSON 中的 title 和 body（兼容 AI 输出被 markdown 代码块包裹的情况）
-            AI_CONTENT_CLEAN=$(echo "$AI_CONTENT" | sed 's/^```json//;s/^```//')
+            # 提取 JSON 中的 title 和 body（兼容 AI 输出被 markdown 代码块包裹）
+            AI_CONTENT_CLEAN=$(printf '%s\n' "$AI_CONTENT" | sed -e '/^```json[[:space:]]*$/d' -e '/^```[[:space:]]*$/d')
             AI_TITLE=$(echo "$AI_CONTENT_CLEAN" | jq -r '.title // empty' 2>/dev/null)
             SUMMARY=$(echo "$AI_CONTENT_CLEAN" | jq -r '.body // empty' 2>/dev/null)
+            SUMMARY=$(normalize_pr_body "$SUMMARY")
           fi
 
           # 兜底（防止 API 异常或网络失败）
