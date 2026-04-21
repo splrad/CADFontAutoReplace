@@ -167,8 +167,11 @@ jobs:
 
       - name: 🔁 执行合并请求生成与状态判定
         env:
+          # GH_TOKEN 用于 gh cli 认证，PR_TITLE 和 PR_BODY_CONTENT 从上一步 AI 生成结果传递
           GH_TOKEN: ${{ secrets.MY_PAT }}
+          # PR 标题（由 AI 生成）
           PR_TITLE: ${{ env.AI_PR_TITLE }}
+          # PR 描述内容（通过环境变量传递，避免 shell 注入）
           PR_BODY_CONTENT: ${{ env.AI_PR_BODY }}
         run: |
           # 检查源分支相对目标分支是否有新提交，若无差异则跳过
