@@ -183,17 +183,32 @@ jobs:
             exit 0
           fi
 
-          # 检查是否已经存在对应的 PR
-          PR_EXISTS=$(gh pr list --head "$SOURCE_BRANCH" --base "$TARGET_BRANCH" --json url --jq '.[0].url')
-          
-          if [ -z "$PR_EXISTS" ]; then
+          # 使用 REST API 查询是否存在对应 PR，避免 GraphQL 额外权限依赖
+          REPO="$GITHUB_REPOSITORY"
+          OWNER="${REPO%%/*}"
+          EXISTING_PR_NUMBER=$(gh api --method GET \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$REPO/pulls" \
+            -f state="open" \
+            -f head="${OWNER}:$SOURCE_BRANCH" \
+            -f base="$TARGET_BRANCH" \
+            -f per_page=1 \
+            --jq '.[0].number // empty')
+
+          if [ -z "$EXISTING_PR_NUMBER" ]; then
             echo "未检测到现有集成请求，正在初始化交付程序..."
-            gh pr create \
-              --base "$TARGET_BRANCH" \
-              --head "$SOURCE_BRANCH" \
-              --title "$PR_TITLE" \
-              --body "$PR_BODY_CONTENT"
+            gh api --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "repos/$REPO/pulls" \
+              -f base="$TARGET_BRANCH" \
+              -f head="$SOURCE_BRANCH" \
+              -f title="$PR_TITLE" \
+              -f body="$PR_BODY_CONTENT" >/dev/null
           else
             echo "检测到已存在的集成请求，正在同步更新变更说明..."
-            gh pr edit "$PR_EXISTS" --title "$PR_TITLE" --body "$PR_BODY_CONTENT"
+            gh api --method PATCH \
+              -H "Accept: application/vnd.github+json" \
+              "repos/$REPO/pulls/$EXISTING_PR_NUMBER" \
+              -f title="$PR_TITLE" \
+              -f body="$PR_BODY_CONTENT" >/dev/null
           fi
