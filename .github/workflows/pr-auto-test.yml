@@ -100,48 +100,97 @@ jobs:
           REPO="$GITHUB_REPOSITORY"
           PR_NUMBER="$CURRENT_PR_NUMBER"
 
-          # 直接读取“当前 PR”的文件变更与 patch，避免混入历史 PR 记录
-          PR_FILES_JSON=$(gh api --method GET \
-            -H "Accept: application/vnd.github+json" \
-            "repos/$REPO/pulls/$PR_NUMBER/files" \
-            -f per_page=100 \
-            --paginate \
-            --slurp)
+          # 优先读取“本次 push(before..after)”差异，避免同一来源分支累计历史提交串入描述
+          BEFORE_SHA="${{ github.event.before }}"
+          AFTER_SHA="${{ github.event.after }}"
+          if [ -z "$AFTER_SHA" ]; then
+            AFTER_SHA="$GITHUB_SHA"
+          fi
 
-          CHANGED_FILES=$(echo "$PR_FILES_JSON" | jq -r '.[][] | "\(.status | ascii_upcase)\t\(.filename)"')
+          CHANGED_FILES=""
+          DIFF_SNIPPET=""
           MAX_DIFF_CHARS=20000
           PRIORITY_TRUNCATE_THRESHOLD=20000
-          PATCH_TOTAL_CHARS=$(echo "$PR_FILES_JSON" | jq -r '[.[][] | .patch // ""] | join("\n") | length')
 
-          if [ "$PATCH_TOTAL_CHARS" -gt "$PRIORITY_TRUNCATE_THRESHOLD" ]; then
-            # 超过阈值时优先保留新增/修改最多的文件片段，提高摘要稳定性
-            DIFF_SNIPPET=$(echo "$PR_FILES_JSON" | jq -r '
-              [.[][] | select(.patch != null) |
-                {
-                  filename: .filename,
-                  patch: .patch,
-                  score: ((.additions // 0) + (.deletions // 0)),
-                  additions: (.additions // 0),
-                  deletions: (.deletions // 0)
-                }
-              ]
-              | sort_by(-.score, -.additions, -.deletions, .filename)
-              | .[]
-              | ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
-            ' | head -c "$MAX_DIFF_CHARS")
-          else
-            DIFF_SNIPPET=$(echo "$PR_FILES_JSON" | jq -r '
-              .[][] | select(.patch != null) |
-              ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
-            ' | head -c "$MAX_DIFF_CHARS")
+          COMPARE_JSON=""
+          if [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            COMPARE_JSON=$(gh api --method GET \
+              -H "Accept: application/vnd.github+json" \
+              "repos/$REPO/compare/$BEFORE_SHA...$AFTER_SHA" 2>/dev/null || true)
           fi
 
-          if [ -z "$CHANGED_FILES" ]; then
-            CHANGED_FILES=$(git diff --name-status "origin/$TARGET_BRANCH...origin/$SOURCE_BRANCH")
+          if [ -n "$COMPARE_JSON" ]; then
+            CHANGED_FILES=$(echo "$COMPARE_JSON" | jq -r '.files[]? | "\(.status | ascii_upcase)\t\(.filename)"')
+            PATCH_TOTAL_CHARS=$(echo "$COMPARE_JSON" | jq -r '[.files[]? | .patch // ""] | join("\n") | length')
+
+            if [ "$PATCH_TOTAL_CHARS" -gt "$PRIORITY_TRUNCATE_THRESHOLD" ]; then
+              # 超过阈值时优先保留新增/修改最多的文件片段，提高摘要稳定性
+              DIFF_SNIPPET=$(echo "$COMPARE_JSON" | jq -r '
+                [.files[]? | select(.patch != null) |
+                  {
+                    filename: .filename,
+                    patch: .patch,
+                    score: ((.additions // 0) + (.deletions // 0)),
+                    additions: (.additions // 0),
+                    deletions: (.deletions // 0)
+                  }
+                ]
+                | sort_by(-.score, -.additions, -.deletions, .filename)
+                | .[]
+                | ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
+              ' | head -c "$MAX_DIFF_CHARS")
+            else
+              DIFF_SNIPPET=$(echo "$COMPARE_JSON" | jq -r '
+                .files[]? | select(.patch != null) |
+                ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
+              ' | head -c "$MAX_DIFF_CHARS")
+            fi
           fi
 
-          if [ -z "$DIFF_SNIPPET" ]; then
-            DIFF_SNIPPET=$(git diff --unified=0 --no-color "origin/$TARGET_BRANCH...origin/$SOURCE_BRANCH" | head -c 20000)
+          # before 不可用（如分支首次推送）时，回退读取当前 PR diff
+          if [ -z "$CHANGED_FILES" ] || [ -z "$DIFF_SNIPPET" ]; then
+            PR_FILES_JSON=$(gh api --method GET \
+              -H "Accept: application/vnd.github+json" \
+              "repos/$REPO/pulls/$PR_NUMBER/files" \
+              -f per_page=100 \
+              --paginate \
+              --slurp)
+
+            CHANGED_FILES=$(echo "$PR_FILES_JSON" | jq -r '.[][] | "\(.status | ascii_upcase)\t\(.filename)"')
+            PATCH_TOTAL_CHARS=$(echo "$PR_FILES_JSON" | jq -r '[.[][] | .patch // ""] | join("\n") | length')
+
+            if [ "$PATCH_TOTAL_CHARS" -gt "$PRIORITY_TRUNCATE_THRESHOLD" ]; then
+              DIFF_SNIPPET=$(echo "$PR_FILES_JSON" | jq -r '
+                [.[][] | select(.patch != null) |
+                  {
+                    filename: .filename,
+                    patch: .patch,
+                    score: ((.additions // 0) + (.deletions // 0)),
+                    additions: (.additions // 0),
+                    deletions: (.deletions // 0)
+                  }
+                ]
+                | sort_by(-.score, -.additions, -.deletions, .filename)
+                | .[]
+                | ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
+              ' | head -c "$MAX_DIFF_CHARS")
+            else
+              DIFF_SNIPPET=$(echo "$PR_FILES_JSON" | jq -r '
+                .[][] | select(.patch != null) |
+                ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
+              ' | head -c "$MAX_DIFF_CHARS")
+            fi
+          fi
+
+          # 最后兜底：如果 before/after 在本地可达，仍优先使用本次 push 的本地差异
+          if [ -z "$CHANGED_FILES" ] && [ -n "$BEFORE_SHA" ] && [ -n "$AFTER_SHA" ] && \
+             git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null && git cat-file -e "$AFTER_SHA^{commit}" 2>/dev/null; then
+            CHANGED_FILES=$(git diff --name-status "$BEFORE_SHA" "$AFTER_SHA")
+          fi
+
+          if [ -z "$DIFF_SNIPPET" ] && [ -n "$BEFORE_SHA" ] && [ -n "$AFTER_SHA" ] && \
+             git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null && git cat-file -e "$AFTER_SHA^{commit}" 2>/dev/null; then
+            DIFF_SNIPPET=$(git diff --unified=0 --no-color "$BEFORE_SHA" "$AFTER_SHA" | head -c "$MAX_DIFF_CHARS")
           fi
 
           if [ -z "$CHANGED_FILES" ]; then
