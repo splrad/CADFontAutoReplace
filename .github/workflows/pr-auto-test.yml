@@ -35,39 +35,117 @@ jobs:
       pull-requests: write
       contents: read
 
+    env:
+      SKIP_PR_AUTOMATION: 'false'
+      CURRENT_PR_NUMBER: ''
+      AI_PR_TITLE: ''
+      AI_PR_BODY: ''
+
     steps:
       - name: 📦 执行代码检出
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
-      - name: 🧠 生成变更说明
+      - name: 🔍 定位当前集成请求
+        env:
+          GH_TOKEN: ${{ secrets.MY_PAT }}
+        run: |
+          # 检查源分支相对目标分支是否有新提交，若无差异则跳过
+          AHEAD_COUNT=$(git rev-list --count "origin/$TARGET_BRANCH".."origin/$SOURCE_BRANCH" 2>/dev/null || echo "0")
+          if [ "$AHEAD_COUNT" -eq 0 ]; then
+            echo "⏭️ $SOURCE_BRANCH 与 $TARGET_BRANCH 无差异提交，跳过 PR 创建与描述生成。"
+            echo "SKIP_PR_AUTOMATION=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          REPO="$GITHUB_REPOSITORY"
+          OWNER="${REPO%%/*}"
+
+          # 只识别当前 source->target 的最新打开 PR，避免历史已关闭 PR 干扰
+          CURRENT_PR_NUMBER=$(gh api --method GET \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$REPO/pulls" \
+            -f state="open" \
+            -f head="${OWNER}:$SOURCE_BRANCH" \
+            -f base="$TARGET_BRANCH" \
+            -f sort="created" \
+            -f direction="desc" \
+            -f per_page=1 \
+            --jq '.[0].number // empty')
+
+          if [ -z "$CURRENT_PR_NUMBER" ]; then
+            echo "未检测到当前打开的集成请求，正在先创建占位 PR..."
+            CURRENT_PR_NUMBER=$(gh api --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "repos/$REPO/pulls" \
+              -f base="$TARGET_BRANCH" \
+              -f head="$SOURCE_BRANCH" \
+              -f title="$SOURCE_BRANCH ➔ $TARGET_BRANCH" \
+              -f body="正在基于当前 PR 的 diff 生成说明..." \
+              --jq '.number')
+          else
+            echo "检测到当前打开的集成请求：#$CURRENT_PR_NUMBER"
+          fi
+
+          echo "CURRENT_PR_NUMBER=$CURRENT_PR_NUMBER" >> "$GITHUB_ENV"
+
+      - name: 🧠 基于当前PR差异生成变更说明
         id: ai-summary
+        if: env.SKIP_PR_AUTOMATION != 'true'
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DeepSeek_API_KEY }}
+          GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
-          # 仅提取“本次 push”包含的代码差异，避免回溯分支历史
-          BEFORE="${{ github.event.before }}"
-          AFTER="${{ github.event.after }}"
+          REPO="$GITHUB_REPOSITORY"
+          PR_NUMBER="$CURRENT_PR_NUMBER"
 
-          if git cat-file -e "$BEFORE" 2>/dev/null; then
-            # 正常场景：before..after 就是这次 push 的代码差异范围
-            CHANGED_FILES=$(git diff --name-status "$BEFORE" "$AFTER")
-            DIFF_SNIPPET=$(git diff --unified=0 --no-color "$BEFORE" "$AFTER" | head -c 20000)
+          # 直接读取“当前 PR”的文件变更与 patch，避免混入历史 PR 记录
+          PR_FILES_JSON=$(gh api --method GET \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$REPO/pulls/$PR_NUMBER/files" \
+            -f per_page=100 \
+            --paginate \
+            --slurp)
+
+          CHANGED_FILES=$(echo "$PR_FILES_JSON" | jq -r '.[][] | "\(.status | ascii_upcase)\t\(.filename)"')
+          MAX_DIFF_CHARS=20000
+          PRIORITY_TRUNCATE_THRESHOLD=20000
+          PATCH_TOTAL_CHARS=$(echo "$PR_FILES_JSON" | jq -r '[.[][] | .patch // ""] | join("\n") | length')
+
+          if [ "$PATCH_TOTAL_CHARS" -gt "$PRIORITY_TRUNCATE_THRESHOLD" ]; then
+            # 超过阈值时优先保留新增/修改最多的文件片段，提高摘要稳定性
+            DIFF_SNIPPET=$(echo "$PR_FILES_JSON" | jq -r '
+              [.[][] | select(.patch != null) |
+                {
+                  filename: .filename,
+                  patch: .patch,
+                  score: ((.additions // 0) + (.deletions // 0)),
+                  additions: (.additions // 0),
+                  deletions: (.deletions // 0)
+                }
+              ]
+              | sort_by(-.score, -.additions, -.deletions, .filename)
+              | .[]
+              | ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
+            ' | head -c "$MAX_DIFF_CHARS")
           else
-            # 强推等场景：before 不可达时，从 push 事件 payload 读取本次提交并拼接代码差异
-            PUSHED_SHAS=$(jq -r '.commits[]?.id' "$GITHUB_EVENT_PATH")
-            CHANGED_FILES=$(for sha in $PUSHED_SHAS; do git show --name-status --pretty="" "$sha"; done | sed '/^[[:space:]]*$/d' | awk '!seen[$0]++')
-            DIFF_SNIPPET=$(for sha in $PUSHED_SHAS; do git show --unified=0 --no-color --pretty=format:"commit $sha" "$sha"; echo; done | head -c 20000)
+            DIFF_SNIPPET=$(echo "$PR_FILES_JSON" | jq -r '
+              .[][] | select(.patch != null) |
+              ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
+            ' | head -c "$MAX_DIFF_CHARS")
+          fi
+
+          if [ -z "$CHANGED_FILES" ]; then
+            CHANGED_FILES=$(git diff --name-status "origin/$TARGET_BRANCH...origin/$SOURCE_BRANCH")
+          fi
+
+          if [ -z "$DIFF_SNIPPET" ]; then
+            DIFF_SNIPPET=$(git diff --unified=0 --no-color "origin/$TARGET_BRANCH...origin/$SOURCE_BRANCH" | head -c 20000)
           fi
 
           if [ -z "$CHANGED_FILES" ]; then
             CHANGED_FILES="无代码文件变更"
-          fi
-
-          if [ -z "$DIFF_SNIPPET" ]; then
-            # 极端兜底：无可用差异时仅保留 after 的代码改动片段
-            DIFF_SNIPPET=$(git show --unified=0 --no-color --pretty=format:"commit $AFTER" "$AFTER" 2>/dev/null | head -c 20000)
           fi
 
           if [ -z "$DIFF_SNIPPET" ]; then
@@ -76,10 +154,10 @@ jobs:
 
           # 使用 jq 安全构建 JSON（防止提交信息中的特殊字符导致注入）
           SYSTEM_PROMPT=$(cat <<'PROMPT'
-          你是一个 PR 描述生成器。根据本次 push 的代码差异（文件清单与 diff 片段），生成符合 Conventional Commits 规范的标题和结构化变更说明。
-          仅依据输入中“本次 push 的代码差异”进行描述，禁止引用分支历史、历史 PR 或历史提交。
+          你是一个 PR 描述生成器。根据当前 PR 的代码差异（文件清单与 diff 片段），生成符合 Conventional Commits 规范的标题和结构化变更说明。
+          仅依据输入中“当前 PR 的代码差异”进行描述，禁止引用分支历史、历史 PR 或历史提交。
           禁止复用、拼接或改写任何已有 PR 描述文本（包括当前已打开 PR 的正文）；正文必须完全基于当前输入重新生成。
-          无论本次 push 包含多少提交，只能输出一份最终 PR 说明；若包含多种类型（如 feat/fix/docs），必须在同一份正文中合并呈现，禁止按提交或按类型重复整套模板。
+          无论当前 PR 包含多少提交，只能输出一份最终 PR 说明；若包含多种类型（如 feat/fix/docs），必须在同一份正文中合并呈现，禁止按提交或按类型重复整套模板。
 
           严格按以下 JSON 格式输出，不要输出任何其他内容：
           {"title": "type(scope): 简短描述", "body": "变更说明正文"}
@@ -129,7 +207,7 @@ jobs:
                 },
                 {
                   role: "user",
-                  content: ("本次 push 代码文件变更：\n" + $changed_files + "\n\n本次 push 代码差异片段：\n" + $diff_snippet)
+                  content: ("当前 PR 代码文件变更：\n" + $changed_files + "\n\n当前 PR 代码差异片段：\n" + $diff_snippet)
                 }
               ]
             }')
@@ -152,7 +230,7 @@ jobs:
             fi
             printf '%s' "$cleaned"
           }
-          
+
           # 解析返回
           SUMMARY=""
           AI_TITLE=""
@@ -172,55 +250,25 @@ jobs:
           if [ -z "$SUMMARY" ]; then
             SUMMARY="⚠️ 自动生成失败，请手动填写变更说明。"
           fi
-          
+
           # 将内容注入环境变量（处理多行文本的安全性写法）
           echo "AI_PR_TITLE=$AI_TITLE" >> "$GITHUB_ENV"
           echo "AI_PR_BODY<<EOF" >> "$GITHUB_ENV"
           echo "$SUMMARY" >> "$GITHUB_ENV"
           echo "EOF" >> "$GITHUB_ENV"
 
-      - name: 🔁 执行合并请求生成与状态判定
+      - name: 🔁 回写合并请求标题与说明
+        if: env.SKIP_PR_AUTOMATION != 'true'
         env:
-          # GH_TOKEN 用于 gh cli 认证，PR_TITLE 和 PR_BODY_CONTENT 从上一步 AI 生成结果传递
           GH_TOKEN: ${{ secrets.MY_PAT }}
-          # PR 标题（由 AI 生成）
           PR_TITLE: ${{ env.AI_PR_TITLE }}
-          # PR 描述内容（通过环境变量传递，避免 shell 注入）
           PR_BODY_CONTENT: ${{ env.AI_PR_BODY }}
         run: |
-          # 检查源分支相对目标分支是否有新提交，若无差异则跳过
-          AHEAD_COUNT=$(git rev-list --count "origin/$TARGET_BRANCH".."origin/$SOURCE_BRANCH" 2>/dev/null || echo "0")
-          if [ "$AHEAD_COUNT" -eq 0 ]; then
-            echo "⏭️ $SOURCE_BRANCH 与 $TARGET_BRANCH 无差异提交，跳过 PR 创建。"
-            exit 0
-          fi
-
-          # 使用 REST API 查询是否存在对应 PR，避免 GraphQL 额外权限依赖
           REPO="$GITHUB_REPOSITORY"
-          OWNER="${REPO%%/*}"
-          EXISTING_PR_NUMBER=$(gh api --method GET \
-            -H "Accept: application/vnd.github+json" \
-            "repos/$REPO/pulls" \
-            -f state="open" \
-            -f head="${OWNER}:$SOURCE_BRANCH" \
-            -f base="$TARGET_BRANCH" \
-            -f per_page=1 \
-            --jq '.[0].number // empty')
+          PR_NUMBER="$CURRENT_PR_NUMBER"
 
-          if [ -z "$EXISTING_PR_NUMBER" ]; then
-            echo "未检测到现有集成请求，正在初始化交付程序..."
-            gh api --method POST \
-              -H "Accept: application/vnd.github+json" \
-              "repos/$REPO/pulls" \
-              -f base="$TARGET_BRANCH" \
-              -f head="$SOURCE_BRANCH" \
-              -f title="$PR_TITLE" \
-              -f body="$PR_BODY_CONTENT" >/dev/null
-          else
-            echo "检测到已存在的集成请求，正在同步更新变更说明..."
-            gh api --method PATCH \
-              -H "Accept: application/vnd.github+json" \
-              "repos/$REPO/pulls/$EXISTING_PR_NUMBER" \
-              -f title="$PR_TITLE" \
-              -f body="$PR_BODY_CONTENT" >/dev/null
-          fi
+          gh api --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$REPO/pulls/$PR_NUMBER" \
+            -f title="$PR_TITLE" \
+            -f body="$PR_BODY_CONTENT" >/dev/null
