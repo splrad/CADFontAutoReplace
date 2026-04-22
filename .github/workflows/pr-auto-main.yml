@@ -92,7 +92,7 @@ jobs:
 
           echo "CURRENT_PR_NUMBER=$CURRENT_PR_NUMBER" >> "$GITHUB_ENV"
 
-      - name: 🧠 基于当前PR差异生成变更说明
+      - name: 🧠 基于本次push差异生成变更说明
         id: ai-summary
         if: env.SKIP_PR_AUTOMATION != 'true'
         env:
@@ -101,7 +101,6 @@ jobs:
           GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
           REPO="$GITHUB_REPOSITORY"
-          PR_NUMBER="$CURRENT_PR_NUMBER"
 
           # 优先读取“本次 push(before..after)”差异，避免同一来源分支累计历史提交串入描述
           BEFORE_SHA="${{ github.event.before }}"
@@ -150,38 +149,45 @@ jobs:
             fi
           fi
 
-          # before 不可用（如分支首次推送）时，回退读取当前 PR diff
+          # compare 不可用时，回退读取本次 push 的提交明细（仅限本次 push 范围）
           if [ -z "$CHANGED_FILES" ] || [ -z "$DIFF_SNIPPET" ]; then
-            PR_FILES_JSON=$(gh api --method GET \
-              -H "Accept: application/vnd.github+json" \
-              "repos/$REPO/pulls/$PR_NUMBER/files" \
-              -f per_page=100 \
-              --paginate \
-              --slurp)
+            PUSH_COMMIT_SHAS=$(jq -r '.commits[]?.id // empty' "$GITHUB_EVENT_PATH")
+            if [ -n "$PUSH_COMMIT_SHAS" ]; then
+              PUSH_COMMITS_JSON=$(while IFS= read -r sha; do
+                [ -z "$sha" ] && continue
+                gh api --method GET \
+                  -H "Accept: application/vnd.github+json" \
+                  "repos/$REPO/commits/$sha" 2>/dev/null || true
+              done <<< "$PUSH_COMMIT_SHAS" | jq -s '.')
 
-            CHANGED_FILES=$(echo "$PR_FILES_JSON" | jq -r '.[][] | "\(.status | ascii_upcase)\t\(.filename)"')
-            PATCH_TOTAL_CHARS=$(echo "$PR_FILES_JSON" | jq -r '[.[][] | .patch // ""] | join("\n") | length')
-
-            if [ "$PATCH_TOTAL_CHARS" -gt "$PRIORITY_TRUNCATE_THRESHOLD" ]; then
-              DIFF_SNIPPET=$(echo "$PR_FILES_JSON" | jq -r '
-                [.[][] | select(.patch != null) |
-                  {
-                    filename: .filename,
-                    patch: .patch,
-                    score: ((.additions // 0) + (.deletions // 0)),
-                    additions: (.additions // 0),
-                    deletions: (.deletions // 0)
-                  }
-                ]
-                | sort_by(-.score, -.additions, -.deletions, .filename)
+              CHANGED_FILES=$(echo "$PUSH_COMMITS_JSON" | jq -r '
+                [.[] | .files[]? | "\(.status | ascii_upcase)\t\(.filename)"]
+                | unique
                 | .[]
-                | ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
-              ' | head -c "$MAX_DIFF_CHARS")
-            else
-              DIFF_SNIPPET=$(echo "$PR_FILES_JSON" | jq -r '
-                .[][] | select(.patch != null) |
-                ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
-              ' | head -c "$MAX_DIFF_CHARS")
+              ')
+              PATCH_TOTAL_CHARS=$(echo "$PUSH_COMMITS_JSON" | jq -r '[.[] | .files[]? | .patch // ""] | join("\n") | length')
+
+              if [ "$PATCH_TOTAL_CHARS" -gt "$PRIORITY_TRUNCATE_THRESHOLD" ]; then
+                DIFF_SNIPPET=$(echo "$PUSH_COMMITS_JSON" | jq -r '
+                  [.[] | .files[]? | select(.patch != null) |
+                    {
+                      filename: .filename,
+                      patch: .patch,
+                      score: ((.additions // 0) + (.deletions // 0)),
+                      additions: (.additions // 0),
+                      deletions: (.deletions // 0)
+                    }
+                  ]
+                  | sort_by(-.score, -.additions, -.deletions, .filename)
+                  | .[]
+                  | ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
+                ' | head -c "$MAX_DIFF_CHARS")
+              else
+                DIFF_SNIPPET=$(echo "$PUSH_COMMITS_JSON" | jq -r '
+                  .[] | .files[]? | select(.patch != null) |
+                  ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
+                ' | head -c "$MAX_DIFF_CHARS")
+              fi
             fi
           fi
 
@@ -197,17 +203,17 @@ jobs:
           fi
 
           if [ -z "$CHANGED_FILES" ]; then
-            CHANGED_FILES="无代码文件变更"
+            CHANGED_FILES="本次 push 未检测到代码文件变更"
           fi
 
           if [ -z "$DIFF_SNIPPET" ]; then
-            DIFF_SNIPPET="无可用代码差异片段"
+            DIFF_SNIPPET="本次 push 无可用代码差异片段"
           fi
 
           # 使用 jq 安全构建 JSON（防止提交信息中的特殊字符导致注入）
           SYSTEM_PROMPT=$(cat <<'PROMPT'
-          你是一个 PR 描述生成器。根据当前 PR 的代码差异（文件清单与 diff 片段），生成符合 Conventional Commits 规范的标题和结构化变更说明。
-          仅依据输入中“当前 PR 的代码差异”进行描述，禁止引用分支历史、历史 PR 或历史提交。
+          你是一个 PR 描述生成器。根据本次 push 的代码差异（文件清单与 diff 片段），生成符合 Conventional Commits 规范的标题和结构化变更说明。
+          仅依据输入中“本次 push 的代码差异”进行描述，禁止引用分支历史、历史 PR 或历史提交。
           禁止复用、拼接或改写任何已有 PR 描述文本（包括当前已打开 PR 的正文）；正文必须完全基于当前输入重新生成。
           无论当前 PR 包含多少提交，只能输出一份最终 PR 说明；若包含多种类型（如 feat/fix/docs），必须在同一份正文中合并呈现，禁止按提交或按类型重复整套模板。
 
@@ -259,7 +265,7 @@ jobs:
                 },
                 {
                   role: "user",
-                  content: ("当前 PR 代码文件变更：\n" + $changed_files + "\n\n当前 PR 代码差异片段：\n" + $diff_snippet)
+                  content: ("本次 push 代码文件变更：\n" + $changed_files + "\n\n本次 push 代码差异片段：\n" + $diff_snippet)
                 }
               ]
             }')
