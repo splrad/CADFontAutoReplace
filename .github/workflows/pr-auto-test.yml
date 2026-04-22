@@ -1,10 +1,15 @@
 # 📋 复用到新项目时的配置步骤：
-#   1. 在仓库中创建以下 Secrets（路径：设置 → 机密与变量 → 操作 → 新建仓库机密）：
-#      - DeepSeek_API_KEY：DeepSeek API 密钥
-#      - MY_PAT：GitHub 个人访问令牌（需要 repo 权限）
-#   2. 修改下方 branches-ignore 中的排除分支名，以及 env 中的 TARGET_BRANCH
-#   3. 核心开发者（TRUSTED_DEVELOPERS 变量中的用户）推送时会跳过本流程，
-#      直接进入向主分支合并的 PR 流程
+#   1) 创建仓库 Secrets（路径：Settings → Secrets and variables → Actions → New repository secret）
+#      Secret 名称必须与下方完全一致（区分大小写）：
+#      - DeepSeek_API_KEY：DeepSeek Key，示例值格式：sk-xxxxxxxx
+#      - MY_PAT：GitHub PAT（建议最小权限覆盖：Pull requests 读写、Contents 读写）
+#   2) 修改下方 branches-ignore 与 TARGET_BRANCH，使其符合你的测试分支命名
+#   3) 可选：在仓库 Variables 中创建 TRUSTED_DEVELOPERS（JSON 数组）
+#      示例：["splrad", "another-user"]
+#      命中该名单的用户将跳过本流程，直接进入主分支 PR 快速通道
+#   4) 通知机制：PR 创建/更新成功后，由 github-actions[bot] 在 PR 下评论并 @ 全部核心开发者
+#      GitHub 将按通知设置向被 @ 用户发送官方通知邮件（无需配置 SMTP）
+#   5) 验证建议：推送任意 feature 分支，确认自动建 PR 与官方通知都正常
 name: 🚀 测试分支合并请求创建
 
 on:
@@ -34,6 +39,7 @@ jobs:
     permissions:
       pull-requests: write
       contents: read
+      issues: write
 
     env:
       SKIP_PR_AUTOMATION: 'false'
@@ -483,3 +489,97 @@ jobs:
             "repos/$REPO/pulls/$PR_NUMBER" \
             -f title="$PR_TITLE" \
             -f body="$PR_BODY_CONTENT" >/dev/null
+
+      - name: 📣 发布PR成功通知（触发GitHub官方通知）
+        if: env.SKIP_PR_AUTOMATION != 'true'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          PR_NUMBER: ${{ env.CURRENT_PR_NUMBER }}
+          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
+          PR_TITLE: ${{ env.AI_PR_TITLE }}
+          PR_BODY: ${{ env.AI_PR_BODY }}
+          SOURCE_BRANCH: ${{ env.SOURCE_BRANCH }}
+          TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
+          ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+        with:
+          script: |
+            const marker = '<!-- pr-auto-success-notice -->';
+            const prNumber = Number(process.env.PR_NUMBER || '0');
+            if (!prNumber) {
+              core.info('未获取到 PR 编号，跳过成功通知评论。');
+              return;
+            }
+
+            const trustedRaw = process.env.TRUSTED_LIST || '[]';
+            let trustedDevelopers = [];
+            try {
+              const parsed = JSON.parse(trustedRaw);
+              if (Array.isArray(parsed)) {
+                trustedDevelopers = parsed.filter(Boolean);
+              }
+            } catch (err) {
+              core.warning(`TRUSTED_DEVELOPERS 解析失败: ${err.message}`);
+            }
+
+            const mentions = trustedDevelopers.length > 0
+              ? trustedDevelopers.map(user => `@${user}`).join(' ')
+              : '_未配置核心开发者名单_';
+
+            const prTitle = process.env.PR_TITLE || '（空）';
+            const prBodyPreview = (process.env.PR_BODY || '')
+              .split(/\r?\n/)
+              .slice(0, 8)
+              .join('\n')
+              .trim();
+
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.RUN_ID}`;
+            const prUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${prNumber}`;
+
+            const bodyLines = [
+              marker,
+              '### ✅ PR 已创建并更新说明',
+              '',
+              '本 PR 已由 **github-actions[bot]** 自动完成创建/更新与描述回写。',
+              '',
+              `- PR 编号：**#${prNumber}**`,
+              `- 提交者：**${process.env.ACTOR || 'unknown'}**`,
+              `- 分支流向：**${process.env.SOURCE_BRANCH || 'unknown'} → ${process.env.TARGET_BRANCH || 'unknown'}**`,
+              `- PR 标题：**${prTitle}**`,
+              `- 查看 PR：${prUrl}`,
+              `- 查看 Workflow Run：${runUrl}`,
+              '',
+              '**通知对象（全部核心开发者）：**',
+              mentions,
+            ];
+
+            if (prBodyPreview) {
+              bodyLines.push('', '**PR 描述预览（前 8 行）：**', '```text', prBodyPreview, '```');
+            }
+
+            const body = bodyLines.join('\n');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info('已更新 PR 成功通知评论。');
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+              core.info('已创建 PR 成功通知评论。');
+            }
