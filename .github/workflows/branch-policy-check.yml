@@ -5,7 +5,7 @@
 #   3. 修改下方 env 中的 ALLOWED_SOURCE_BRANCH 为允许向主分支合并的来源分支名
 #   4. 修改 on.pull_request_target.branches 为实际的主分支名（master 或 main）
 #   5. 核心开发者（TRUSTED_DEVELOPERS 变量中的用户）发起的 PR 将自动放行来源校验
-name: 🔒 主分支合并规则校验
+name: 🔒 主干分支合并规则校验
 
 on:
   pull_request_target:

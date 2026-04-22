@@ -340,31 +340,89 @@ jobs:
           PROMPT
           )
 
-          PAYLOAD=$(jq -n \
-            --arg changed_files "$CHANGED_FILES" \
-            --arg diff_snippet "$DIFF_SNIPPET" \
-            --arg diff_source "$DIFF_SOURCE" \
-            --arg system_prompt "$SYSTEM_PROMPT" \
-            '{
-              model: "deepseek-chat",
-              messages: [
-                {
-                  role: "system",
-                  content: $system_prompt
-                },
-                {
-                  role: "user",
-                  content: ("差异来源：" + $diff_source + "\n\n当前 PR 代码文件变更：\n" + $changed_files + "\n\n当前 PR 代码差异片段：\n" + $diff_snippet)
-                }
-              ]
-            }')
+          build_payload() {
+            local diff_snippet_for_payload="$1"
+            jq -n \
+              --arg changed_files "$CHANGED_FILES" \
+              --arg diff_snippet "$diff_snippet_for_payload" \
+              --arg diff_source "$DIFF_SOURCE" \
+              --arg system_prompt "$SYSTEM_PROMPT" \
+              '{
+                model: "deepseek-chat",
+                messages: [
+                  {
+                    role: "system",
+                    content: $system_prompt
+                  },
+                  {
+                    role: "user",
+                    content: ("差异来源：" + $diff_source + "\n\n当前 PR 代码文件变更：\n" + $changed_files + "\n\n当前 PR 代码差异片段：\n" + $diff_snippet)
+                  }
+                ]
+              }'
+          }
 
-          # 调用 DeepSeek 接口进行语义化总结（限时 30s，失败重试 2 次）
-          RESPONSE=$(curl -sf --max-time 30 --retry 2 --retry-max-time 60 \
-            https://api.deepseek.com/v1/chat/completions \
-            -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD") || RESPONSE=""
+          call_deepseek() {
+            local payload="$1"
+            local response_file http_code
+            response_file="$RUNNER_TEMP/deepseek_response_${CURRENT_PR_NUMBER:-0}.json"
+
+            http_code=$(curl -sS --max-time 45 --retry 1 --retry-delay 2 --retry-max-time 60 \
+              -o "$response_file" -w "%{http_code}" \
+              https://api.deepseek.com/v1/chat/completions \
+              -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d "$payload" 2>/dev/null || true)
+
+            if [ "$http_code" = "200" ]; then
+              RESPONSE=$(cat "$response_file")
+              AI_ERROR_MSG=""
+              return 0
+            fi
+
+            AI_ERROR_MSG=$(jq -r '.error.message // .message // empty' "$response_file" 2>/dev/null || true)
+            if [ -z "$AI_ERROR_MSG" ]; then
+              if [ -n "$http_code" ]; then
+                AI_ERROR_MSG="HTTP_$http_code"
+              else
+                AI_ERROR_MSG="network_or_timeout"
+              fi
+            fi
+
+            RESPONSE=""
+            return 1
+          }
+
+          build_fallback_summary() {
+            local files_preview reason_line
+            files_preview=$(printf '%s\n' "$CHANGED_FILES" | sed 's/\t/  /g' | head -n 8 | sed 's/^/- /')
+            [ -z "$files_preview" ] && files_preview="- 无可用文件差异"
+
+            reason_line="$DIFF_SOURCE"
+            if [ -n "$AI_ERROR_MSG" ]; then
+              reason_line="$reason_line；$AI_ERROR_MSG"
+            fi
+
+            printf '%s\n\n%s\n%s\n\n%s\n%s\n' \
+              '**变更类型：** chore' \
+              '**变更摘要：**' \
+              "自动摘要服务未返回可解析结果（$reason_line），以下为当前 PR 净差异的兜底说明。" \
+              '**主要改动：**' \
+              "$files_preview"
+          }
+
+          DIFF_SNIPPET_FOR_AI="$DIFF_SNIPPET"
+          PAYLOAD=$(build_payload "$DIFF_SNIPPET_FOR_AI")
+          RESPONSE=""
+          AI_ERROR_MSG=""
+          call_deepseek "$PAYLOAD" || true
+
+          # 调用失败时缩短 diff 后重试一次，提升稳定性
+          if [ -z "$RESPONSE" ]; then
+            DIFF_SNIPPET_FOR_AI=$(printf '%s' "$DIFF_SNIPPET" | head -c 8000)
+            PAYLOAD=$(build_payload "$DIFF_SNIPPET_FOR_AI")
+            call_deepseek "$PAYLOAD" || true
+          fi
 
           # 规范化正文：剔除代码块包裹，并在模型重复输出模板时只保留最后一份
           normalize_pr_body() {
@@ -382,12 +440,18 @@ jobs:
           SUMMARY=""
           AI_TITLE=""
           if [ -n "$RESPONSE" ]; then
-            AI_CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+            AI_CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
             # 提取 JSON 中的 title 和 body（兼容 AI 输出被 markdown 代码块包裹）
             AI_CONTENT_CLEAN=$(printf '%s\n' "$AI_CONTENT" | sed -e '/^```json[[:space:]]*$/d' -e '/^```[[:space:]]*$/d')
             AI_TITLE=$(echo "$AI_CONTENT_CLEAN" | jq -r '.title // empty' 2>/dev/null)
             SUMMARY=$(echo "$AI_CONTENT_CLEAN" | jq -r '.body // empty' 2>/dev/null)
             SUMMARY=$(normalize_pr_body "$SUMMARY")
+
+            if [ -z "$AI_TITLE" ] || [ -z "$SUMMARY" ]; then
+              if [ -z "$AI_ERROR_MSG" ]; then
+                AI_ERROR_MSG="invalid_model_output"
+              fi
+            fi
           fi
 
           # 兜底（防止 API 异常或网络失败）
@@ -395,7 +459,7 @@ jobs:
             AI_TITLE="$SOURCE_BRANCH ➔ $TARGET_BRANCH"
           fi
           if [ -z "$SUMMARY" ]; then
-            SUMMARY="⚠️ 自动生成失败，请手动填写变更说明。"
+            SUMMARY=$(build_fallback_summary)
           fi
 
           # 将内容注入环境变量（处理多行文本的安全性写法）
