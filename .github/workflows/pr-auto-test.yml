@@ -188,6 +188,10 @@ jobs:
 
           # 先刷新目标分支和来源分支引用，避免使用过期远端指针
           git fetch --no-tags origin "$TARGET_BRANCH" "$SOURCE_BRANCH" >/dev/null 2>&1 || true
+          SOURCE_SHA=""
+          if git rev-parse --verify "$SOURCE_REF^{commit}" >/dev/null 2>&1; then
+            SOURCE_SHA=$(git rev-parse "$SOURCE_REF^{commit}")
+          fi
 
           # 优先使用 PR merge ref 与目标分支对比，得到“当前 PR 若合入后的净变化”
           if [ -n "$CURRENT_PR_NUMBER" ]; then
@@ -195,10 +199,36 @@ jobs:
             if git fetch --no-tags origin "refs/pull/$CURRENT_PR_NUMBER/merge:$PR_MERGE_REF" >/dev/null 2>&1 && \
                git rev-parse --verify "$PR_MERGE_REF^{commit}" >/dev/null 2>&1 && \
                git rev-parse --verify "$TARGET_REF^{commit}" >/dev/null 2>&1; then
-              CHANGED_FILES=$(git diff --name-status "$TARGET_REF..$PR_MERGE_REF")
-              DIFF_SNIPPET=$(git diff --unified=0 --no-color "$TARGET_REF..$PR_MERGE_REF" | head -c "$MAX_DIFF_CHARS")
-              DIFF_SOURCE="pr_merge_ref"
-              DIFF_RESOLVED="true"
+              PR_MERGE_SOURCE_SHA=""
+              MERGE_REF_STALE="false"
+              if git rev-parse --verify "$PR_MERGE_REF^2^{commit}" >/dev/null 2>&1; then
+                PR_MERGE_SOURCE_SHA=$(git rev-parse "$PR_MERGE_REF^2^{commit}")
+                if [ -n "$SOURCE_SHA" ] && [ "$PR_MERGE_SOURCE_SHA" != "$SOURCE_SHA" ]; then
+                  MERGE_REF_STALE="true"
+                fi
+              fi
+
+              if [ "$MERGE_REF_STALE" = "true" ]; then
+                echo "检测到 PR merge ref 未对齐来源分支最新提交，回退两点差异。"
+              else
+                CHANGED_FILES=$(git diff --name-status "$TARGET_REF..$PR_MERGE_REF")
+                DIFF_SNIPPET=$(git diff --unified=0 --no-color "$TARGET_REF..$PR_MERGE_REF" | head -c "$MAX_DIFF_CHARS")
+
+                if [ -z "$CHANGED_FILES" ] && [ -n "$SOURCE_SHA" ]; then
+                  GUARD_CHANGED_FILES=$(git diff --name-status "$TARGET_REF..$SOURCE_REF")
+                  if [ -n "$GUARD_CHANGED_FILES" ]; then
+                    CHANGED_FILES="$GUARD_CHANGED_FILES"
+                    DIFF_SNIPPET=$(git diff --unified=0 --no-color "$TARGET_REF..$SOURCE_REF" | head -c "$MAX_DIFF_CHARS")
+                    DIFF_SOURCE="target_two_dot_guard"
+                  else
+                    DIFF_SOURCE="pr_merge_ref"
+                  fi
+                else
+                  DIFF_SOURCE="pr_merge_ref"
+                fi
+
+                DIFF_RESOLVED="true"
+              fi
             fi
           fi
 
