@@ -506,7 +506,6 @@ jobs:
           SOURCE_BRANCH: ${{ env.SOURCE_BRANCH }}
           TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
           ACTOR: ${{ github.actor }}
-          RUN_ID: ${{ github.run_id }}
         with:
           script: |
             const marker = '<!-- pr-auto-success-notice -->';
@@ -531,38 +530,35 @@ jobs:
               ? trustedDevelopers.map(user => `@${user}`).join(' ')
               : '_未配置核心开发者名单_';
 
-            const prTitle = process.env.PR_TITLE || '（空）';
-            const prBodyPreview = (process.env.PR_BODY || '')
-              .split(/\r?\n/)
-              .slice(0, 8)
-              .join('\n')
-              .trim();
-
-            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.RUN_ID}`;
+            const prTitle = (process.env.PR_TITLE || '').trim() || '（空）';
+            const prAuthor = (process.env.ACTOR || 'unknown').trim();
+            const sourceBranch = (process.env.SOURCE_BRANCH || 'unknown').trim();
+            const targetBranch = (process.env.TARGET_BRANCH || 'unknown').trim();
+            const prDescription = (process.env.PR_BODY || '').trim() || '（空）';
             const prUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${prNumber}`;
+            const descriptionBlock = prDescription
+              .split(/\r?\n/)
+              .map(line => `> ${line}`)
+              .join('\n');
 
-            const bodyLines = [
+            const body = [
               marker,
-              '### ✅ PR 已创建并更新说明',
+              '## ✅ PR 创建成功通知',
               '',
-              '本 PR 已由 **github-actions[bot]** 自动完成创建/更新与描述回写。',
+              '> 本通知由 **GitHub Actions** 自动发布。',
               '',
-              `- PR 编号：**#${prNumber}**`,
-              `- 提交者：**${process.env.ACTOR || 'unknown'}**`,
-              `- 分支流向：**${process.env.SOURCE_BRANCH || 'unknown'} → ${process.env.TARGET_BRANCH || 'unknown'}**`,
-              `- PR 标题：**${prTitle}**`,
-              `- 查看 PR：${prUrl}`,
-              `- 查看 Workflow Run：${runUrl}`,
+              '### 📌 关键信息',
+              `- PR标题：**${prTitle}**`,
+              `- 提交人：**${prAuthor}**`,
+              `- 分支流向：**${sourceBranch} → ${targetBranch}**`,
+              `- PR 链接：${prUrl}`,
               '',
-              '**通知对象（全部核心开发者）：**',
+              '### 📝 变更说明',
+              descriptionBlock,
+              '',
+              '### 🔔 通知对象',
               mentions,
-            ];
-
-            if (prBodyPreview) {
-              bodyLines.push('', '**PR 描述预览（前 8 行）：**', '```text', prBodyPreview, '```');
-            }
-
-            const body = bodyLines.join('\n');
+            ].join('\n');
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,

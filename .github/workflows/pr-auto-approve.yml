@@ -4,9 +4,8 @@
 #      - 示例值：["splrad", "another-user"]
 #   2) 行为说明：
 #      - PR 作者在 TRUSTED_DEVELOPERS 中：自动提交 APPROVE
-#      - 自动授权成功后，github-actions[bot] 会在 PR 下发布通知评论并 @ 全部核心开发者
-#        GitHub 将按通知设置向被 @ 用户发送官方通知邮件
-#      - 不在名单中：发布提示评论，等待人工审批
+#      - 自动授权成功后仅提交 APPROVE；评论与通知由 merge-permission.yml 统一回写
+#      - 不在名单中：跳过自动审批，等待后续规则校验或人工审批
 #   3) 验证建议：分别用白名单用户和非白名单用户各触发一次 PR 事件
 name: 🛡️ 合并审批自动授权
 
@@ -39,82 +38,9 @@ jobs:
             --method POST \
             -H "Accept: application/vnd.github+json" \
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
-            -f event='APPROVE' \
-            -f body='🤖 已完成核心开发者身份校验，自动准入流程已授权。'
+            -f event='APPROVE'
 
-      - name: 📣 发布自动授权通知（触发GitHub官方通知）
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
-        env:
-          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
-          APPROVER: ${{ github.actor }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR_SOURCE: ${{ github.event.pull_request.head.ref }}
-          PR_TARGET: ${{ github.event.pull_request.base.ref }}
-        with:
-          script: |
-            const marker = '<!-- auto-approve-success-notice -->';
-            const trustedRaw = process.env.TRUSTED_LIST || '[]';
-
-            let trustedDevelopers = [];
-            try {
-              const parsed = JSON.parse(trustedRaw);
-              if (Array.isArray(parsed)) {
-                trustedDevelopers = parsed.filter(Boolean);
-              }
-            } catch (err) {
-              core.warning(`TRUSTED_DEVELOPERS 解析失败: ${err.message}`);
-            }
-
-            const mentionLine = trustedDevelopers.length > 0
-              ? trustedDevelopers.map(user => `@${user}`).join(' ')
-              : '_未配置核心开发者名单_';
-
-            const approver = process.env.APPROVER || context.actor;
-            const prAuthor = process.env.PR_AUTHOR || 'unknown';
-            const prSource = process.env.PR_SOURCE || 'unknown';
-            const prTarget = process.env.PR_TARGET || 'unknown';
-
-            const body = [
-              marker,
-              '### ✅ 自动授权已完成',
-              '',
-              '本 PR 已通过核心开发者授权并由 **github-actions[bot]** 自动提交 APPROVE。',
-              '',
-              `- 批准此 PR 合并的核心开发者：**${approver}**`,
-              `- PR 作者：**${prAuthor}**`,
-              `- 分支流向：**${prSource} → ${prTarget}**`,
-              '',
-              '**通知对象（全部核心开发者）：**',
-              mentionLine,
-            ].join('\n');
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              per_page: 100,
-            });
-
-            const existing = comments.find(c => c.body && c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-              core.info('已更新自动授权通知评论。');
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-              core.info('已创建自动授权通知评论。');
-            }
-
-  # 非核心开发者时显示提示信息，避免 PR 检查列表只有灰色 Skipped
+  # 非核心开发者时保留可见检查结果，避免 PR 列表只有灰色 Skipped
   access-denied:
     name: 🔐 普通成员类别
     runs-on: ubuntu-latest
@@ -122,37 +48,10 @@ jobs:
     if: >-
       !contains(fromJSON(vars.TRUSTED_DEVELOPERS), github.actor)
     permissions:
-      pull-requests: write
+      contents: read
 
     steps:
-      - name: 💬 提示需要人工审批
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
-        with:
-          script: |
-            // 避免重复评论：检查是否已经发过相同提示
-            const marker = '<!-- auto-approve-notice -->';
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            if (comments.some(c => c.body.includes(marker))) {
-              core.info('已存在审批提示评论，跳过。');
-              return;
-            }
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: [
-                marker,
-                '### 🔐 此PR需要核心开发者审批',
-                '',
-                `提交者 **${context.actor}** 未在核心开发者名单中，已跳过自动审批流程。`,
-                '',
-                '**后续步骤：**',
-                '- 等待核心开发者 Review 并批准此 PR',
-                '- 或联系仓库管理员将你添加至核心开发者名单',
-              ].join('\n'),
-            });
+      - name: ℹ️ 记录非核心成员路径
+        run: |
+          echo "提交者不在核心开发者名单中，已跳过自动审批。"
+          echo "评论与通知由 merge-permission.yml 统一处理。"

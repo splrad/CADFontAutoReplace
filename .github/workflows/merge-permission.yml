@@ -21,7 +21,8 @@ jobs:
   # ────────────────────────────────────────────────────────
   # 场景一：PR → test 分支
   # 仅检查是否修改了 .github/workflows 下的文件
-  # 未修改工作流文件 → 直接放行；修改了 → 仅允许核心开发者
+  # 未修改工作流文件 → 直接放行
+  # 修改了工作流文件 → 必须获得核心开发者有效审批（核心成员提交或核心成员审批）
   # ────────────────────────────────────────────────────────
   workflow-file-audit:
     name: 🔒 工作流配置保护规则
@@ -32,18 +33,25 @@ jobs:
     permissions:
       pull-requests: write
       contents: read
+      issues: write
 
     steps:
-      - name: 🔍 检测工作流文件变更与提交者身份
+      - name: 🔍 检测工作流文件变更与核心审批
         id: audit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_ACTOR: ${{ github.actor }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
           REPO: ${{ github.repository }}
         run: |
-          echo "📋 PR #$PR_NUMBER 提交者: $PR_ACTOR"
+          echo "📋 PR #$PR_NUMBER 提交者: $PR_AUTHOR（触发者: $PR_ACTOR）"
+          echo "📋 当前审计基准提交: $PR_HEAD_SHA"
+
+          TRUSTED_LIST_JSON=$(printf '%s' "${TRUSTED_LIST:-[]}" | jq -c 'if type == "array" then . else [] end' 2>/dev/null || echo '[]')
+          echo "📋 核心开发者名单: $TRUSTED_LIST_JSON"
           
           # 获取 PR 中所有变更的文件列表
           CHANGED_FILES=$(gh api \
@@ -62,64 +70,280 @@ jobs:
           
           if [ -z "$WORKFLOW_CHANGES" ]; then
             echo "✅ 未检测到工作流文件变更，放行。"
-            echo "has_violation=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "has_violation=false"
+              echo "audit_status=no_workflow_change"
+              echo "changed_files=无"
+              echo "trusted_approver="
+              echo "current_approvers=无"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           
           echo "⚠️ 检测到以下工作流文件被修改："
           echo -e "$WORKFLOW_CHANGES"
+
+          {
+            echo "changed_files<<EOF"
+            printf '%b' "$WORKFLOW_CHANGES"
+            echo
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
           
           # 检查 PR 提交者是否在受信任开发者名单中
-          IS_TRUSTED=$(echo "$TRUSTED_LIST" | jq -r --arg actor "$PR_ACTOR" 'if . == null then "false" elif (. | index($actor)) then "true" else "false" end')
+          IS_TRUSTED=$(echo "$TRUSTED_LIST_JSON" | jq -r --arg actor "$PR_AUTHOR" 'if index($actor) then "true" else "false" end')
           
           if [ "$IS_TRUSTED" = "true" ]; then
-            echo "✅ 提交者 $PR_ACTOR 在核心开发者名单中，允许修改工作流文件。"
-            echo "has_violation=false" >> "$GITHUB_OUTPUT"
+            echo "✅ 提交者 $PR_AUTHOR 在核心开发者名单中，允许修改工作流文件。"
+            {
+              echo "has_violation=false"
+              echo "audit_status=trusted_workflow_change"
+              echo "trusted_approver=$PR_AUTHOR"
+              echo "current_approvers=PR提交者是核心开发者"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "⚠️ 提交者不在核心开发者名单中，检查当前最新提交是否已有核心开发者审批..."
+
+          APPROVERS=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+            --paginate \
+            --slurp \
+            | jq -c --arg head "$PR_HEAD_SHA" '
+              [ .[] | .[] ]
+              | sort_by(.user.login)
+              | group_by(.user.login)
+              | map(sort_by(.submitted_at) | last)
+              | [.[] | select(.state == "APPROVED" and .commit_id == $head) | .user.login]
+            ')
+
+          APPROVERS_TEXT=$(echo "$APPROVERS" | jq -r 'if length == 0 then "无" else join(", ") end')
+          HAS_TRUSTED_APPROVER="false"
+          TRUSTED_APPROVER=""
+
+          for approver in $(echo "$APPROVERS" | jq -r '.[]'); do
+            IS_TRUSTED_APPROVER=$(echo "$TRUSTED_LIST_JSON" | jq -r --arg user "$approver" 'if index($user) then "true" else "false" end')
+            if [ "$IS_TRUSTED_APPROVER" = "true" ]; then
+              HAS_TRUSTED_APPROVER="true"
+              TRUSTED_APPROVER="$approver"
+              break
+            fi
+          done
+
+          if [ "$HAS_TRUSTED_APPROVER" = "true" ]; then
+            echo "✅ 检测到核心开发者审批 $TRUSTED_APPROVER，允许本次工作流文件变更。"
+            {
+              echo "has_violation=false"
+              echo "audit_status=core_review_approved_workflow_change"
+              echo "trusted_approver=$TRUSTED_APPROVER"
+              echo "current_approvers=$APPROVERS_TEXT"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           
-          # 非核心开发者修改了工作流文件 → 违规
-          echo "❌ 提交者 $PR_ACTOR 不在核心开发者名单中，禁止修改工作流文件。"
-          echo "has_violation=true" >> "$GITHUB_OUTPUT"
+          # 非核心开发者修改了工作流文件且未获得针对当前最新提交的核心开发者有效审批 → 违规
+          echo "❌ 提交者 $PR_AUTHOR 非核心且未获得针对当前最新提交的核心开发者有效审批，禁止修改工作流文件。"
           {
-            echo "changed_files<<EOF"
-            echo -e "$WORKFLOW_CHANGES"
-            echo "EOF"
+            echo "has_violation=true"
+            echo "audit_status=unauthorized_workflow_change"
+            echo "trusted_approver="
+            echo "current_approvers=$APPROVERS_TEXT"
           } >> "$GITHUB_OUTPUT"
 
-      - name: 💬 发布违规通知并阻断合并
-        if: steps.audit.outputs.has_violation == 'true'
+      - name: 💬 回写工作流配置保护状态说明
+        if: always()
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
+          AUDIT_STATUS: ${{ steps.audit.outputs.audit_status }}
           CHANGED_FILES: ${{ steps.audit.outputs.changed_files }}
-          PR_ACTOR: ${{ github.actor }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          TRUSTED_APPROVER: ${{ steps.audit.outputs.trusted_approver }}
+          CURRENT_APPROVERS: ${{ steps.audit.outputs.current_approvers }}
+          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
         with:
           script: |
-            const actor = process.env.PR_ACTOR;
-            const files = process.env.CHANGED_FILES.trim();
-            const fileList = files.split('\n').map(f => `- \`${f}\``).join('\n');
-            
-            const body = [
-              '### 🚨 工作流文件变更审计未通过',
-              '',
-              `提交者 **${actor}** 不在核心开发者名单中，无权修改 CI/CD 工作流文件。`,
-              '',
-              '**涉及的受保护文件：**',
-              fileList,
-              '',
-              '**处理方式：**',
-              '1. 撤回对 `.github/workflows/` 目录下文件的修改',
-              '2. 或联系仓库管理员取得本仓库的核心开发者权限',
-            ].join('\n');
-            
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
+            const marker = '<!-- workflow-file-audit-status -->';
+            const stateMarkerPrefix = '<!-- workflow-file-audit-state:';
+            const legacyBroadcastMarker = '<!-- workflow-file-audit-core-broadcasted -->';
+            const passBroadcastMarker = '<!-- workflow-file-audit-pass-broadcasted -->';
+            const failureBroadcastMarker = '<!-- workflow-file-audit-failure-broadcasted -->';
+            const failureMarker = '<!-- workflow-file-audit-failure-displayed -->';
+            const status = process.env.AUDIT_STATUS || 'unknown';
+            const prAuthor = process.env.PR_AUTHOR || context.actor || 'unknown';
+            const trustedApprover = process.env.TRUSTED_APPROVER || 'unknown';
+
+            const changedFilesRaw = (process.env.CHANGED_FILES || '').trim();
+            const changedFiles = changedFilesRaw && changedFilesRaw !== '无'
+              ? changedFilesRaw.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+              : [];
+            const fileList = changedFiles.length > 0
+              ? changedFiles.map(f => `- \`${f}\``).join('\n')
+              : '- 无';
+
+            let trustedDevelopers = [];
+            try {
+              const parsed = JSON.parse(process.env.TRUSTED_LIST || '[]');
+              if (Array.isArray(parsed)) {
+                trustedDevelopers = parsed.filter(Boolean);
+              }
+            } catch (err) {
+              core.warning(`TRUSTED_DEVELOPERS 解析失败: ${err.message}`);
+            }
+
+            const mentionLine = trustedDevelopers.length > 0
+              ? trustedDevelopers.map(user => `@${user}`).join(' ')
+              : '_未配置核心开发者名单_';
+            const approverListBlock = trustedDevelopers.length > 0
+              ? trustedDevelopers.map(user => `- @${user}`).join('\n')
+              : '- _未配置核心开发者名单_';
+
+            const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body
+              issue_number: context.issue.number,
+              per_page: 100,
             });
-            
-            core.setFailed('非授权用户修改了工作流文件，合并被阻断。');
+
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            const existingBody = (existing && existing.body) ? existing.body : '';
+            const stateMatch = existingBody.match(/<!-- workflow-file-audit-state:([a-z_]+) -->/);
+            let previousStatus = stateMatch ? stateMatch[1] : 'unknown';
+
+            const hasLegacyBroadcasted = existingBody.includes(legacyBroadcastMarker);
+            const hasFailureDisplayed = existingBody.includes(failureMarker);
+            const legacyHasPassBroadcast = existingBody.includes(passBroadcastMarker) || (hasLegacyBroadcasted && !hasFailureDisplayed);
+            const legacyHasFailureBroadcast = existingBody.includes(failureBroadcastMarker) || (hasLegacyBroadcasted && hasFailureDisplayed);
+
+            if (previousStatus === 'unknown') {
+              if (legacyHasFailureBroadcast) {
+                previousStatus = 'unauthorized_workflow_change';
+              } else if (legacyHasPassBroadcast) {
+                previousStatus = 'trusted_workflow_change';
+              } else if (existing) {
+                previousStatus = 'no_workflow_change';
+              }
+            }
+
+            const categoryOf = (s) => {
+              if (s === 'unauthorized_workflow_change') return 'failure';
+              if (s === 'trusted_workflow_change' || s === 'core_review_approved_workflow_change') return 'pass';
+              return 'neutral';
+            };
+
+            const currentCategory = categoryOf(status);
+            const previousCategory = categoryOf(previousStatus);
+            const statusChanged = previousStatus !== status;
+            const shouldBroadcastNow = statusChanged && currentCategory !== 'neutral' && currentCategory !== previousCategory;
+            const stateMarker = `${stateMarkerPrefix}${status} -->`;
+
+            const notificationBlock = shouldBroadcastNow
+              ? [
+                  '**全员通知（核心成员）：**',
+                  mentionLine,
+                ]
+              : [
+                  '**全员通知（核心成员）：**',
+                  '已发送，无需重复通知。',
+                ];
+
+            let body = '';
+            if (status === 'no_workflow_change') {
+              body = [
+                marker,
+                stateMarker,
+                '### ✅ 工作流配置保护规则已通过',
+                '',
+                '未检测到 `.github/workflows/` 目录变更，本次规则检查通过。',
+                '',
+                `- PR 提交人：**${prAuthor}**`,
+              ].join('\n');
+            } else if (status === 'trusted_workflow_change') {
+              body = [
+                marker,
+                stateMarker,
+                '### ✅ 工作流配置保护规则已通过',
+                '',
+                `检测到工作流文件变更，且提交者 **${prAuthor}** 属于核心开发者，允许变更。`,
+                '',
+                '**涉及的工作流文件：**',
+                fileList,
+                '',
+                ...notificationBlock,
+              ].join('\n');
+            } else if (status === 'core_review_approved_workflow_change') {
+              body = [
+                marker,
+                stateMarker,
+                '### ✅ 工作流配置保护规则已通过',
+                '',
+                '检测到工作流文件变更，提交者虽非核心开发者，但已获得核心开发者有效审批，允许变更。',
+                '',
+                `- PR 提交人：**${prAuthor}**`,
+                `- 批准此 PR 合并的核心开发者：**${trustedApprover}**`,
+                '',
+                '**涉及的工作流文件：**',
+                fileList,
+                '',
+                ...notificationBlock,
+              ].join('\n');
+            } else if (status === 'unauthorized_workflow_change') {
+              body = [
+                marker,
+                stateMarker,
+                '### ❌ 工作流配置保护规则未通过',
+                '',
+                `提交者 **${prAuthor}** 不在核心开发者名单中，且尚未获得针对当前最新提交的核心开发者有效审批，不满足合并条件。`,
+                '',
+                '**涉及的工作流文件：**',
+                fileList,
+                '',
+                '**处理方式：**',
+                '1. 撤回对 `.github/workflows/` 目录下文件的修改',
+                '2. 或邀请以下任一核心成员进行有效审批：',
+                approverListBlock,
+                '',
+                ...notificationBlock,
+              ].join('\n');
+            } else {
+              core.info('未获取到明确审计状态，跳过评论回写。');
+              return;
+            }
+
+            if (existing && !statusChanged) {
+              core.info('工作流配置保护状态未变化，跳过评论更新与通知。');
+              return;
+            }
+
+            if (existing && (existing.body || '').trim() === body.trim()) {
+              core.info('工作流配置保护评论内容未变化，跳过更新。');
+              return;
+            }
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info('已更新工作流配置保护状态评论。');
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+              core.info('已创建工作流配置保护状态评论。');
+            }
+
+      - name: 🚫 阻断非授权工作流变更
+        if: steps.audit.outputs.audit_status == 'unauthorized_workflow_change'
+        run: |
+          echo "❌ 非授权用户修改了工作流文件，合并被阻断。"
+          exit 1
 
   # ────────────────────────────────────────────────────────
   # 场景二：test → main 分支
@@ -133,57 +357,242 @@ jobs:
 
     permissions:
       pull-requests: read
+      issues: write
 
     steps:
       - name: 🔍 校验审批来源授权
+        id: approval-check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
           echo "📋 PR #$PR_NUMBER 作者: $PR_AUTHOR"
+          echo "📋 当前审计基准提交: $PR_HEAD_SHA"
+
+          TRUSTED_LIST_JSON=$(printf '%s' "${TRUSTED_LIST:-[]}" | jq -c 'if type == "array" then . else [] end' 2>/dev/null || echo '[]')
+          echo "📋 核心开发者名单: $TRUSTED_LIST_JSON"
           
           # 如果 PR 作者在核心开发者名单中，直接通过（配合 pr-auto-approve 自动满足审批数要求）
-          IS_AUTHOR_TRUSTED=$(echo "$TRUSTED_LIST" | jq -r --arg actor "$PR_AUTHOR" \
-            'if . == null then "false" elif (. | index($actor)) then "true" else "false" end')
+          IS_AUTHOR_TRUSTED=$(echo "$TRUSTED_LIST_JSON" | jq -r --arg actor "$PR_AUTHOR" \
+            'if index($actor) then "true" else "false" end')
           
           if [ "$IS_AUTHOR_TRUSTED" = "true" ]; then
             echo "✅ PR 作者 $PR_AUTHOR 是核心开发者，校验通过。"
+            {
+              echo "approval_status=author_trusted"
+              echo "trusted_approver=$PR_AUTHOR"
+              echo "current_approvers=PR作者是核心开发者"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           
-          echo "⚠️ PR 作者不在核心开发者名单中，检查审批记录..."
+          echo "⚠️ PR 作者不在核心开发者名单中，检查当前最新提交的审批记录..."
           
-          # 获取每位审批人的最新审批状态，筛选仍然有效的 APPROVED
+          # 仅统计针对当前最新提交（head SHA）的有效 APPROVED，确保推送后需要重新审批
           APPROVERS=$(gh api \
             -H "Accept: application/vnd.github+json" \
             "repos/$REPO/pulls/$PR_NUMBER/reviews" \
-            --jq '
-              group_by(.user.login)
+            --paginate \
+            --slurp \
+            | jq -c --arg head "$PR_HEAD_SHA" '
+              [ .[] | .[] ]
+              | sort_by(.user.login)
+              | group_by(.user.login)
               | map(sort_by(.submitted_at) | last)
-              | [.[] | select(.state == "APPROVED") | .user.login]
+              | [.[] | select(.state == "APPROVED" and .commit_id == $head) | .user.login]
             ')
           
-          echo "当前有效审批人: $APPROVERS"
+          APPROVERS_TEXT=$(echo "$APPROVERS" | jq -r 'if length == 0 then "无" else join(", ") end')
           
           # 检查审批人中是否有核心开发者
           HAS_TRUSTED="false"
+          TRUSTED_APPROVER=""
           for approver in $(echo "$APPROVERS" | jq -r '.[]'); do
-            IS_TRUSTED=$(echo "$TRUSTED_LIST" | jq -r --arg user "$approver" \
-              'if . == null then "false" elif (. | index($user)) then "true" else "false" end')
+            IS_TRUSTED=$(echo "$TRUSTED_LIST_JSON" | jq -r --arg user "$approver" \
+              'if index($user) then "true" else "false" end')
             if [ "$IS_TRUSTED" = "true" ]; then
               echo "✅ 核心开发者 $approver 已审批，校验通过。"
               HAS_TRUSTED="true"
+              TRUSTED_APPROVER="$approver"
               break
             fi
           done
           
           if [ "$HAS_TRUSTED" = "true" ]; then
+            {
+              echo "approval_status=trusted_approver"
+              echo "trusted_approver=$TRUSTED_APPROVER"
+              echo "current_approvers=$APPROVERS_TEXT"
+            } >> "$GITHUB_OUTPUT"
             echo "✅ 授权审批校验通过。"
           else
+            {
+              echo "approval_status=non_trusted_only"
+              echo "trusted_approver="
+              echo "current_approvers=$APPROVERS_TEXT"
+            } >> "$GITHUB_OUTPUT"
             echo "❌ 合并被阻断：需要核心开发者审批。"
-            echo "📋 核心开发者名单: $TRUSTED_LIST"
+            echo "📋 核心开发者名单: $TRUSTED_LIST_JSON"
             exit 1
           fi
+
+      - name: 💬 回写主分支审批状态说明
+        if: always()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          APPROVAL_STATUS: ${{ steps.approval-check.outputs.approval_status }}
+          TRUSTED_APPROVER: ${{ steps.approval-check.outputs.trusted_approver }}
+          CURRENT_APPROVERS: ${{ steps.approval-check.outputs.current_approvers }}
+          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        with:
+          script: |
+            const marker = '<!-- merge-permission-approval-status -->';
+            const stateMarkerPrefix = '<!-- merge-permission-approval-state:';
+            const broadcastMarker = '<!-- merge-permission-core-broadcasted -->';
+            const failureOnceMarker = '<!-- merge-permission-approval-failure-displayed -->';
+            const status = process.env.APPROVAL_STATUS || 'unknown';
+            const trustedApprover = process.env.TRUSTED_APPROVER || '';
+            const prAuthor = process.env.PR_AUTHOR || 'unknown';
+
+            let trustedDevelopers = [];
+            try {
+              const parsed = JSON.parse(process.env.TRUSTED_LIST || '[]');
+              if (Array.isArray(parsed)) {
+                trustedDevelopers = parsed.filter(Boolean);
+              }
+            } catch (err) {
+              core.warning(`TRUSTED_DEVELOPERS 解析失败: ${err.message}`);
+            }
+
+            const mentionLine = trustedDevelopers.length > 0
+              ? trustedDevelopers.map(user => `@${user}`).join(' ')
+              : '_未配置核心开发者名单_';
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            const existingBody = (existing && existing.body) ? existing.body : '';
+
+            const stateMatch = existingBody.match(/<!-- merge-permission-approval-state:([a-z_]+) -->/);
+            let previousStatus = stateMatch ? stateMatch[1] : 'unknown';
+            const legacyHasBroadcasted = existingBody.includes(broadcastMarker);
+            const legacyHasFailureDisplayed = existingBody.includes(failureOnceMarker);
+
+            if (previousStatus === 'unknown') {
+              if (legacyHasFailureDisplayed) {
+                previousStatus = 'non_trusted_only';
+              } else if (legacyHasBroadcasted) {
+                previousStatus = 'trusted_approver';
+              }
+            }
+
+            const categoryOf = (s) => {
+              if (s === 'non_trusted_only') return 'failure';
+              if (s === 'trusted_approver' || s === 'author_trusted') return 'pass';
+              return 'neutral';
+            };
+
+            const currentCategory = categoryOf(status);
+            const previousCategory = categoryOf(previousStatus);
+            const statusChanged = previousStatus !== status;
+            const shouldBroadcastNow = statusChanged && currentCategory !== 'neutral' && currentCategory !== previousCategory;
+            const stateMarker = `${stateMarkerPrefix}${status} -->`;
+
+            let body = '';
+            if (status === 'trusted_approver') {
+              const notificationBlock = shouldBroadcastNow
+                ? [
+                    '**全员通知（核心成员）：**',
+                    mentionLine,
+                  ]
+                : [
+                    '**全员通知（核心成员）：**',
+                    '已发送，无需重复通知。',
+                  ];
+
+              body = [
+                marker,
+                stateMarker,
+                '### ✅ 主分支合并权限校验通过',
+                '',
+                '已检测到核心开发者有效审批，当前 PR 满足主分支合并权限要求。',
+                '',
+                `- 批准此 PR 合并的核心开发者：**${trustedApprover || 'unknown'}**`,
+                `- PR 提交人：**${prAuthor}**`,
+                '',
+                ...notificationBlock,
+              ].join('\n');
+            } else if (status === 'non_trusted_only') {
+              body = [
+                marker,
+                stateMarker,
+                '### ❌ 仍不能合并：审批来源不满足要求',
+                '',
+                '虽然该 PR 历史上可能已有审批记录，但针对当前最新提交仍缺少核心开发者有效审批，因此不满足主分支合并条件。',
+                '- 失败原因：**缺少核心开发者有效审批**',
+                '',
+                '**需要以下任一核心成员审批后方可合并：**',
+                mentionLine,
+              ].join('\n');
+            } else if (status === 'author_trusted') {
+              const notificationBlock = shouldBroadcastNow
+                ? [
+                    '**全员通知（核心成员）：**',
+                    mentionLine,
+                  ]
+                : [
+                    '**全员通知（核心成员）：**',
+                    '已发送，无需重复通知。',
+                  ];
+
+              body = [
+                marker,
+                stateMarker,
+                '### ✅ 主分支合并权限校验通过',
+                '',
+                `PR 提交人 **${prAuthor}** 属于核心开发者，已满足主分支合并权限要求。`,
+                '',
+                ...notificationBlock,
+              ].join('\n');
+            } else {
+              core.info('未获取到明确审批状态，跳过评论回写。');
+              return;
+            }
+
+            if (existing && !statusChanged) {
+              core.info('主分支审批状态未变化，跳过评论更新与通知。');
+              return;
+            }
+
+            if (existing && (existing.body || '').trim() === body.trim()) {
+              core.info('主分支审批评论内容未变化，跳过更新。');
+              return;
+            }
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info('已更新主分支审批状态评论。');
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+              core.info('已创建主分支审批状态评论。');
+            }
