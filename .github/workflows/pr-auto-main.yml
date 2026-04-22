@@ -5,7 +5,7 @@
 #   2. 修改下方 env 中的 TARGET_BRANCH
 #   3. 核心开发者（TRUSTED_DEVELOPERS 变量中的用户）从任意非主分支推送时，
 #      将跳过测试分支直接创建向主分支合并的 PR
-name: 🚀 主支合并请求创建
+name: 🚀 主干分支合并请求创建
 
 on:
   push:

@@ -2,11 +2,9 @@
 #   1. 确保仓库已创建 TRUSTED_DEVELOPERS 变量（JSON 数组格式的用户名列表）
 #   2. 在 test 和 main 分支保护规则中勾选「Require a pull request before merging」，
 #      禁止任何人直接推送到受保护分支，所有变更必须通过 PR 合入
-#   3. 推送本文件后，在 Actions 页面手动运行一次本工作流（workflow_dispatch），
-#      使「🔒 流程配置保护规则」和「🔐 主干合并权限审计」注册到 GitHub
-#   4. 在 test 分支保护规则中将「🔒 流程配置保护规则」添加为必须通过的状态检查
-#   5. 在 main 分支保护规则中将「🔐 主干合并权限审计」添加为必须通过的状态检查
-#   6. 取消勾选「要求代码所有者进行审查」，本工作流的权限校验 Job 已替代该功能
+#   3. 在 test 分支保护规则中将「🔒 工作流配置保护规则」添加为必须通过的状态检查
+#   4. 在 main 分支保护规则中将「🔐 主分支合并权限审计」添加为必须通过的状态检查
+#   5. 取消勾选「要求代码所有者进行审查」，本工作流的权限校验 Job 已替代该功能
 name: 🛡️ 合并审批权限校验
 
 on:
@@ -26,7 +24,7 @@ jobs:
   # 未修改工作流文件 → 直接放行；修改了 → 仅允许核心开发者
   # ────────────────────────────────────────────────────────
   workflow-file-audit:
-    name: 🔒 流程配置保护规则
+    name: 🔒 工作流配置保护规则
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: github.event.pull_request.base.ref == 'test'
@@ -128,7 +126,7 @@ jobs:
   # 检查审批人是否为核心开发者（PR 作者是核心开发者也直接通过）
   # ────────────────────────────────────────────────────────
   approval-gate:
-    name: 🔐 主干合并权限审计
+    name: 🔐 主分支合并权限审计
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: github.event.pull_request.base.ref == 'main'

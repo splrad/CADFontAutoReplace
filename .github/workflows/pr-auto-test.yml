@@ -5,7 +5,7 @@
 #   2. 修改下方 branches-ignore 中的排除分支名，以及 env 中的 TARGET_BRANCH
 #   3. 核心开发者（TRUSTED_DEVELOPERS 变量中的用户）推送时会跳过本流程，
 #      直接进入向主分支合并的 PR 流程
-name: 🚀 集成分支请求创建
+name: 🚀 测试分支合并请求创建
 
 on:
   push:
