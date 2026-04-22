@@ -205,17 +205,14 @@ jobs:
             fi
           fi
 
-          # PR merge ref 不可用（例如冲突）时，回退到 merge-base 方案
+          # PR merge ref 不可用（例如冲突）时，回退到目标分支与来源分支的两点差异
           if [ "$DIFF_RESOLVED" != "true" ] && \
              git rev-parse --verify "$TARGET_REF^{commit}" >/dev/null 2>&1 && \
              git rev-parse --verify "$SOURCE_REF^{commit}" >/dev/null 2>&1; then
-            BASE_SHA=$(git merge-base "$TARGET_REF" "$SOURCE_REF" 2>/dev/null || true)
-            if [ -n "$BASE_SHA" ]; then
-              CHANGED_FILES=$(git diff --name-status "$BASE_SHA..$SOURCE_REF")
-              DIFF_SNIPPET=$(git diff --unified=0 --no-color "$BASE_SHA..$SOURCE_REF" | head -c "$MAX_DIFF_CHARS")
-              DIFF_SOURCE="merge_base"
-              DIFF_RESOLVED="true"
-            fi
+            CHANGED_FILES=$(git diff --name-status "$TARGET_REF..$SOURCE_REF")
+            DIFF_SNIPPET=$(git diff --unified=0 --no-color "$TARGET_REF..$SOURCE_REF" | head -c "$MAX_DIFF_CHARS")
+            DIFF_SOURCE="target_two_dot"
+            DIFF_RESOLVED="true"
           fi
 
           # 仍不可用时，回退到 push 事件 compare API（仅限本次 push）
