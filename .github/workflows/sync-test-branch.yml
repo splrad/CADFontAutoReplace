@@ -6,7 +6,7 @@
 #      （路径：设置 → 规则 → 规则集 → 选择 test 分支规则 → 旁路列表 → 添加旁路 → 勾选「仓库管理员」）
 #   4. 修改下方 env 中的 TEST_BRANCH 和 MAIN_BRANCH 为实际分支名
 #   5. 当 main 分支发生 push（含强制推送）或核心开发者跳过 test 分支直接向 main 合并 PR 后，test 分支将自动同步至 main 最新提交
-#   6. 当 test 分支成功合并到 main 时，将在 PR 下自动发布通知评论并 @ 核心成员，触发 GitHub 官方通知邮件
+#   6. 当 test 分支成功合并到 main 时，将通过后台通知流程触发核心成员官方通知，状态评论不展示通知对象
 name: 🔄 重置测试分支到主分支
 
 on:
@@ -78,7 +78,7 @@ jobs:
 
     permissions:
       issues: write
-      pull-requests: read
+      pull-requests: write
 
     steps:
       - name: 📣 发布 test 合并 main 成功通知（触发 GitHub 官方通知）
@@ -86,8 +86,11 @@ jobs:
         env:
           TRUSTED_DEVELOPERS: ${{ vars.TRUSTED_DEVELOPERS }}
         with:
+          github-token: ${{ secrets.MY_PAT || github.token }}
           script: |
             const marker = '<!-- sync-test-branch-status:test-to-main-merged -->';
+            const notifySentMarker = '<!-- sync-test-branch-notify-sent -->';
+            const notifyPingMarker = '<!-- sync-test-branch-hidden-notify-ping -->';
             const pr = context.payload.pull_request;
             const issueNumber = pr.number;
 
@@ -97,31 +100,6 @@ jobs:
             } catch (error) {
               core.warning(`TRUSTED_DEVELOPERS 解析失败：${error.message}`);
             }
-
-            const mentionText = trustedDevelopers.length > 0
-              ? trustedDevelopers.map(user => `@${user}`).join(' ')
-              : '_未配置核心成员，无法发送 @ 通知_';
-
-            const trustedList = trustedDevelopers.length > 0
-              ? trustedDevelopers.map(user => `- @${user}`).join('\n')
-              : '- （空）';
-
-            const body = [
-              marker,
-              '## ✅ 主干分支更新通知',
-              '',
-              `- PR: #${pr.number}`,
-              `- 合并人: @${pr.merged_by?.login || 'unknown'}`,
-              `- 合并提交: ${pr.merge_commit_sha || 'N/A'}`,
-              '',
-              '### 🔔 通知对象',
-              mentionText,
-              '',
-              '### 👥 核心成员名单',
-              trustedList,
-              '',
-              '> 本通知由 **GitHub Actions** 自动发布。'
-            ].join('\n');
 
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
@@ -133,6 +111,83 @@ jobs:
             const existing = comments.find(comment =>
               typeof comment.body === 'string' && comment.body.includes(marker)
             );
+
+            const hasAlreadyNotified = Boolean(existing && typeof existing.body === 'string' && existing.body.includes(notifySentMarker));
+            let notifyStatus = '状态未变化，未重复触发通知。';
+            let notifySent = hasAlreadyNotified;
+
+            const sendCoreNotifications = async () => {
+              const reviewers = [...new Set((trustedDevelopers || []).filter(Boolean))].slice(0, 15);
+              if (reviewers.length === 0) {
+                return { sent: false, status: '未配置核心成员名单，未触发通知。' };
+              }
+
+              try {
+                await github.rest.pulls.requestReviewers({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: issueNumber,
+                  reviewers,
+                });
+                return { sent: true, status: '已通过请求评审触发核心成员通知（评论不展示对象）。' };
+              } catch (error) {
+                if (error.status !== 422) {
+                  throw error;
+                }
+
+                // 合并后的关闭 PR 无法 request reviewers，回退为瞬时 @ 通知并立即删除。
+                const mentionText = reviewers.map(user => `@${user}`).join(' ');
+                const pingComment = await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  body: [
+                    notifyPingMarker,
+                    mentionText,
+                  ].join('\n'),
+                });
+
+                try {
+                  await github.rest.issues.deleteComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: pingComment.data.id,
+                  });
+                } catch (deleteError) {
+                  core.warning(`删除后台通知临时评论失败：${deleteError.message}`);
+                }
+
+                return { sent: true, status: '已通过后台通知流程触发核心成员通知（评论不展示对象）。' };
+              }
+            };
+
+            if (!hasAlreadyNotified) {
+              try {
+                const result = await sendCoreNotifications();
+                notifySent = result.sent;
+                notifyStatus = result.status;
+              } catch (error) {
+                core.warning(`触发核心成员通知失败：${error.message}`);
+                notifyStatus = '触发通知失败，请检查权限或核心成员配置。';
+              }
+            } else {
+              notifyStatus = '已发送，无需重复通知。';
+            }
+
+            const body = [
+              marker,
+              ...(notifySent ? [notifySentMarker] : []),
+              '## ✅ 主干分支更新通知',
+              '',
+              `- PR: #${pr.number}`,
+              `- 合并人: ${pr.merged_by?.login || 'unknown'}`,
+              `- 合并提交: ${pr.merge_commit_sha || 'N/A'}`,
+              '',
+              '### 🔔 通知状态',
+              notifyStatus,
+              '',
+              '> 本通知由 **GitHub Actions** 自动发布。'
+            ].join('\n');
 
             if (existing) {
               await github.rest.issues.updateComment({

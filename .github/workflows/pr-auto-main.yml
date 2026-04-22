@@ -7,7 +7,7 @@
 #   3) 可选：在仓库 Variables 中创建 TRUSTED_DEVELOPERS（JSON 数组）
 #      示例：["splrad", "another-user"]
 #      命中该名单的用户可从非主分支走快速通道直接创建到主分支的 PR
-#   4) 通知机制：PR 创建/更新成功后，由 github-actions[bot] 在 PR 下评论并 @ 全部核心开发者
+#   4) 通知机制：PR 创建/更新成功后，自动请求核心成员评审并发布状态评论（评论不展示通知对象）
 #      GitHub 将按通知设置向被 @ 用户发送官方通知邮件（无需配置 SMTP）
 #   5) 验证建议：先推送一次分支，确认 PR 可创建且官方通知可正常送达
 name: 🚀 主干分支合并请求创建
@@ -495,18 +495,82 @@ jobs:
             -f title="$PR_TITLE" \
             -f body="$PR_BODY_CONTENT" >/dev/null
 
+      - name: 👥 请求核心成员评审（触发官方通知）
+        if: env.SKIP_PR_AUTOMATION != 'true'
+        continue-on-error: true
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          PR_NUMBER: ${{ env.CURRENT_PR_NUMBER }}
+          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
+          PR_AUTHOR: ${{ github.actor }}
+        with:
+          github-token: ${{ secrets.MY_PAT || github.token }}
+          script: |
+            const prNumber = Number(process.env.PR_NUMBER || '0');
+            if (!prNumber) {
+              core.info('未获取到 PR 编号，跳过评审请求。');
+              return;
+            }
+
+            let trustedDevelopers = [];
+            try {
+              const parsed = JSON.parse(process.env.TRUSTED_LIST || '[]');
+              if (Array.isArray(parsed)) {
+                trustedDevelopers = parsed.filter(Boolean);
+              }
+            } catch (err) {
+              core.warning(`TRUSTED_DEVELOPERS 解析失败: ${err.message}`);
+            }
+
+            const prAuthor = (process.env.PR_AUTHOR || '').trim();
+            const reviewers = [...new Set(trustedDevelopers.filter(user => user !== prAuthor))];
+
+            if (reviewers.length === 0) {
+              core.info('无可请求的核心成员评审对象，跳过。');
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            const existing = new Set((pr.requested_reviewers || []).map(user => user.login));
+            const pending = reviewers.filter(user => !existing.has(user)).slice(0, 15);
+
+            if (pending.length === 0) {
+              core.info('核心成员评审请求已存在，无需重复请求。');
+              return;
+            }
+
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                reviewers: pending,
+              });
+              core.info(`已请求核心成员评审：${pending.join(', ')}`);
+            } catch (error) {
+              if (error.status === 422) {
+                core.warning(`请求核心成员评审部分失败：${error.message}`);
+                return;
+              }
+              throw error;
+            }
+
       - name: 📣 发布PR成功通知（触发GitHub官方通知）
         if: env.SKIP_PR_AUTOMATION != 'true'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           PR_NUMBER: ${{ env.CURRENT_PR_NUMBER }}
-          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
           PR_TITLE: ${{ env.AI_PR_TITLE }}
-          PR_BODY: ${{ env.AI_PR_BODY }}
           SOURCE_BRANCH: ${{ env.SOURCE_BRANCH }}
           TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
           ACTOR: ${{ github.actor }}
         with:
+          github-token: ${{ secrets.MY_PAT || github.token }}
           script: |
             const marker = '<!-- pr-auto-success-notice -->';
             const prNumber = Number(process.env.PR_NUMBER || '0');
@@ -515,31 +579,11 @@ jobs:
               return;
             }
 
-            const trustedRaw = process.env.TRUSTED_LIST || '[]';
-            let trustedDevelopers = [];
-            try {
-              const parsed = JSON.parse(trustedRaw);
-              if (Array.isArray(parsed)) {
-                trustedDevelopers = parsed.filter(Boolean);
-              }
-            } catch (err) {
-              core.warning(`TRUSTED_DEVELOPERS 解析失败: ${err.message}`);
-            }
-
-            const mentions = trustedDevelopers.length > 0
-              ? trustedDevelopers.map(user => `@${user}`).join(' ')
-              : '_未配置核心开发者名单_';
-
             const prTitle = (process.env.PR_TITLE || '').trim() || '（空）';
             const prAuthor = (process.env.ACTOR || 'unknown').trim();
             const sourceBranch = (process.env.SOURCE_BRANCH || 'unknown').trim();
             const targetBranch = (process.env.TARGET_BRANCH || 'unknown').trim();
-            const prDescription = (process.env.PR_BODY || '').trim() || '（空）';
             const prUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${prNumber}`;
-            const descriptionBlock = prDescription
-              .split(/\r?\n/)
-              .map(line => `> ${line}`)
-              .join('\n');
 
             const body = [
               marker,
@@ -553,11 +597,6 @@ jobs:
               `- 分支流向：**${sourceBranch} → ${targetBranch}**`,
               `- PR 链接：${prUrl}`,
               '',
-              '### 📝 变更说明',
-              descriptionBlock,
-              '',
-              '### 🔔 通知对象',
-              mentions,
             ].join('\n');
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,

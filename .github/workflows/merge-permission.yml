@@ -154,8 +154,10 @@ jobs:
 
       - name: 💬 回写工作流配置保护状态说明
         if: always()
+        continue-on-error: true
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           AUDIT_STATUS: ${{ steps.audit.outputs.audit_status }}
           CHANGED_FILES: ${{ steps.audit.outputs.changed_files }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
@@ -163,6 +165,7 @@ jobs:
           CURRENT_APPROVERS: ${{ steps.audit.outputs.current_approvers }}
           TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
         with:
+          github-token: ${{ secrets.MY_PAT || github.token }}
           script: |
             const marker = '<!-- workflow-file-audit-status -->';
             const stateMarkerPrefix = '<!-- workflow-file-audit-state:';
@@ -191,13 +194,6 @@ jobs:
             } catch (err) {
               core.warning(`TRUSTED_DEVELOPERS 解析失败: ${err.message}`);
             }
-
-            const mentionLine = trustedDevelopers.length > 0
-              ? trustedDevelopers.map(user => `@${user}`).join(' ')
-              : '_未配置核心开发者名单_';
-            const approverListBlock = trustedDevelopers.length > 0
-              ? trustedDevelopers.map(user => `- @${user}`).join('\n')
-              : '- _未配置核心开发者名单_';
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -238,15 +234,70 @@ jobs:
             const shouldBroadcastNow = statusChanged && currentCategory !== 'neutral' && currentCategory !== previousCategory;
             const stateMarker = `${stateMarkerPrefix}${status} -->`;
 
-            const notificationBlock = shouldBroadcastNow
-              ? [
-                  '**全员通知（核心成员）：**',
-                  mentionLine,
-                ]
-              : [
-                  '**全员通知（核心成员）：**',
-                  '已发送，无需重复通知。',
-                ];
+            const requestCoreReviewerNotifications = async () => {
+              const prNumber = Number(process.env.PR_NUMBER || context.issue.number || '0');
+              if (!prNumber) {
+                return '未获取到 PR 编号，无法触发通知。';
+              }
+
+              const reviewers = [...new Set(
+                trustedDevelopers
+                  .filter(Boolean)
+                  .filter(user => user !== prAuthor)
+              )].slice(0, 15);
+
+              if (reviewers.length === 0) {
+                return '核心成员名单为空或仅包含 PR 提交人，未触发通知。';
+              }
+
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+              });
+
+              const requested = new Set((pr.requested_reviewers || []).map(user => user.login));
+              const alreadyRequested = reviewers.filter(user => requested.has(user));
+              const toRequest = reviewers.filter(user => !requested.has(user));
+
+              if (toRequest.length > 0) {
+                await github.rest.pulls.requestReviewers({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                  reviewers: toRequest,
+                });
+                return '已通过请求评审触发核心成员通知（评论不展示对象）。';
+              }
+
+              if (alreadyRequested.length > 0) {
+                await github.rest.pulls.removeRequestedReviewers({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                  reviewers: alreadyRequested,
+                });
+                await github.rest.pulls.requestReviewers({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                  reviewers,
+                });
+                return '已刷新核心成员评审请求并触发通知（评论不展示对象）。';
+              }
+
+              return '未找到可请求的核心成员，未触发通知。';
+            };
+
+            let notificationStatusText = '状态未发生通过/失败切换，未重复触发通知。';
+            if (shouldBroadcastNow) {
+              try {
+                notificationStatusText = await requestCoreReviewerNotifications();
+              } catch (err) {
+                core.warning(`触发核心成员通知失败: ${err.message}`);
+                notificationStatusText = '触发通知失败，请检查权限或核心成员配置。';
+              }
+            }
 
             let body = '';
             if (status === 'no_workflow_change') {
@@ -270,7 +321,8 @@ jobs:
                 '**涉及的工作流文件：**',
                 fileList,
                 '',
-                ...notificationBlock,
+                '**通知状态：**',
+                notificationStatusText,
               ].join('\n');
             } else if (status === 'core_review_approved_workflow_change') {
               body = [
@@ -286,7 +338,8 @@ jobs:
                 '**涉及的工作流文件：**',
                 fileList,
                 '',
-                ...notificationBlock,
+                '**通知状态：**',
+                notificationStatusText,
               ].join('\n');
             } else if (status === 'unauthorized_workflow_change') {
               body = [
@@ -301,10 +354,10 @@ jobs:
                 '',
                 '**处理方式：**',
                 '1. 撤回对 `.github/workflows/` 目录下文件的修改',
-                '2. 或邀请以下任一核心成员进行有效审批：',
-                approverListBlock,
+                '2. 或联系任一核心成员进行有效审批。',
                 '',
-                ...notificationBlock,
+                '**通知状态：**',
+                notificationStatusText,
               ].join('\n');
             } else {
               core.info('未获取到明确审计状态，跳过评论回写。');
@@ -356,7 +409,7 @@ jobs:
     if: github.event.pull_request.base.ref == 'main'
 
     permissions:
-      pull-requests: read
+      pull-requests: write
       issues: write
 
     steps:
@@ -442,14 +495,17 @@ jobs:
 
       - name: 💬 回写主分支审批状态说明
         if: always()
+        continue-on-error: true
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           APPROVAL_STATUS: ${{ steps.approval-check.outputs.approval_status }}
           TRUSTED_APPROVER: ${{ steps.approval-check.outputs.trusted_approver }}
           CURRENT_APPROVERS: ${{ steps.approval-check.outputs.current_approvers }}
           TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         with:
+          github-token: ${{ secrets.MY_PAT || github.token }}
           script: |
             const marker = '<!-- merge-permission-approval-status -->';
             const stateMarkerPrefix = '<!-- merge-permission-approval-state:';
@@ -468,10 +524,6 @@ jobs:
             } catch (err) {
               core.warning(`TRUSTED_DEVELOPERS 解析失败: ${err.message}`);
             }
-
-            const mentionLine = trustedDevelopers.length > 0
-              ? trustedDevelopers.map(user => `@${user}`).join(' ')
-              : '_未配置核心开发者名单_';
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -508,18 +560,73 @@ jobs:
             const shouldBroadcastNow = statusChanged && currentCategory !== 'neutral' && currentCategory !== previousCategory;
             const stateMarker = `${stateMarkerPrefix}${status} -->`;
 
+            const requestCoreReviewerNotifications = async () => {
+              const prNumber = Number(process.env.PR_NUMBER || context.issue.number || '0');
+              if (!prNumber) {
+                return '未获取到 PR 编号，无法触发通知。';
+              }
+
+              const reviewers = [...new Set(
+                trustedDevelopers
+                  .filter(Boolean)
+                  .filter(user => user !== prAuthor)
+              )].slice(0, 15);
+
+              if (reviewers.length === 0) {
+                return '核心成员名单为空或仅包含 PR 提交人，未触发通知。';
+              }
+
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+              });
+
+              const requested = new Set((pr.requested_reviewers || []).map(user => user.login));
+              const alreadyRequested = reviewers.filter(user => requested.has(user));
+              const toRequest = reviewers.filter(user => !requested.has(user));
+
+              if (toRequest.length > 0) {
+                await github.rest.pulls.requestReviewers({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                  reviewers: toRequest,
+                });
+                return '已通过请求评审触发核心成员通知（评论不展示对象）。';
+              }
+
+              if (alreadyRequested.length > 0) {
+                await github.rest.pulls.removeRequestedReviewers({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                  reviewers: alreadyRequested,
+                });
+                await github.rest.pulls.requestReviewers({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                  reviewers,
+                });
+                return '已刷新核心成员评审请求并触发通知（评论不展示对象）。';
+              }
+
+              return '未找到可请求的核心成员，未触发通知。';
+            };
+
+            let notificationStatusText = '状态未发生通过/失败切换，未重复触发通知。';
+            if (shouldBroadcastNow) {
+              try {
+                notificationStatusText = await requestCoreReviewerNotifications();
+              } catch (err) {
+                core.warning(`触发核心成员通知失败: ${err.message}`);
+                notificationStatusText = '触发通知失败，请检查权限或核心成员配置。';
+              }
+            }
+
             let body = '';
             if (status === 'trusted_approver') {
-              const notificationBlock = shouldBroadcastNow
-                ? [
-                    '**全员通知（核心成员）：**',
-                    mentionLine,
-                  ]
-                : [
-                    '**全员通知（核心成员）：**',
-                    '已发送，无需重复通知。',
-                  ];
-
               body = [
                 marker,
                 stateMarker,
@@ -530,7 +637,8 @@ jobs:
                 `- 批准此 PR 合并的核心开发者：**${trustedApprover || 'unknown'}**`,
                 `- PR 提交人：**${prAuthor}**`,
                 '',
-                ...notificationBlock,
+                '**通知状态：**',
+                notificationStatusText,
               ].join('\n');
             } else if (status === 'non_trusted_only') {
               body = [
@@ -541,20 +649,13 @@ jobs:
                 '虽然该 PR 历史上可能已有审批记录，但针对当前最新提交仍缺少核心开发者有效审批，因此不满足主分支合并条件。',
                 '- 失败原因：**缺少核心开发者有效审批**',
                 '',
-                '**需要以下任一核心成员审批后方可合并：**',
-                mentionLine,
+                '**处理方式：**',
+                '请联系任一核心成员完成对当前最新提交的有效审批。',
+                '',
+                '**通知状态：**',
+                notificationStatusText,
               ].join('\n');
             } else if (status === 'author_trusted') {
-              const notificationBlock = shouldBroadcastNow
-                ? [
-                    '**全员通知（核心成员）：**',
-                    mentionLine,
-                  ]
-                : [
-                    '**全员通知（核心成员）：**',
-                    '已发送，无需重复通知。',
-                  ];
-
               body = [
                 marker,
                 stateMarker,
@@ -562,7 +663,8 @@ jobs:
                 '',
                 `PR 提交人 **${prAuthor}** 属于核心开发者，已满足主分支合并权限要求。`,
                 '',
-                ...notificationBlock,
+                '**通知状态：**',
+                notificationStatusText,
               ].join('\n');
             } else {
               core.info('未获取到明确审批状态，跳过评论回写。');
