@@ -90,7 +90,7 @@ jobs:
 
           echo "CURRENT_PR_NUMBER=$CURRENT_PR_NUMBER" >> "$GITHUB_ENV"
 
-      - name: 🧠 基于本次push差异生成变更说明
+      - name: 🧠 基于当前PR净差异生成变更说明
         id: ai-summary
         if: env.SKIP_PR_AUTOMATION != 'true'
         env:
@@ -98,8 +98,10 @@ jobs:
           GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
           REPO="$GITHUB_REPOSITORY"
+          TARGET_REF="origin/$TARGET_BRANCH"
+          SOURCE_REF="origin/$SOURCE_BRANCH"
 
-          # 优先读取“本次 push(before..after)”差异，避免同一来源分支累计历史提交串入描述
+          # 记录 push 事件中的 before/after，仅作为最终兜底差异来源
           BEFORE_SHA="${{ github.event.before }}"
           AFTER_SHA="${{ github.event.after }}"
           if [ -z "$AFTER_SHA" ]; then
@@ -108,23 +110,22 @@ jobs:
 
           CHANGED_FILES=""
           DIFF_SNIPPET=""
+          DIFF_SOURCE=""
+          DIFF_RESOLVED="false"
           MAX_DIFF_CHARS=20000
           PRIORITY_TRUNCATE_THRESHOLD=20000
 
-          COMPARE_JSON=""
-          if [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
-            COMPARE_JSON=$(gh api --method GET \
-              -H "Accept: application/vnd.github+json" \
-              "repos/$REPO/compare/$BEFORE_SHA...$AFTER_SHA" 2>/dev/null || true)
-          fi
+          build_diff_from_compare_json() {
+            local compare_json="$1"
+            local patch_total_chars
+            [ -z "$compare_json" ] && return 1
 
-          if [ -n "$COMPARE_JSON" ]; then
-            CHANGED_FILES=$(echo "$COMPARE_JSON" | jq -r '.files[]? | "\(.status | ascii_upcase)\t\(.filename)"')
-            PATCH_TOTAL_CHARS=$(echo "$COMPARE_JSON" | jq -r '[.files[]? | .patch // ""] | join("\n") | length')
+            CHANGED_FILES=$(echo "$compare_json" | jq -r '.files[]? | "\(.status | ascii_upcase)\t\(.filename)"')
+            patch_total_chars=$(echo "$compare_json" | jq -r '[.files[]? | .patch // ""] | join("\n") | length')
 
-            if [ "$PATCH_TOTAL_CHARS" -gt "$PRIORITY_TRUNCATE_THRESHOLD" ]; then
+            if [ "$patch_total_chars" -gt "$PRIORITY_TRUNCATE_THRESHOLD" ]; then
               # 超过阈值时优先保留新增/修改最多的文件片段，提高摘要稳定性
-              DIFF_SNIPPET=$(echo "$COMPARE_JSON" | jq -r '
+              DIFF_SNIPPET=$(echo "$compare_json" | jq -r '
                 [.files[]? | select(.patch != null) |
                   {
                     filename: .filename,
@@ -139,15 +140,98 @@ jobs:
                 | ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
               ' | head -c "$MAX_DIFF_CHARS")
             else
-              DIFF_SNIPPET=$(echo "$COMPARE_JSON" | jq -r '
+              DIFF_SNIPPET=$(echo "$compare_json" | jq -r '
                 .files[]? | select(.patch != null) |
                 ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
               ' | head -c "$MAX_DIFF_CHARS")
             fi
+
+            return 0
+          }
+
+          build_diff_from_push_commits_json() {
+            local commits_json="$1"
+            local patch_total_chars
+            [ -z "$commits_json" ] && return 1
+
+            CHANGED_FILES=$(echo "$commits_json" | jq -r '
+              [.[] | .files[]? | "\(.status | ascii_upcase)\t\(.filename)"]
+              | unique
+              | .[]
+            ')
+            patch_total_chars=$(echo "$commits_json" | jq -r '[.[] | .files[]? | .patch // ""] | join("\n") | length')
+
+            if [ "$patch_total_chars" -gt "$PRIORITY_TRUNCATE_THRESHOLD" ]; then
+              DIFF_SNIPPET=$(echo "$commits_json" | jq -r '
+                [.[] | .files[]? | select(.patch != null) |
+                  {
+                    filename: .filename,
+                    patch: .patch,
+                    score: ((.additions // 0) + (.deletions // 0)),
+                    additions: (.additions // 0),
+                    deletions: (.deletions // 0)
+                  }
+                ]
+                | sort_by(-.score, -.additions, -.deletions, .filename)
+                | .[]
+                | ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
+              ' | head -c "$MAX_DIFF_CHARS")
+            else
+              DIFF_SNIPPET=$(echo "$commits_json" | jq -r '
+                .[] | .files[]? | select(.patch != null) |
+                ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
+              ' | head -c "$MAX_DIFF_CHARS")
+            fi
+
+            return 0
+          }
+
+          # 先刷新目标分支和来源分支引用，避免使用过期远端指针
+          git fetch --no-tags origin "$TARGET_BRANCH" "$SOURCE_BRANCH" >/dev/null 2>&1 || true
+
+          # 优先使用 PR merge ref 与目标分支对比，得到“当前 PR 若合入后的净变化”
+          if [ -n "$CURRENT_PR_NUMBER" ]; then
+            PR_MERGE_REF="refs/remotes/origin/pr/$CURRENT_PR_NUMBER/merge"
+            if git fetch --no-tags origin "refs/pull/$CURRENT_PR_NUMBER/merge:$PR_MERGE_REF" >/dev/null 2>&1 && \
+               git rev-parse --verify "$PR_MERGE_REF^{commit}" >/dev/null 2>&1 && \
+               git rev-parse --verify "$TARGET_REF^{commit}" >/dev/null 2>&1; then
+              CHANGED_FILES=$(git diff --name-status "$TARGET_REF..$PR_MERGE_REF")
+              DIFF_SNIPPET=$(git diff --unified=0 --no-color "$TARGET_REF..$PR_MERGE_REF" | head -c "$MAX_DIFF_CHARS")
+              DIFF_SOURCE="pr_merge_ref"
+              DIFF_RESOLVED="true"
+            fi
           fi
 
-          # compare 不可用时，回退读取本次 push 的提交明细（仅限本次 push 范围）
-          if [ -z "$CHANGED_FILES" ] || [ -z "$DIFF_SNIPPET" ]; then
+          # PR merge ref 不可用（例如冲突）时，回退到 merge-base 方案
+          if [ "$DIFF_RESOLVED" != "true" ] && \
+             git rev-parse --verify "$TARGET_REF^{commit}" >/dev/null 2>&1 && \
+             git rev-parse --verify "$SOURCE_REF^{commit}" >/dev/null 2>&1; then
+            BASE_SHA=$(git merge-base "$TARGET_REF" "$SOURCE_REF" 2>/dev/null || true)
+            if [ -n "$BASE_SHA" ]; then
+              CHANGED_FILES=$(git diff --name-status "$BASE_SHA..$SOURCE_REF")
+              DIFF_SNIPPET=$(git diff --unified=0 --no-color "$BASE_SHA..$SOURCE_REF" | head -c "$MAX_DIFF_CHARS")
+              DIFF_SOURCE="merge_base"
+              DIFF_RESOLVED="true"
+            fi
+          fi
+
+          # 仍不可用时，回退到 push 事件 compare API（仅限本次 push）
+          if [ "$DIFF_RESOLVED" != "true" ]; then
+            COMPARE_JSON=""
+            if [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+              COMPARE_JSON=$(gh api --method GET \
+                -H "Accept: application/vnd.github+json" \
+                "repos/$REPO/compare/$BEFORE_SHA...$AFTER_SHA" 2>/dev/null || true)
+            fi
+
+            if [ -n "$COMPARE_JSON" ] && build_diff_from_compare_json "$COMPARE_JSON"; then
+              DIFF_SOURCE="push_compare_api"
+              DIFF_RESOLVED="true"
+            fi
+          fi
+
+          # compare API 不可用时，回退读取本次 push 的提交明细
+          if [ "$DIFF_RESOLVED" != "true" ]; then
             PUSH_COMMIT_SHAS=$(jq -r '.commits[]?.id // empty' "$GITHUB_EVENT_PATH")
             if [ -n "$PUSH_COMMIT_SHAS" ]; then
               PUSH_COMMITS_JSON=$(while IFS= read -r sha; do
@@ -157,60 +241,40 @@ jobs:
                   "repos/$REPO/commits/$sha" 2>/dev/null || true
               done <<< "$PUSH_COMMIT_SHAS" | jq -s '.')
 
-              CHANGED_FILES=$(echo "$PUSH_COMMITS_JSON" | jq -r '
-                [.[] | .files[]? | "\(.status | ascii_upcase)\t\(.filename)"]
-                | unique
-                | .[]
-              ')
-              PATCH_TOTAL_CHARS=$(echo "$PUSH_COMMITS_JSON" | jq -r '[.[] | .files[]? | .patch // ""] | join("\n") | length')
-
-              if [ "$PATCH_TOTAL_CHARS" -gt "$PRIORITY_TRUNCATE_THRESHOLD" ]; then
-                DIFF_SNIPPET=$(echo "$PUSH_COMMITS_JSON" | jq -r '
-                  [.[] | .files[]? | select(.patch != null) |
-                    {
-                      filename: .filename,
-                      patch: .patch,
-                      score: ((.additions // 0) + (.deletions // 0)),
-                      additions: (.additions // 0),
-                      deletions: (.deletions // 0)
-                    }
-                  ]
-                  | sort_by(-.score, -.additions, -.deletions, .filename)
-                  | .[]
-                  | ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
-                ' | head -c "$MAX_DIFF_CHARS")
-              else
-                DIFF_SNIPPET=$(echo "$PUSH_COMMITS_JSON" | jq -r '
-                  .[] | .files[]? | select(.patch != null) |
-                  ("diff --git a/" + .filename + " b/" + .filename + "\n" + .patch + "\n")
-                ' | head -c "$MAX_DIFF_CHARS")
+              if build_diff_from_push_commits_json "$PUSH_COMMITS_JSON"; then
+                DIFF_SOURCE="push_commits_api"
+                DIFF_RESOLVED="true"
               fi
             fi
           fi
 
-          # 最后兜底：如果 before/after 在本地可达，仍优先使用本次 push 的本地差异
-          if [ -z "$CHANGED_FILES" ] && [ -n "$BEFORE_SHA" ] && [ -n "$AFTER_SHA" ] && \
+          # 最后兜底：before/after 在本地可达时读取本地 push 增量
+          if [ "$DIFF_RESOLVED" != "true" ] && [ -n "$BEFORE_SHA" ] && [ -n "$AFTER_SHA" ] && \
              git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null && git cat-file -e "$AFTER_SHA^{commit}" 2>/dev/null; then
             CHANGED_FILES=$(git diff --name-status "$BEFORE_SHA" "$AFTER_SHA")
+            DIFF_SNIPPET=$(git diff --unified=0 --no-color "$BEFORE_SHA" "$AFTER_SHA" | head -c "$MAX_DIFF_CHARS")
+            DIFF_SOURCE="push_local_diff"
+            DIFF_RESOLVED="true"
           fi
 
-          if [ -z "$DIFF_SNIPPET" ] && [ -n "$BEFORE_SHA" ] && [ -n "$AFTER_SHA" ] && \
-             git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null && git cat-file -e "$AFTER_SHA^{commit}" 2>/dev/null; then
-            DIFF_SNIPPET=$(git diff --unified=0 --no-color "$BEFORE_SHA" "$AFTER_SHA" | head -c "$MAX_DIFF_CHARS")
+          if [ -z "$DIFF_SOURCE" ]; then
+            DIFF_SOURCE="none"
           fi
+
+          echo "差异来源: $DIFF_SOURCE"
 
           if [ -z "$CHANGED_FILES" ]; then
-            CHANGED_FILES="本次 push 未检测到代码文件变更"
+            CHANGED_FILES="当前 PR 相对目标分支无代码文件差异"
           fi
 
           if [ -z "$DIFF_SNIPPET" ]; then
-            DIFF_SNIPPET="本次 push 无可用代码差异片段"
+            DIFF_SNIPPET="当前 PR 相对目标分支无可用代码差异片段"
           fi
 
           # 使用 jq 安全构建 JSON（防止提交信息中的特殊字符导致注入）
           SYSTEM_PROMPT=$(cat <<'PROMPT'
-          你是一个 PR 描述生成器。根据本次 push 的代码差异（文件清单与 diff 片段），生成符合 Conventional Commits 规范的标题和结构化变更说明。
-          仅依据输入中“本次 push 的代码差异”进行描述，禁止引用分支历史、历史 PR 或历史提交。
+          你是一个 PR 描述生成器。根据当前 PR 相对目标分支的净代码差异（文件清单与 diff 片段），生成符合 Conventional Commits 规范的标题和结构化变更说明。
+          仅依据输入中的差异内容进行描述，禁止引用分支历史、历史 PR 或历史提交。
           禁止复用、拼接或改写任何已有 PR 描述文本（包括当前已打开 PR 的正文）；正文必须完全基于当前输入重新生成。
           无论当前 PR 包含多少提交，只能输出一份最终 PR 说明；若包含多种类型（如 feat/fix/docs），必须在同一份正文中合并呈现，禁止按提交或按类型重复整套模板。
 
@@ -237,7 +301,7 @@ jobs:
           - 示例输出（注意 \n 换行）：
             **变更类型：** 混合变更（feat/fix/docs）\n\n**变更摘要：**\n新增字体模糊匹配能力并修复配置空值异常，同时补充关键参数文档，以提升替换准确性和可维护性。\n\n**主要改动：**\n- 新功能：在 FontMatcher 模块引入 FuzzyMatch 流程，基于编辑距离计算相似度并纳入替换决策链路。\n- 缺陷修复：在配置解析阶段增加空值防护，消除空指针异常并提升执行稳定性。\n- 文档更新：补充 fuzzyThreshold 参数定义、取值范围与示例，降低配置歧义。
           - 使用专业、客观、克制的工程语气，面向代码评审场景
-          - 禁止口语化和网络化表达（如「两块料」「没辙」「清掉」「搞定」「顺手」等）
+          - 禁止口语化和网络化表达
           - 变更摘要必须明确“改动对象 + 行为变化 + 目的/收益”，避免空泛结论
           - 主要改动每条必须采用“改动对象 + 变更动作 + 影响范围/收益”的技术表述
           - 主要改动优先引用模块名、函数名、配置项或流程节点，避免泛化描述
@@ -252,6 +316,7 @@ jobs:
           PAYLOAD=$(jq -n \
             --arg changed_files "$CHANGED_FILES" \
             --arg diff_snippet "$DIFF_SNIPPET" \
+            --arg diff_source "$DIFF_SOURCE" \
             --arg system_prompt "$SYSTEM_PROMPT" \
             '{
               model: "deepseek-chat",
@@ -262,7 +327,7 @@ jobs:
                 },
                 {
                   role: "user",
-                  content: ("本次 push 代码文件变更：\n" + $changed_files + "\n\n本次 push 代码差异片段：\n" + $diff_snippet)
+                  content: ("差异来源：" + $diff_source + "\n\n当前 PR 代码文件变更：\n" + $changed_files + "\n\n当前 PR 代码差异片段：\n" + $diff_snippet)
                 }
               ]
             }')
