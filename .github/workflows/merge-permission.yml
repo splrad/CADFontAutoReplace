@@ -233,10 +233,15 @@ jobs:
             console.log(`::warning::TRUSTED_DEVELOPERS 解析失败: ${errText(err)}`);
           }
 
-          const mentionText = unique(trustedDevelopers.filter(Boolean))
-            .slice(0, 15)
+          const trustedList = unique(trustedDevelopers.filter(Boolean)).slice(0, 15);
+          const mentionText = trustedList
             .map(user => `@${user}`)
-            .join(' ') || '（未配置通知对象）';
+            .join('；') || '（未配置通知对象）';
+          const normalizedAuthor = trim(prAuthor);
+          const shouldMentionAuthor = normalizedAuthor && normalizedAuthor !== 'unknown' && !trustedList.includes(normalizedAuthor);
+          const mentionDisplay = shouldMentionAuthor
+            ? (mentionText === '（未配置通知对象）' ? `@${normalizedAuthor}` : `${mentionText}；@${normalizedAuthor}`)
+            : mentionText;
 
           const comments = ghJson([
             '--method', 'GET',
@@ -281,10 +286,10 @@ jobs:
               '',
               '### ✅ 自动化资源保护规则已通过',
               '',
-              `- PR：${prUrl}`,
+              `- PR链接：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
               `- PR 提交人：**${prAuthor}**`,
-              `- 通知对象：${mentionText}`,
+              `- 通知对象：${mentionDisplay}`,
               '',
               '未检测到 `.github/workflows/` 或 `.github/skills/` 目录变更，本次规则检查通过。',
               '',
@@ -298,10 +303,10 @@ jobs:
               '',
               '### ✅ 自动化资源保护规则已通过',
               '',
-              `- PR：${prUrl}`,
+              `- PR链接：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
               `- PR 提交人：**${prAuthor}**`,
-              `- 通知对象：${mentionText}`,
+              `- 通知对象：${mentionDisplay}`,
               '',
               `检测到受保护配置文件变更，且提交者 **${prAuthor}** 属于核心开发者，允许变更。`,
               '',
@@ -318,12 +323,12 @@ jobs:
               '',
               '### ✅ 自动化资源保护规则已通过',
               '',
-              `- PR：${prUrl}`,
+              `- PR链接：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
               `- PR 提交人：**${prAuthor}**`,
               `- 批准此 PR 合并的核心开发者：**${trustedApprover}**`,
               '',
-              `- 通知对象：${mentionText}`,
+              `- 通知对象：${mentionDisplay}`,
               '',
               '检测到受保护配置文件变更，提交者虽非核心开发者，但已获得核心开发者有效审批，允许变更。',
               '',
@@ -340,10 +345,10 @@ jobs:
               '',
               '### ❌ 自动化资源保护规则未通过',
               '',
-              `- PR：${prUrl}`,
+              `- PR链接：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
               `- PR 提交人：**${prAuthor}**`,
-              `- 通知对象：${mentionText}`,
+              `- 通知对象：${mentionDisplay}`,
               '',
               `提交者 **${prAuthor}** 不在核心开发者名单中，且尚未获得针对当前最新提交的核心开发者有效审批，不满足合并条件。`,
               '',
@@ -554,10 +559,15 @@ jobs:
             console.log(`::warning::TRUSTED_DEVELOPERS 解析失败: ${errText(err)}`);
           }
 
-          const mentionText = unique(trustedDevelopers.filter(Boolean))
-            .slice(0, 15)
+          const trustedList = unique(trustedDevelopers.filter(Boolean)).slice(0, 15);
+          const mentionText = trustedList
             .map(user => `@${user}`)
-            .join(' ') || '（未配置通知对象）';
+            .join('；') || '（未配置通知对象）';
+          const normalizedAuthor = trim(prAuthor);
+          const shouldMentionAuthor = normalizedAuthor && normalizedAuthor !== 'unknown' && !trustedList.includes(normalizedAuthor);
+          const mentionDisplay = shouldMentionAuthor
+            ? (mentionText === '（未配置通知对象）' ? `@${normalizedAuthor}` : `${mentionText}；@${normalizedAuthor}`)
+            : mentionText;
 
           const comments = ghJson([
             '--method', 'GET',
@@ -598,13 +608,13 @@ jobs:
               '',
               '### ✅ 主分支合并权限校验通过',
               '',
-              `- PR：${prUrl}`,
+              `- PR链接：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
               `- PR 提交人：**${prAuthor}**`,
               '',
               `- 批准此 PR 合并的核心开发者：**${trustedApprover || 'unknown'}**`,
               '',
-              `- 通知对象：${mentionText}`,
+              `- 通知对象：${mentionDisplay}`,
               '',
               '已检测到核心开发者有效审批，当前 PR 满足主分支合并权限要求。',
               '',
@@ -618,10 +628,10 @@ jobs:
               '',
               '### ❌ 仍不能合并：审批来源不满足要求',
               '',
-              `- PR：${prUrl}`,
+              `- PR链接：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
               `- PR 提交人：**${prAuthor}**`,
-              `- 通知对象：${mentionText}`,
+              `- 通知对象：${mentionDisplay}`,
               '',
               '虽然该 PR 历史上可能已有审批记录，但针对当前最新提交仍缺少核心开发者有效审批，因此不满足主分支合并条件。',
               '- 失败原因：**缺少核心开发者有效审批**',
@@ -639,10 +649,10 @@ jobs:
               '',
               '### ✅ 主分支合并权限校验通过',
               '',
-              `- PR：${prUrl}`,
+              `- PR链接：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
               `- PR 提交人：**${prAuthor}**`,
-              `- 通知对象：${mentionText}`,
+              `- 通知对象：${mentionDisplay}`,
               '',
               `PR 提交人 **${prAuthor}** 属于核心开发者，已满足主分支合并权限要求。`,
               '',

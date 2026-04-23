@@ -107,8 +107,17 @@ jobs:
           if [ -z "$EXISTING_NOTICE_COMMENT_ID" ]; then
             PR_URL="https://github.com/$REPO/pull/$CURRENT_PR_NUMBER"
             TRUSTED_JSON=$(printf '%s' "${TRUSTED_LIST:-[]}" | jq -c 'if type == "array" then map(select(type == "string" and length > 0)) else [] end' 2>/dev/null || echo '[]')
-            MENTION_TEXT=$(echo "$TRUSTED_JSON" | jq -r 'unique | map("@" + .) | join(" ")')
+            MENTION_TEXT=$(echo "$TRUSTED_JSON" | jq -r 'unique | map("@" + .) | join("；")')
             [ -z "$MENTION_TEXT" ] && MENTION_TEXT='（未配置通知对象）'
+            PR_SUBMITTER="$(printf '%s' "${GITHUB_ACTOR:-unknown}" | xargs)"
+            IS_SUBMITTER_TRUSTED=$(echo "$TRUSTED_JSON" | jq -r --arg user "$PR_SUBMITTER" 'if index($user) then "true" else "false" end')
+            if [ -n "$PR_SUBMITTER" ] && [ "$PR_SUBMITTER" != "unknown" ] && [ "$IS_SUBMITTER_TRUSTED" != "true" ]; then
+              if [ "$MENTION_TEXT" = '（未配置通知对象）' ]; then
+                MENTION_TEXT="@$PR_SUBMITTER"
+              else
+                MENTION_TEXT="$MENTION_TEXT；@$PR_SUBMITTER"
+              fi
+            fi
             NOTICE_BODY=$(printf '%s\n' \
               '<!-- pr-auto-success-notice -->' \
               '## ✅ PR 创建成功通知' \
@@ -557,8 +566,16 @@ jobs:
           pr_url="https://github.com/$REPO/pull/$pr_number"
 
           trusted_json=$(printf '%s' "${TRUSTED_LIST:-[]}" | jq -c 'if type == "array" then map(select(type == "string" and length > 0)) else [] end' 2>/dev/null || echo '[]')
-          mention_text=$(echo "$trusted_json" | jq -r 'unique | map("@" + .) | join(" ")')
+          mention_text=$(echo "$trusted_json" | jq -r 'unique | map("@" + .) | join("；")')
           [ -z "$mention_text" ] && mention_text='（未配置通知对象）'
+          is_author_trusted=$(echo "$trusted_json" | jq -r --arg user "$pr_author" 'if index($user) then "true" else "false" end')
+          if [ -n "$pr_author" ] && [ "$pr_author" != "unknown" ] && [ "$is_author_trusted" != "true" ]; then
+            if [ "$mention_text" = '（未配置通知对象）' ]; then
+              mention_text="@$pr_author"
+            else
+              mention_text="$mention_text；@$pr_author"
+            fi
+          fi
 
           body_file="$RUNNER_TEMP/pr_auto_success_body_test.txt"
           {

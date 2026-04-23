@@ -122,7 +122,7 @@ jobs:
           }
 
           trusted_json=$(printf '%s' "${TRUSTED_DEVELOPERS:-[]}" | jq -c 'if type == "array" then map(select(type == "string" and length > 0)) else [] end' 2>/dev/null || echo '[]')
-          mention_text=$(echo "$trusted_json" | jq -r 'unique | map("@" + .) | join(" ")')
+          mention_text=$(echo "$trusted_json" | jq -r 'unique | map("@" + .) | join("；")')
           [ -z "$mention_text" ] && mention_text='（未配置通知对象）'
 
           comments_json=$(run_gh_api "读取关闭状态评论" "api-first" --method GET \
@@ -139,6 +139,14 @@ jobs:
           pr_closed_by="${PR_CLOSED_BY:-unknown}"
           merged_by="${MERGED_BY:-unknown}"
           merge_commit_sha="${MERGE_COMMIT_SHA:-N/A}"
+          is_author_trusted=$(echo "$trusted_json" | jq -r --arg user "$pr_author" 'if index($user) then "true" else "false" end')
+          if [ -n "$pr_author" ] && [ "$pr_author" != "unknown" ] && [ "$is_author_trusted" != "true" ]; then
+            if [ "$mention_text" = '（未配置通知对象）' ]; then
+              mention_text="@$pr_author"
+            else
+              mention_text="$mention_text；@$pr_author"
+            fi
+          fi
 
           body_file="$RUNNER_TEMP/pr_close_status_notice_body.txt"
 
@@ -152,7 +160,7 @@ jobs:
             fi
 
             echo
-            echo "- PR: #$issue_number"
+            echo "- PR链接: #$issue_number"
             echo "- 标题: $pr_title"
             echo "- 分支流向: $source_branch → $target_branch"
             echo "- 提交人: $pr_author"
