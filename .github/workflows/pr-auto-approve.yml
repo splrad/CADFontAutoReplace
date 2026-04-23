@@ -47,10 +47,10 @@ jobs:
           🚀 核心成员审批已自动提交：**APPROVE**
 
           - **PR**: #$PR_NUMBER
-          - **动作类型**: 自动提交 `APPROVE`
-          - **分支流向**: `$HEAD_REF -> $BASE_REF`
+          - **动作类型**: 自动提交 **APPROVE**
+          - **分支流向**: **$HEAD_REF -> $BASE_REF**
           - **提交人**: $PR_AUTHOR
-          - **执行动作**: `event=APPROVE`
+          - **执行动作**: **event=APPROVE**
 
           > 本审批由 **GitHub Actions** 自动完成。
           EOF
