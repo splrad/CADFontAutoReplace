@@ -3,7 +3,7 @@
 #   1. 确保仓库已创建 TRUSTED_DEVELOPERS 变量（JSON 数组格式的用户名列表）
 #   2. 修改下方 on.pull_request_target.branches 为实际主分支名（main 或 master）
 #   3. 当 PR 关闭时自动发布状态评论，并通过评论中的 @对象触发 GitHub 官方通知邮件
-#   4. 若日志出现 github.token 无写权限，请在仓库 Settings → Actions → General 将 Workflow permissions 设置为 Read and write permissions
+#   4. 若日志出现 github.token 无写权限，先确认仓库 Actions 默认权限为 Read and write，再确认本工作流 jobs.permissions 含 pull-requests: write 与 issues: write
 name: 📣 PR关闭状态通知
 
 on:
@@ -25,7 +25,7 @@ jobs:
 
     permissions:
       issues: write
-      pull-requests: read
+      pull-requests: write
 
     steps:
       - name: 📣 按关闭状态发送评论并 @ 通知对象
@@ -99,7 +99,7 @@ jobs:
 
               if grep -q "Resource not accessible by integration" "$err_file"; then
                 if [ "$order" = "comment-only" ]; then
-                  echo "::error::[$purpose] github.token 无写权限，无法由机器人发布评论。请在仓库 Settings → Actions → General 将 Workflow permissions 设置为 Read and write permissions。" >&2
+                  echo "::error::[$purpose] github.token 无写权限，无法由机器人发布评论。请检查仓库 Actions 默认权限（Read and write）及当前工作流 jobs.permissions 是否包含 pull-requests: write 与 issues: write。" >&2
                   cat "$err_file" >&2
                   return 1
                 fi
