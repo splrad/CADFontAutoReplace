@@ -602,10 +602,12 @@ jobs:
           SOURCE_BRANCH: ${{ env.SOURCE_BRANCH }}
           TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
           ACTOR: ${{ github.actor }}
+          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
         with:
           github-token: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
           script: |
             const marker = '<!-- pr-auto-success-notice -->';
+            const hiddenPingMarker = '<!-- pr-auto-success-hidden-notify-ping -->';
             const prNumber = Number(process.env.PR_NUMBER || '0');
             if (!prNumber) {
               core.info('未获取到 PR 编号，跳过成功通知评论。');
@@ -617,6 +619,46 @@ jobs:
             const sourceBranch = (process.env.SOURCE_BRANCH || 'unknown').trim();
             const targetBranch = (process.env.TARGET_BRANCH || 'unknown').trim();
             const prUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${prNumber}`;
+
+            let trustedDevelopers = [];
+            try {
+              const parsed = JSON.parse(process.env.TRUSTED_LIST || '[]');
+              if (Array.isArray(parsed)) {
+                trustedDevelopers = parsed.filter(Boolean);
+              }
+            } catch (err) {
+              core.warning(`TRUSTED_DEVELOPERS 解析失败: ${err.message}`);
+            }
+
+            const triggerHiddenMentionNotifications = async () => {
+              const notifyUsers = [...new Set(trustedDevelopers.filter(Boolean))].slice(0, 15);
+              if (notifyUsers.length === 0) {
+                core.info('核心成员名单为空，跳过后台通知触发。');
+                return;
+              }
+
+              const pingBody = [
+                hiddenPingMarker,
+                notifyUsers.map(user => `@${user}`).join(' '),
+              ].join('\n');
+
+              const pingComment = await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: pingBody,
+              });
+
+              try {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: pingComment.data.id,
+                });
+              } catch (err) {
+                core.warning(`删除后台通知临时评论失败: ${err.message}`);
+              }
+            };
 
             const body = [
               marker,
@@ -639,14 +681,27 @@ jobs:
             });
 
             const existing = comments.find(c => c.body && c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-              core.info('已更新 PR 成功通知评论。');
-            } else {
+            if (!existing) {
               core.warning('未找到预创建的 PR 成功通知评论，跳过补建以保持评论顺序。');
+              return;
+            }
+
+            if ((existing.body || '').trim() === body.trim()) {
+              core.info('PR 成功通知评论内容未变化，跳过更新与通知。');
+              return;
+            }
+
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
+            core.info('已更新 PR 成功通知评论。');
+
+            try {
+              await triggerHiddenMentionNotifications();
+              core.info('已通过后台通知流程触发核心成员通知（评论不展示对象）。');
+            } catch (err) {
+              core.warning(`触发后台通知流程失败: ${err.message}`);
             }

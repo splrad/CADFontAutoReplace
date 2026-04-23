@@ -86,7 +86,7 @@ jobs:
         env:
           TRUSTED_DEVELOPERS: ${{ vars.TRUSTED_DEVELOPERS }}
         with:
-          github-token: ${{ secrets.MY_PAT || github.token }}
+          github-token: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
           script: |
             const marker = '<!-- sync-test-branch-status:test-to-main-merged -->';
             const notifySentMarker = '<!-- sync-test-branch-notify-sent -->';
