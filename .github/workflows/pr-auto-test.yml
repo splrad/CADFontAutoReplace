@@ -585,6 +585,7 @@ jobs:
         if: env.SKIP_PR_AUTOMATION != 'true'
         env:
           GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
+          GH_NOTIFY_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ env.CURRENT_PR_NUMBER }}
           PR_TITLE: ${{ env.AI_PR_TITLE }}
           SOURCE_BRANCH: ${{ env.SOURCE_BRANCH }}
@@ -656,15 +657,33 @@ jobs:
           echo '已更新 PR 成功通知评论。'
 
           if [ "$reviewer_targets_count" -eq 0 ]; then
-            pulse_body=$(printf '%s\n%s\n%s\n%s\n' \
-              "$pulse_marker" \
-              '🔔 系统通知已触发（无可请求评审对象）。' \
-              "- PR: #$pr_number" \
-              '> 本评论用于触发 GitHub 官方邮件通知，不展示通知对象。')
+            hidden_ping_marker='<!-- pr-auto-success-hidden-notify-ping -->'
+            mention_text="@$pr_author"
+            hidden_ping_body=$(printf '%s\n%s\n' "$hidden_ping_marker" "$mention_text")
 
-            gh api --method POST \
+            if ping_id=$(GH_TOKEN="${GH_NOTIFY_TOKEN:-$GH_TOKEN}" gh api --method POST \
               -H "Accept: application/vnd.github+json" \
               "repos/$REPO/issues/$pr_number/comments" \
-              -f body="$pulse_body" >/dev/null
-            echo '已创建通知脉冲评论，触发参与者邮件通知。'
+              -f body="$hidden_ping_body" \
+              --jq '.id' 2>/dev/null); then
+              if ! GH_TOKEN="${GH_NOTIFY_TOKEN:-$GH_TOKEN}" gh api --method DELETE \
+                -H "Accept: application/vnd.github+json" \
+                "repos/$REPO/issues/comments/$ping_id" >/dev/null 2>&1; then
+                echo "::warning::删除后台通知临时评论失败（comment_id=$ping_id）。"
+              fi
+              echo '已通过后台临时@提及触发作者邮件通知。'
+            else
+              echo '::warning::后台通知触发失败，回退为常规通知脉冲评论。'
+              pulse_body=$(printf '%s\n%s\n%s\n%s\n' \
+                "$pulse_marker" \
+                '🔔 系统通知已触发（无可请求评审对象）。' \
+                "- PR: #$pr_number" \
+                '> 本评论用于触发 GitHub 官方邮件通知，不展示通知对象。')
+
+              gh api --method POST \
+                -H "Accept: application/vnd.github+json" \
+                "repos/$REPO/issues/$pr_number/comments" \
+                -f body="$pulse_body" >/dev/null
+              echo '已创建通知脉冲评论，触发参与者邮件通知。'
+            fi
           fi
