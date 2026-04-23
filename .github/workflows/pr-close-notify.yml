@@ -1,9 +1,9 @@
 # 📋 复用到新项目时的配置步骤：
-#   0. （推荐）将 REPO_ADMIN_TOKEN（或 MY_PAT）配置为独立机器人账号 PAT（repo 权限），用于在受限场景下回退发布评论并提升邮件触达稳定性
+#   0. （可选）创建 REPO_ADMIN_TOKEN（或 MY_PAT）用于读取 API 的回退访问；评论写入不会回退到该令牌
 #   1. 确保仓库已创建 TRUSTED_DEVELOPERS 变量（JSON 数组格式的用户名列表）
 #   2. 修改下方 on.pull_request_target.branches 为实际主分支名（main 或 master）
 #   3. 当 PR 关闭时自动发布状态评论，并通过评论中的 @对象触发 GitHub 官方通知邮件
-#   4. 建议创建 REPO_ADMIN_TOKEN（或 MY_PAT）作为回退令牌，避免受限仓库中的 github.token 出现 403
+#   4. 若日志出现 github.token 无写权限，请在仓库 Settings → Actions → General 将 Workflow permissions 设置为 Read and write permissions
 name: 📣 PR关闭状态通知
 
 on:
@@ -66,6 +66,10 @@ jobs:
 
             if [ "$order" = "api-first" ]; then
               labels=(api comment)
+            elif [ "$order" = "api-only" ]; then
+              labels=(api)
+            elif [ "$order" = "comment-only" ]; then
+              labels=(comment)
             else
               labels=(comment api)
             fi
@@ -94,6 +98,11 @@ jobs:
               fi
 
               if grep -q "Resource not accessible by integration" "$err_file"; then
+                if [ "$order" = "comment-only" ]; then
+                  echo "::error::[$purpose] github.token 无写权限，无法由机器人发布评论。请在仓库 Settings → Actions → General 将 Workflow permissions 设置为 Read and write permissions。" >&2
+                  cat "$err_file" >&2
+                  return 1
+                fi
                 echo "[$purpose] 当前令牌权限受限，尝试备用令牌..." >&2
                 used_fallback="true"
                 continue
@@ -165,19 +174,17 @@ jobs:
           body=$(cat "$body_file")
 
           if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
-            run_gh_api "更新关闭状态评论" "comment-first" --method PATCH \
+            run_gh_api "更新关闭状态评论" "comment-only" --method PATCH \
               -H "Accept: application/vnd.github+json" \
               "repos/$REPO/issues/comments/$existing_id" \
               -f body="$body" >/dev/null
             echo "已更新 PR #$issue_number 的关闭状态通知评论。"
           else
-            run_gh_api "创建关闭状态评论" "comment-first" --method POST \
+            run_gh_api "创建关闭状态评论" "comment-only" --method POST \
               -H "Accept: application/vnd.github+json" \
               "repos/$REPO/issues/$issue_number/comments" \
               -f body="$body" >/dev/null
             echo "已创建 PR #$issue_number 的关闭状态通知评论。"
           fi
 
-          if [ "${RUN_GH_API_LAST_LABEL:-}" != "comment" ]; then
-            echo "::warning::关闭状态评论由备用令牌发布（非 GH_COMMENT_TOKEN）。若该令牌与通知对象为同一账号，GitHub 可能不会发送邮件。建议将 REPO_ADMIN_TOKEN/MY_PAT 配置为独立机器人账号，或将仓库 Actions 的 GITHUB_TOKEN 权限改为 Read and write。"
-          fi
+          echo "关闭状态评论已由 GH_COMMENT_TOKEN 发布（机器人身份）。"
