@@ -158,6 +158,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           AUDIT_STATUS: ${{ steps.audit.outputs.audit_status }}
           CHANGED_FILES: ${{ steps.audit.outputs.changed_files }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
@@ -179,7 +181,6 @@ jobs:
           const prAuthor = process.env.PR_AUTHOR || process.env.GITHUB_ACTOR || 'unknown';
           const trustedApprover = process.env.TRUSTED_APPROVER || 'unknown';
           const prNumber = Number(process.env.PR_NUMBER || '0');
-          const prNumberText = prNumber ? `#${prNumber}` : '未知编号';
 
           const [owner, repo] = (process.env.GITHUB_REPOSITORY || '/').split('/');
           if (!owner || !repo || !prNumber) {
@@ -201,12 +202,17 @@ jobs:
             return out ? JSON.parse(out) : null;
           };
 
-          let prTitle = '未知标题';
+          let branchFlow = `${trim(process.env.PR_HEAD_REF || 'unknown')} → ${trim(process.env.PR_BASE_REF || 'unknown')}`;
+          const prUrl = `https://github.com/${owner}/${repo}/pull/${prNumber}`;
           try {
             const latestPr = ghJson(['--method', 'GET', `repos/${owner}/${repo}/pulls/${prNumber}`]);
-            prTitle = trim(latestPr?.title) || prTitle;
+            const latestHead = trim(latestPr?.head?.ref || '');
+            const latestBase = trim(latestPr?.base?.ref || '');
+            if (latestHead && latestBase) {
+              branchFlow = `${latestHead} → ${latestBase}`;
+            }
           } catch (err) {
-            console.log(`::warning::获取最新 PR 标题失败: ${errText(err)}`);
+            console.log(`::warning::获取最新 PR 分支流向失败: ${errText(err)}`);
           }
 
           const changedFilesRaw = trim(process.env.CHANGED_FILES || '');
@@ -273,8 +279,8 @@ jobs:
               stateMarker,
               '### ✅ 工作流配置保护规则已通过',
               '',
-              `- PR 标题：**${prTitle}**`,
-              `- PR 编号：**${prNumberText}**`,
+              `- 分支流向：**${branchFlow}**`,
+              `- PR 链接：${prUrl}`,
               `- 通知对象：${mentionText}`,
               '',
               '未检测到 `.github/workflows/` 目录变更，本次规则检查通过。',
@@ -287,8 +293,8 @@ jobs:
               stateMarker,
               '### ✅ 工作流配置保护规则已通过',
               '',
-              `- PR 标题：**${prTitle}**`,
-              `- PR 编号：**${prNumberText}**`,
+              `- 分支流向：**${branchFlow}**`,
+              `- PR 链接：${prUrl}`,
               `- 通知对象：${mentionText}`,
               '',
               `检测到工作流文件变更，且提交者 **${prAuthor}** 属于核心开发者，允许变更。`,
@@ -303,8 +309,8 @@ jobs:
               stateMarker,
               '### ✅ 工作流配置保护规则已通过',
               '',
-              `- PR 标题：**${prTitle}**`,
-              `- PR 编号：**${prNumberText}**`,
+              `- 分支流向：**${branchFlow}**`,
+              `- PR 链接：${prUrl}`,
               `- 通知对象：${mentionText}`,
               '',
               '检测到工作流文件变更，提交者虽非核心开发者，但已获得核心开发者有效审批，允许变更。',
@@ -322,8 +328,8 @@ jobs:
               stateMarker,
               '### ❌ 工作流配置保护规则未通过',
               '',
-              `- PR 标题：**${prTitle}**`,
-              `- PR 编号：**${prNumberText}**`,
+              `- 分支流向：**${branchFlow}**`,
+              `- PR 链接：${prUrl}`,
               `- 通知对象：${mentionText}`,
               '',
               `提交者 **${prAuthor}** 不在核心开发者名单中，且尚未获得针对当前最新提交的核心开发者有效审批，不满足合并条件。`,
@@ -470,6 +476,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           APPROVAL_STATUS: ${{ steps.approval-check.outputs.approval_status }}
           TRUSTED_APPROVER: ${{ steps.approval-check.outputs.trusted_approver }}
           CURRENT_APPROVERS: ${{ steps.approval-check.outputs.current_approvers }}
@@ -488,7 +496,6 @@ jobs:
           const trustedApprover = process.env.TRUSTED_APPROVER || '';
           const prAuthor = process.env.PR_AUTHOR || 'unknown';
           const prNumber = Number(process.env.PR_NUMBER || '0');
-          const prNumberText = prNumber ? `#${prNumber}` : '未知编号';
 
           const [owner, repo] = (process.env.GITHUB_REPOSITORY || '/').split('/');
           if (!owner || !repo || !prNumber) {
@@ -510,12 +517,17 @@ jobs:
             return out ? JSON.parse(out) : null;
           };
 
-          let prTitle = '未知标题';
+          let branchFlow = `${trim(process.env.PR_HEAD_REF || 'unknown')} → ${trim(process.env.PR_BASE_REF || 'unknown')}`;
+          const prUrl = `https://github.com/${owner}/${repo}/pull/${prNumber}`;
           try {
             const latestPr = ghJson(['--method', 'GET', `repos/${owner}/${repo}/pulls/${prNumber}`]);
-            prTitle = trim(latestPr?.title) || prTitle;
+            const latestHead = trim(latestPr?.head?.ref || '');
+            const latestBase = trim(latestPr?.base?.ref || '');
+            if (latestHead && latestBase) {
+              branchFlow = `${latestHead} → ${latestBase}`;
+            }
           } catch (err) {
-            console.log(`::warning::获取最新 PR 标题失败: ${errText(err)}`);
+            console.log(`::warning::获取最新 PR 分支流向失败: ${errText(err)}`);
           }
 
           let trustedDevelopers = [];
@@ -570,8 +582,8 @@ jobs:
               stateMarker,
               '### ✅ 主分支合并权限校验通过',
               '',
-              `- PR 标题：**${prTitle}**`,
-              `- PR 编号：**${prNumberText}**`,
+              `- 分支流向：**${branchFlow}**`,
+              `- PR 链接：${prUrl}`,
               `- 通知对象：${mentionText}`,
               '',
               '已检测到核心开发者有效审批，当前 PR 满足主分支合并权限要求。',
@@ -586,8 +598,8 @@ jobs:
               stateMarker,
               '### ❌ 仍不能合并：审批来源不满足要求',
               '',
-              `- PR 标题：**${prTitle}**`,
-              `- PR 编号：**${prNumberText}**`,
+              `- 分支流向：**${branchFlow}**`,
+              `- PR 链接：${prUrl}`,
               `- 通知对象：${mentionText}`,
               '',
               '虽然该 PR 历史上可能已有审批记录，但针对当前最新提交仍缺少核心开发者有效审批，因此不满足主分支合并条件。',
@@ -603,8 +615,8 @@ jobs:
               stateMarker,
               '### ✅ 主分支合并权限校验通过',
               '',
-              `- PR 标题：**${prTitle}**`,
-              `- PR 编号：**${prNumberText}**`,
+              `- 分支流向：**${branchFlow}**`,
+              `- PR 链接：${prUrl}`,
               `- 通知对象：${mentionText}`,
               '',
               `PR 提交人 **${prAuthor}** 属于核心开发者，已满足主分支合并权限要求。`,

@@ -121,8 +121,8 @@ jobs:
               "- PR标题：**$SOURCE_BRANCH ➔ $TARGET_BRANCH**" \
               "- 提交人：**$GITHUB_ACTOR**" \
               "- 分支流向：**$SOURCE_BRANCH → $TARGET_BRANCH**" \
-              "- 通知对象：$MENTION_TEXT" \
               "- PR 链接：$PR_URL" \
+              "- 通知对象：$MENTION_TEXT" \
               '')
 
             GH_TOKEN="${GH_COMMENT_TOKEN:-$GH_TOKEN}" gh api --method POST \
@@ -575,8 +575,8 @@ jobs:
             echo "- PR标题：**$pr_title**"
             echo "- 提交人：**$pr_author**"
             echo "- 分支流向：**$source_branch → $target_branch**"
-            echo "- 通知对象：$mention_text"
             echo "- PR 链接：$pr_url"
+            echo "- 通知对象：$mention_text"
             echo
           } > "$body_file"
           body=$(cat "$body_file")
