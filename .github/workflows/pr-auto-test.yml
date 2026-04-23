@@ -94,6 +94,38 @@ jobs:
             echo "检测到当前打开的集成请求：#$CURRENT_PR_NUMBER"
           fi
 
+          # 在流程前段确保成功通知评论存在：缺失则立即补建，避免在流程末尾置后创建。
+          EXISTING_NOTICE_COMMENT_ID=$(gh api --method GET \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$REPO/issues/$CURRENT_PR_NUMBER/comments" \
+            -f per_page=100 \
+            --jq '.[] | select((.body // "") | contains("<!-- pr-auto-success-notice -->")) | .id' \
+            | head -n 1)
+
+          if [ -z "$EXISTING_NOTICE_COMMENT_ID" ]; then
+            PR_URL="https://github.com/$REPO/pull/$CURRENT_PR_NUMBER"
+            NOTICE_BODY=$(printf '%s\n' \
+              '<!-- pr-auto-success-notice -->' \
+              '## ✅ PR 创建成功通知' \
+              '' \
+              '> 本通知由 **GitHub Actions** 自动发布。' \
+              '' \
+              '### 📌 关键信息' \
+              "- PR标题：**$SOURCE_BRANCH ➔ $TARGET_BRANCH**" \
+              "- 提交人：**$GITHUB_ACTOR**" \
+              "- 分支流向：**$SOURCE_BRANCH → $TARGET_BRANCH**" \
+              "- PR 链接：$PR_URL" \
+              '')
+
+            gh api --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "repos/$REPO/issues/$CURRENT_PR_NUMBER/comments" \
+              -f body="$NOTICE_BODY" >/dev/null
+            echo "已在流程前段补建 PR 成功通知评论。"
+          else
+            echo "PR 成功通知评论已存在（comment_id=$EXISTING_NOTICE_COMMENT_ID），后续将仅更新。"
+          fi
+
           echo "CURRENT_PR_NUMBER=$CURRENT_PR_NUMBER" >> "$GITHUB_ENV"
 
       - name: 🧠 基于当前PR净差异生成变更说明
@@ -610,11 +642,5 @@ jobs:
               });
               core.info('已更新 PR 成功通知评论。');
             } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body,
-              });
-              core.info('已创建 PR 成功通知评论。');
+              core.warning('未找到预创建的 PR 成功通知评论，跳过补建以保持评论顺序。');
             }

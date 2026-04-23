@@ -158,6 +158,7 @@ jobs:
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
           AUDIT_STATUS: ${{ steps.audit.outputs.audit_status }}
           CHANGED_FILES: ${{ steps.audit.outputs.changed_files }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
@@ -176,6 +177,9 @@ jobs:
             const status = process.env.AUDIT_STATUS || 'unknown';
             const prAuthor = process.env.PR_AUTHOR || context.actor || 'unknown';
             const trustedApprover = process.env.TRUSTED_APPROVER || 'unknown';
+            const prNumber = Number(process.env.PR_NUMBER || context.issue.number || '0');
+            const prNumberText = prNumber ? `#${prNumber}` : '未知编号';
+            const prTitle = process.env.PR_TITLE || context.payload.pull_request?.title || '未知标题';
 
             const changedFilesRaw = (process.env.CHANGED_FILES || '').trim();
             const changedFiles = changedFilesRaw && changedFilesRaw !== '无'
@@ -289,13 +293,11 @@ jobs:
               return '未找到可请求的核心成员，未触发通知。';
             };
 
-            let notificationStatusText = '状态未发生通过/失败切换，未重复触发通知。';
             if (shouldBroadcastNow) {
               try {
-                notificationStatusText = await requestCoreReviewerNotifications();
+                await requestCoreReviewerNotifications();
               } catch (err) {
                 core.warning(`触发核心成员通知失败: ${err.message}`);
-                notificationStatusText = '触发通知失败，请检查权限或核心成员配置。';
               }
             }
 
@@ -305,6 +307,9 @@ jobs:
                 marker,
                 stateMarker,
                 '### ✅ 工作流配置保护规则已通过',
+                '',
+                `- PR 标题：**${prTitle}**`,
+                `- PR 编号：**${prNumberText}**`,
                 '',
                 '未检测到 `.github/workflows/` 目录变更，本次规则检查通过。',
                 '',
@@ -316,19 +321,23 @@ jobs:
                 stateMarker,
                 '### ✅ 工作流配置保护规则已通过',
                 '',
+                `- PR 标题：**${prTitle}**`,
+                `- PR 编号：**${prNumberText}**`,
+                '',
                 `检测到工作流文件变更，且提交者 **${prAuthor}** 属于核心开发者，允许变更。`,
                 '',
                 '**涉及的工作流文件：**',
                 fileList,
                 '',
-                '**通知状态：**',
-                notificationStatusText,
               ].join('\n');
             } else if (status === 'core_review_approved_workflow_change') {
               body = [
                 marker,
                 stateMarker,
                 '### ✅ 工作流配置保护规则已通过',
+                '',
+                `- PR 标题：**${prTitle}**`,
+                `- PR 编号：**${prNumberText}**`,
                 '',
                 '检测到工作流文件变更，提交者虽非核心开发者，但已获得核心开发者有效审批，允许变更。',
                 '',
@@ -338,14 +347,15 @@ jobs:
                 '**涉及的工作流文件：**',
                 fileList,
                 '',
-                '**通知状态：**',
-                notificationStatusText,
               ].join('\n');
             } else if (status === 'unauthorized_workflow_change') {
               body = [
                 marker,
                 stateMarker,
                 '### ❌ 工作流配置保护规则未通过',
+                '',
+                `- PR 标题：**${prTitle}**`,
+                `- PR 编号：**${prNumberText}**`,
                 '',
                 `提交者 **${prAuthor}** 不在核心开发者名单中，且尚未获得针对当前最新提交的核心开发者有效审批，不满足合并条件。`,
                 '',
@@ -356,8 +366,6 @@ jobs:
                 '1. 撤回对 `.github/workflows/` 目录下文件的修改',
                 '2. 或联系任一核心成员进行有效审批。',
                 '',
-                '**通知状态：**',
-                notificationStatusText,
               ].join('\n');
             } else {
               core.info('未获取到明确审计状态，跳过评论回写。');
@@ -499,6 +507,7 @@ jobs:
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
           APPROVAL_STATUS: ${{ steps.approval-check.outputs.approval_status }}
           TRUSTED_APPROVER: ${{ steps.approval-check.outputs.trusted_approver }}
           CURRENT_APPROVERS: ${{ steps.approval-check.outputs.current_approvers }}
@@ -514,6 +523,9 @@ jobs:
             const status = process.env.APPROVAL_STATUS || 'unknown';
             const trustedApprover = process.env.TRUSTED_APPROVER || '';
             const prAuthor = process.env.PR_AUTHOR || 'unknown';
+            const prNumber = Number(process.env.PR_NUMBER || context.issue.number || '0');
+            const prNumberText = prNumber ? `#${prNumber}` : '未知编号';
+            const prTitle = process.env.PR_TITLE || context.payload.pull_request?.title || '未知标题';
 
             let trustedDevelopers = [];
             try {
@@ -615,13 +627,11 @@ jobs:
               return '未找到可请求的核心成员，未触发通知。';
             };
 
-            let notificationStatusText = '状态未发生通过/失败切换，未重复触发通知。';
             if (shouldBroadcastNow) {
               try {
-                notificationStatusText = await requestCoreReviewerNotifications();
+                await requestCoreReviewerNotifications();
               } catch (err) {
                 core.warning(`触发核心成员通知失败: ${err.message}`);
-                notificationStatusText = '触发通知失败，请检查权限或核心成员配置。';
               }
             }
 
@@ -632,13 +642,14 @@ jobs:
                 stateMarker,
                 '### ✅ 主分支合并权限校验通过',
                 '',
+                `- PR 标题：**${prTitle}**`,
+                `- PR 编号：**${prNumberText}**`,
+                '',
                 '已检测到核心开发者有效审批，当前 PR 满足主分支合并权限要求。',
                 '',
                 `- 批准此 PR 合并的核心开发者：**${trustedApprover || 'unknown'}**`,
                 `- PR 提交人：**${prAuthor}**`,
                 '',
-                '**通知状态：**',
-                notificationStatusText,
               ].join('\n');
             } else if (status === 'non_trusted_only') {
               body = [
@@ -646,14 +657,15 @@ jobs:
                 stateMarker,
                 '### ❌ 仍不能合并：审批来源不满足要求',
                 '',
+                `- PR 标题：**${prTitle}**`,
+                `- PR 编号：**${prNumberText}**`,
+                '',
                 '虽然该 PR 历史上可能已有审批记录，但针对当前最新提交仍缺少核心开发者有效审批，因此不满足主分支合并条件。',
                 '- 失败原因：**缺少核心开发者有效审批**',
                 '',
                 '**处理方式：**',
                 '请联系任一核心成员完成对当前最新提交的有效审批。',
                 '',
-                '**通知状态：**',
-                notificationStatusText,
               ].join('\n');
             } else if (status === 'author_trusted') {
               body = [
@@ -661,10 +673,11 @@ jobs:
                 stateMarker,
                 '### ✅ 主分支合并权限校验通过',
                 '',
+                `- PR 标题：**${prTitle}**`,
+                `- PR 编号：**${prNumberText}**`,
+                '',
                 `PR 提交人 **${prAuthor}** 属于核心开发者，已满足主分支合并权限要求。`,
                 '',
-                '**通知状态：**',
-                notificationStatusText,
               ].join('\n');
             } else {
               core.info('未获取到明确审批状态，跳过评论回写。');
