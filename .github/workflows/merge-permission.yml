@@ -2,7 +2,7 @@
 #   1. 确保仓库已创建 TRUSTED_DEVELOPERS 变量（JSON 数组格式的用户名列表）
 #   2. 在 test 和 main 分支保护规则中勾选「Require a pull request before merging」，
 #      禁止任何人直接推送到受保护分支，所有变更必须通过 PR 合入
-#   3. 在 test 分支保护规则中将「🔒 工作流配置保护规则」添加为必须通过的状态检查
+#   3. 在 test 分支保护规则中将「🔒 自动化资源保护规则」添加为必须通过的状态检查
 #   4. 在 main 分支保护规则中将「🔐 主分支合并权限审计」添加为必须通过的状态检查
 #   5. 取消勾选「要求代码所有者进行审查」，本工作流的权限校验 Job 已替代该功能
 name: 🛡️ 合并审批权限校验
@@ -20,12 +20,12 @@ concurrency:
 jobs:
   # ────────────────────────────────────────────────────────
   # 场景一：PR → test 分支
-  # 仅检查是否修改了 .github/workflows 下的文件
-  # 未修改工作流文件 → 直接放行
-  # 修改了工作流文件 → 必须获得核心开发者有效审批（核心成员提交或核心成员审批）
+  # 仅检查是否修改了 .github/workflows 或 .github/skills 下的文件
+  # 未修改受保护配置文件 → 直接放行
+  # 修改了受保护配置文件 → 必须获得核心开发者有效审批（核心成员提交或核心成员审批）
   # ────────────────────────────────────────────────────────
   workflow-file-audit:
-    name: 🔒 工作流配置保护规则
+    name: 🔒 自动化资源保护规则
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: github.event.pull_request.base.ref == 'test'
@@ -36,7 +36,7 @@ jobs:
       issues: write
 
     steps:
-      - name: 🔍 检测工作流文件变更与核心审批
+      - name: 🔍 检测受保护配置文件变更与核心审批
         id: audit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -60,16 +60,16 @@ jobs:
             --paginate \
             --jq '.[].filename')
           
-          # 检查是否有 .github/workflows 下的文件被修改
+          # 检查是否有 .github/workflows 或 .github/skills 下的文件被修改
           WORKFLOW_CHANGES=""
           while IFS= read -r file; do
-            if [[ "$file" == .github/workflows/* ]]; then
+            if [[ "$file" == .github/workflows/* || "$file" == .github/skills/* ]]; then
               WORKFLOW_CHANGES="${WORKFLOW_CHANGES}${file}\n"
             fi
           done <<< "$CHANGED_FILES"
           
           if [ -z "$WORKFLOW_CHANGES" ]; then
-            echo "✅ 未检测到工作流文件变更，放行。"
+            echo "✅ 未检测到受保护配置文件变更，放行。"
             {
               echo "has_violation=false"
               echo "audit_status=no_workflow_change"
@@ -80,7 +80,7 @@ jobs:
             exit 0
           fi
           
-          echo "⚠️ 检测到以下工作流文件被修改："
+          echo "⚠️ 检测到以下受保护配置文件被修改："
           echo -e "$WORKFLOW_CHANGES"
 
           {
@@ -94,7 +94,7 @@ jobs:
           IS_TRUSTED=$(echo "$TRUSTED_LIST_JSON" | jq -r --arg actor "$PR_AUTHOR" 'if index($actor) then "true" else "false" end')
           
           if [ "$IS_TRUSTED" = "true" ]; then
-            echo "✅ 提交者 $PR_AUTHOR 在核心开发者名单中，允许修改工作流文件。"
+            echo "✅ 提交者 $PR_AUTHOR 在核心开发者名单中，允许修改受保护配置文件。"
             {
               echo "has_violation=false"
               echo "audit_status=trusted_workflow_change"
@@ -133,7 +133,7 @@ jobs:
           done
 
           if [ "$HAS_TRUSTED_APPROVER" = "true" ]; then
-            echo "✅ 检测到核心开发者审批 $TRUSTED_APPROVER，允许本次工作流文件变更。"
+            echo "✅ 检测到核心开发者审批 $TRUSTED_APPROVER，允许本次受保护配置文件变更。"
             {
               echo "has_violation=false"
               echo "audit_status=core_review_approved_workflow_change"
@@ -143,8 +143,8 @@ jobs:
             exit 0
           fi
           
-          # 非核心开发者修改了工作流文件且未获得针对当前最新提交的核心开发者有效审批 → 违规
-          echo "❌ 提交者 $PR_AUTHOR 非核心且未获得针对当前最新提交的核心开发者有效审批，禁止修改工作流文件。"
+          # 非核心开发者修改了受保护配置文件且未获得针对当前最新提交的核心开发者有效审批 → 违规
+          echo "❌ 提交者 $PR_AUTHOR 非核心且未获得针对当前最新提交的核心开发者有效审批，禁止修改受保护配置文件。"
           {
             echo "has_violation=true"
             echo "audit_status=unauthorized_workflow_change"
@@ -279,13 +279,13 @@ jobs:
               stateMarker,
               '## 🛡️【合并权限审查】已通过',
               '',
-              '### ✅ 工作流配置保护规则已通过',
+              '### ✅ 自动化资源保护规则已通过',
               '',
               `- PR：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
               `- 通知对象：${mentionText}`,
               '',
-              '未检测到 `.github/workflows/` 目录变更，本次规则检查通过。',
+              '未检测到 `.github/workflows/` 或 `.github/skills/` 目录变更，本次规则检查通过。',
               '',
               `- PR 提交人：**${prAuthor}**`,
               '',
@@ -298,15 +298,15 @@ jobs:
               stateMarker,
               '## 🛡️【合并权限审查】已通过',
               '',
-              '### ✅ 工作流配置保护规则已通过',
+              '### ✅ 自动化资源保护规则已通过',
               '',
               `- PR：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
               `- 通知对象：${mentionText}`,
               '',
-              `检测到工作流文件变更，且提交者 **${prAuthor}** 属于核心开发者，允许变更。`,
+              `检测到受保护配置文件变更，且提交者 **${prAuthor}** 属于核心开发者，允许变更。`,
               '',
-              '**涉及的工作流文件：**',
+              '**涉及的受保护配置文件：**',
               fileList,
               '',
               '',
@@ -318,18 +318,18 @@ jobs:
               stateMarker,
               '## 🛡️【合并权限审查】已通过',
               '',
-              '### ✅ 工作流配置保护规则已通过',
+              '### ✅ 自动化资源保护规则已通过',
               '',
               `- PR：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
               `- 通知对象：${mentionText}`,
               '',
-              '检测到工作流文件变更，提交者虽非核心开发者，但已获得核心开发者有效审批，允许变更。',
+              '检测到受保护配置文件变更，提交者虽非核心开发者，但已获得核心开发者有效审批，允许变更。',
               '',
               `- PR 提交人：**${prAuthor}**`,
               `- 批准此 PR 合并的核心开发者：**${trustedApprover}**`,
               '',
-              '**涉及的工作流文件：**',
+              '**涉及的受保护配置文件：**',
               fileList,
               '',
               '',
@@ -341,7 +341,7 @@ jobs:
               stateMarker,
               '## 🛡️【合并权限审查】未通过',
               '',
-              '### ❌ 工作流配置保护规则未通过',
+              '### ❌ 自动化资源保护规则未通过',
               '',
               `- PR：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
@@ -349,11 +349,11 @@ jobs:
               '',
               `提交者 **${prAuthor}** 不在核心开发者名单中，且尚未获得针对当前最新提交的核心开发者有效审批，不满足合并条件。`,
               '',
-              '**涉及的工作流文件：**',
+              '**涉及的受保护配置文件：**',
               fileList,
               '',
               '**处理方式：**',
-              '1. 撤回对 `.github/workflows/` 目录下文件的修改',
+              '1. 撤回对 `.github/workflows/` 或 `.github/skills/` 目录下文件的修改',
               '2. 或联系任一核心成员进行有效审批。',
               '',
               '',
@@ -386,10 +386,10 @@ jobs:
           }
           NODE
 
-      - name: 🚫 阻断非授权工作流变更
+      - name: 🚫 阻断非授权自动化资源变更
         if: steps.audit.outputs.audit_status == 'unauthorized_workflow_change'
         run: |
-          echo "❌ 非授权用户修改了工作流文件，合并被阻断。"
+          echo "❌ 非授权用户修改了受保护配置文件，合并被阻断。"
           exit 1
 
   # ────────────────────────────────────────────────────────

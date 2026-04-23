@@ -115,14 +115,15 @@ jobs:
               '<!-- pr-auto-success-notice -->' \
               '## ✅ PR 创建成功通知' \
               '' \
-              '> 本通知由 **GitHub Actions** 自动发布。' \
-              '' \
               '### 📌 关键信息' \
+              '' \
               "- PR标题：**$SOURCE_BRANCH ➔ $TARGET_BRANCH**" \
               "- 提交人：**$GITHUB_ACTOR**" \
               "- 分支流向：**$SOURCE_BRANCH → $TARGET_BRANCH**" \
               "- PR 链接：$PR_URL" \
               "- 通知对象：$MENTION_TEXT" \
+              '' \
+              '> 本通知由 **GitHub Actions** 自动发布。' \
               '')
 
             GH_TOKEN="${GH_COMMENT_TOKEN:-$GH_TOKEN}" gh api --method POST \
@@ -569,15 +570,15 @@ jobs:
             echo "$marker"
             echo '## ✅ PR 创建成功通知'
             echo
-            echo '> 本通知由 **GitHub Actions** 自动发布。'
-            echo
             echo '### 📌 关键信息'
+            echo
             echo "- PR标题：**$pr_title**"
             echo "- 提交人：**$pr_author**"
             echo "- 分支流向：**$source_branch → $target_branch**"
             echo "- PR 链接：$pr_url"
             echo "- 通知对象：$mention_text"
             echo
+            echo '> 本通知由 **GitHub Actions** 自动发布。'
           } > "$body_file"
           body=$(cat "$body_file")
 
