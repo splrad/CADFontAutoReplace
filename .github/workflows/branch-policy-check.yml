@@ -71,7 +71,7 @@ jobs:
         # 仅在上述步骤失败时运行
         if: failure()
         env:
-          GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN || secrets.MY_PAT || github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
           REPO: ${{ github.repository }}
