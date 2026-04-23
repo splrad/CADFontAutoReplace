@@ -158,7 +158,6 @@ jobs:
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
           AUDIT_STATUS: ${{ steps.audit.outputs.audit_status }}
           CHANGED_FILES: ${{ steps.audit.outputs.changed_files }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
@@ -166,7 +165,7 @@ jobs:
           CURRENT_APPROVERS: ${{ steps.audit.outputs.current_approvers }}
           TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
         with:
-          github-token: ${{ secrets.MY_PAT || github.token }}
+          github-token: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
           script: |
             const marker = '<!-- workflow-file-audit-status -->';
             const stateMarkerPrefix = '<!-- workflow-file-audit-state:';
@@ -179,7 +178,19 @@ jobs:
             const trustedApprover = process.env.TRUSTED_APPROVER || 'unknown';
             const prNumber = Number(process.env.PR_NUMBER || context.issue.number || '0');
             const prNumberText = prNumber ? `#${prNumber}` : '未知编号';
-            const prTitle = process.env.PR_TITLE || context.payload.pull_request?.title || '未知标题';
+            let prTitle = context.payload.pull_request?.title || '未知标题';
+            if (prNumber) {
+              try {
+                const { data: latestPr } = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                });
+                prTitle = (latestPr.title || '').trim() || prTitle;
+              } catch (err) {
+                core.warning(`获取最新 PR 标题失败: ${err.message}`);
+              }
+            }
 
             const changedFilesRaw = (process.env.CHANGED_FILES || '').trim();
             const changedFiles = changedFilesRaw && changedFilesRaw !== '无'
@@ -507,14 +518,13 @@ jobs:
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
           APPROVAL_STATUS: ${{ steps.approval-check.outputs.approval_status }}
           TRUSTED_APPROVER: ${{ steps.approval-check.outputs.trusted_approver }}
           CURRENT_APPROVERS: ${{ steps.approval-check.outputs.current_approvers }}
           TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         with:
-          github-token: ${{ secrets.MY_PAT || github.token }}
+          github-token: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
           script: |
             const marker = '<!-- merge-permission-approval-status -->';
             const stateMarkerPrefix = '<!-- merge-permission-approval-state:';
@@ -525,7 +535,19 @@ jobs:
             const prAuthor = process.env.PR_AUTHOR || 'unknown';
             const prNumber = Number(process.env.PR_NUMBER || context.issue.number || '0');
             const prNumberText = prNumber ? `#${prNumber}` : '未知编号';
-            const prTitle = process.env.PR_TITLE || context.payload.pull_request?.title || '未知标题';
+            let prTitle = context.payload.pull_request?.title || '未知标题';
+            if (prNumber) {
+              try {
+                const { data: latestPr } = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                });
+                prTitle = (latestPr.title || '').trim() || prTitle;
+              } catch (err) {
+                core.warning(`获取最新 PR 标题失败: ${err.message}`);
+              }
+            }
 
             let trustedDevelopers = [];
             try {

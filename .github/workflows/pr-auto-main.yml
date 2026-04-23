@@ -2,7 +2,7 @@
 #   1) 创建仓库 Secrets（路径：Settings → Secrets and variables → Actions → New repository secret）
 #      Secret 名称必须与下方完全一致（区分大小写）：
 #      - DeepSeek_API_KEY：DeepSeek Key，示例值格式：sk-xxxxxxxx
-#      - MY_PAT：GitHub PAT（建议最小权限覆盖：Pull requests 读写、Contents 读写）
+#      - PR_PAT：GitHub PAT（建议最小权限覆盖：Pull requests 读写、Issues 读写、Contents 只读）
 #   2) 修改下方 env 中的 TARGET_BRANCH（例如 main 或 master）
 #   3) 可选：在仓库 Variables 中创建 TRUSTED_DEVELOPERS（JSON 数组）
 #      示例：["splrad", "another-user"]
@@ -57,7 +57,8 @@ jobs:
 
       - name: 🔍 定位当前集成请求
         env:
-          GH_TOKEN: ${{ secrets.MY_PAT }}
+          GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT }}
+          GH_COMMENT_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
         run: |
           # 检查源分支相对目标分支是否有新提交，若无差异则跳过（如 test 刚被同步至 main）
           AHEAD_COUNT=$(git rev-list --count "origin/$TARGET_BRANCH".."origin/$SOURCE_BRANCH" 2>/dev/null || echo "0")
@@ -97,7 +98,7 @@ jobs:
           fi
 
           # 在流程前段确保成功通知评论存在：缺失则立即补建，避免在流程末尾置后创建。
-          EXISTING_NOTICE_COMMENT_ID=$(gh api --method GET \
+          EXISTING_NOTICE_COMMENT_ID=$(GH_TOKEN="${GH_COMMENT_TOKEN:-$GH_TOKEN}" gh api --method GET \
             -H "Accept: application/vnd.github+json" \
             "repos/$REPO/issues/$CURRENT_PR_NUMBER/comments" \
             -f per_page=100 \
@@ -119,7 +120,7 @@ jobs:
               "- PR 链接：$PR_URL" \
               '')
 
-            gh api --method POST \
+            GH_TOKEN="${GH_COMMENT_TOKEN:-$GH_TOKEN}" gh api --method POST \
               -H "Accept: application/vnd.github+json" \
               "repos/$REPO/issues/$CURRENT_PR_NUMBER/comments" \
               -f body="$NOTICE_BODY" >/dev/null
@@ -136,7 +137,7 @@ jobs:
         env:
           # 关键：使用 Secrets 传递 API 密钥，避免泄露风险
           DEEPSEEK_API_KEY: ${{ secrets.DeepSeek_API_KEY }}
-          GH_TOKEN: ${{ secrets.MY_PAT }}
+          GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT }}
         run: |
           REPO="$GITHUB_REPOSITORY"
           TARGET_REF="origin/$TARGET_BRANCH"
@@ -513,7 +514,7 @@ jobs:
         if: env.SKIP_PR_AUTOMATION != 'true'
         env:
           # ❗ 关键点：必须使用个人访问令牌 (PAT)
-          GH_TOKEN: ${{ secrets.MY_PAT }}
+          GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT }}
           # 通过环境变量传递 AI 内容，避免 shell 注入
           PR_TITLE: ${{ env.AI_PR_TITLE }}
           PR_BODY_CONTENT: ${{ env.AI_PR_BODY }}
@@ -536,7 +537,7 @@ jobs:
           TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
           PR_AUTHOR: ${{ github.actor }}
         with:
-          github-token: ${{ secrets.MY_PAT || github.token }}
+          github-token: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
           script: |
             const prNumber = Number(process.env.PR_NUMBER || '0');
             if (!prNumber) {
@@ -602,7 +603,7 @@ jobs:
           TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
           ACTOR: ${{ github.actor }}
         with:
-          github-token: ${{ secrets.MY_PAT || github.token }}
+          github-token: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
           script: |
             const marker = '<!-- pr-auto-success-notice -->';
             const prNumber = Number(process.env.PR_NUMBER || '0');
