@@ -2,6 +2,7 @@
 #   1. 确保仓库已创建 TRUSTED_DEVELOPERS 变量（JSON 数组格式的用户名列表）
 #   2. 修改下方 on.pull_request_target.branches 为实际主分支名（main 或 master）
 #   3. 当 PR 关闭时自动发布状态评论，并通过评论中的 @对象触发 GitHub 官方通知邮件
+#   4. 建议创建 PR_PAT（或 MY_PAT）作为回退令牌，避免受限仓库中的 github.token 出现 403
 name: 📣 PR关闭状态通知
 
 on:
@@ -28,7 +29,8 @@ jobs:
     steps:
       - name: 📣 按关闭状态发送评论并 @ 通知对象
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
+          GH_COMMENT_TOKEN: ${{ github.token }}
           TRUSTED_DEVELOPERS: ${{ vars.TRUSTED_DEVELOPERS }}
           ISSUE_NUMBER: ${{ github.event.pull_request.number }}
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -49,11 +51,67 @@ jobs:
             exit 0
           fi
 
+          run_gh_api() {
+            local purpose="$1"
+            local order="${2:-comment-first}"
+            shift 2
+
+            local err_file="$RUNNER_TEMP/pr_close_notify_gh_err.log"
+            local tried_any="false"
+            local used_fallback="false"
+            local labels=()
+
+            if [ "$order" = "api-first" ]; then
+              labels=(api comment)
+            else
+              labels=(comment api)
+            fi
+
+            for label in "${labels[@]}"; do
+              local token=""
+              if [ "$label" = "comment" ]; then
+                token="${GH_COMMENT_TOKEN:-}"
+              else
+                token="${GH_TOKEN:-}"
+                if [ -n "${GH_COMMENT_TOKEN:-}" ] && [ "$token" = "$GH_COMMENT_TOKEN" ]; then
+                  continue
+                fi
+              fi
+
+              [ -z "$token" ] && continue
+
+              tried_any="true"
+              if GH_TOKEN="$token" gh api "$@" 2>"$err_file"; then
+                if [ "$used_fallback" = "true" ]; then
+                  echo "[$purpose] 已使用备用令牌执行成功。" >&2
+                fi
+                return 0
+              fi
+
+              if grep -q "Resource not accessible by integration" "$err_file"; then
+                echo "[$purpose] 当前令牌权限受限，尝试备用令牌..." >&2
+                used_fallback="true"
+                continue
+              fi
+
+              cat "$err_file" >&2
+              return 1
+            done
+
+            if [ "$tried_any" != "true" ]; then
+              echo "[$purpose] 未配置可用令牌，无法调用 gh api。" >&2
+              return 1
+            fi
+
+            [ -f "$err_file" ] && cat "$err_file" >&2
+            return 1
+          }
+
           trusted_json=$(printf '%s' "${TRUSTED_DEVELOPERS:-[]}" | jq -c 'if type == "array" then map(select(type == "string" and length > 0)) else [] end' 2>/dev/null || echo '[]')
           mention_text=$(echo "$trusted_json" | jq -r 'unique | map("@" + .) | join(" ")')
           [ -z "$mention_text" ] && mention_text='（未配置通知对象）'
 
-          comments_json=$(gh api --method GET \
+          comments_json=$(run_gh_api "读取关闭状态评论" "api-first" --method GET \
             -H "Accept: application/vnd.github+json" \
             "repos/$REPO/issues/$issue_number/comments" \
             -f per_page=100)
@@ -102,13 +160,13 @@ jobs:
           body=$(cat "$body_file")
 
           if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
-            gh api --method PATCH \
+            run_gh_api "更新关闭状态评论" "comment-first" --method PATCH \
               -H "Accept: application/vnd.github+json" \
               "repos/$REPO/issues/comments/$existing_id" \
               -f body="$body" >/dev/null
             echo "已更新 PR #$issue_number 的关闭状态通知评论。"
           else
-            gh api --method POST \
+            run_gh_api "创建关闭状态评论" "comment-first" --method POST \
               -H "Accept: application/vnd.github+json" \
               "repos/$REPO/issues/$issue_number/comments" \
               -f body="$body" >/dev/null
