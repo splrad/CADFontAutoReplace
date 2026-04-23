@@ -155,8 +155,8 @@ jobs:
       - name: 💬 回写工作流配置保护状态说明
         if: always()
         continue-on-error: true
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
+          GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           AUDIT_STATUS: ${{ steps.audit.outputs.audit_status }}
           CHANGED_FILES: ${{ steps.audit.outputs.changed_files }}
@@ -164,252 +164,291 @@ jobs:
           TRUSTED_APPROVER: ${{ steps.audit.outputs.trusted_approver }}
           CURRENT_APPROVERS: ${{ steps.audit.outputs.current_approvers }}
           TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
-        with:
-          github-token: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
-          script: |
-            const marker = '<!-- workflow-file-audit-status -->';
-            const stateMarkerPrefix = '<!-- workflow-file-audit-state:';
-            const legacyBroadcastMarker = '<!-- workflow-file-audit-core-broadcasted -->';
-            const passBroadcastMarker = '<!-- workflow-file-audit-pass-broadcasted -->';
-            const failureBroadcastMarker = '<!-- workflow-file-audit-failure-broadcasted -->';
-            const failureMarker = '<!-- workflow-file-audit-failure-displayed -->';
-            const status = process.env.AUDIT_STATUS || 'unknown';
-            const prAuthor = process.env.PR_AUTHOR || context.actor || 'unknown';
-            const trustedApprover = process.env.TRUSTED_APPROVER || 'unknown';
-            const prNumber = Number(process.env.PR_NUMBER || context.issue.number || '0');
-            const prNumberText = prNumber ? `#${prNumber}` : '未知编号';
-            let prTitle = context.payload.pull_request?.title || '未知标题';
-            if (prNumber) {
-              try {
-                const { data: latestPr } = await github.rest.pulls.get({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: prNumber,
-                });
-                prTitle = (latestPr.title || '').trim() || prTitle;
-              } catch (err) {
-                core.warning(`获取最新 PR 标题失败: ${err.message}`);
-              }
+        run: |
+          node - <<'NODE'
+          const { execFileSync } = require('node:child_process');
+
+          const marker = '<!-- workflow-file-audit-status -->';
+          const stateMarkerPrefix = '<!-- workflow-file-audit-state:';
+          const legacyBroadcastMarker = '<!-- workflow-file-audit-core-broadcasted -->';
+          const passBroadcastMarker = '<!-- workflow-file-audit-pass-broadcasted -->';
+          const failureBroadcastMarker = '<!-- workflow-file-audit-failure-broadcasted -->';
+          const failureMarker = '<!-- workflow-file-audit-failure-displayed -->';
+          const notifyPulseMarker = '<!-- workflow-file-audit-notify-pulse -->';
+
+          const status = process.env.AUDIT_STATUS || 'unknown';
+          const prAuthor = process.env.PR_AUTHOR || process.env.GITHUB_ACTOR || 'unknown';
+          const trustedApprover = process.env.TRUSTED_APPROVER || 'unknown';
+          const prNumber = Number(process.env.PR_NUMBER || '0');
+          const prNumberText = prNumber ? `#${prNumber}` : '未知编号';
+
+          const [owner, repo] = (process.env.GITHUB_REPOSITORY || '/').split('/');
+          if (!owner || !repo || !prNumber) {
+            console.log('缺少 owner/repo 或 PR 编号，跳过。');
+            process.exit(0);
+          }
+
+          const trim = (v) => (v || '').trim();
+          const unique = (arr) => [...new Set(arr)];
+          const errText = (err) => String(err?.stderr || err?.stdout || err?.message || err);
+
+          const ghRaw = (args, input) => execFileSync('gh', ['api', ...args], {
+            encoding: 'utf8',
+            input,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
+          const ghJson = (args, input) => {
+            const out = ghRaw(args, input);
+            return out ? JSON.parse(out) : null;
+          };
+
+          let prTitle = '未知标题';
+          try {
+            const latestPr = ghJson(['--method', 'GET', `repos/${owner}/${repo}/pulls/${prNumber}`]);
+            prTitle = trim(latestPr?.title) || prTitle;
+          } catch (err) {
+            console.log(`::warning::获取最新 PR 标题失败: ${errText(err)}`);
+          }
+
+          const changedFilesRaw = trim(process.env.CHANGED_FILES || '');
+          const changedFiles = changedFilesRaw && changedFilesRaw !== '无'
+            ? changedFilesRaw.split(/\r?\n/).map(s => trim(s)).filter(Boolean)
+            : [];
+          const fileList = changedFiles.length > 0
+            ? changedFiles.map(f => `- \`${f}\``).join('\n')
+            : '- 无';
+
+          let trustedDevelopers = [];
+          try {
+            const parsed = JSON.parse(process.env.TRUSTED_LIST || '[]');
+            if (Array.isArray(parsed)) {
+              trustedDevelopers = parsed.filter(Boolean);
             }
+          } catch (err) {
+            console.log(`::warning::TRUSTED_DEVELOPERS 解析失败: ${errText(err)}`);
+          }
 
-            const changedFilesRaw = (process.env.CHANGED_FILES || '').trim();
-            const changedFiles = changedFilesRaw && changedFilesRaw !== '无'
-              ? changedFilesRaw.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
-              : [];
-            const fileList = changedFiles.length > 0
-              ? changedFiles.map(f => `- \`${f}\``).join('\n')
-              : '- 无';
+          const comments = ghJson([
+            '--method', 'GET',
+            `repos/${owner}/${repo}/issues/${prNumber}/comments`,
+            '-f', 'per_page=100',
+          ]) || [];
 
-            let trustedDevelopers = [];
+          const existing = comments.find(c => c?.body && c.body.includes(marker));
+          const existingBody = existing?.body || '';
+          const stateMatch = existingBody.match(/<!-- workflow-file-audit-state:([a-z_]+) -->/);
+          let previousStatus = stateMatch ? stateMatch[1] : 'unknown';
+
+          const hasLegacyBroadcasted = existingBody.includes(legacyBroadcastMarker);
+          const hasFailureDisplayed = existingBody.includes(failureMarker);
+          const legacyHasPassBroadcast = existingBody.includes(passBroadcastMarker) || (hasLegacyBroadcasted && !hasFailureDisplayed);
+          const legacyHasFailureBroadcast = existingBody.includes(failureBroadcastMarker) || (hasLegacyBroadcasted && hasFailureDisplayed);
+
+          if (previousStatus === 'unknown') {
+            if (legacyHasFailureBroadcast) {
+              previousStatus = 'unauthorized_workflow_change';
+            } else if (legacyHasPassBroadcast) {
+              previousStatus = 'trusted_workflow_change';
+            } else if (existing) {
+              previousStatus = 'no_workflow_change';
+            }
+          }
+
+          const categoryOf = (s) => {
+            if (s === 'unauthorized_workflow_change') return 'failure';
+            if (s === 'trusted_workflow_change' || s === 'core_review_approved_workflow_change') return 'pass';
+            return 'neutral';
+          };
+
+          const currentCategory = categoryOf(status);
+          const previousCategory = categoryOf(previousStatus);
+          const statusChanged = previousStatus !== status;
+          const shouldBroadcastNow = statusChanged && currentCategory !== 'neutral' && currentCategory !== previousCategory;
+          const stateMarker = `${stateMarkerPrefix}${status} -->`;
+
+          const sendHiddenNotifyPulse = () => {
+            const notifyUsers = unique(trustedDevelopers.filter(Boolean)).slice(0, 15);
+            if (notifyUsers.length === 0) return false;
+
+            const mentionText = notifyUsers.map(user => `@${user}`).join(' ');
+            const pulse = ghJson([
+              '--method', 'POST',
+              `repos/${owner}/${repo}/issues/${prNumber}/comments`,
+              '--input', '-',
+            ], JSON.stringify({ body: `${notifyPulseMarker}\n${mentionText}` }));
+
             try {
-              const parsed = JSON.parse(process.env.TRUSTED_LIST || '[]');
-              if (Array.isArray(parsed)) {
-                trustedDevelopers = parsed.filter(Boolean);
-              }
+              ghRaw([
+                '--method', 'DELETE',
+                `repos/${owner}/${repo}/issues/comments/${pulse?.id}`,
+              ]);
             } catch (err) {
-              core.warning(`TRUSTED_DEVELOPERS 解析失败: ${err.message}`);
+              console.log(`::warning::删除后台通知临时评论失败: ${errText(err)}`);
             }
 
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              per_page: 100,
-            });
+            return true;
+          };
 
-            const existing = comments.find(c => c.body && c.body.includes(marker));
-            const existingBody = (existing && existing.body) ? existing.body : '';
-            const stateMatch = existingBody.match(/<!-- workflow-file-audit-state:([a-z_]+) -->/);
-            let previousStatus = stateMatch ? stateMatch[1] : 'unknown';
+          const requestCoreReviewerNotifications = () => {
+            const reviewers = unique(
+              trustedDevelopers.filter(Boolean).filter(user => user !== prAuthor)
+            ).slice(0, 15);
 
-            const hasLegacyBroadcasted = existingBody.includes(legacyBroadcastMarker);
-            const hasFailureDisplayed = existingBody.includes(failureMarker);
-            const legacyHasPassBroadcast = existingBody.includes(passBroadcastMarker) || (hasLegacyBroadcasted && !hasFailureDisplayed);
-            const legacyHasFailureBroadcast = existingBody.includes(failureBroadcastMarker) || (hasLegacyBroadcasted && hasFailureDisplayed);
-
-            if (previousStatus === 'unknown') {
-              if (legacyHasFailureBroadcast) {
-                previousStatus = 'unauthorized_workflow_change';
-              } else if (legacyHasPassBroadcast) {
-                previousStatus = 'trusted_workflow_change';
-              } else if (existing) {
-                previousStatus = 'no_workflow_change';
-              }
+            if (reviewers.length === 0) {
+              const pulsed = sendHiddenNotifyPulse();
+              return pulsed
+                ? '已通过通知脉冲触发邮件（无可请求评审对象）。'
+                : '核心成员名单为空或仅包含 PR 提交人，未触发通知。';
             }
 
-            const categoryOf = (s) => {
-              if (s === 'unauthorized_workflow_change') return 'failure';
-              if (s === 'trusted_workflow_change' || s === 'core_review_approved_workflow_change') return 'pass';
-              return 'neutral';
-            };
+            const pr = ghJson(['--method', 'GET', `repos/${owner}/${repo}/pulls/${prNumber}`]) || {};
+            const requested = new Set((pr.requested_reviewers || []).map(user => user.login));
+            const alreadyRequested = reviewers.filter(user => requested.has(user));
+            const toRequest = reviewers.filter(user => !requested.has(user));
 
-            const currentCategory = categoryOf(status);
-            const previousCategory = categoryOf(previousStatus);
-            const statusChanged = previousStatus !== status;
-            const shouldBroadcastNow = statusChanged && currentCategory !== 'neutral' && currentCategory !== previousCategory;
-            const stateMarker = `${stateMarkerPrefix}${status} -->`;
+            if (toRequest.length > 0) {
+              ghRaw([
+                '--method', 'POST',
+                `repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
+                '--input', '-',
+              ], JSON.stringify({ reviewers: toRequest }));
 
-            const requestCoreReviewerNotifications = async () => {
-              const prNumber = Number(process.env.PR_NUMBER || context.issue.number || '0');
-              if (!prNumber) {
-                return '未获取到 PR 编号，无法触发通知。';
-              }
-
-              const reviewers = [...new Set(
-                trustedDevelopers
-                  .filter(Boolean)
-                  .filter(user => user !== prAuthor)
-              )].slice(0, 15);
-
-              if (reviewers.length === 0) {
-                return '核心成员名单为空或仅包含 PR 提交人，未触发通知。';
-              }
-
-              const { data: pr } = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-              });
-
-              const requested = new Set((pr.requested_reviewers || []).map(user => user.login));
-              const alreadyRequested = reviewers.filter(user => requested.has(user));
-              const toRequest = reviewers.filter(user => !requested.has(user));
-
-              if (toRequest.length > 0) {
-                await github.rest.pulls.requestReviewers({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: prNumber,
-                  reviewers: toRequest,
-                });
-                return '已通过请求评审触发核心成员通知（评论不展示对象）。';
-              }
-
-              if (alreadyRequested.length > 0) {
-                await github.rest.pulls.removeRequestedReviewers({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: prNumber,
-                  reviewers: alreadyRequested,
-                });
-                await github.rest.pulls.requestReviewers({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: prNumber,
-                  reviewers,
-                });
-                return '已刷新核心成员评审请求并触发通知（评论不展示对象）。';
-              }
-
-              return '未找到可请求的核心成员，未触发通知。';
-            };
-
-            if (shouldBroadcastNow) {
-              try {
-                await requestCoreReviewerNotifications();
-              } catch (err) {
-                core.warning(`触发核心成员通知失败: ${err.message}`);
-              }
+              const pulsed = sendHiddenNotifyPulse();
+              return pulsed
+                ? '已通过请求评审+通知脉冲触发邮件（评论不展示对象）。'
+                : '已通过请求评审触发核心成员通知（评论不展示对象）。';
             }
 
-            let body = '';
-            if (status === 'no_workflow_change') {
-              body = [
-                marker,
-                stateMarker,
-                '### ✅ 工作流配置保护规则已通过',
-                '',
-                `- PR 标题：**${prTitle}**`,
-                `- PR 编号：**${prNumberText}**`,
-                '',
-                '未检测到 `.github/workflows/` 目录变更，本次规则检查通过。',
-                '',
-                `- PR 提交人：**${prAuthor}**`,
-              ].join('\n');
-            } else if (status === 'trusted_workflow_change') {
-              body = [
-                marker,
-                stateMarker,
-                '### ✅ 工作流配置保护规则已通过',
-                '',
-                `- PR 标题：**${prTitle}**`,
-                `- PR 编号：**${prNumberText}**`,
-                '',
-                `检测到工作流文件变更，且提交者 **${prAuthor}** 属于核心开发者，允许变更。`,
-                '',
-                '**涉及的工作流文件：**',
-                fileList,
-                '',
-              ].join('\n');
-            } else if (status === 'core_review_approved_workflow_change') {
-              body = [
-                marker,
-                stateMarker,
-                '### ✅ 工作流配置保护规则已通过',
-                '',
-                `- PR 标题：**${prTitle}**`,
-                `- PR 编号：**${prNumberText}**`,
-                '',
-                '检测到工作流文件变更，提交者虽非核心开发者，但已获得核心开发者有效审批，允许变更。',
-                '',
-                `- PR 提交人：**${prAuthor}**`,
-                `- 批准此 PR 合并的核心开发者：**${trustedApprover}**`,
-                '',
-                '**涉及的工作流文件：**',
-                fileList,
-                '',
-              ].join('\n');
-            } else if (status === 'unauthorized_workflow_change') {
-              body = [
-                marker,
-                stateMarker,
-                '### ❌ 工作流配置保护规则未通过',
-                '',
-                `- PR 标题：**${prTitle}**`,
-                `- PR 编号：**${prNumberText}**`,
-                '',
-                `提交者 **${prAuthor}** 不在核心开发者名单中，且尚未获得针对当前最新提交的核心开发者有效审批，不满足合并条件。`,
-                '',
-                '**涉及的工作流文件：**',
-                fileList,
-                '',
-                '**处理方式：**',
-                '1. 撤回对 `.github/workflows/` 目录下文件的修改',
-                '2. 或联系任一核心成员进行有效审批。',
-                '',
-              ].join('\n');
-            } else {
-              core.info('未获取到明确审计状态，跳过评论回写。');
-              return;
+            if (alreadyRequested.length > 0) {
+              ghRaw([
+                '--method', 'DELETE',
+                `repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
+                '--input', '-',
+              ], JSON.stringify({ reviewers: alreadyRequested }));
+
+              ghRaw([
+                '--method', 'POST',
+                `repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
+                '--input', '-',
+              ], JSON.stringify({ reviewers }));
+
+              const pulsed = sendHiddenNotifyPulse();
+              return pulsed
+                ? '已刷新评审请求+通知脉冲触发邮件（评论不展示对象）。'
+                : '已刷新核心成员评审请求并触发通知（评论不展示对象）。';
             }
 
-            if (existing && !statusChanged) {
-              core.info('工作流配置保护状态未变化，跳过评论更新与通知。');
-              return;
-            }
+            const pulsed = sendHiddenNotifyPulse();
+            return pulsed
+              ? '已通过通知脉冲触发邮件（无新增评审请求）。'
+              : '未找到可请求的核心成员，未触发通知。';
+          };
 
-            if (existing && (existing.body || '').trim() === body.trim()) {
-              core.info('工作流配置保护评论内容未变化，跳过更新。');
-              return;
+          if (shouldBroadcastNow) {
+            try {
+              requestCoreReviewerNotifications();
+            } catch (err) {
+              console.log(`::warning::触发核心成员通知失败: ${errText(err)}`);
             }
+          }
 
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-              core.info('已更新工作流配置保护状态评论。');
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-              core.info('已创建工作流配置保护状态评论。');
-            }
+          let body = '';
+          if (status === 'no_workflow_change') {
+            body = [
+              marker,
+              stateMarker,
+              '### ✅ 工作流配置保护规则已通过',
+              '',
+              `- PR 标题：**${prTitle}**`,
+              `- PR 编号：**${prNumberText}**`,
+              '',
+              '未检测到 `.github/workflows/` 目录变更，本次规则检查通过。',
+              '',
+              `- PR 提交人：**${prAuthor}**`,
+            ].join('\n');
+          } else if (status === 'trusted_workflow_change') {
+            body = [
+              marker,
+              stateMarker,
+              '### ✅ 工作流配置保护规则已通过',
+              '',
+              `- PR 标题：**${prTitle}**`,
+              `- PR 编号：**${prNumberText}**`,
+              '',
+              `检测到工作流文件变更，且提交者 **${prAuthor}** 属于核心开发者，允许变更。`,
+              '',
+              '**涉及的工作流文件：**',
+              fileList,
+              '',
+            ].join('\n');
+          } else if (status === 'core_review_approved_workflow_change') {
+            body = [
+              marker,
+              stateMarker,
+              '### ✅ 工作流配置保护规则已通过',
+              '',
+              `- PR 标题：**${prTitle}**`,
+              `- PR 编号：**${prNumberText}**`,
+              '',
+              '检测到工作流文件变更，提交者虽非核心开发者，但已获得核心开发者有效审批，允许变更。',
+              '',
+              `- PR 提交人：**${prAuthor}**`,
+              `- 批准此 PR 合并的核心开发者：**${trustedApprover}**`,
+              '',
+              '**涉及的工作流文件：**',
+              fileList,
+              '',
+            ].join('\n');
+          } else if (status === 'unauthorized_workflow_change') {
+            body = [
+              marker,
+              stateMarker,
+              '### ❌ 工作流配置保护规则未通过',
+              '',
+              `- PR 标题：**${prTitle}**`,
+              `- PR 编号：**${prNumberText}**`,
+              '',
+              `提交者 **${prAuthor}** 不在核心开发者名单中，且尚未获得针对当前最新提交的核心开发者有效审批，不满足合并条件。`,
+              '',
+              '**涉及的工作流文件：**',
+              fileList,
+              '',
+              '**处理方式：**',
+              '1. 撤回对 `.github/workflows/` 目录下文件的修改',
+              '2. 或联系任一核心成员进行有效审批。',
+              '',
+            ].join('\n');
+          } else {
+            console.log('未获取到明确审计状态，跳过评论回写。');
+            process.exit(0);
+          }
+
+          if (existing && !statusChanged) {
+            console.log('工作流配置保护状态未变化，跳过评论更新与通知。');
+            process.exit(0);
+          }
+
+          if (existing && trim(existing.body) === trim(body)) {
+            console.log('工作流配置保护评论内容未变化，跳过更新。');
+            process.exit(0);
+          }
+
+          if (existing) {
+            ghRaw([
+              '--method', 'PATCH',
+              `repos/${owner}/${repo}/issues/comments/${existing.id}`,
+              '--input', '-',
+            ], JSON.stringify({ body }));
+            console.log('已更新工作流配置保护状态评论。');
+          } else {
+            ghRaw([
+              '--method', 'POST',
+              `repos/${owner}/${repo}/issues/${prNumber}/comments`,
+              '--input', '-',
+            ], JSON.stringify({ body }));
+            console.log('已创建工作流配置保护状态评论。');
+          }
+          NODE
 
       - name: 🚫 阻断非授权工作流变更
         if: steps.audit.outputs.audit_status == 'unauthorized_workflow_change'
@@ -515,221 +554,260 @@ jobs:
       - name: 💬 回写主分支审批状态说明
         if: always()
         continue-on-error: true
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
+          GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           APPROVAL_STATUS: ${{ steps.approval-check.outputs.approval_status }}
           TRUSTED_APPROVER: ${{ steps.approval-check.outputs.trusted_approver }}
           CURRENT_APPROVERS: ${{ steps.approval-check.outputs.current_approvers }}
           TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-        with:
-          github-token: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
-          script: |
-            const marker = '<!-- merge-permission-approval-status -->';
-            const stateMarkerPrefix = '<!-- merge-permission-approval-state:';
-            const broadcastMarker = '<!-- merge-permission-core-broadcasted -->';
-            const failureOnceMarker = '<!-- merge-permission-approval-failure-displayed -->';
-            const status = process.env.APPROVAL_STATUS || 'unknown';
-            const trustedApprover = process.env.TRUSTED_APPROVER || '';
-            const prAuthor = process.env.PR_AUTHOR || 'unknown';
-            const prNumber = Number(process.env.PR_NUMBER || context.issue.number || '0');
-            const prNumberText = prNumber ? `#${prNumber}` : '未知编号';
-            let prTitle = context.payload.pull_request?.title || '未知标题';
-            if (prNumber) {
-              try {
-                const { data: latestPr } = await github.rest.pulls.get({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: prNumber,
-                });
-                prTitle = (latestPr.title || '').trim() || prTitle;
-              } catch (err) {
-                core.warning(`获取最新 PR 标题失败: ${err.message}`);
-              }
-            }
+        run: |
+          node - <<'NODE'
+          const { execFileSync } = require('node:child_process');
 
-            let trustedDevelopers = [];
+          const marker = '<!-- merge-permission-approval-status -->';
+          const stateMarkerPrefix = '<!-- merge-permission-approval-state:';
+          const broadcastMarker = '<!-- merge-permission-core-broadcasted -->';
+          const failureOnceMarker = '<!-- merge-permission-approval-failure-displayed -->';
+          const notifyPulseMarker = '<!-- merge-permission-approval-notify-pulse -->';
+
+          const status = process.env.APPROVAL_STATUS || 'unknown';
+          const trustedApprover = process.env.TRUSTED_APPROVER || '';
+          const prAuthor = process.env.PR_AUTHOR || 'unknown';
+          const prNumber = Number(process.env.PR_NUMBER || '0');
+          const prNumberText = prNumber ? `#${prNumber}` : '未知编号';
+
+          const [owner, repo] = (process.env.GITHUB_REPOSITORY || '/').split('/');
+          if (!owner || !repo || !prNumber) {
+            console.log('缺少 owner/repo 或 PR 编号，跳过。');
+            process.exit(0);
+          }
+
+          const trim = (v) => (v || '').trim();
+          const unique = (arr) => [...new Set(arr)];
+          const errText = (err) => String(err?.stderr || err?.stdout || err?.message || err);
+
+          const ghRaw = (args, input) => execFileSync('gh', ['api', ...args], {
+            encoding: 'utf8',
+            input,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
+          const ghJson = (args, input) => {
+            const out = ghRaw(args, input);
+            return out ? JSON.parse(out) : null;
+          };
+
+          let prTitle = '未知标题';
+          try {
+            const latestPr = ghJson(['--method', 'GET', `repos/${owner}/${repo}/pulls/${prNumber}`]);
+            prTitle = trim(latestPr?.title) || prTitle;
+          } catch (err) {
+            console.log(`::warning::获取最新 PR 标题失败: ${errText(err)}`);
+          }
+
+          let trustedDevelopers = [];
+          try {
+            const parsed = JSON.parse(process.env.TRUSTED_LIST || '[]');
+            if (Array.isArray(parsed)) {
+              trustedDevelopers = parsed.filter(Boolean);
+            }
+          } catch (err) {
+            console.log(`::warning::TRUSTED_DEVELOPERS 解析失败: ${errText(err)}`);
+          }
+
+          const comments = ghJson([
+            '--method', 'GET',
+            `repos/${owner}/${repo}/issues/${prNumber}/comments`,
+            '-f', 'per_page=100',
+          ]) || [];
+
+          const existing = comments.find(c => c?.body && c.body.includes(marker));
+          const existingBody = existing?.body || '';
+
+          const stateMatch = existingBody.match(/<!-- merge-permission-approval-state:([a-z_]+) -->/);
+          let previousStatus = stateMatch ? stateMatch[1] : 'unknown';
+          const legacyHasBroadcasted = existingBody.includes(broadcastMarker);
+          const legacyHasFailureDisplayed = existingBody.includes(failureOnceMarker);
+
+          if (previousStatus === 'unknown') {
+            if (legacyHasFailureDisplayed) {
+              previousStatus = 'non_trusted_only';
+            } else if (legacyHasBroadcasted) {
+              previousStatus = 'trusted_approver';
+            }
+          }
+
+          const categoryOf = (s) => {
+            if (s === 'non_trusted_only') return 'failure';
+            if (s === 'trusted_approver' || s === 'author_trusted') return 'pass';
+            return 'neutral';
+          };
+
+          const currentCategory = categoryOf(status);
+          const previousCategory = categoryOf(previousStatus);
+          const statusChanged = previousStatus !== status;
+          const shouldBroadcastNow = statusChanged && currentCategory !== 'neutral' && currentCategory !== previousCategory;
+          const stateMarker = `${stateMarkerPrefix}${status} -->`;
+
+          const sendHiddenNotifyPulse = () => {
+            const notifyUsers = unique(trustedDevelopers.filter(Boolean)).slice(0, 15);
+            if (notifyUsers.length === 0) return false;
+
+            const mentionText = notifyUsers.map(user => `@${user}`).join(' ');
+            const pulse = ghJson([
+              '--method', 'POST',
+              `repos/${owner}/${repo}/issues/${prNumber}/comments`,
+              '--input', '-',
+            ], JSON.stringify({ body: `${notifyPulseMarker}\n${mentionText}` }));
+
             try {
-              const parsed = JSON.parse(process.env.TRUSTED_LIST || '[]');
-              if (Array.isArray(parsed)) {
-                trustedDevelopers = parsed.filter(Boolean);
-              }
+              ghRaw([
+                '--method', 'DELETE',
+                `repos/${owner}/${repo}/issues/comments/${pulse?.id}`,
+              ]);
             } catch (err) {
-              core.warning(`TRUSTED_DEVELOPERS 解析失败: ${err.message}`);
+              console.log(`::warning::删除后台通知临时评论失败: ${errText(err)}`);
             }
 
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              per_page: 100,
-            });
+            return true;
+          };
 
-            const existing = comments.find(c => c.body && c.body.includes(marker));
-            const existingBody = (existing && existing.body) ? existing.body : '';
+          const requestCoreReviewerNotifications = () => {
+            const reviewers = unique(
+              trustedDevelopers.filter(Boolean).filter(user => user !== prAuthor)
+            ).slice(0, 15);
 
-            const stateMatch = existingBody.match(/<!-- merge-permission-approval-state:([a-z_]+) -->/);
-            let previousStatus = stateMatch ? stateMatch[1] : 'unknown';
-            const legacyHasBroadcasted = existingBody.includes(broadcastMarker);
-            const legacyHasFailureDisplayed = existingBody.includes(failureOnceMarker);
-
-            if (previousStatus === 'unknown') {
-              if (legacyHasFailureDisplayed) {
-                previousStatus = 'non_trusted_only';
-              } else if (legacyHasBroadcasted) {
-                previousStatus = 'trusted_approver';
-              }
+            if (reviewers.length === 0) {
+              const pulsed = sendHiddenNotifyPulse();
+              return pulsed
+                ? '已通过通知脉冲触发邮件（无可请求评审对象）。'
+                : '核心成员名单为空或仅包含 PR 提交人，未触发通知。';
             }
 
-            const categoryOf = (s) => {
-              if (s === 'non_trusted_only') return 'failure';
-              if (s === 'trusted_approver' || s === 'author_trusted') return 'pass';
-              return 'neutral';
-            };
+            const pr = ghJson(['--method', 'GET', `repos/${owner}/${repo}/pulls/${prNumber}`]) || {};
+            const requested = new Set((pr.requested_reviewers || []).map(user => user.login));
+            const alreadyRequested = reviewers.filter(user => requested.has(user));
+            const toRequest = reviewers.filter(user => !requested.has(user));
 
-            const currentCategory = categoryOf(status);
-            const previousCategory = categoryOf(previousStatus);
-            const statusChanged = previousStatus !== status;
-            const shouldBroadcastNow = statusChanged && currentCategory !== 'neutral' && currentCategory !== previousCategory;
-            const stateMarker = `${stateMarkerPrefix}${status} -->`;
+            if (toRequest.length > 0) {
+              ghRaw([
+                '--method', 'POST',
+                `repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
+                '--input', '-',
+              ], JSON.stringify({ reviewers: toRequest }));
 
-            const requestCoreReviewerNotifications = async () => {
-              const prNumber = Number(process.env.PR_NUMBER || context.issue.number || '0');
-              if (!prNumber) {
-                return '未获取到 PR 编号，无法触发通知。';
-              }
-
-              const reviewers = [...new Set(
-                trustedDevelopers
-                  .filter(Boolean)
-                  .filter(user => user !== prAuthor)
-              )].slice(0, 15);
-
-              if (reviewers.length === 0) {
-                return '核心成员名单为空或仅包含 PR 提交人，未触发通知。';
-              }
-
-              const { data: pr } = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-              });
-
-              const requested = new Set((pr.requested_reviewers || []).map(user => user.login));
-              const alreadyRequested = reviewers.filter(user => requested.has(user));
-              const toRequest = reviewers.filter(user => !requested.has(user));
-
-              if (toRequest.length > 0) {
-                await github.rest.pulls.requestReviewers({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: prNumber,
-                  reviewers: toRequest,
-                });
-                return '已通过请求评审触发核心成员通知（评论不展示对象）。';
-              }
-
-              if (alreadyRequested.length > 0) {
-                await github.rest.pulls.removeRequestedReviewers({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: prNumber,
-                  reviewers: alreadyRequested,
-                });
-                await github.rest.pulls.requestReviewers({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: prNumber,
-                  reviewers,
-                });
-                return '已刷新核心成员评审请求并触发通知（评论不展示对象）。';
-              }
-
-              return '未找到可请求的核心成员，未触发通知。';
-            };
-
-            if (shouldBroadcastNow) {
-              try {
-                await requestCoreReviewerNotifications();
-              } catch (err) {
-                core.warning(`触发核心成员通知失败: ${err.message}`);
-              }
+              const pulsed = sendHiddenNotifyPulse();
+              return pulsed
+                ? '已通过请求评审+通知脉冲触发邮件（评论不展示对象）。'
+                : '已通过请求评审触发核心成员通知（评论不展示对象）。';
             }
 
-            let body = '';
-            if (status === 'trusted_approver') {
-              body = [
-                marker,
-                stateMarker,
-                '### ✅ 主分支合并权限校验通过',
-                '',
-                `- PR 标题：**${prTitle}**`,
-                `- PR 编号：**${prNumberText}**`,
-                '',
-                '已检测到核心开发者有效审批，当前 PR 满足主分支合并权限要求。',
-                '',
-                `- 批准此 PR 合并的核心开发者：**${trustedApprover || 'unknown'}**`,
-                `- PR 提交人：**${prAuthor}**`,
-                '',
-              ].join('\n');
-            } else if (status === 'non_trusted_only') {
-              body = [
-                marker,
-                stateMarker,
-                '### ❌ 仍不能合并：审批来源不满足要求',
-                '',
-                `- PR 标题：**${prTitle}**`,
-                `- PR 编号：**${prNumberText}**`,
-                '',
-                '虽然该 PR 历史上可能已有审批记录，但针对当前最新提交仍缺少核心开发者有效审批，因此不满足主分支合并条件。',
-                '- 失败原因：**缺少核心开发者有效审批**',
-                '',
-                '**处理方式：**',
-                '请联系任一核心成员完成对当前最新提交的有效审批。',
-                '',
-              ].join('\n');
-            } else if (status === 'author_trusted') {
-              body = [
-                marker,
-                stateMarker,
-                '### ✅ 主分支合并权限校验通过',
-                '',
-                `- PR 标题：**${prTitle}**`,
-                `- PR 编号：**${prNumberText}**`,
-                '',
-                `PR 提交人 **${prAuthor}** 属于核心开发者，已满足主分支合并权限要求。`,
-                '',
-              ].join('\n');
-            } else {
-              core.info('未获取到明确审批状态，跳过评论回写。');
-              return;
+            if (alreadyRequested.length > 0) {
+              ghRaw([
+                '--method', 'DELETE',
+                `repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
+                '--input', '-',
+              ], JSON.stringify({ reviewers: alreadyRequested }));
+
+              ghRaw([
+                '--method', 'POST',
+                `repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
+                '--input', '-',
+              ], JSON.stringify({ reviewers }));
+
+              const pulsed = sendHiddenNotifyPulse();
+              return pulsed
+                ? '已刷新评审请求+通知脉冲触发邮件（评论不展示对象）。'
+                : '已刷新核心成员评审请求并触发通知（评论不展示对象）。';
             }
 
-            if (existing && !statusChanged) {
-              core.info('主分支审批状态未变化，跳过评论更新与通知。');
-              return;
-            }
+            const pulsed = sendHiddenNotifyPulse();
+            return pulsed
+              ? '已通过通知脉冲触发邮件（无新增评审请求）。'
+              : '未找到可请求的核心成员，未触发通知。';
+          };
 
-            if (existing && (existing.body || '').trim() === body.trim()) {
-              core.info('主分支审批评论内容未变化，跳过更新。');
-              return;
+          if (shouldBroadcastNow) {
+            try {
+              requestCoreReviewerNotifications();
+            } catch (err) {
+              console.log(`::warning::触发核心成员通知失败: ${errText(err)}`);
             }
+          }
 
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-              core.info('已更新主分支审批状态评论。');
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-              core.info('已创建主分支审批状态评论。');
-            }
+          let body = '';
+          if (status === 'trusted_approver') {
+            body = [
+              marker,
+              stateMarker,
+              '### ✅ 主分支合并权限校验通过',
+              '',
+              `- PR 标题：**${prTitle}**`,
+              `- PR 编号：**${prNumberText}**`,
+              '',
+              '已检测到核心开发者有效审批，当前 PR 满足主分支合并权限要求。',
+              '',
+              `- 批准此 PR 合并的核心开发者：**${trustedApprover || 'unknown'}**`,
+              `- PR 提交人：**${prAuthor}**`,
+              '',
+            ].join('\n');
+          } else if (status === 'non_trusted_only') {
+            body = [
+              marker,
+              stateMarker,
+              '### ❌ 仍不能合并：审批来源不满足要求',
+              '',
+              `- PR 标题：**${prTitle}**`,
+              `- PR 编号：**${prNumberText}**`,
+              '',
+              '虽然该 PR 历史上可能已有审批记录，但针对当前最新提交仍缺少核心开发者有效审批，因此不满足主分支合并条件。',
+              '- 失败原因：**缺少核心开发者有效审批**',
+              '',
+              '**处理方式：**',
+              '请联系任一核心成员完成对当前最新提交的有效审批。',
+              '',
+            ].join('\n');
+          } else if (status === 'author_trusted') {
+            body = [
+              marker,
+              stateMarker,
+              '### ✅ 主分支合并权限校验通过',
+              '',
+              `- PR 标题：**${prTitle}**`,
+              `- PR 编号：**${prNumberText}**`,
+              '',
+              `PR 提交人 **${prAuthor}** 属于核心开发者，已满足主分支合并权限要求。`,
+              '',
+            ].join('\n');
+          } else {
+            console.log('未获取到明确审批状态，跳过评论回写。');
+            process.exit(0);
+          }
+
+          if (existing && !statusChanged) {
+            console.log('主分支审批状态未变化，跳过评论更新与通知。');
+            process.exit(0);
+          }
+
+          if (existing && trim(existing.body) === trim(body)) {
+            console.log('主分支审批评论内容未变化，跳过更新。');
+            process.exit(0);
+          }
+
+          if (existing) {
+            ghRaw([
+              '--method', 'PATCH',
+              `repos/${owner}/${repo}/issues/comments/${existing.id}`,
+              '--input', '-',
+            ], JSON.stringify({ body }));
+            console.log('已更新主分支审批状态评论。');
+          } else {
+            ghRaw([
+              '--method', 'POST',
+              `repos/${owner}/${repo}/issues/${prNumber}/comments`,
+              '--input', '-',
+            ], JSON.stringify({ body }));
+            console.log('已创建主分支审批状态评论。');
+          }
+          NODE

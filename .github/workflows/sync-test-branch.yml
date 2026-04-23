@@ -82,127 +82,115 @@ jobs:
 
     steps:
       - name: 📣 发布 test 合并 main 成功通知（触发 GitHub 官方通知）
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
+          GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
           TRUSTED_DEVELOPERS: ${{ vars.TRUSTED_DEVELOPERS }}
-        with:
-          github-token: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
-          script: |
-            const marker = '<!-- sync-test-branch-status:test-to-main-merged -->';
-            const notifySentMarker = '<!-- sync-test-branch-notify-sent -->';
-            const notifyPingMarker = '<!-- sync-test-branch-hidden-notify-ping -->';
-            const pr = context.payload.pull_request;
-            const issueNumber = pr.number;
+          ISSUE_NUMBER: ${{ github.event.pull_request.number }}
+          MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
+          MERGE_COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          marker='<!-- sync-test-branch-status:test-to-main-merged -->'
+          notify_sent_marker='<!-- sync-test-branch-notify-sent -->'
+          notify_ping_marker='<!-- sync-test-branch-hidden-notify-ping -->'
 
-            let trustedDevelopers = [];
-            try {
-              trustedDevelopers = JSON.parse(process.env.TRUSTED_DEVELOPERS || '[]');
-            } catch (error) {
-              core.warning(`TRUSTED_DEVELOPERS 解析失败：${error.message}`);
-            }
+          issue_number="${ISSUE_NUMBER:-0}"
+          if [ "$issue_number" = "0" ]; then
+            echo "未获取到 PR 编号，跳过通知。"
+            exit 0
+          fi
 
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issueNumber,
-              per_page: 100
-            });
+          trusted_json=$(printf '%s' "${TRUSTED_DEVELOPERS:-[]}" | jq -c 'if type == "array" then map(select(type == "string" and length > 0)) else [] end' 2>/dev/null || echo '[]')
 
-            const existing = comments.find(comment =>
-              typeof comment.body === 'string' && comment.body.includes(marker)
-            );
+          comments_json=$(gh api --method GET \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$REPO/issues/$issue_number/comments" \
+            -f per_page=100)
 
-            const hasAlreadyNotified = Boolean(existing && typeof existing.body === 'string' && existing.body.includes(notifySentMarker));
-            let notifyStatus = '状态未变化，未重复触发通知。';
-            let notifySent = hasAlreadyNotified;
+          existing_id=$(echo "$comments_json" | jq -r --arg marker "$marker" '.[] | select((.body // "") | contains($marker)) | .id' | head -n 1)
+          existing_body=$(echo "$comments_json" | jq -r --arg marker "$marker" '.[] | select((.body // "") | contains($marker)) | .body' | head -n 1)
 
-            const sendCoreNotifications = async () => {
-              const reviewers = [...new Set((trustedDevelopers || []).filter(Boolean))].slice(0, 15);
-              if (reviewers.length === 0) {
-                return { sent: false, status: '未配置核心成员名单，未触发通知。' };
-              }
+          notify_sent="false"
+          notify_status='状态未变化，未重复触发通知。'
+          if printf '%s' "$existing_body" | grep -Fq "$notify_sent_marker"; then
+            notify_sent="true"
+            notify_status='已发送，无需重复通知。'
+          fi
 
-              try {
-                await github.rest.pulls.requestReviewers({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: issueNumber,
-                  reviewers,
-                });
-                return { sent: true, status: '已通过请求评审触发核心成员通知（评论不展示对象）。' };
-              } catch (error) {
-                if (error.status !== 422) {
-                  throw error;
-                }
+          if [ "$notify_sent" != "true" ]; then
+            reviewers_json=$(echo "$trusted_json" | jq -c 'unique | .[:15]')
+            reviewer_count=$(echo "$reviewers_json" | jq 'length')
 
-                // 合并后的关闭 PR 无法 request reviewers，回退为瞬时 @ 通知并立即删除。
-                const mentionText = reviewers.map(user => `@${user}`).join(' ');
-                const pingComment = await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: issueNumber,
-                  body: [
-                    notifyPingMarker,
-                    mentionText,
-                  ].join('\n'),
-                });
+            if [ "$reviewer_count" -eq 0 ]; then
+              notify_sent="false"
+              notify_status='未配置核心成员名单，未触发通知。'
+            else
+              req_payload=$(jq -nc --argjson reviewers "$reviewers_json" '{reviewers: $reviewers}')
+              if request_output=$(gh api --method POST \
+                -H "Accept: application/vnd.github+json" \
+                "repos/$REPO/pulls/$issue_number/requested_reviewers" \
+                --input - <<< "$req_payload" 2>&1); then
+                notify_sent="true"
+                notify_status='已通过请求评审触发核心成员通知（评论不展示对象）。'
+              elif printf '%s' "$request_output" | grep -q '422'; then
+                mention_text=$(echo "$reviewers_json" | jq -r 'map("@" + .) | join(" ")')
+                ping_body=$(printf '%s\n%s\n' "$notify_ping_marker" "$mention_text")
 
-                try {
-                  await github.rest.issues.deleteComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    comment_id: pingComment.data.id,
-                  });
-                } catch (deleteError) {
-                  core.warning(`删除后台通知临时评论失败：${deleteError.message}`);
-                }
+                ping_id=$(gh api --method POST \
+                  -H "Accept: application/vnd.github+json" \
+                  "repos/$REPO/issues/$issue_number/comments" \
+                  -f body="$ping_body" \
+                  --jq '.id')
 
-                return { sent: true, status: '已通过后台通知流程触发核心成员通知（评论不展示对象）。' };
-              }
-            };
+                if ! gh api --method DELETE \
+                  -H "Accept: application/vnd.github+json" \
+                  "repos/$REPO/issues/comments/$ping_id" >/dev/null 2>&1; then
+                  echo "::warning::删除后台通知临时评论失败（comment_id=$ping_id）。"
+                fi
 
-            if (!hasAlreadyNotified) {
-              try {
-                const result = await sendCoreNotifications();
-                notifySent = result.sent;
-                notifyStatus = result.status;
-              } catch (error) {
-                core.warning(`触发核心成员通知失败：${error.message}`);
-                notifyStatus = '触发通知失败，请检查权限或核心成员配置。';
-              }
-            } else {
-              notifyStatus = '已发送，无需重复通知。';
-            }
+                notify_sent="true"
+                notify_status='已通过后台通知流程触发核心成员通知（评论不展示对象）。'
+              else
+                echo "::warning::触发核心成员通知失败：$request_output"
+                notify_sent="false"
+                notify_status='触发通知失败，请检查权限或核心成员配置。'
+              fi
+            fi
+          fi
 
-            const body = [
-              marker,
-              ...(notifySent ? [notifySentMarker] : []),
-              '## ✅ 主干分支更新通知',
-              '',
-              `- PR: #${pr.number}`,
-              `- 合并人: ${pr.merged_by?.login || 'unknown'}`,
-              `- 合并提交: ${pr.merge_commit_sha || 'N/A'}`,
-              '',
-              '### 🔔 通知状态',
-              notifyStatus,
-              '',
-              '> 本通知由 **GitHub Actions** 自动发布。'
-            ].join('\n');
+          merged_by="${MERGED_BY:-unknown}"
+          merge_commit_sha="${MERGE_COMMIT_SHA:-N/A}"
+          body_file="$RUNNER_TEMP/sync_test_merge_notice_body.txt"
 
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body
-              });
-              core.info('已更新 test->main 合并成功通知评论。');
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber,
-                body
-              });
-              core.info('已创建 test->main 合并成功通知评论。');
-            }
+          {
+            echo "$marker"
+            if [ "$notify_sent" = "true" ]; then
+              echo "$notify_sent_marker"
+            fi
+            echo '## ✅ 主干分支更新通知'
+            echo
+            echo "- PR: #$issue_number"
+            echo "- 合并人: $merged_by"
+            echo "- 合并提交: $merge_commit_sha"
+            echo
+            echo '### 🔔 通知状态'
+            echo "$notify_status"
+            echo
+            echo '> 本通知由 **GitHub Actions** 自动发布。'
+          } > "$body_file"
+
+          body=$(cat "$body_file")
+
+          if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
+            gh api --method PATCH \
+              -H "Accept: application/vnd.github+json" \
+              "repos/$REPO/issues/comments/$existing_id" \
+              -f body="$body" >/dev/null
+            echo '已更新 test->main 合并成功通知评论。'
+          else
+            gh api --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "repos/$REPO/issues/$issue_number/comments" \
+              -f body="$body" >/dev/null
+            echo '已创建 test->main 合并成功通知评论。'
+          fi

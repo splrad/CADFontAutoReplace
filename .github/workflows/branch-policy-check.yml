@@ -70,19 +70,26 @@ jobs:
       - name: 💬 执行违规合并自动反馈
         # 仅在上述步骤失败时运行
         if: failure()
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
+          GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+          REPO: ${{ github.repository }}
           ERROR_MSG: ${{ steps.check.outputs.error_msg }}
-        with:
-          script: |
-            const errorMsg = process.env.ERROR_MSG || `❌ 分支检查失败：请确保来源分支为 \`${process.env.ALLOWED_SOURCE_BRANCH}\`。`;
-            const allowedBranch = process.env.ALLOWED_SOURCE_BRANCH;
-            const baseBranch = context.payload.pull_request.base.ref;
-            const commentBody = `### 🤖 流程自动检查失败\n\n${errorMsg}\n\n**操作指引：**\n1. 请关闭此 Pull Request。\n2. 确保代码已合并至 \`${allowedBranch}\` 分支并完成测试。\n3. 从 \`${allowedBranch}\` 分支发起新的 PR 指向 \`${baseBranch}\`。`;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: commentBody
-            })
+        run: |
+          ERROR_MSG_TEXT="${ERROR_MSG:-❌ 分支检查失败：请确保来源分支为 \`$ALLOWED_SOURCE_BRANCH\`。}"
+
+          COMMENT_BODY=$(printf '%s\n' \
+            '### 🤖 流程自动检查失败' \
+            '' \
+            "$ERROR_MSG_TEXT" \
+            '' \
+            '**操作指引：**' \
+            '1. 请关闭此 Pull Request。' \
+            "2. 确保代码已合并至 \`$ALLOWED_SOURCE_BRANCH\` 分支并完成测试。" \
+            "3. 从 \`$ALLOWED_SOURCE_BRANCH\` 分支发起新的 PR 指向 \`$BASE_BRANCH\`。")
+
+          gh api --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$REPO/issues/$PR_NUMBER/comments" \
+            -f body="$COMMENT_BODY" >/dev/null
