@@ -6,7 +6,7 @@
 #      （路径：设置 → 规则 → 规则集 → 选择 test 分支规则 → 旁路列表 → 添加旁路 → 勾选「仓库管理员」）
 #   4. 修改下方 env 中的 TEST_BRANCH 和 MAIN_BRANCH 为实际分支名
 #   5. 当 main 分支发生 push（含强制推送）或核心开发者跳过 test 分支直接向 main 合并 PR 后，test 分支将自动同步至 main 最新提交
-#   6. 当 test 分支成功合并到 main 时，将通过后台通知流程触发核心成员官方通知，状态评论不展示通知对象
+#   6. 当任意分支成功合并到 main 时，仅通过成功状态评论触发通知，评论中显式包含 @通知对象
 name: 🔄 重置测试分支到主分支
 
 on:
@@ -66,14 +66,13 @@ jobs:
             -F force=true
           echo "✅ 已将 $TEST_BRANCH 分支重置为 $MAIN_BRANCH 的最新提交 ($MAIN_SHA)"
 
-  notify-test-merge-success:
-    name: 📣 通知 test 合并主分支成功
+  notify-main-merge-success:
+    name: 📣 通知分支合并主分支成功
     runs-on: ubuntu-latest
     timeout-minutes: 3
     if: >-
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.merged == true &&
-      github.event.pull_request.head.ref == 'test' &&
       github.event.pull_request.base.ref == 'main'
 
     permissions:
@@ -81,18 +80,17 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: 📣 发布 test 合并 main 成功通知（触发 GitHub 官方通知）
+      - name: 📣 发布分支合并 main 成功通知（触发 GitHub 官方通知）
         env:
-          GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
           TRUSTED_DEVELOPERS: ${{ vars.TRUSTED_DEVELOPERS }}
           ISSUE_NUMBER: ${{ github.event.pull_request.number }}
+          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref }}
           MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
           MERGE_COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha }}
           REPO: ${{ github.repository }}
         run: |
-          marker='<!-- sync-test-branch-status:test-to-main-merged -->'
-          notify_sent_marker='<!-- sync-test-branch-notify-sent -->'
-          notify_ping_marker='<!-- sync-test-branch-hidden-notify-ping -->'
+          marker='<!-- sync-main-merge-status:pr-to-main-merged -->'
 
           issue_number="${ISSUE_NUMBER:-0}"
           if [ "$issue_number" = "0" ]; then
@@ -101,6 +99,8 @@ jobs:
           fi
 
           trusted_json=$(printf '%s' "${TRUSTED_DEVELOPERS:-[]}" | jq -c 'if type == "array" then map(select(type == "string" and length > 0)) else [] end' 2>/dev/null || echo '[]')
+          mention_text=$(echo "$trusted_json" | jq -r 'unique | map("@" + .) | join(" ")')
+          [ -z "$mention_text" ] && mention_text='（未配置通知对象）'
 
           comments_json=$(gh api --method GET \
             -H "Accept: application/vnd.github+json" \
@@ -108,73 +108,21 @@ jobs:
             -f per_page=100)
 
           existing_id=$(echo "$comments_json" | jq -r --arg marker "$marker" '.[] | select((.body // "") | contains($marker)) | .id' | head -n 1)
-          existing_body=$(echo "$comments_json" | jq -r --arg marker "$marker" '.[] | select((.body // "") | contains($marker)) | .body' | head -n 1)
-
-          notify_sent="false"
-          notify_status='状态未变化，未重复触发通知。'
-          if printf '%s' "$existing_body" | grep -Fq "$notify_sent_marker"; then
-            notify_sent="true"
-            notify_status='已发送，无需重复通知。'
-          fi
-
-          if [ "$notify_sent" != "true" ]; then
-            reviewers_json=$(echo "$trusted_json" | jq -c 'unique | .[:15]')
-            reviewer_count=$(echo "$reviewers_json" | jq 'length')
-
-            if [ "$reviewer_count" -eq 0 ]; then
-              notify_sent="false"
-              notify_status='未配置核心成员名单，未触发通知。'
-            else
-              req_payload=$(jq -nc --argjson reviewers "$reviewers_json" '{reviewers: $reviewers}')
-              if request_output=$(gh api --method POST \
-                -H "Accept: application/vnd.github+json" \
-                "repos/$REPO/pulls/$issue_number/requested_reviewers" \
-                --input - <<< "$req_payload" 2>&1); then
-                notify_sent="true"
-                notify_status='已通过请求评审触发核心成员通知（评论不展示对象）。'
-              elif printf '%s' "$request_output" | grep -q '422'; then
-                mention_text=$(echo "$reviewers_json" | jq -r 'map("@" + .) | join(" ")')
-                ping_body=$(printf '%s\n%s\n' "$notify_ping_marker" "$mention_text")
-
-                ping_id=$(gh api --method POST \
-                  -H "Accept: application/vnd.github+json" \
-                  "repos/$REPO/issues/$issue_number/comments" \
-                  -f body="$ping_body" \
-                  --jq '.id')
-
-                if ! gh api --method DELETE \
-                  -H "Accept: application/vnd.github+json" \
-                  "repos/$REPO/issues/comments/$ping_id" >/dev/null 2>&1; then
-                  echo "::warning::删除后台通知临时评论失败（comment_id=$ping_id）。"
-                fi
-
-                notify_sent="true"
-                notify_status='已通过后台通知流程触发核心成员通知（评论不展示对象）。'
-              else
-                echo "::warning::触发核心成员通知失败：$request_output"
-                notify_sent="false"
-                notify_status='触发通知失败，请检查权限或核心成员配置。'
-              fi
-            fi
-          fi
 
           merged_by="${MERGED_BY:-unknown}"
+          source_branch="${SOURCE_BRANCH:-unknown}"
           merge_commit_sha="${MERGE_COMMIT_SHA:-N/A}"
-          body_file="$RUNNER_TEMP/sync_test_merge_notice_body.txt"
+          body_file="$RUNNER_TEMP/sync_main_merge_notice_body.txt"
 
           {
             echo "$marker"
-            if [ "$notify_sent" = "true" ]; then
-              echo "$notify_sent_marker"
-            fi
             echo '## ✅ 主干分支更新通知'
             echo
             echo "- PR: #$issue_number"
+            echo "- 来源分支: $source_branch"
             echo "- 合并人: $merged_by"
             echo "- 合并提交: $merge_commit_sha"
-            echo
-            echo '### 🔔 通知状态'
-            echo "$notify_status"
+            echo "- 通知对象：$mention_text"
             echo
             echo '> 本通知由 **GitHub Actions** 自动发布。'
           } > "$body_file"
@@ -186,11 +134,11 @@ jobs:
               -H "Accept: application/vnd.github+json" \
               "repos/$REPO/issues/comments/$existing_id" \
               -f body="$body" >/dev/null
-            echo '已更新 test->main 合并成功通知评论。'
+            echo '已更新分支合并 main 成功通知评论。'
           else
             gh api --method POST \
               -H "Accept: application/vnd.github+json" \
               "repos/$REPO/issues/$issue_number/comments" \
               -f body="$body" >/dev/null
-            echo '已创建 test->main 合并成功通知评论。'
+            echo '已创建分支合并 main 成功通知评论。'
           fi

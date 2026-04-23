@@ -7,8 +7,8 @@
 #   3) 可选：在仓库 Variables 中创建 TRUSTED_DEVELOPERS（JSON 数组）
 #      示例：["splrad", "another-user"]
 #      命中该名单的用户将跳过本流程，直接进入主分支 PR 快速通道
-#   4) 通知机制：PR 创建/更新成功后，自动请求核心成员评审并发布状态评论（评论不展示通知对象）
-#      GitHub 将按通知设置向被 @ 用户发送官方通知邮件（无需配置 SMTP）
+#   4) 通知机制：PR 创建/更新成功后，仅通过“成功状态评论”发送通知，评论内显式包含 @通知对象
+#      为提升触达稳定性，评论由 github.token 身份发布（无需配置 SMTP）
 #   5) 验证建议：推送任意 feature 分支，确认自动建 PR 与官方通知都正常
 name: 🚀 测试分支合并请求创建
 
@@ -56,7 +56,8 @@ jobs:
       - name: 🔍 定位当前集成请求
         env:
           GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT }}
-          GH_COMMENT_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
+          GH_COMMENT_TOKEN: ${{ github.token }}
+          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
         run: |
           # 检查源分支相对目标分支是否有新提交，若无差异则跳过
           AHEAD_COUNT=$(git rev-list --count "origin/$TARGET_BRANCH".."origin/$SOURCE_BRANCH" 2>/dev/null || echo "0")
@@ -105,6 +106,9 @@ jobs:
 
           if [ -z "$EXISTING_NOTICE_COMMENT_ID" ]; then
             PR_URL="https://github.com/$REPO/pull/$CURRENT_PR_NUMBER"
+            TRUSTED_JSON=$(printf '%s' "${TRUSTED_LIST:-[]}" | jq -c 'if type == "array" then map(select(type == "string" and length > 0)) else [] end' 2>/dev/null || echo '[]')
+            MENTION_TEXT=$(echo "$TRUSTED_JSON" | jq -r 'unique | map("@" + .) | join(" ")')
+            [ -z "$MENTION_TEXT" ] && MENTION_TEXT='（未配置通知对象）'
             NOTICE_BODY=$(printf '%s\n' \
               '<!-- pr-auto-success-notice -->' \
               '## ✅ PR 创建成功通知' \
@@ -115,6 +119,7 @@ jobs:
               "- PR标题：**$SOURCE_BRANCH ➔ $TARGET_BRANCH**" \
               "- 提交人：**$GITHUB_ACTOR**" \
               "- 分支流向：**$SOURCE_BRANCH → $TARGET_BRANCH**" \
+              "- 通知对象：$MENTION_TEXT" \
               "- PR 链接：$PR_URL" \
               '')
 
@@ -523,69 +528,10 @@ jobs:
             -f title="$PR_TITLE" \
             -f body="$PR_BODY_CONTENT" >/dev/null
 
-      - name: 👥 请求核心成员评审（触发官方通知）
-        if: env.SKIP_PR_AUTOMATION != 'true'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
-          PR_NUMBER: ${{ env.CURRENT_PR_NUMBER }}
-          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
-          PR_AUTHOR: ${{ github.actor }}
-        run: |
-          pr_number="${PR_NUMBER:-0}"
-          if [ "$pr_number" = "0" ]; then
-            echo '未获取到 PR 编号，跳过评审请求。'
-            exit 0
-          fi
-
-          REPO="$GITHUB_REPOSITORY"
-          trusted_json=$(printf '%s' "${TRUSTED_LIST:-[]}" | jq -c 'if type == "array" then map(select(type == "string" and length > 0)) else [] end' 2>/dev/null || echo '[]')
-          reviewers_json=$(echo "$trusted_json" | jq -c --arg author "${PR_AUTHOR:-}" '[.[] | select(. != $author)] | unique')
-          reviewer_count=$(echo "$reviewers_json" | jq 'length')
-
-          if [ "$reviewer_count" -eq 0 ]; then
-            echo '无可请求的核心成员评审对象，跳过。'
-            exit 0
-          fi
-
-          requested_json=$(gh api --method GET \
-            -H "Accept: application/vnd.github+json" \
-            "repos/$REPO/pulls/$pr_number" \
-            --jq '[.requested_reviewers[]?.login] // []' 2>/dev/null || echo '[]')
-
-          pending_json=$(jq -nc \
-            --argjson reviewers "$reviewers_json" \
-            --argjson requested "$requested_json" \
-            '$reviewers | map(select(($requested | index(.)) | not)) | .[:15]')
-          pending_count=$(echo "$pending_json" | jq 'length')
-
-          if [ "$pending_count" -eq 0 ]; then
-            echo '核心成员评审请求已存在，无需重复请求。'
-            exit 0
-          fi
-
-          req_payload=$(jq -nc --argjson reviewers "$pending_json" '{reviewers: $reviewers}')
-          if request_output=$(gh api --method POST \
-            -H "Accept: application/vnd.github+json" \
-            "repos/$REPO/pulls/$pr_number/requested_reviewers" \
-            --input - <<< "$req_payload" 2>&1); then
-            echo "已请求核心成员评审：$(echo "$pending_json" | jq -r 'join(", ")')"
-            exit 0
-          fi
-
-          if printf '%s' "$request_output" | grep -q '422'; then
-            echo "::warning::请求核心成员评审部分失败：$request_output"
-            exit 0
-          fi
-
-          echo "$request_output"
-          exit 1
-
       - name: 📣 发布PR成功通知（触发GitHub官方通知）
         if: env.SKIP_PR_AUTOMATION != 'true'
         env:
-          GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
-          GH_NOTIFY_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ env.CURRENT_PR_NUMBER }}
           PR_TITLE: ${{ env.AI_PR_TITLE }}
           SOURCE_BRANCH: ${{ env.SOURCE_BRANCH }}
@@ -594,7 +540,6 @@ jobs:
           TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
         run: |
           marker='<!-- pr-auto-success-notice -->'
-          pulse_marker='<!-- pr-auto-success-notify-pulse -->'
           pr_number="${PR_NUMBER:-0}"
 
           if [ "$pr_number" = "0" ]; then
@@ -611,8 +556,8 @@ jobs:
           pr_url="https://github.com/$REPO/pull/$pr_number"
 
           trusted_json=$(printf '%s' "${TRUSTED_LIST:-[]}" | jq -c 'if type == "array" then map(select(type == "string" and length > 0)) else [] end' 2>/dev/null || echo '[]')
-          reviewer_targets_json=$(echo "$trusted_json" | jq -c --arg author "$pr_author" '[.[] | select(. != $author)] | unique')
-          reviewer_targets_count=$(echo "$reviewer_targets_json" | jq 'length')
+          mention_text=$(echo "$trusted_json" | jq -r 'unique | map("@" + .) | join(" ")')
+          [ -z "$mention_text" ] && mention_text='（未配置通知对象）'
 
           body_file="$RUNNER_TEMP/pr_auto_success_body_test.txt"
           {
@@ -625,6 +570,7 @@ jobs:
             echo "- PR标题：**$pr_title**"
             echo "- 提交人：**$pr_author**"
             echo "- 分支流向：**$source_branch → $target_branch**"
+            echo "- 通知对象：$mention_text"
             echo "- PR 链接：$pr_url"
             echo
           } > "$body_file"
@@ -646,7 +592,7 @@ jobs:
           existing_trim=$(printf '%s' "$existing_body" | sed -e ':a' -e 'N' -e '$!ba' -e 's/[[:space:]]*$//')
           body_trim=$(printf '%s' "$body" | sed -e ':a' -e 'N' -e '$!ba' -e 's/[[:space:]]*$//')
           if [ "$existing_trim" = "$body_trim" ]; then
-            echo 'PR 成功通知评论内容未变化，跳过更新与通知脉冲。'
+            echo 'PR 成功通知评论内容未变化，跳过更新。'
             exit 0
           fi
 
@@ -655,35 +601,3 @@ jobs:
             "repos/$REPO/issues/comments/$existing_id" \
             -f body="$body" >/dev/null
           echo '已更新 PR 成功通知评论。'
-
-          if [ "$reviewer_targets_count" -eq 0 ]; then
-            hidden_ping_marker='<!-- pr-auto-success-hidden-notify-ping -->'
-            mention_text="@$pr_author"
-            hidden_ping_body=$(printf '%s\n%s\n' "$hidden_ping_marker" "$mention_text")
-
-            if ping_id=$(GH_TOKEN="${GH_NOTIFY_TOKEN:-$GH_TOKEN}" gh api --method POST \
-              -H "Accept: application/vnd.github+json" \
-              "repos/$REPO/issues/$pr_number/comments" \
-              -f body="$hidden_ping_body" \
-              --jq '.id' 2>/dev/null); then
-              if ! GH_TOKEN="${GH_NOTIFY_TOKEN:-$GH_TOKEN}" gh api --method DELETE \
-                -H "Accept: application/vnd.github+json" \
-                "repos/$REPO/issues/comments/$ping_id" >/dev/null 2>&1; then
-                echo "::warning::删除后台通知临时评论失败（comment_id=$ping_id）。"
-              fi
-              echo '已通过后台临时@提及触发作者邮件通知。'
-            else
-              echo '::warning::后台通知触发失败，回退为常规通知脉冲评论。'
-              pulse_body=$(printf '%s\n%s\n%s\n%s\n' \
-                "$pulse_marker" \
-                '🔔 系统通知已触发（无可请求评审对象）。' \
-                "- PR: #$pr_number" \
-                '> 本评论用于触发 GitHub 官方邮件通知，不展示通知对象。')
-
-              gh api --method POST \
-                -H "Accept: application/vnd.github+json" \
-                "repos/$REPO/issues/$pr_number/comments" \
-                -f body="$pulse_body" >/dev/null
-              echo '已创建通知脉冲评论，触发参与者邮件通知。'
-            fi
-          fi

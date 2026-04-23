@@ -156,7 +156,7 @@ jobs:
         if: always()
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           AUDIT_STATUS: ${{ steps.audit.outputs.audit_status }}
           CHANGED_FILES: ${{ steps.audit.outputs.changed_files }}
@@ -174,7 +174,6 @@ jobs:
           const passBroadcastMarker = '<!-- workflow-file-audit-pass-broadcasted -->';
           const failureBroadcastMarker = '<!-- workflow-file-audit-failure-broadcasted -->';
           const failureMarker = '<!-- workflow-file-audit-failure-displayed -->';
-          const notifyPulseMarker = '<!-- workflow-file-audit-notify-pulse -->';
 
           const status = process.env.AUDIT_STATUS || 'unknown';
           const prAuthor = process.env.PR_AUTHOR || process.env.GITHUB_ACTOR || 'unknown';
@@ -228,6 +227,11 @@ jobs:
             console.log(`::warning::TRUSTED_DEVELOPERS 解析失败: ${errText(err)}`);
           }
 
+          const mentionText = unique(trustedDevelopers.filter(Boolean))
+            .slice(0, 15)
+            .map(user => `@${user}`)
+            .join(' ') || '（未配置通知对象）';
+
           const comments = ghJson([
             '--method', 'GET',
             `repos/${owner}/${repo}/issues/${prNumber}/comments`,
@@ -260,97 +264,7 @@ jobs:
             return 'neutral';
           };
 
-          const currentCategory = categoryOf(status);
-          const previousCategory = categoryOf(previousStatus);
-          const statusChanged = previousStatus !== status;
-          const shouldBroadcastNow = statusChanged && currentCategory !== 'neutral' && currentCategory !== previousCategory;
           const stateMarker = `${stateMarkerPrefix}${status} -->`;
-
-          const sendHiddenNotifyPulse = () => {
-            const notifyUsers = unique(trustedDevelopers.filter(Boolean)).slice(0, 15);
-            if (notifyUsers.length === 0) return false;
-
-            const mentionText = notifyUsers.map(user => `@${user}`).join(' ');
-            const pulse = ghJson([
-              '--method', 'POST',
-              `repos/${owner}/${repo}/issues/${prNumber}/comments`,
-              '--input', '-',
-            ], JSON.stringify({ body: `${notifyPulseMarker}\n${mentionText}` }));
-
-            try {
-              ghRaw([
-                '--method', 'DELETE',
-                `repos/${owner}/${repo}/issues/comments/${pulse?.id}`,
-              ]);
-            } catch (err) {
-              console.log(`::warning::删除后台通知临时评论失败: ${errText(err)}`);
-            }
-
-            return true;
-          };
-
-          const requestCoreReviewerNotifications = () => {
-            const reviewers = unique(
-              trustedDevelopers.filter(Boolean).filter(user => user !== prAuthor)
-            ).slice(0, 15);
-
-            if (reviewers.length === 0) {
-              const pulsed = sendHiddenNotifyPulse();
-              return pulsed
-                ? '已通过通知脉冲触发邮件（无可请求评审对象）。'
-                : '核心成员名单为空或仅包含 PR 提交人，未触发通知。';
-            }
-
-            const pr = ghJson(['--method', 'GET', `repos/${owner}/${repo}/pulls/${prNumber}`]) || {};
-            const requested = new Set((pr.requested_reviewers || []).map(user => user.login));
-            const alreadyRequested = reviewers.filter(user => requested.has(user));
-            const toRequest = reviewers.filter(user => !requested.has(user));
-
-            if (toRequest.length > 0) {
-              ghRaw([
-                '--method', 'POST',
-                `repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
-                '--input', '-',
-              ], JSON.stringify({ reviewers: toRequest }));
-
-              const pulsed = sendHiddenNotifyPulse();
-              return pulsed
-                ? '已通过请求评审+通知脉冲触发邮件（评论不展示对象）。'
-                : '已通过请求评审触发核心成员通知（评论不展示对象）。';
-            }
-
-            if (alreadyRequested.length > 0) {
-              ghRaw([
-                '--method', 'DELETE',
-                `repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
-                '--input', '-',
-              ], JSON.stringify({ reviewers: alreadyRequested }));
-
-              ghRaw([
-                '--method', 'POST',
-                `repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
-                '--input', '-',
-              ], JSON.stringify({ reviewers }));
-
-              const pulsed = sendHiddenNotifyPulse();
-              return pulsed
-                ? '已刷新评审请求+通知脉冲触发邮件（评论不展示对象）。'
-                : '已刷新核心成员评审请求并触发通知（评论不展示对象）。';
-            }
-
-            const pulsed = sendHiddenNotifyPulse();
-            return pulsed
-              ? '已通过通知脉冲触发邮件（无新增评审请求）。'
-              : '未找到可请求的核心成员，未触发通知。';
-          };
-
-          if (shouldBroadcastNow) {
-            try {
-              requestCoreReviewerNotifications();
-            } catch (err) {
-              console.log(`::warning::触发核心成员通知失败: ${errText(err)}`);
-            }
-          }
 
           let body = '';
           if (status === 'no_workflow_change') {
@@ -361,6 +275,7 @@ jobs:
               '',
               `- PR 标题：**${prTitle}**`,
               `- PR 编号：**${prNumberText}**`,
+              `- 通知对象：${mentionText}`,
               '',
               '未检测到 `.github/workflows/` 目录变更，本次规则检查通过。',
               '',
@@ -374,6 +289,7 @@ jobs:
               '',
               `- PR 标题：**${prTitle}**`,
               `- PR 编号：**${prNumberText}**`,
+              `- 通知对象：${mentionText}`,
               '',
               `检测到工作流文件变更，且提交者 **${prAuthor}** 属于核心开发者，允许变更。`,
               '',
@@ -389,6 +305,7 @@ jobs:
               '',
               `- PR 标题：**${prTitle}**`,
               `- PR 编号：**${prNumberText}**`,
+              `- 通知对象：${mentionText}`,
               '',
               '检测到工作流文件变更，提交者虽非核心开发者，但已获得核心开发者有效审批，允许变更。',
               '',
@@ -407,6 +324,7 @@ jobs:
               '',
               `- PR 标题：**${prTitle}**`,
               `- PR 编号：**${prNumberText}**`,
+              `- 通知对象：${mentionText}`,
               '',
               `提交者 **${prAuthor}** 不在核心开发者名单中，且尚未获得针对当前最新提交的核心开发者有效审批，不满足合并条件。`,
               '',
@@ -420,11 +338,6 @@ jobs:
             ].join('\n');
           } else {
             console.log('未获取到明确审计状态，跳过评论回写。');
-            process.exit(0);
-          }
-
-          if (existing && !statusChanged) {
-            console.log('工作流配置保护状态未变化，跳过评论更新与通知。');
             process.exit(0);
           }
 
@@ -555,7 +468,7 @@ jobs:
         if: always()
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.PR_PAT || secrets.MY_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           APPROVAL_STATUS: ${{ steps.approval-check.outputs.approval_status }}
           TRUSTED_APPROVER: ${{ steps.approval-check.outputs.trusted_approver }}
@@ -570,7 +483,6 @@ jobs:
           const stateMarkerPrefix = '<!-- merge-permission-approval-state:';
           const broadcastMarker = '<!-- merge-permission-core-broadcasted -->';
           const failureOnceMarker = '<!-- merge-permission-approval-failure-displayed -->';
-          const notifyPulseMarker = '<!-- merge-permission-approval-notify-pulse -->';
 
           const status = process.env.APPROVAL_STATUS || 'unknown';
           const trustedApprover = process.env.TRUSTED_APPROVER || '';
@@ -616,6 +528,11 @@ jobs:
             console.log(`::warning::TRUSTED_DEVELOPERS 解析失败: ${errText(err)}`);
           }
 
+          const mentionText = unique(trustedDevelopers.filter(Boolean))
+            .slice(0, 15)
+            .map(user => `@${user}`)
+            .join(' ') || '（未配置通知对象）';
+
           const comments = ghJson([
             '--method', 'GET',
             `repos/${owner}/${repo}/issues/${prNumber}/comments`,
@@ -644,97 +561,7 @@ jobs:
             return 'neutral';
           };
 
-          const currentCategory = categoryOf(status);
-          const previousCategory = categoryOf(previousStatus);
-          const statusChanged = previousStatus !== status;
-          const shouldBroadcastNow = statusChanged && currentCategory !== 'neutral' && currentCategory !== previousCategory;
           const stateMarker = `${stateMarkerPrefix}${status} -->`;
-
-          const sendHiddenNotifyPulse = () => {
-            const notifyUsers = unique(trustedDevelopers.filter(Boolean)).slice(0, 15);
-            if (notifyUsers.length === 0) return false;
-
-            const mentionText = notifyUsers.map(user => `@${user}`).join(' ');
-            const pulse = ghJson([
-              '--method', 'POST',
-              `repos/${owner}/${repo}/issues/${prNumber}/comments`,
-              '--input', '-',
-            ], JSON.stringify({ body: `${notifyPulseMarker}\n${mentionText}` }));
-
-            try {
-              ghRaw([
-                '--method', 'DELETE',
-                `repos/${owner}/${repo}/issues/comments/${pulse?.id}`,
-              ]);
-            } catch (err) {
-              console.log(`::warning::删除后台通知临时评论失败: ${errText(err)}`);
-            }
-
-            return true;
-          };
-
-          const requestCoreReviewerNotifications = () => {
-            const reviewers = unique(
-              trustedDevelopers.filter(Boolean).filter(user => user !== prAuthor)
-            ).slice(0, 15);
-
-            if (reviewers.length === 0) {
-              const pulsed = sendHiddenNotifyPulse();
-              return pulsed
-                ? '已通过通知脉冲触发邮件（无可请求评审对象）。'
-                : '核心成员名单为空或仅包含 PR 提交人，未触发通知。';
-            }
-
-            const pr = ghJson(['--method', 'GET', `repos/${owner}/${repo}/pulls/${prNumber}`]) || {};
-            const requested = new Set((pr.requested_reviewers || []).map(user => user.login));
-            const alreadyRequested = reviewers.filter(user => requested.has(user));
-            const toRequest = reviewers.filter(user => !requested.has(user));
-
-            if (toRequest.length > 0) {
-              ghRaw([
-                '--method', 'POST',
-                `repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
-                '--input', '-',
-              ], JSON.stringify({ reviewers: toRequest }));
-
-              const pulsed = sendHiddenNotifyPulse();
-              return pulsed
-                ? '已通过请求评审+通知脉冲触发邮件（评论不展示对象）。'
-                : '已通过请求评审触发核心成员通知（评论不展示对象）。';
-            }
-
-            if (alreadyRequested.length > 0) {
-              ghRaw([
-                '--method', 'DELETE',
-                `repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
-                '--input', '-',
-              ], JSON.stringify({ reviewers: alreadyRequested }));
-
-              ghRaw([
-                '--method', 'POST',
-                `repos/${owner}/${repo}/pulls/${prNumber}/requested_reviewers`,
-                '--input', '-',
-              ], JSON.stringify({ reviewers }));
-
-              const pulsed = sendHiddenNotifyPulse();
-              return pulsed
-                ? '已刷新评审请求+通知脉冲触发邮件（评论不展示对象）。'
-                : '已刷新核心成员评审请求并触发通知（评论不展示对象）。';
-            }
-
-            const pulsed = sendHiddenNotifyPulse();
-            return pulsed
-              ? '已通过通知脉冲触发邮件（无新增评审请求）。'
-              : '未找到可请求的核心成员，未触发通知。';
-          };
-
-          if (shouldBroadcastNow) {
-            try {
-              requestCoreReviewerNotifications();
-            } catch (err) {
-              console.log(`::warning::触发核心成员通知失败: ${errText(err)}`);
-            }
-          }
 
           let body = '';
           if (status === 'trusted_approver') {
@@ -745,6 +572,7 @@ jobs:
               '',
               `- PR 标题：**${prTitle}**`,
               `- PR 编号：**${prNumberText}**`,
+              `- 通知对象：${mentionText}`,
               '',
               '已检测到核心开发者有效审批，当前 PR 满足主分支合并权限要求。',
               '',
@@ -760,6 +588,7 @@ jobs:
               '',
               `- PR 标题：**${prTitle}**`,
               `- PR 编号：**${prNumberText}**`,
+              `- 通知对象：${mentionText}`,
               '',
               '虽然该 PR 历史上可能已有审批记录，但针对当前最新提交仍缺少核心开发者有效审批，因此不满足主分支合并条件。',
               '- 失败原因：**缺少核心开发者有效审批**',
@@ -776,17 +605,13 @@ jobs:
               '',
               `- PR 标题：**${prTitle}**`,
               `- PR 编号：**${prNumberText}**`,
+              `- 通知对象：${mentionText}`,
               '',
               `PR 提交人 **${prAuthor}** 属于核心开发者，已满足主分支合并权限要求。`,
               '',
             ].join('\n');
           } else {
             console.log('未获取到明确审批状态，跳过评论回写。');
-            process.exit(0);
-          }
-
-          if (existing && !statusChanged) {
-            console.log('主分支审批状态未变化，跳过评论更新与通知。');
             process.exit(0);
           }
 
