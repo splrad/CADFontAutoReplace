@@ -277,28 +277,31 @@ jobs:
             body = [
               marker,
               stateMarker,
-              '【合并权限审查】已通过',
+              '## 🛡️【合并权限审查】已通过',
               '',
               '### ✅ 工作流配置保护规则已通过',
               '',
+              `- PR：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
-              `- PR 链接：${prUrl}`,
               `- 通知对象：${mentionText}`,
               '',
               '未检测到 `.github/workflows/` 目录变更，本次规则检查通过。',
               '',
               `- PR 提交人：**${prAuthor}**`,
+              '',
+              '',
+              '> 本通知由 **GitHub Actions** 自动发布。' \
             ].join('\n');
           } else if (status === 'trusted_workflow_change') {
             body = [
               marker,
               stateMarker,
-              '【合并权限审查】已通过',
+              '## 🛡️【合并权限审查】已通过',
               '',
               '### ✅ 工作流配置保护规则已通过',
               '',
+              `- PR：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
-              `- PR 链接：${prUrl}`,
               `- 通知对象：${mentionText}`,
               '',
               `检测到工作流文件变更，且提交者 **${prAuthor}** 属于核心开发者，允许变更。`,
@@ -306,17 +309,19 @@ jobs:
               '**涉及的工作流文件：**',
               fileList,
               '',
+              '',
+              '> 本通知由 **GitHub Actions** 自动发布。' \
             ].join('\n');
           } else if (status === 'core_review_approved_workflow_change') {
             body = [
               marker,
               stateMarker,
-              '【合并权限审查】已通过',
+              '## 🛡️【合并权限审查】已通过',
               '',
               '### ✅ 工作流配置保护规则已通过',
               '',
+              `- PR：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
-              `- PR 链接：${prUrl}`,
               `- 通知对象：${mentionText}`,
               '',
               '检测到工作流文件变更，提交者虽非核心开发者，但已获得核心开发者有效审批，允许变更。',
@@ -327,17 +332,19 @@ jobs:
               '**涉及的工作流文件：**',
               fileList,
               '',
+              '',
+              '> 本通知由 **GitHub Actions** 自动发布。' \
             ].join('\n');
           } else if (status === 'unauthorized_workflow_change') {
             body = [
               marker,
               stateMarker,
-              '【合并权限审查】未通过',
+              '## 🛡️【合并权限审查】未通过',
               '',
               '### ❌ 工作流配置保护规则未通过',
               '',
+              `- PR：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
-              `- PR 链接：${prUrl}`,
               `- 通知对象：${mentionText}`,
               '',
               `提交者 **${prAuthor}** 不在核心开发者名单中，且尚未获得针对当前最新提交的核心开发者有效审批，不满足合并条件。`,
@@ -349,6 +356,8 @@ jobs:
               '1. 撤回对 `.github/workflows/` 目录下文件的修改',
               '2. 或联系任一核心成员进行有效审批。',
               '',
+              '',
+              '> 本通知由 **GitHub Actions** 自动发布。' \
             ].join('\n');
           } else {
             console.log('未获取到明确审计状态，跳过评论回写。');
@@ -588,12 +597,12 @@ jobs:
             body = [
               marker,
               stateMarker,
-              '【合并权限审查】已通过',
+              '## 🛡️【合并权限审查】已通过',
               '',
               '### ✅ 主分支合并权限校验通过',
               '',
+              `- PR：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
-              `- PR 链接：${prUrl}`,
               `- 通知对象：${mentionText}`,
               '',
               '已检测到核心开发者有效审批，当前 PR 满足主分支合并权限要求。',
@@ -601,17 +610,19 @@ jobs:
               `- 批准此 PR 合并的核心开发者：**${trustedApprover || 'unknown'}**`,
               `- PR 提交人：**${prAuthor}**`,
               '',
+              '',
+              '> 本通知由 **GitHub Actions** 自动发布。',
             ].join('\n');
           } else if (status === 'non_trusted_only') {
             body = [
               marker,
               stateMarker,
-              '【合并权限审查】未通过',
+              '## 🛡️【合并权限审查】未通过',
               '',
               '### ❌ 仍不能合并：审批来源不满足要求',
               '',
+              `- PR：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
-              `- PR 链接：${prUrl}`,
               `- 通知对象：${mentionText}`,
               '',
               '虽然该 PR 历史上可能已有审批记录，但针对当前最新提交仍缺少核心开发者有效审批，因此不满足主分支合并条件。',
@@ -620,21 +631,27 @@ jobs:
               '**处理方式：**',
               '请联系任一核心成员完成对当前最新提交的有效审批。',
               '',
+              '',
+              '> 本通知由 **GitHub Actions** 自动发布。',
             ].join('\n');
           } else if (status === 'author_trusted') {
             body = [
               marker,
               stateMarker,
-              '【合并权限审查】已通过',
+              '## 🛡️【合并权限审查】已通过',
               '',
               '### ✅ 主分支合并权限校验通过',
               '',
+              `- PR：${prUrl}`,
               `- 分支流向：**${branchFlow}**`,
-              `- PR 链接：${prUrl}`,
               `- 通知对象：${mentionText}`,
               '',
               `PR 提交人 **${prAuthor}** 属于核心开发者，已满足主分支合并权限要求。`,
               '',
+              `- PR 提交人：**${prAuthor}**`,
+              '',
+              '',
+              '> 本通知由 **GitHub Actions** 自动发布。',
             ].join('\n');
           } else {
             console.log('未获取到明确审批状态，跳过评论回写。');

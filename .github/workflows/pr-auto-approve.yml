@@ -42,15 +42,16 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           REVIEW_BODY=$(cat <<EOF
-          【自动审批】已完成
-          ✅ 已自动提交核心成员权限审批（APPROVE）
+          🤖【自动审批】已完成
+          🚀 核心成员审批已自动提交（APPROVE）
 
           - PR: #$PR_NUMBER
           - 动作类型: 自动提交 APPROVE
           - 分支流向: $HEAD_REF -> $BASE_REF
           - 提交人: $PR_AUTHOR
           - 执行动作: event=APPROVE
-          - 执行记录: $RUN_URL
+
+          > 本审批由 **GitHub Actions** 自动完成。
           EOF
           )
 
