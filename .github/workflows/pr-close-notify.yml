@@ -1,0 +1,116 @@
+# 📋 复用到新项目时的配置步骤：
+#   1. 确保仓库已创建 TRUSTED_DEVELOPERS 变量（JSON 数组格式的用户名列表）
+#   2. 修改下方 on.pull_request_target.branches 为实际主分支名（main 或 master）
+#   3. 当 PR 关闭时自动发布状态评论，并通过评论中的 @对象触发 GitHub 官方通知邮件
+name: 📣 PR关闭状态通知
+
+on:
+  pull_request_target:
+    branches:
+      - main
+    types: [closed]
+
+concurrency:
+  group: pr-close-notify-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  notify-pr-close-status:
+    # ✅ 在 PR 检查列表显示的名称
+    name: 📣 发布PR关闭状态通知
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    permissions:
+      issues: write
+      pull-requests: read
+
+    steps:
+      - name: 📣 按关闭状态发送评论并 @ 通知对象
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRUSTED_DEVELOPERS: ${{ vars.TRUSTED_DEVELOPERS }}
+          ISSUE_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref }}
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_CLOSED_BY: ${{ github.event.sender.login }}
+          PR_MERGED: ${{ github.event.pull_request.merged }}
+          MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
+          MERGE_COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          marker='<!-- pr-close-status-notice -->'
+
+          issue_number="${ISSUE_NUMBER:-0}"
+          if [ "$issue_number" = "0" ]; then
+            echo "未获取到 PR 编号，跳过通知。"
+            exit 0
+          fi
+
+          trusted_json=$(printf '%s' "${TRUSTED_DEVELOPERS:-[]}" | jq -c 'if type == "array" then map(select(type == "string" and length > 0)) else [] end' 2>/dev/null || echo '[]')
+          mention_text=$(echo "$trusted_json" | jq -r 'unique | map("@" + .) | join(" ")')
+          [ -z "$mention_text" ] && mention_text='（未配置通知对象）'
+
+          comments_json=$(gh api --method GET \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$REPO/issues/$issue_number/comments" \
+            -f per_page=100)
+
+          existing_id=$(echo "$comments_json" | jq -r --arg marker "$marker" '.[] | select((.body // "") | contains($marker)) | .id' | head -n 1)
+
+          pr_title="${PR_TITLE:-unknown}"
+          source_branch="${SOURCE_BRANCH:-unknown}"
+          target_branch="${TARGET_BRANCH:-unknown}"
+          pr_author="${PR_AUTHOR:-unknown}"
+          pr_closed_by="${PR_CLOSED_BY:-unknown}"
+          merged_by="${MERGED_BY:-unknown}"
+          merge_commit_sha="${MERGE_COMMIT_SHA:-N/A}"
+
+          body_file="$RUNNER_TEMP/pr_close_status_notice_body.txt"
+
+          {
+            echo "$marker"
+
+            if [ "${PR_MERGED}" = "true" ]; then
+              echo '## ✅ PR 已合并并关闭'
+            else
+              echo '## ⚠️ PR 已关闭但未合并'
+            fi
+
+            echo
+            echo "- PR: #$issue_number"
+            echo "- 标题: $pr_title"
+            echo "- 分支流向: $source_branch → $target_branch"
+            echo "- 提交人: $pr_author"
+
+            if [ "${PR_MERGED}" = "true" ]; then
+              echo "- 关闭原因: 已成功合并"
+              echo "- 合并人: $merged_by"
+              echo "- 合并提交: $merge_commit_sha"
+            else
+              echo "- 关闭原因: 未合并直接关闭"
+              echo "- 关闭人: $pr_closed_by"
+            fi
+
+            echo "- 通知对象：$mention_text"
+            echo
+            echo '> 本通知由 **GitHub Actions** 自动发布。'
+          } > "$body_file"
+
+          body=$(cat "$body_file")
+
+          if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
+            gh api --method PATCH \
+              -H "Accept: application/vnd.github+json" \
+              "repos/$REPO/issues/comments/$existing_id" \
+              -f body="$body" >/dev/null
+            echo "已更新 PR #$issue_number 的关闭状态通知评论。"
+          else
+            gh api --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "repos/$REPO/issues/$issue_number/comments" \
+              -f body="$body" >/dev/null
+            echo "已创建 PR #$issue_number 的关闭状态通知评论。"
+          fi

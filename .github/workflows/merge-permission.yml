@@ -277,6 +277,8 @@ jobs:
             body = [
               marker,
               stateMarker,
+              '【合并权限审查】已通过',
+              '',
               '### ✅ 工作流配置保护规则已通过',
               '',
               `- 分支流向：**${branchFlow}**`,
@@ -291,6 +293,8 @@ jobs:
             body = [
               marker,
               stateMarker,
+              '【合并权限审查】已通过',
+              '',
               '### ✅ 工作流配置保护规则已通过',
               '',
               `- 分支流向：**${branchFlow}**`,
@@ -307,6 +311,8 @@ jobs:
             body = [
               marker,
               stateMarker,
+              '【合并权限审查】已通过',
+              '',
               '### ✅ 工作流配置保护规则已通过',
               '',
               `- 分支流向：**${branchFlow}**`,
@@ -326,6 +332,8 @@ jobs:
             body = [
               marker,
               stateMarker,
+              '【合并权限审查】未通过',
+              '',
               '### ❌ 工作流配置保护规则未通过',
               '',
               `- 分支流向：**${branchFlow}**`,
@@ -580,6 +588,8 @@ jobs:
             body = [
               marker,
               stateMarker,
+              '【合并权限审查】已通过',
+              '',
               '### ✅ 主分支合并权限校验通过',
               '',
               `- 分支流向：**${branchFlow}**`,
@@ -596,6 +606,8 @@ jobs:
             body = [
               marker,
               stateMarker,
+              '【合并权限审查】未通过',
+              '',
               '### ❌ 仍不能合并：审批来源不满足要求',
               '',
               `- 分支流向：**${branchFlow}**`,
@@ -613,6 +625,8 @@ jobs:
             body = [
               marker,
               stateMarker,
+              '【合并权限审查】已通过',
+              '',
               '### ✅ 主分支合并权限校验通过',
               '',
               `- 分支流向：**${branchFlow}**`,
