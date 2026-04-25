@@ -1,6 +1,16 @@
 <Project>
 
   <PropertyGroup>
+    <!-- 插件统一版本号：所有 AFR-ACAD20XX 适配 DLL 共用此版本。发版时由维护者手动更新。 -->
+	  <!-- NuGet / 包版本号 -->
+    <Version>1.0</Version>
+	  <!-- 程序集版本（CLR 用）-->
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+	  <!-- Windows 文件属性里的版本 -->
+    <FileVersion>1.0.0.0</FileVersion>
+	  <!-- 供开发者查看的版本（可包含更多信息，如预发布标签等） -->
+    <InformationalVersion>8.8</InformationalVersion>
+
     <!-- 统一构建产物输出到 artifacts/ 目录（仅 bin，不含 obj） -->
     <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
     <UseArtifactsIntermediateOutput>false</UseArtifactsIntermediateOutput>

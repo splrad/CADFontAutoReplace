@@ -23,6 +23,8 @@ internal static class AppInitializer
     private const string Description = "AFR Auto Replace Font Plugin";
     private const int LoadCtrls = 2;   // 2 = 随 AutoCAD 启动自动加载
     private const int Managed = 1;     // 1 = 标识为托管 .NET 插件
+    private const string PluginVersionValueName = "PluginVersion";
+    private const string ConfigSchemaVersionValueName = "ConfigSchemaVersion";
 
     /// <summary>
     /// 执行注册表初始化：为所有匹配的 CAD 配置文件创建/更新自动加载条目。
@@ -67,36 +69,103 @@ internal static class AppInitializer
     private static bool InitializeProfile(string appPath, string dllPath)
     {
         bool isNewKey = !RegistryService.KeyExists(Registry.CurrentUser, appPath);
+        string currentPluginVersion = PluginVersionService.GetPluginVersion();
+        int currentConfigSchemaVersion = PluginVersionService.ConfigSchemaVersion;
+        string? installedPluginVersion = RegistryService.ReadString(Registry.CurrentUser, appPath, PluginVersionValueName);
+        int? installedConfigSchemaVersion = RegistryService.ReadDword(Registry.CurrentUser, appPath, ConfigSchemaVersionValueName);
 
         // 自动加载键值（幂等写入 — 仅在值与预期不同时才写入注册表）
         WriteIfChanged(appPath, "LOADER", dllPath);
         WriteIfChanged(appPath, "LOADCTRLS", LoadCtrls);
         WriteIfChanged(appPath, "MANAGED", Managed);
         WriteIfChanged(appPath, "DESCRIPTION", Description);
+        WriteIfChanged(appPath, PluginVersionValueName, currentPluginVersion);
 
         // 首次初始化时部署内嵌字体并写入默认配置
         if (isNewKey)
         {
-            bool deployed = EmbeddedFontDeployer.Deploy();
-            if (deployed)
-            {
-                // 字体部署成功：写入默认替换字体 + 已初始化标记，重启后即可自动工作
-                RegistryService.WriteString(Registry.CurrentUser, appPath, "MainFont", EmbeddedFontDeployer.DefaultMainFont);
-                RegistryService.WriteString(Registry.CurrentUser, appPath, "BigFont", EmbeddedFontDeployer.DefaultBigFont);
-                RegistryService.WriteString(Registry.CurrentUser, appPath, "TrueTypeFont", EmbeddedFontDeployer.DefaultTrueTypeFont);
-                RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", 1);
-                DiagnosticLogger.Log("初始化", "首次安装 — 已部署默认字体并写入配置");
-            }
-            else
-            {
-                // 字体部署失败：回退为空值 + 未初始化，等待用户手动运行 AFR 命令
-                RegistryService.WriteString(Registry.CurrentUser, appPath, "MainFont", string.Empty);
-                RegistryService.WriteString(Registry.CurrentUser, appPath, "BigFont", string.Empty);
-                RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", 0);
-                DiagnosticLogger.Log("初始化", "首次安装 — 字体部署失败，等待用户手动配置");
-            }
+            WriteDefaultConfiguration(appPath);
+            WriteIfChanged(appPath, ConfigSchemaVersionValueName, currentConfigSchemaVersion);
+        }
+        else if (installedConfigSchemaVersion != currentConfigSchemaVersion)
+        {
+            MigrateConfiguration(appPath, installedConfigSchemaVersion);
+            WriteIfChanged(appPath, ConfigSchemaVersionValueName, currentConfigSchemaVersion);
+            DiagnosticLogger.Log("初始化",
+                $"配置版本已迁移: {installedConfigSchemaVersion?.ToString() ?? "未设置"} → {currentConfigSchemaVersion}");
+        }
+        else if (!string.Equals(installedPluginVersion, currentPluginVersion, StringComparison.Ordinal))
+        {
+            DiagnosticLogger.Log("初始化",
+                $"插件版本已更新: {installedPluginVersion ?? "未设置"} → {currentPluginVersion}");
         }
         return isNewKey;
+    }
+
+    /// <summary>写入首次安装时的默认配置。</summary>
+    private static void WriteDefaultConfiguration(string appPath)
+    {
+        bool deployed = EmbeddedFontDeployer.Deploy();
+        if (deployed)
+        {
+            // 字体部署成功：写入默认替换字体 + 已初始化标记，重启后即可自动工作
+            RegistryService.WriteString(Registry.CurrentUser, appPath, "MainFont", EmbeddedFontDeployer.DefaultMainFont);
+            RegistryService.WriteString(Registry.CurrentUser, appPath, "BigFont", EmbeddedFontDeployer.DefaultBigFont);
+            RegistryService.WriteString(Registry.CurrentUser, appPath, "TrueTypeFont", EmbeddedFontDeployer.DefaultTrueTypeFont);
+            RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", 1);
+            DiagnosticLogger.Log("初始化", "首次安装 — 已部署默认字体并写入配置");
+        }
+        else
+        {
+            // 字体部署失败：回退为空值 + 未初始化，等待用户手动运行 AFR 命令
+            RegistryService.WriteString(Registry.CurrentUser, appPath, "MainFont", string.Empty);
+            RegistryService.WriteString(Registry.CurrentUser, appPath, "BigFont", string.Empty);
+            RegistryService.WriteString(Registry.CurrentUser, appPath, "TrueTypeFont", string.Empty);
+            RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", 0);
+            DiagnosticLogger.Log("初始化", "首次安装 — 字体部署失败，等待用户手动配置");
+        }
+    }
+
+    /// <summary>
+    /// 按配置架构版本迁移注册表配置。
+    /// <para>
+    /// 迁移只补齐缺失值或替换已知旧默认值，不覆盖用户主动选择的自定义字体。
+    /// </para>
+    /// </summary>
+    /// <param name="appPath">该配置文件对应的完整注册表路径。</param>
+    /// <param name="installedConfigSchemaVersion">注册表中已有的配置架构版本。</param>
+    private static void MigrateConfiguration(string appPath, int? installedConfigSchemaVersion)
+    {
+        EmbeddedFontDeployer.Deploy();
+
+        MigrateDefaultString(appPath, "MainFont", EmbeddedFontDeployer.DefaultMainFont, "K_roms.shx");
+        MigrateDefaultString(appPath, "BigFont", EmbeddedFontDeployer.DefaultBigFont);
+        MigrateDefaultString(appPath, "TrueTypeFont", EmbeddedFontDeployer.DefaultTrueTypeFont);
+
+        if (!RegistryService.ValueExists(Registry.CurrentUser, appPath, "IsInitialized"))
+        {
+            RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", 1);
+        }
+    }
+
+    /// <summary>迁移单个字符串默认配置，保留用户自定义值。</summary>
+    private static void MigrateDefaultString(string appPath, string name, string defaultValue, params string[] oldDefaultValues)
+    {
+        var current = RegistryService.ReadString(Registry.CurrentUser, appPath, name);
+        if (string.IsNullOrWhiteSpace(current))
+        {
+            RegistryService.WriteString(Registry.CurrentUser, appPath, name, defaultValue);
+            return;
+        }
+
+        for (int i = 0; i < oldDefaultValues.Length; i++)
+        {
+            if (string.Equals(current, oldDefaultValues[i], StringComparison.OrdinalIgnoreCase))
+            {
+                RegistryService.WriteString(Registry.CurrentUser, appPath, name, defaultValue);
+                return;
+            }
+        }
     }
 
     /// <summary>仅在注册表中的当前值与目标值不同时才写入（字符串版本）。</summary>

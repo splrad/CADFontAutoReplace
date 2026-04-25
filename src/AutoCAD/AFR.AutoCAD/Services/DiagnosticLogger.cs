@@ -510,11 +510,10 @@ internal static class DiagnosticLogger
     private static void WriteHeaderDirect()
     {
         if (_writer == null) return;
-        var asm = typeof(DiagnosticLogger).Assembly;
         _writer.WriteLine("================== AFR 诊断日志 ==================");
         _writer.WriteLine($"时间:     {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
         _writer.WriteLine($"日志路径: {Path.Combine(_outputDir!, BuildFileName())}");
-        _writer.WriteLine($"插件版本: {asm.GetName().Version}");
+        _writer.WriteLine($"插件版本: {PluginVersionService.GetPluginVersion()}");
         _writer.WriteLine($"运行时:   {Environment.Version}");
         _writer.WriteLine($"操作系统: {Environment.OSVersion}");
         _writer.WriteLine("==================================================");

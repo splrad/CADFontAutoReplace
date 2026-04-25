@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-AFR（CAD 缺失字体自动替换工具）是一个 AutoCAD .NET 插件，通过 Inline Hook + 样式表修改两阶段策略自动替换缺失字体。采用 Shared Project 架构实现单 DLL 分发。
+AFR（CAD 缺失字体自动替换工具）是一个 AutoCAD .NET 插件，通过 Inline Hook + 样式表修改两阶段策略自动替换缺失字体。采用 Shared Project 架构实现单 DLL 分发。项目插件版本号使用“主版本.次版本”的 0.0 格式，日志头应与统一插件版本号同步。
 
 ## 架构规则
 
