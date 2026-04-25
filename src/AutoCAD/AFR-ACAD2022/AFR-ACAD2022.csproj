@@ -17,16 +17,18 @@
   <Import Project="..\..\AFR.UI\AFR.UI.projitems" Label="Shared" />
   <Import Project="..\AFR.AutoCAD\AFR.AutoCAD.projitems" Label="Shared" />
   <Import Project="..\..\AFR.Polyfills\AFR.Polyfills.projitems" Label="Shared" />
+  <ItemGroup>
+    <Compile Remove="Properties\**" />
+    <EmbeddedResource Remove="Properties\**" />
+    <None Remove="Properties\**" />
+    <Page Remove="Properties\**" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- AutoCAD SDK — 由 AutoCAD 运行时提供，不复制到输出 -->
     <PackageReference Include="AutoCAD.NET" VersionOverride="24.1.51000">
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Properties\" />
   </ItemGroup>
 
 </Project>
