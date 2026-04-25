@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <MSBuildAllProjects Condition="'$(MSBuildVersion)' == '' Or '$(MSBuildVersion)' &lt; '16.0'">$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
@@ -32,10 +32,10 @@
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\EmbeddedFontDeployer.cs" Link="Hosting\EmbeddedFontDeployer.cs" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="$(MSBuildThisFileDirectory)Fonts\K_roms.shx">
-      <LogicalName>AFR.Fonts.K_roms.shx</LogicalName>
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)..\..\..\chore\Fonts\ming.shx">
+      <LogicalName>AFR.Fonts.ming.shx</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="$(MSBuildThisFileDirectory)Fonts\tssdchn.shx">
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)..\..\..\chore\Fonts\tssdchn.shx">
       <LogicalName>AFR.Fonts.tssdchn.shx</LogicalName>
     </EmbeddedResource>
   </ItemGroup>

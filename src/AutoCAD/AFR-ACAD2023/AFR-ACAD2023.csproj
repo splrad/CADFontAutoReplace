@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <RootNamespace>AFR</RootNamespace>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <UseWPF>true</UseWPF>
+    <NoWarn>$(NoWarn);NU1701</NoWarn>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Platforms>AnyCPU;x64</Platforms>
+  </PropertyGroup>
+
+  <!-- 导入共享源码 -->
+  <Import Project="..\..\AFR.Core\AFR.Core.projitems" Label="Shared" />
+  <Import Project="..\..\AFR.UI\AFR.UI.projitems" Label="Shared" />
+  <Import Project="..\AFR.AutoCAD\AFR.AutoCAD.projitems" Label="Shared" />
+  <Import Project="..\..\AFR.Polyfills\AFR.Polyfills.projitems" Label="Shared" />
+
+  <ItemGroup>
+    <!-- AutoCAD SDK — 由 AutoCAD 运行时提供，不复制到输出 -->
+    <PackageReference Include="AutoCAD.NET" VersionOverride="24.2.0">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

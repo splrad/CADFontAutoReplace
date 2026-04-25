@@ -11,10 +11,15 @@
   </Configurations>
 
   <Folder Name="/AutoCAD/">
+    <Project Path="src/AutoCAD/AFR-ACAD2023/AFR-ACAD2023.csproj" Id="f1425e62-3c56-4244-973f-79ba18b6a980">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
     <Project Path="src/AutoCAD/AFR-ACAD2024/AFR-ACAD2024.csproj" Id="b2c747d9-1feb-4903-9dfa-81eb8a8a141e">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
-    <Project Path="src/AutoCAD/AFR-ACAD2025/AFR-ACAD2025.csproj" Id="225a4c7d-deaa-4d89-be89-93afb3920571" />
+    <Project Path="src/AutoCAD/AFR-ACAD2025/AFR-ACAD2025.csproj" Id="225a4c7d-deaa-4d89-be89-93afb3920571">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
     <Project Path="src/AutoCAD/AFR-ACAD2026/AFR-ACAD2026.csproj" Id="d48e6fcc-a40c-4231-ad10-5383e93241b2">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
