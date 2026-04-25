@@ -9,7 +9,7 @@
 	  <!-- Windows 文件属性里的版本 -->
     <FileVersion>1.0.0.0</FileVersion>
 	  <!-- 供开发者查看的版本（可包含更多信息，如预发布标签等） -->
-    <InformationalVersion>8.8</InformationalVersion>
+    <InformationalVersion>8.9</InformationalVersion>
 
     <!-- 统一构建产物输出到 artifacts/ 目录（仅 bin，不含 obj） -->
     <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
