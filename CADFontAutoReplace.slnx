@@ -11,6 +11,9 @@
   </Configurations>
 
   <Folder Name="/AutoCAD/">
+    <Project Path="src/AutoCAD/AFR-ACAD2022/AFR-ACAD2022.csproj" Id="96831ced-0cff-4431-900d-9aac9f6a0ba1">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
     <Project Path="src/AutoCAD/AFR-ACAD2023/AFR-ACAD2023.csproj" Id="f1425e62-3c56-4244-973f-79ba18b6a980">
       <Platform Solution="*|x64" Project="x64" />
     </Project>

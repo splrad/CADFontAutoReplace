@@ -25,7 +25,7 @@ public static class PluginVersionService
         var informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         if (!string.IsNullOrWhiteSpace(informationalVersion))
         {
-            return informationalVersion;
+            return informationalVersion!;
         }
 
         return assembly.GetName().Version?.ToString() ?? "0.0.0.0";
