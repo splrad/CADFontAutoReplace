@@ -16,7 +16,7 @@ namespace AFR.Hosting;
 internal static class EmbeddedFontDeployer
 {
     /// <summary>内嵌的默认 SHX 主字体文件名。</summary>
-    internal const string DefaultMainFont = "K_roms.shx";
+    internal const string DefaultMainFont = "ming.shx";
 
     /// <summary>内嵌的默认 SHX 大字体文件名。</summary>
     internal const string DefaultBigFont = "tssdchn.shx";
