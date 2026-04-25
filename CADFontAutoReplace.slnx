@@ -1,8 +1,8 @@
 <Solution>
   <Folder Name="/Core/">
-    <Project Path="src/AFR.Core/AFR.Core.shproj" Id="3EED6822-3B82-4BBD-9842-3F32258AF0F0" />
-    <Project Path="src/AFR.Polyfills/AFR.Polyfills.shproj" Id="E1D65B0A-4F5C-42FB-B439-DA31EAF465B1" />
-    <Project Path="src/AFR.UI/AFR.UI.shproj" Id="B542E201-51B9-4103-9A5C-8E87772186D1" />
+    <Project Path="src/AFR.Core/AFR.Core.shproj" Id="3eed6822-3b82-4bbd-9842-3f32258af0f0" />
+    <Project Path="src/AFR.Polyfills/AFR.Polyfills.shproj" Id="e1d65b0a-4f5c-42fb-b439-da31eaf465b1" />
+    <Project Path="src/AFR.UI/AFR.UI.shproj" Id="b542e201-51b9-4103-9a5c-8e87772186d1" />
   </Folder>
 
   <Configurations>
@@ -11,14 +11,21 @@
   </Configurations>
 
   <Folder Name="/AutoCAD/">
-    <Project Path="src/AutoCAD/AFR-ACAD2024/AFR-ACAD2024.csproj" Id="B2C747D9-1FEB-4903-9DFA-81EB8A8A141E">
+    <Project Path="src/AutoCAD/AFR-ACAD2022/AFR-ACAD2022.csproj" Id="96831ced-0cff-4431-900d-9aac9f6a0ba1">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
-
-    <Project Path="src/AutoCAD/AFR-ACAD2026/AFR-ACAD2026.csproj" Id="D48E6FCC-A40C-4231-AD10-5383E93241B2">
+    <Project Path="src/AutoCAD/AFR-ACAD2023/AFR-ACAD2023.csproj" Id="f1425e62-3c56-4244-973f-79ba18b6a980">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
-
-    <Project Path="src/AutoCAD/AFR.AutoCAD/AFR.AutoCAD.shproj" Id="3CE2A9BA-19C1-4439-9EC8-E68FDB3F533D" />
+    <Project Path="src/AutoCAD/AFR-ACAD2024/AFR-ACAD2024.csproj" Id="b2c747d9-1feb-4903-9dfa-81eb8a8a141e">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2025/AFR-ACAD2025.csproj" Id="225a4c7d-deaa-4d89-be89-93afb3920571">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2026/AFR-ACAD2026.csproj" Id="d48e6fcc-a40c-4231-ad10-5383e93241b2">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR.AutoCAD/AFR.AutoCAD.shproj" Id="3ce2a9ba-19c1-4439-9ec8-e68fdb3f533d" />
   </Folder>
 </Solution>

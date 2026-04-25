@@ -1,14 +1,11 @@
 <Project>
-
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
-
   <ItemGroup>
     <!-- AutoCAD SDK — 各版本通过 VersionOverride 指定不同版本号 -->
-    <PackageVersion Include="AutoCAD.NET" Version="25.1.0" />
+    <PackageVersion Include="AutoCAD.NET" Version="25.0.1" />
     <!-- UI 控件库 -->
     <PackageVersion Include="HandyControl" Version="3.5.1" />
   </ItemGroup>
-
 </Project>
