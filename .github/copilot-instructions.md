@@ -83,3 +83,26 @@ AFR-ACAD20XX（版本适配壳，仅 PluginEntry + ICadPlatform 实现）
 - `FontDetectionContext` 按事务隔离，不同图纸/执行次数之间零共享
 - ShapeFile 样式（`ltypeshp.shx` 等）始终跳过，不参与替换
 - 文档注释使用中文
+
+## 验证 CAD DLL Hook 函数的标准步骤
+
+1. **确认导出符号**（dumpbin，取 RVA）：
+   ```powershell
+   dumpbin /exports '<dll路径>' | Select-String 'ldfile'
+   ```
+   输出格式：`序号 ordinal RVA 修饰名`
+
+2. **读取函数入口字节**（PE 解析 RVA → 文件偏移，读 32 字节）：
+   ```powershell
+   $dllPath='<dll路径>'; $rva=0x<RVA>; $bytes=[System.IO.File]::ReadAllBytes($dllPath); $peOffset=[BitConverter]::ToInt32($bytes,0x3C); $numSections=[BitConverter]::ToUInt16($bytes,$peOffset+6); $optHeaderSize=[BitConverter]::ToUInt16($bytes,$peOffset+20); $sectionBase=$peOffset+24+$optHeaderSize; $fileOffset=$null; for($i=0;$i-lt$numSections;$i++){$off=$sectionBase+$i*40;$vAddr=[BitConverter]::ToUInt32($bytes,$off+12);$vSize=[BitConverter]::ToUInt32($bytes,$off+16);$rawOff=[BitConverter]::ToUInt32($bytes,$off+20);if($rva-ge$vAddr-and$rva-lt($vAddr+$vSize)){$fileOffset=$rawOff+($rva-$vAddr);break}}; if($null-eq$fileOffset){"RVA not found";exit}; $dump=$bytes[$fileOffset..($fileOffset+31)]|ForEach-Object{$_.ToString('X2')}; "FileOffset=0x{0:X8}" -f $fileOffset; "Bytes: "+($dump-join' ')
+   ```
+
+3. **逐指令解析验证 PrologueSize**：
+   - 逐字节识别 x64 指令边界
+   - 确认 `PrologueSize`（通常 21）恰好落在完整指令末尾
+   - 确认被复制字节中**不含 RIP 相对寻址**（`lea/mov [rip+...]`），若有则需 Trampoline 重定位
+
+4. **判断通过条件**：
+   - ✅ 导出名与平台常量 `LdFileExport` 一致
+   - ✅ `PrologueSize` 边界对齐完整指令
+   - ✅ 序言中无 RIP 相对寻址，Trampoline 可直接复制
