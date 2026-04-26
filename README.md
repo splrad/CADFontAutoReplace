@@ -65,22 +65,11 @@
 
 | DLL 文件名 | AutoCAD 版本 | .NET |
 |:---:|:---:|:---:|
-| `AFR-ACAD2026.dll` | AutoCAD **2026**（R25.1） | .NET 8 |
+| `AFR-ACAD2026.dll` | AutoCAD **2026**（R25.1） | .NET 8.0 |
+| `AFR-ACAD2025.dll` | AutoCAD **2025**（R25.0） | .NET 8.0 |
 | `AFR-ACAD2024.dll` | AutoCAD **2024**（R24.3） | .NET 4.8 |
-
----
-
-## 🗺️ 开发计划
-
-| 平台 | 版本 | 状态 |
-|---|---|---|
-| AutoCAD | 2026 | ✅ **已支持** |
-| AutoCAD | 2025 | ✅ **已支持** |
-| AutoCAD | 2024 | ✅ **已支持** |
-| AutoCAD | 2023 | ✅ **已支持** |
-| AutoCAD | 2022 | ✅ **已支持** |
-| 中望CAD | 2026 | ⬜ 计划中 |
-| 中望CAD | 2025 | ⬜ 计划中 |
+| `AFR-ACAD2023.dll` | AutoCAD **2023**（R24.2） | .NET 4.8 |
+| `AFR-ACAD2022.dll` | AutoCAD **2022**（R24.1） | .NET 4.8 |
 
 ---
 

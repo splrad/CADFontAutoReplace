@@ -11,6 +11,10 @@
   </Configurations>
 
   <Folder Name="/AutoCAD/">
+    <Project Path="src/AutoCAD/AFR-ACAD2018/AFR-ACAD2018.csproj" Id="7ab78a85-217e-46d8-bc9c-cebe7062e697" />
+    <Project Path="src/AutoCAD/AFR-ACAD2019/AFR-ACAD2019.csproj" Id="505904ee-5fda-4e6e-a8c7-f1a743a98017" />
+    <Project Path="src/AutoCAD/AFR-ACAD2020/AFR-ACAD2020.csproj" Id="71997328-f134-427b-99d2-bac2ef3f7107" />
+    <Project Path="src/AutoCAD/AFR-ACAD2021/AFR-ACAD2021.csproj" Id="57e003a6-b28c-45e5-839e-90984eb70577" />
     <Project Path="src/AutoCAD/AFR-ACAD2022/AFR-ACAD2022.csproj" Id="96831ced-0cff-4431-900d-9aac9f6a0ba1">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
@@ -26,6 +30,7 @@
     <Project Path="src/AutoCAD/AFR-ACAD2026/AFR-ACAD2026.csproj" Id="d48e6fcc-a40c-4231-ad10-5383e93241b2">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2027/AFR-ACAD2027.csproj" Id="0067f487-dbb2-4a4c-8c2f-afea74061fe6" />
     <Project Path="src/AutoCAD/AFR.AutoCAD/AFR.AutoCAD.shproj" Id="3ce2a9ba-19c1-4439-9ec8-e68fdb3f533d" />
   </Folder>
 </Solution>
