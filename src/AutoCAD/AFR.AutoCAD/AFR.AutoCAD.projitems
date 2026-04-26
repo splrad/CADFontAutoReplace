@@ -24,6 +24,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Commands\MTextEditorCommand.cs" Link="Commands\MTextEditorCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\AutoCadFontScanner.cs" Link="Services\AutoCadFontScanner.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\CadEnvironmentSettings.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextEncodingRepairService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetectionContext.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\DiagnosticLogger.cs" Link="Services\DiagnosticLogger.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetector.cs" Link="Services\FontDetector.cs" />
