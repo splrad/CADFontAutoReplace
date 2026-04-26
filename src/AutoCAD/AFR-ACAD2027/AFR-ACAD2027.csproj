@@ -1,14 +1,25 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <RootNamespace>AFR_ACAD2027</RootNamespace>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>AFR</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Platforms>AnyCPU;x64</Platforms>
   </PropertyGroup>
 
+  <!-- 导入共享源码 -->
+  <Import Project="..\..\AFR.Core\AFR.Core.projitems" Label="Shared" />
+  <Import Project="..\..\AFR.UI\AFR.UI.projitems" Label="Shared" />
+  <Import Project="..\AFR.AutoCAD\AFR.AutoCAD.projitems" Label="Shared" />
+
   <ItemGroup>
-    <PackageReference Include="AutoCAD.NET" />
+    <!-- AutoCAD SDK — 由 AutoCAD 运行时提供，不复制到输出 -->
+    <PackageReference Include="AutoCAD.NET" Version="26.0.0">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>

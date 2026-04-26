@@ -1,11 +1,9 @@
 <Project>
+
   <PropertyGroup>
-    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- 已关闭中心化包管理（CPM）。各项目在自己的 .csproj 中通过 Version 属性独立管理包版本，
+         GUI 升级包时只影响当前项目，不会联动其他项目。 -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
   </PropertyGroup>
-  <ItemGroup>
-    <!-- AutoCAD SDK — 各版本通过 VersionOverride 指定不同版本号 -->
-    <PackageVersion Include="AutoCAD.NET" Version="26.0.0" />
-    <!-- UI 控件库 -->
-    <PackageVersion Include="HandyControl" Version="3.5.1" />
-  </ItemGroup>
+
 </Project>

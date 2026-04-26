@@ -1,7 +1,7 @@
 <Project>
   <ItemGroup>
     <!-- UI 控件库 — 嵌入为程序集资源，不复制到输出 -->
-    <PackageReference Include="HandyControl" />
+    <PackageReference Include="HandyControl" Version="3.5.1" />
   </ItemGroup>
 
   <!-- 将 HandyControl DLL 嵌入为程序集资源，实现单 DLL 分发 -->

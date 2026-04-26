@@ -20,7 +20,7 @@
 
   <ItemGroup>
     <!-- AutoCAD SDK — 由 AutoCAD 运行时提供，不复制到输出 -->
-    <PackageReference Include="AutoCAD.NET" VersionOverride="24.2.0">
+    <PackageReference Include="AutoCAD.NET" Version="24.2.0">
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
   </ItemGroup>
