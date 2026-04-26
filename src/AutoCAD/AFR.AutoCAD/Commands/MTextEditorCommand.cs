@@ -116,6 +116,37 @@ public class MTextEditorCommand
         }
     }
 
+    /// <summary>
+    /// AFRBIG5LEFT 命令：扫描自动修复后仍疑似残留乱码的单行文字。
+    /// <para>
+    /// 仅用于 DEBUG 调试，不修改图纸。用于定位 DBText 修复模块未覆盖的残留样本。
+    /// </para>
+    /// </summary>
+    [CommandMethod("AFRBIG5LEFT")]
+    public void DiagnoseResidualBig5Text()
+    {
+        var log = LogService.Instance;
+        try
+        {
+            var doc = AcadApp.DocumentManager.MdiActiveDocument;
+            if (doc == null) return;
+
+            string report;
+            using (doc.LockDocument())
+            {
+                report = DbTextEncodingRepairService.BuildResidualDiagnostics(doc.Database);
+            }
+
+            DiagnosticLogger.Log("Big5残留诊断", report);
+            log.Info("Big5 残留诊断已输出到调试日志。命令: AFRLOG");
+            log.Flush();
+        }
+        catch (System.Exception ex)
+        {
+            log.Error("Big5 残留诊断失败", ex);
+        }
+    }
+
     private static string BuildBig5Diagnostics(Database db, Transaction tr)
     {
         var sb = new StringBuilder(64 * 1024);

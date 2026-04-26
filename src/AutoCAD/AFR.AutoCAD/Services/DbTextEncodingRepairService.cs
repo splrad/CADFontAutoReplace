@@ -58,6 +58,95 @@ internal static class DbTextEncodingRepairService
 
                 if (text == null) continue;
 
+                if (TryRepairDbText(text, tr))
+                    repairedCount++;
+            }
+        }
+
+        tr.Commit();
+        return repairedCount;
+    }
+
+    private static bool TryRepairDbText(DBText text, Transaction tr)
+    {
+        TextStyleTableRecord? style = null;
+        try
+        {
+            style = (TextStyleTableRecord)tr.GetObject(text.TextStyleId, OpenMode.ForRead);
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (!IsCandidateStyle(style)) return false;
+
+        string raw = text.TextString ?? string.Empty;
+        if (!TryRepairText(raw, out string repaired, out string reason)) return false;
+
+        try
+        {
+            text.UpgradeOpen();
+            text.TextString = repaired;
+
+            DiagnosticLogger.Log(
+                "DBText编码",
+                $"Handle={text.Handle} Style='{style.Name}' '{EscapeForLog(raw)}' → '{EscapeForLog(repaired)}' 原因={reason}");
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.LogError($"DBText编码修复失败 Handle={text.Handle}", ex);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 扫描当前数据库中仍疑似乱码的单行文字。
+    /// <para>
+    /// 该方法仅用于诊断：不修改图纸，用于找出自动修复后仍可能残留的 DBText。
+    /// </para>
+    /// </summary>
+    /// <param name="db">需要扫描的 AutoCAD 数据库。</param>
+    /// <param name="maxSamples">最多输出的样本数量。</param>
+    /// <returns>诊断文本。</returns>
+    public static string BuildResidualDiagnostics(Database db, int maxSamples = 200)
+    {
+        var sb = new StringBuilder(32 * 1024);
+        int total = 0;
+        int residual = 0;
+
+        using var tr = db.TransactionManager.StartOpenCloseTransaction();
+        var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+
+        foreach (ObjectId btrId in bt)
+        {
+            BlockTableRecord? btr = null;
+            try
+            {
+                btr = (BlockTableRecord)tr.GetObject(btrId, OpenMode.ForRead);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (ObjectId entId in btr)
+            {
+                DBText? text = null;
+                try
+                {
+                    text = tr.GetObject(entId, OpenMode.ForRead) as DBText;
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (text == null) continue;
+
+                total++;
                 TextStyleTableRecord? style = null;
                 try
                 {
@@ -68,30 +157,43 @@ internal static class DbTextEncodingRepairService
                     continue;
                 }
 
-                if (!IsCandidateStyle(style)) continue;
-
                 string raw = text.TextString ?? string.Empty;
-                if (!TryRepairText(raw, out string repaired, out string reason)) continue;
+                if (!IsCandidateStyle(style) || !LooksResidualMojibake(raw)) continue;
 
-                try
+                string candidate = TryTranscode(raw, 950, 936);
+                residual++;
+                if (residual <= maxSamples)
                 {
-                    text.UpgradeOpen();
-                    text.TextString = repaired;
-                    repairedCount++;
-
-                    DiagnosticLogger.Log(
-                        "DBText编码",
-                        $"Handle={text.Handle} Style='{style.Name}' '{EscapeForLog(raw)}' → '{EscapeForLog(repaired)}' 原因={reason}");
-                }
-                catch (Exception ex)
-                {
-                    DiagnosticLogger.LogError($"DBText编码修复失败 Handle={text.Handle}", ex);
+                    sb.AppendLine(string.Join("|",
+                        "DBText",
+                        text.Handle.ToString(),
+                        EscapeForLog(btr.Name),
+                        EscapeForLog(style.Name),
+                        EscapeForLog(style.FileName ?? string.Empty),
+                        EscapeForLog(style.BigFontFileName ?? string.Empty),
+                        EscapeForLog(raw),
+                        EscapeForLog(candidate),
+                        HasKnownCjkMojibakeSignal(raw).ToString(),
+                        HasReadableChineseSignal(candidate).ToString()));
                 }
             }
         }
 
         tr.Commit();
-        return repairedCount;
+        sb.Insert(0, $"TotalDBText={total}, Residual={residual}\n字段: Entity|Handle|Block|Style|Main|Big|Raw|Big5BytesToGBK|MojibakeSignal|ReadableSignal\n");
+        return sb.ToString();
+    }
+
+    private static bool LooksResidualMojibake(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text.Length < 2) return false;
+        if (ContainsPrivateUseOrBopomofo(text)) return true;
+        if (HasKnownCjkMojibakeSignal(text)) return true;
+
+        string candidate = TryTranscode(text, 950, 936);
+        return !string.IsNullOrWhiteSpace(candidate)
+            && candidate != text
+            && HasReadableChineseSignal(candidate);
     }
 
     private static bool IsCandidateStyle(TextStyleTableRecord style)
@@ -130,24 +232,65 @@ internal static class DbTextEncodingRepairService
         reason = string.Empty;
 
         if (string.IsNullOrWhiteSpace(raw) || raw.Length < 2) return false;
-        if (!HasGarbledSignal(raw)) return false;
 
         string candidate = TryTranscode(raw, 950, 936);
         if (string.IsNullOrWhiteSpace(candidate)) return false;
         if (candidate == raw) return false;
+
+        bool hasStrongGarbledSignal = HasGarbledSignal(raw);
+        bool hasCjkMojibakeSignal = HasKnownCjkMojibakeSignal(raw) && HasReadableChineseSignal(candidate);
+        if (!hasStrongGarbledSignal && !hasCjkMojibakeSignal) return false;
 
         int rawScore = ScoreChineseText(raw);
         int candidateScore = ScoreChineseText(candidate);
         int candidateCjkCount = CountCjk(candidate);
         int rawCjkCount = CountCjk(raw);
 
-        if (candidateScore - rawScore < MinScoreDelta) return false;
+        if (hasStrongGarbledSignal && candidateScore - rawScore < MinScoreDelta) return false;
         if (candidateCjkCount < MinCandidateCjkCount) return false;
-        if (candidateCjkCount <= rawCjkCount && !ContainsPrivateUseOrBopomofo(raw)) return false;
+        if (candidateCjkCount <= rawCjkCount && !ContainsPrivateUseOrBopomofo(raw) && !hasCjkMojibakeSignal) return false;
 
         repaired = candidate;
         reason = $"Big5BytesToGBK Score {rawScore}->{candidateScore} CJK {rawCjkCount}->{candidateCjkCount}";
         return true;
+    }
+
+    private static bool HasKnownCjkMojibakeSignal(string text)
+    {
+        const string mojibakeChars = "奪阨扢掘齬蚚腔華婓眕跤弅俋厙嘎殤葩蹋蕾騵脹撰囀窒僱砆獗囥媼耋芃援堤滅葛揭眒涾儂砦莉汜徹講帤斛剕迵翋賦凳蟀諉潰党韌遵詢階善褽菁";
+        int count = 0;
+        foreach (char c in text)
+        {
+            if (mojibakeChars.IndexOf(c) >= 0)
+                count++;
+        }
+
+        return count >= 2;
+    }
+
+    private static bool HasReadableChineseSignal(string text)
+    {
+        string[] commonWords =
+        [
+            "给水", "排水", "详见", "平面", "强电", "弱电", "气体", "透气", "管道", "设备",
+            "连接", "采用", "施工", "内部", "外墙", "楼板", "基础", "系统", "设置", "安装"
+        ];
+
+        for (int i = 0; i < commonWords.Length; i++)
+        {
+            if (text.IndexOf(commonWords[i], StringComparison.Ordinal) >= 0)
+                return true;
+        }
+
+        const string commonChars = "的一是在有和不为以用水电气管施详见内外部平面强弱连接采用设备系统设置安装";
+        int count = 0;
+        foreach (char c in text)
+        {
+            if (commonChars.IndexOf(c) >= 0)
+                count++;
+        }
+
+        return count >= 3;
     }
 
     private static bool HasGarbledSignal(string text)
