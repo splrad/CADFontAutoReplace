@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>AFR.Deployer</RootNamespace>
+    <AssemblyName>AFR.Deployer</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 不继承 Directory.Build.props 中的 CopyDllToReleases 目标 -->
+    <Platforms>x64</Platforms>
+    <!-- 自包含单文件发布：用户双击即用，无需安装 .NET 运行时 -->
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- 排除不需要的本机调试组件以缩减体积 -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+  <!-- 嵌入所有插件 DLL（Release 构建后手动放入 Resources\ 目录） -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\AFR-ACAD2018.dll" Condition="Exists('Resources\AFR-ACAD2018.dll')" />
+    <EmbeddedResource Include="Resources\AFR-ACAD2019.dll" Condition="Exists('Resources\AFR-ACAD2019.dll')" />
+    <EmbeddedResource Include="Resources\AFR-ACAD2020.dll" Condition="Exists('Resources\AFR-ACAD2020.dll')" />
+    <EmbeddedResource Include="Resources\AFR-ACAD2021.dll" Condition="Exists('Resources\AFR-ACAD2021.dll')" />
+    <EmbeddedResource Include="Resources\AFR-ACAD2022.dll" Condition="Exists('Resources\AFR-ACAD2022.dll')" />
+    <EmbeddedResource Include="Resources\AFR-ACAD2023.dll" Condition="Exists('Resources\AFR-ACAD2023.dll')" />
+    <EmbeddedResource Include="Resources\AFR-ACAD2024.dll" Condition="Exists('Resources\AFR-ACAD2024.dll')" />
+    <EmbeddedResource Include="Resources\AFR-ACAD2025.dll" Condition="Exists('Resources\AFR-ACAD2025.dll')" />
+    <EmbeddedResource Include="Resources\AFR-ACAD2026.dll" Condition="Exists('Resources\AFR-ACAD2026.dll')" />
+    <EmbeddedResource Include="Resources\AFR-ACAD2027.dll" Condition="Exists('Resources\AFR-ACAD2027.dll')" />
+  </ItemGroup>
+
+</Project>

@@ -41,4 +41,10 @@
     <Project Path="src/AutoCAD/AFR-ACAD2027/AFR-ACAD2027.csproj" Id="0067f487-dbb2-4a4c-8c2f-afea74061fe6" />
     <Project Path="src/AutoCAD/AFR.AutoCAD/AFR.AutoCAD.shproj" Id="3ce2a9ba-19c1-4439-9ec8-e68fdb3f533d" />
   </Folder>
+
+  <Folder Name="/Tools/">
+    <Project Path="src/AFR.Deployer/AFR.Deployer.csproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234567890">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+  </Folder>
 </Solution>
