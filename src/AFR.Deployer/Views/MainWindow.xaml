@@ -5,16 +5,29 @@
            xmlns:models="clr-namespace:AFR.Deployer.Models"
            Title="AFR 插件统一管理部署工具"
            Icon="/Assets/app.ico"
-           Width="900" Height="640"
-           MinWidth="740" MinHeight="500"
+           Width="960" Height="660"
+           MinWidth="780" MinHeight="520"
            WindowStartupLocation="CenterScreen"
+           Background="{DynamicResource RegionBrush}"
            NonClientAreaBackground="{DynamicResource RegionBrush}"
-           Background="{DynamicResource RegionBrush}">
+           FontFamily="Microsoft YaHei UI">
 
     <hc:Window.Resources>
-        <!-- 部署状态 → 前景色 -->
-        <Style x:Key="StatusCellStyle" TargetType="TextBlock">
+
+        <!-- 状态点样式：● 圆点颜色 -->
+        <Style x:Key="StatusDotStyle" TargetType="Ellipse">
+            <Setter Property="Width"  Value="8" />
+            <Setter Property="Height" Value="8" />
             <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,5,0" />
+            <Setter Property="Fill"   Value="{DynamicResource SecondaryTextBrush}" />
+        </Style>
+
+        <!-- 状态文本 + 圆点容器的前景色触发器 -->
+        <Style x:Key="StatusTextStyle" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
             <Style.Triggers>
                 <DataTrigger Binding="{Binding Status}" Value="{x:Static models:PluginDeployStatus.InstalledCurrent}">
                     <Setter Property="Foreground" Value="{StaticResource SuccessBrush}" />
@@ -25,301 +38,364 @@
                 <DataTrigger Binding="{Binding Status}" Value="{x:Static models:PluginDeployStatus.DllMissing}">
                     <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
                 </DataTrigger>
-                <DataTrigger Binding="{Binding Status}" Value="{x:Static models:PluginDeployStatus.NotInstalled}">
-                    <Setter Property="Foreground" Value="{StaticResource SubTextBrush}" />
+            </Style.Triggers>
+        </Style>
+
+        <!-- 状态点颜色触发器 -->
+        <Style x:Key="StatusDotColorStyle" TargetType="Ellipse" BasedOn="{StaticResource StatusDotStyle}">
+            <Setter Property="Fill" Value="{DynamicResource SecondaryTextBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Status}" Value="{x:Static models:PluginDeployStatus.InstalledCurrent}">
+                    <Setter Property="Fill" Value="{StaticResource SuccessBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Status}" Value="{x:Static models:PluginDeployStatus.InstalledOutdated}">
+                    <Setter Property="Fill" Value="{StaticResource WarningBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Status}" Value="{x:Static models:PluginDeployStatus.DllMissing}">
+                    <Setter Property="Fill" Value="{StaticResource DangerBrush}" />
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+
     </hc:Window.Resources>
 
-    <Grid Margin="0,0,0,0">
+    <!-- 最外层：白色内容区，所有内容在此内 -->
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />  <!-- 软件信息 -->
-            <RowDefinition Height="*"    />  <!-- CAD 列表 -->
-            <RowDefinition Height="Auto" />  <!-- 操作区 -->
+            <RowDefinition Height="Auto" />  <!-- 顶部标题区 -->
+            <RowDefinition Height="Auto" />  <!-- 分隔线 -->
+            <RowDefinition Height="Auto" />  <!-- 列表标题行 -->
+            <RowDefinition Height="*"    />  <!-- 列表 -->
+            <RowDefinition Height="Auto" />  <!-- 分隔线 -->
+            <RowDefinition Height="Auto" />  <!-- 底部操作区 -->
             <RowDefinition Height="Auto" />  <!-- 状态栏 -->
         </Grid.RowDefinitions>
 
         <!-- ══════════════════════════════════════════
-             Top Section — 软件信息
+             Row 0 — 标题区
              ══════════════════════════════════════════ -->
-        <hc:Card Grid.Row="0" Margin="16,12,16,0" Padding="20,14">
-            <Grid>
+        <Grid Grid.Row="0" Margin="32,28,32,20">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="插件部署"
+                           FontSize="26" FontWeight="Bold"
+                           Foreground="{DynamicResource PrimaryTextBrush}" />
+                <TextBlock Text="自动检测本机已安装的 AutoCAD 版本，一键完成插件 DLL 的部署与注册。"
+                           FontSize="13" Margin="0,6,0,0"
+                           Foreground="{DynamicResource SecondaryTextBrush}" />
+            </StackPanel>
+
+            <!-- 刷新按钮：图标 + 文字，轻量样式 -->
+            <Button Grid.Column="1"
+                    Command="{Binding RefreshCommand}"
+                    VerticalAlignment="Top"
+                    Style="{StaticResource ButtonCustom}"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Padding="0">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#x21BB;" FontSize="15"
+                               Foreground="{DynamicResource PrimaryTextBrush}"
+                               VerticalAlignment="Center" Margin="0,0,5,0" />
+                    <TextBlock Text="刷新" FontSize="13"
+                               Foreground="{DynamicResource PrimaryTextBrush}"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <!-- ══════════════════════════════════════════
+             Row 1 — 分隔线
+             ══════════════════════════════════════════ -->
+        <Separator Grid.Row="1" Margin="0" Background="{DynamicResource BorderBrush}" />
+
+        <!-- ══════════════════════════════════════════
+             Row 2 — 列表标题行
+             ══════════════════════════════════════════ -->
+        <Grid Grid.Row="2" Margin="32,16,32,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 左：标题 + 数量徽标 -->
+            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="本机已安装的 AutoCAD 版本"
+                           FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource PrimaryTextBrush}" />
+                <Border Margin="10,0,0,0" Padding="8,2" CornerRadius="10"
+                        Background="{DynamicResource SecondaryRegionBrush}"
+                        VerticalAlignment="Center">
+                    <TextBlock Text="{Binding CadEntries.Count, StringFormat={}{0} 个实例}"
+                               FontSize="11"
+                               Foreground="{DynamicResource SecondaryTextBrush}" />
+                </Border>
+            </StackPanel>
+
+            <!-- 右：全选 / 取消全选 -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button Content="全选"
+                        Style="{StaticResource ButtonCustom}"
+                        Background="Transparent" BorderThickness="0"
+                        Command="{Binding SelectAllCommand}" CommandParameter="true"
+                        FontSize="13" Foreground="{DynamicResource PrimaryTextBrush}"
+                        Padding="8,4" />
+                <Rectangle Width="1" Height="14" Margin="4,0"
+                           VerticalAlignment="Center"
+                           Fill="{DynamicResource BorderBrush}" />
+                <Button Content="取消全选"
+                        Style="{StaticResource ButtonCustom}"
+                        Background="Transparent" BorderThickness="0"
+                        Command="{Binding SelectAllCommand}" CommandParameter="false"
+                        FontSize="13" Foreground="{DynamicResource PrimaryTextBrush}"
+                        Padding="8,4" />
+            </StackPanel>
+        </Grid>
+
+        <!-- ══════════════════════════════════════════
+             Row 3 — CAD 列表
+             ══════════════════════════════════════════ -->
+        <DataGrid Grid.Row="3"
+                  Margin="32,0,32,0"
+                  ItemsSource="{Binding CadEntries}"
+                  AutoGenerateColumns="False"
+                  CanUserAddRows="False"
+                  CanUserDeleteRows="False"
+                  CanUserReorderColumns="False"
+                  CanUserResizeRows="False"
+                  SelectionMode="Single"
+                  GridLinesVisibility="Horizontal"
+                  HorizontalGridLinesBrush="{DynamicResource BorderBrush}"
+                  Background="Transparent"
+                  RowBackground="Transparent"
+                  AlternatingRowBackground="Transparent"
+                  BorderThickness="1"
+                  BorderBrush="{DynamicResource BorderBrush}"
+                  RowHeight="52"
+                  HeadersVisibility="Column"
+                  Style="{StaticResource DataGridBaseStyle}">
+
+            <DataGrid.ColumnHeaderStyle>
+                <Style TargetType="DataGridColumnHeader"
+                       BasedOn="{StaticResource DataGridColumnHeaderStyle}">
+                    <Setter Property="Height"          Value="38" />
+                    <Setter Property="Padding"         Value="12,0" />
+                    <Setter Property="FontSize"        Value="12" />
+                    <Setter Property="Foreground"      Value="{DynamicResource SecondaryTextBrush}" />
+                    <Setter Property="Background"      Value="{DynamicResource RegionBrush}" />
+                    <Setter Property="BorderThickness" Value="0" />
+                </Style>
+            </DataGrid.ColumnHeaderStyle>
+
+            <DataGrid.CellStyle>
+                <Style TargetType="DataGridCell"
+                       BasedOn="{StaticResource DataGridCellStyle}">
+                    <Setter Property="BorderThickness" Value="0" />
+                    <Setter Property="Padding"         Value="12,0" />
+                    <Style.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" Value="Transparent" />
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.CellStyle>
+
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow"
+                       BasedOn="{StaticResource DataGridRowStyle}">
+                    <Style.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" Value="Transparent" />
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.RowStyle>
+
+            <DataGrid.Columns>
+
+                <!-- 勾选框 -->
+                <DataGridTemplateColumn Width="52" CanUserResize="False">
+                    <DataGridTemplateColumn.HeaderTemplate>
+                        <DataTemplate>
+                            <!-- 空列头，对应图片中的空白勾选列头 -->
+                            <CheckBox HorizontalAlignment="Center" IsEnabled="False"
+                                      Style="{StaticResource CheckBoxBaseStyle}" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.HeaderTemplate>
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                                      Style="{StaticResource CheckBoxBaseStyle}" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+
+                <!-- 品牌（图标徽标 + 文字） -->
+                <DataGridTemplateColumn Header="品牌" Width="160" IsReadOnly="True">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0">
+                                <!-- 红色圆角首字母徽标 -->
+                                <Border Width="28" Height="28" CornerRadius="6"
+                                        Background="#E53935" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding BrandInitial}"
+                                               Foreground="White"
+                                               FontSize="13" FontWeight="Bold"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Text="{Binding Brand}"
+                                           VerticalAlignment="Center"
+                                           FontSize="13"
+                                           Foreground="{DynamicResource PrimaryTextBrush}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+
+                <!-- 版本 -->
+                <DataGridTextColumn Header="版本"
+                                    Binding="{Binding Version}"
+                                    Width="80" IsReadOnly="True">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="VerticalAlignment" Value="Center" />
+                            <Setter Property="FontSize"          Value="13" />
+                            <Setter Property="Margin"            Value="12,0" />
+                            <Setter Property="Foreground"        Value="{DynamicResource PrimaryTextBrush}" />
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+
+                <!-- 配置文件 -->
+                <DataGridTextColumn Header="配置文件"
+                                    Binding="{Binding Profile}"
+                                    Width="*" IsReadOnly="True">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="VerticalAlignment" Value="Center" />
+                            <Setter Property="FontSize"          Value="13" />
+                            <Setter Property="Margin"            Value="12,0" />
+                            <Setter Property="Foreground"        Value="{DynamicResource SecondaryTextBrush}" />
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+
+                <!-- 已安装版本 -->
+                <DataGridTextColumn Header="已安装版本"
+                                    Binding="{Binding InstalledVersion}"
+                                    Width="140" IsReadOnly="True">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="VerticalAlignment" Value="Center" />
+                            <Setter Property="FontSize"          Value="13" />
+                            <Setter Property="Margin"            Value="12,0" />
+                            <Setter Property="Foreground"        Value="{DynamicResource PrimaryTextBrush}" />
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+
+                <!-- 状态（● 圆点 + 文字） -->
+                <DataGridTemplateColumn Header="状态" Width="120" IsReadOnly="True">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0">
+                                <Ellipse Style="{StaticResource StatusDotColorStyle}" />
+                                <TextBlock Text="{Binding StatusText}"
+                                           Style="{StaticResource StatusTextStyle}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <!-- ══════════════════════════════════════════
+             Row 4 — 分隔线
+             ══════════════════════════════════════════ -->
+        <Separator Grid.Row="4" Margin="0,12,0,0" Background="{DynamicResource BorderBrush}" />
+
+        <!-- ══════════════════════════════════════════
+             Row 5 — 底部操作区
+             ══════════════════════════════════════════ -->
+        <Grid Grid.Row="5" Margin="32,16,32,12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="12"   />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- 安装目录行 -->
+            <Grid Grid.Row="0">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*"    />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                        <Image Source="/Assets/app.ico" Width="22" Height="22"
-                               VerticalAlignment="Center" Margin="0,0,8,0" />
-                        <TextBlock Text="AFR 插件统一管理部署工具"
-                                   FontSize="18" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource PrimaryTextBrush}"
-                                   VerticalAlignment="Center" />
-                    </StackPanel>
-                    <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
-                               FontSize="12" TextWrapping="Wrap">
-                        自动检测本机已安装的 AutoCAD 版本，一键完成插件 DLL 的部署与注册。
-                        部署完成后重启对应 CAD，首次进入图纸时运行
-                        <Run FontWeight="SemiBold">AFR</Run>
-                        命令完成字体配置。
-                    </TextBlock>
-                </StackPanel>
+                <TextBlock Grid.Column="0" Text="安装目录"
+                           FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource PrimaryTextBrush}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,16,0" />
 
-                <Button Grid.Column="1"
-                        Content="↻  刷新"
+                <hc:TextBox Grid.Column="1"
+                            Text="{Binding DeployPath, UpdateSourceTrigger=PropertyChanged}"
+                            hc:InfoElement.Placeholder="输入或浏览目标目录…"
+                            FontFamily="Consolas, Microsoft YaHei UI"
+                            FontSize="13" Height="34" />
+
+                <Button Grid.Column="2"
+                        Content="浏览..."
                         Style="{StaticResource SecondaryButtonStyle}"
-                        Command="{Binding RefreshCommand}"
-                        VerticalAlignment="Center"
-                        Margin="16,0,0,0" />
+                        Command="{Binding BrowseCommand}"
+                        Margin="10,0,0,0"
+                        Width="80" Height="34" />
             </Grid>
-        </hc:Card>
 
-        <!-- ══════════════════════════════════════════
-             Middle Section — CAD 列表
-             ══════════════════════════════════════════ -->
-        <hc:Card Grid.Row="1" Margin="16,10,16,0" Padding="0">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*"    />
-                </Grid.RowDefinitions>
+            <!-- 说明 + 操作按钮行 -->
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"    />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
 
-                <!-- 列표标题行 -->
-                <Border Grid.Row="0" Padding="16,10"
-                        BorderBrush="{DynamicResource BorderBrush}"
-                        BorderThickness="0,0,0,1">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="本机已安装的 AutoCAD 版本"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource PrimaryTextBrush}" />
-                            <Border Margin="10,0,0,0" Padding="6,2"
-                                    CornerRadius="10"
-                                    Background="{DynamicResource SecondaryRegionBrush}">
-                                <TextBlock Text="{Binding CadEntries.Count, StringFormat={}{0} 个实例}"
-                                           Foreground="{DynamicResource SecondaryTextBrush}"
-                                           FontSize="11" VerticalAlignment="Center" />
-                            </Border>
-                        </StackPanel>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal">
-                            <Button Content="全选"
-                                    Style="{StaticResource SecondaryButtonStyle}"
-                                    Command="{Binding SelectAllCommand}"
-                                    CommandParameter="true"
-                                    Height="28" Padding="12,0" FontSize="12" />
-                            <Button Content="取消全选"
-                                    Style="{StaticResource SecondaryButtonStyle}"
-                                    Command="{Binding SelectAllCommand}"
-                                    CommandParameter="false"
-                                    Margin="6,0,0,0"
-                                    Height="28" Padding="12,0" FontSize="12" />
-                        </StackPanel>
-                    </Grid>
-                </Border>
+                <TextBlock Grid.Column="0"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           FontSize="12" TextWrapping="Wrap">
+                    勾选列表中的版本，点击"安装"将 DLL 复制到安装目录并写入注册表；点击"卸载"删除 DLL 并清理注册表。
+                </TextBlock>
 
-                <!-- DataGrid -->
-                <DataGrid Grid.Row="1"
-                          ItemsSource="{Binding CadEntries}"
-                          AutoGenerateColumns="False"
-                          CanUserAddRows="False"
-                          CanUserDeleteRows="False"
-                          CanUserReorderColumns="False"
-                          CanUserResizeRows="False"
-                          SelectionMode="Single"
-                          GridLinesVisibility="Horizontal"
-                          HorizontalGridLinesBrush="{DynamicResource BorderBrush}"
-                          Background="Transparent"
-                          RowBackground="Transparent"
-                          AlternatingRowBackground="{DynamicResource SecondaryRegionBrush}"
-                          BorderThickness="0"
-                          RowHeight="38"
-                          HeadersVisibility="Column"
-                          Style="{StaticResource DataGridBaseStyle}">
-
-                    <DataGrid.ColumnHeaderStyle>
-                        <Style TargetType="DataGridColumnHeader"
-                               BasedOn="{StaticResource DataGridColumnHeaderStyle}">
-                            <Setter Property="Height"   Value="36" />
-                            <Setter Property="Padding"  Value="10,0" />
-                        </Style>
-                    </DataGrid.ColumnHeaderStyle>
-
-                    <DataGrid.CellStyle>
-                        <Style TargetType="DataGridCell"
-                               BasedOn="{StaticResource DataGridCellStyle}">
-                            <Setter Property="Padding" Value="10,0" />
-                            <Style.Triggers>
-                                <Trigger Property="IsSelected" Value="True">
-                                    <Setter Property="Background" Value="Transparent" />
-                                </Trigger>
-                            </Style.Triggers>
-                        </Style>
-                    </DataGrid.CellStyle>
-
-                    <DataGrid.RowStyle>
-                        <Style TargetType="DataGridRow"
-                               BasedOn="{StaticResource DataGridRowStyle}" />
-                    </DataGrid.RowStyle>
-
-                    <DataGrid.Columns>
-
-                        <!-- 勾选框 -->
-                        <DataGridTemplateColumn Header="选择" Width="52" CanUserResize="False">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"
-                                              HorizontalAlignment="Center" VerticalAlignment="Center"
-                                              Style="{StaticResource CheckBoxBaseStyle}" />
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-
-                        <!-- 品牌 -->
-                        <DataGridTextColumn Header="品牌"
-                                            Binding="{Binding Brand}"
-                                            Width="90" IsReadOnly="True">
-                            <DataGridTextColumn.ElementStyle>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="VerticalAlignment" Value="Center" />
-                                    <Setter Property="Padding"           Value="10,0" />
-                                </Style>
-                            </DataGridTextColumn.ElementStyle>
-                        </DataGridTextColumn>
-
-                        <!-- 版本 -->
-                        <DataGridTextColumn Header="版本"
-                                            Binding="{Binding Version}"
-                                            Width="68" IsReadOnly="True">
-                            <DataGridTextColumn.ElementStyle>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="VerticalAlignment" Value="Center" />
-                                    <Setter Property="Padding"           Value="10,0" />
-                                </Style>
-                            </DataGridTextColumn.ElementStyle>
-                        </DataGridTextColumn>
-
-                        <!-- 配置文件 -->
-                        <DataGridTextColumn Header="配置文件"
-                                            Binding="{Binding Profile}"
-                                            Width="*" IsReadOnly="True">
-                            <DataGridTextColumn.ElementStyle>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="VerticalAlignment" Value="Center" />
-                                    <Setter Property="Padding"           Value="10,0" />
-                                    <Setter Property="Foreground"        Value="{DynamicResource SecondaryTextBrush}" />
-                                </Style>
-                            </DataGridTextColumn.ElementStyle>
-                        </DataGridTextColumn>
-
-                        <!-- 已安装版本 -->
-                        <DataGridTextColumn Header="已安装版本"
-                                            Binding="{Binding InstalledVersion}"
-                                            Width="110" IsReadOnly="True">
-                            <DataGridTextColumn.ElementStyle>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="VerticalAlignment" Value="Center" />
-                                    <Setter Property="Padding"           Value="10,0" />
-                                </Style>
-                            </DataGridTextColumn.ElementStyle>
-                        </DataGridTextColumn>
-
-                        <!-- 安装状态 -->
-                        <DataGridTemplateColumn Header="状态" Width="160" IsReadOnly="True">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding StatusText}"
-                                               Style="{StaticResource StatusCellStyle}"
-                                               Padding="10,0" />
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-
-                    </DataGrid.Columns>
-                </DataGrid>
-            </Grid>
-        </hc:Card>
-
-        <!-- ══════════════════════════════════════════
-             Bottom Section — 路径选择 + 操作按钮
-             ══════════════════════════════════════════ -->
-        <hc:Card Grid.Row="2" Margin="16,10,16,0" Padding="16,12">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-
-                <!-- 路径选择行 -->
-                <Grid Grid.Row="0" Margin="0,0,0,10">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*"    />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-
-                    <TextBlock Grid.Column="0" Text="安装目录："
-                               VerticalAlignment="Center"
-                               FontWeight="SemiBold"
-                               Foreground="{DynamicResource PrimaryTextBrush}"
-                               Margin="0,0,8,0" />
-
-                    <hc:TextBox Grid.Column="1"
-                                Text="{Binding DeployPath, UpdateSourceTrigger=PropertyChanged}"
-                                hc:InfoElement.Placeholder="输入或浏览目标目录…"
-                                FontFamily="Consolas, Microsoft YaHei UI"
-                                FontSize="12" />
-
-                    <Button Grid.Column="2"
-                            Content="浏览…"
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="卸载"
                             Style="{StaticResource SecondaryButtonStyle}"
-                            Command="{Binding BrowseCommand}"
-                            Margin="8,0,0,0"
-                            Width="70" />
-                </Grid>
-
-                <!-- 操作按钮行 -->
-                <Grid Grid.Row="1">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"    />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-
-                    <TextBlock Grid.Column="0"
-                               VerticalAlignment="Center"
-                               Foreground="{DynamicResource SecondaryTextBrush}"
-                               FontSize="12" TextWrapping="Wrap">
-                        勾选列表中的版本，点击"安装"将 DLL 复制到安装目录并写入注册表；
-                        点击"卸载"删除 DLL 并清理注册表。
-                    </TextBlock>
-
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Button Content="卸　载"
-                                Style="{StaticResource DangerButtonStyle}"
-                                Command="{Binding UninstallCommand}"
-                                Width="90" Margin="0,0,8,0" />
-                        <Button Content="安　装"
-                                Style="{StaticResource PrimaryButtonStyle}"
-                                Command="{Binding InstallCommand}"
-                                Width="90" />
-                    </StackPanel>
-                </Grid>
+                            Command="{Binding UninstallCommand}"
+                            Width="88" Height="34" Margin="0,0,10,0" />
+                    <Button Content="安装"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            Command="{Binding InstallCommand}"
+                            Width="88" Height="34" />
+                </StackPanel>
             </Grid>
-        </hc:Card>
+        </Grid>
 
         <!-- ══════════════════════════════════════════
-             StatusBar — 底部状态栏
+             Row 6 — 状态栏
              ══════════════════════════════════════════ -->
-        <Border Grid.Row="3" Margin="16,8,16,12" CornerRadius="6" Padding="14,6">
+        <Border Grid.Row="6"
+                Padding="32,8"
+                BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource BorderBrush}">
             <Border.Style>
                 <Style TargetType="Border">
-                    <Setter Property="Background" Value="{DynamicResource SecondaryRegionBrush}" />
+                    <Setter Property="Background" Value="{DynamicResource RegionBrush}" />
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsCadRunning}" Value="True">
                             <Setter Property="Background" Value="{StaticResource WarningBgBrush}" />
@@ -328,20 +404,18 @@
                 </Style>
             </Border.Style>
             <StackPanel Orientation="Horizontal">
-                <TextBlock VerticalAlignment="Center" FontSize="12">
-                    <TextBlock.Style>
-                        <Style TargetType="TextBlock">
-                            <Setter Property="Text"       Value="●" />
-                            <Setter Property="Foreground" Value="{StaticResource SuccessBrush}" />
-                            <Setter Property="Margin"     Value="0,0,6,0" />
+                <Ellipse Width="8" Height="8" VerticalAlignment="Center" Margin="0,0,7,0">
+                    <Ellipse.Style>
+                        <Style TargetType="Ellipse">
+                            <Setter Property="Fill" Value="{StaticResource SuccessBrush}" />
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsCadRunning}" Value="True">
-                                    <Setter Property="Foreground" Value="{StaticResource WarningBrush}" />
+                                    <Setter Property="Fill" Value="{StaticResource WarningBrush}" />
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
-                    </TextBlock.Style>
-                </TextBlock>
+                    </Ellipse.Style>
+                </Ellipse>
                 <TextBlock Text="{Binding StatusText}"
                            VerticalAlignment="Center" FontSize="12">
                     <TextBlock.Style>

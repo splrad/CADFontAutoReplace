@@ -47,11 +47,15 @@ internal sealed class CadEntryViewModel : INotifyPropertyChanged
     public string StatusText => Status switch
     {
         PluginDeployStatus.NotInstalled      => "未安装",
-        PluginDeployStatus.InstalledCurrent  => "✓ 已安装（最新）",
-        PluginDeployStatus.InstalledOutdated => "⚠ 已安装（旧版）",
-        PluginDeployStatus.DllMissing        => "✗ DLL 文件缺失",
+        PluginDeployStatus.InstalledCurrent  => "已安装（最新）",
+        PluginDeployStatus.InstalledOutdated => "旧版本",
+        PluginDeployStatus.DllMissing        => "DLL 缺失",
         _                                    => "未知"
     };
+
+    /// <summary>品牌首字母，用于徽标显示，如 "A"（AutoCAD）。</summary>
+    public string BrandInitial => Brand.Length > 0 ? Brand[0].ToString().ToUpperInvariant() : "?";
+
 
     internal CadEntryViewModel(CadInstallation installation)
     {
