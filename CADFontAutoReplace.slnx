@@ -38,7 +38,9 @@
     <Project Path="src/AutoCAD/AFR-ACAD2026/AFR-ACAD2026.csproj" Id="d48e6fcc-a40c-4231-ad10-5383e93241b2">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
-    <Project Path="src/AutoCAD/AFR-ACAD2027/AFR-ACAD2027.csproj" Id="0067f487-dbb2-4a4c-8c2f-afea74061fe6" />
+    <Project Path="src/AutoCAD/AFR-ACAD2027/AFR-ACAD2027.csproj" Id="0067f487-dbb2-4a4c-8c2f-afea74061fe6">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
     <Project Path="src/AutoCAD/AFR.AutoCAD/AFR.AutoCAD.shproj" Id="3ce2a9ba-19c1-4439-9ec8-e68fdb3f533d" />
   </Folder>
 

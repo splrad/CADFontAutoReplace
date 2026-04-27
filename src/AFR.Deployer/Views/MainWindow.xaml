@@ -100,11 +100,13 @@
                             <TextBlock Text="本机已安装的 AutoCAD 版本"
                                        FontWeight="SemiBold"
                                        Foreground="{DynamicResource PrimaryTextBrush}" />
-                            <hc:Tag Content="{Binding CadEntries.Count, StringFormat={}{0} 个实例}"
-                                    Margin="10,0,0,0"
-                                    Background="{DynamicResource SecondaryRegionBrush}"
-                                    Foreground="{DynamicResource SecondaryTextBrush}"
-                                    FontSize="11" />
+                            <Border Margin="10,0,0,0" Padding="6,2"
+                                    CornerRadius="10"
+                                    Background="{DynamicResource SecondaryRegionBrush}">
+                                <TextBlock Text="{Binding CadEntries.Count, StringFormat={}{0} 个实例}"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           FontSize="11" VerticalAlignment="Center" />
+                            </Border>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal">
                             <Button Content="全选"
