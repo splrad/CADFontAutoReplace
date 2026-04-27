@@ -9,6 +9,8 @@
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- EXE 文件图标（资源管理器 / 任务栏） -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <!-- 不继承 Directory.Build.props 中的 CopyDllToReleases 目标 -->
     <Platforms>x64</Platforms>
     <!-- 自包含单文件发布：用户双击即用，无需安装 .NET 运行时 -->
@@ -19,6 +21,16 @@
     <!-- 排除不需要的本机调试组件以缩减体积 -->
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
+
+  <!-- Assets -->
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+  </ItemGroup>
+
+  <!-- UI 控件库 -->
+  <ItemGroup>
+    <PackageReference Include="HandyControl" Version="3.5.1" />
+  </ItemGroup>
 
   <!-- 嵌入所有插件 DLL（Release 构建后手动放入 Resources\ 目录） -->
   <ItemGroup>

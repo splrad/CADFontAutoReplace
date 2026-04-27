@@ -7,7 +7,7 @@ namespace AFR.Deployer.ViewModels;
 /// <summary>
 /// DataGrid 中单行的 ViewModel，对应本机一个 CAD 配置文件实例。
 /// </summary>
-public sealed class CadEntryViewModel : INotifyPropertyChanged
+internal sealed class CadEntryViewModel : INotifyPropertyChanged
 {
     private bool _isSelected;
     private PluginDeployStatus _status;

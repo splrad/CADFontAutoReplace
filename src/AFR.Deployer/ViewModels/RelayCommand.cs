@@ -5,7 +5,7 @@ namespace AFR.Deployer.ViewModels;
 /// <summary>
 /// 通用 <see cref="ICommand"/> 实现，将命令逻辑委托给外部 Action / Func。
 /// </summary>
-public sealed class RelayCommand : ICommand
+internal sealed class RelayCommand : ICommand
 {
     private readonly Action<object?> _execute;
     private readonly Func<object?, bool>? _canExecute;

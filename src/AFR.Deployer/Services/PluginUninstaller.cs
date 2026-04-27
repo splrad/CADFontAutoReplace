@@ -26,13 +26,12 @@ internal static class PluginUninstaller
     internal static bool TryUninstall(CadInstallation installation, out string? warningMessage)
     {
         warningMessage = null;
-        var appPath = installation.RegistryAppPath;
 
         // 1. 重新从注册表读取 LOADER，防止 UI 缓存与实际不符
         string? dllPath;
         try
         {
-            using var appKey = Registry.CurrentUser.OpenSubKey(appPath, false);
+            using var appKey = Registry.CurrentUser.OpenSubKey(installation.RegistryAppPath, false);
             dllPath = appKey?.GetValue("LOADER") as string;
         }
         catch (Exception ex)
@@ -56,13 +55,13 @@ internal static class PluginUninstaller
         }
 
         // 3. 删除注册表 AppName 子键
+        // RegistryAppPath 末尾为 "...\Applications\{AppName}"，直接用已知的 AppName 定位
         try
         {
-            // appPath 末尾为 "...\Applications\AFR-ACAD20XX"，需删除最后一级子键
-            var parentPath = Path.GetDirectoryName(appPath)!.Replace('/', '\\');
-            var keyName    = Path.GetFileName(appPath);
-            using var parentKey = Registry.CurrentUser.OpenSubKey(parentPath, true);
-            parentKey?.DeleteSubKeyTree(keyName, throwOnMissingSubKey: false);
+            var applicationsPath = installation.RegistryAppPath[
+                ..^(installation.Descriptor.AppName.Length + 1)]; // 去掉 "\AppName"
+            using var parentKey = Registry.CurrentUser.OpenSubKey(applicationsPath, true);
+            parentKey?.DeleteSubKeyTree(installation.Descriptor.AppName, throwOnMissingSubKey: false);
 
             return true;
         }

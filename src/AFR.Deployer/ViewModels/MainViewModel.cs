@@ -1,8 +1,8 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using System.Windows;
 using System.Windows.Threading;
+using AFR.Deployer.Infrastructure;
 using AFR.Deployer.Models;
 using AFR.Deployer.Services;
 
@@ -11,10 +11,12 @@ namespace AFR.Deployer.ViewModels;
 /// <summary>
 /// 主窗口 ViewModel，协调扫描、安装、卸载、进程检测等全部业务逻辑。
 /// </summary>
-public sealed class MainViewModel : INotifyPropertyChanged
+internal sealed class MainViewModel : INotifyPropertyChanged
 {
     // ── 进程轮询定时器（每 2 秒检测一次 CAD 是否正在运行） ──
-    private readonly DispatcherTimer _processTimer;
+    private readonly DispatcherTimer      _processTimer;
+    private readonly IDialogService       _dialog;
+    private readonly IFolderPickerService _folderPicker;
 
     private string _deployPath  = @"D:\CADPlugins\";
     private string _statusText  = "正在扫描已安装的 CAD……";
@@ -74,8 +76,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
     /// <summary>全选 / 取消全选命令。</summary>
     public RelayCommand SelectAllCommand { get; }
 
-    public MainViewModel()
+    internal MainViewModel(IDialogService dialog, IFolderPickerService folderPicker)
     {
+        _dialog       = dialog;
+        _folderPicker = folderPicker;
+
         RefreshCommand   = new RelayCommand(_ => Refresh());
         BrowseCommand    = new RelayCommand(_ => BrowsePath());
         InstallCommand   = new RelayCommand(_ => ExecuteInstall(),   _ => CanOperate);
@@ -144,14 +149,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void BrowsePath()
     {
-        var dialog = new Microsoft.Win32.OpenFolderDialog
-        {
-            Title            = "选择插件 DLL 的释放目录",
-            InitialDirectory = DeployPath,
-        };
-
-        if (dialog.ShowDialog() == true)
-            DeployPath = dialog.FolderName;
+        var selected = _folderPicker.PickFolder(DeployPath);
+        if (selected is not null)
+            DeployPath = selected;
     }
 
     // ── 安装 ──
@@ -161,8 +161,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var selected = CadEntries.Where(e => e.IsSelected).ToList();
         if (selected.Count == 0)
         {
-            MessageBox.Show("请先在列表中勾选要安装的 CAD 版本。",
-                "AFR 部署工具", MessageBoxButton.OK, MessageBoxImage.Information);
+            _dialog.ShowInfo("请先在列表中勾选要安装的 CAD 版本。",
+                "AFR 部署工具");
             return;
         }
 
@@ -194,7 +194,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (errors.Count > 0)
         {
             var msg = $"以下版本安装失败：\n\n{string.Join("\n", errors)}";
-            MessageBox.Show(msg, "AFR 部署工具 — 安装错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+            _dialog.ShowWarning(msg, "AFR 部署工具 — 安装错误");
         }
         else
         {
@@ -212,18 +212,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         if (selected.Count == 0)
         {
-            MessageBox.Show("请勾选已安装的 CAD 版本进行卸载。",
-                "AFR 部署工具", MessageBoxButton.OK, MessageBoxImage.Information);
+            _dialog.ShowInfo("请勾选已安装的 CAD 版本进行卸载。",
+                "AFR 部署工具");
             return;
         }
 
-        var confirm = MessageBox.Show(
+        if (!_dialog.Confirm(
             $"确定要从以下 {selected.Count} 个配置文件实例中卸载 AFR 插件？\n\n" +
             string.Join("\n", selected.Select(e => $"  • {e.Installation.Descriptor.DisplayName} [{e.Profile}]")),
-            "AFR 部署工具 — 确认卸载",
-            MessageBoxButton.OKCancel, MessageBoxImage.Question);
-
-        if (confirm != MessageBoxResult.OK) return;
+            "AFR 部署工具 — 确认卸载")) return;
 
         // 操作前再次读取注册表（防手动修改）
         var freshResults = CadRegistryScanner.Scan()
@@ -255,8 +252,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         if (warnings.Count > 0)
         {
-            MessageBox.Show(string.Join("\n", warnings),
-                "AFR 部署工具 — 卸载完成（含警告）", MessageBoxButton.OK, MessageBoxImage.Warning);
+            _dialog.ShowWarning(string.Join("\n", warnings),
+                "AFR 部署工具 — 卸载完成（含警告）");
         }
         else
         {

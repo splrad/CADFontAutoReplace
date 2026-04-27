@@ -3,7 +3,7 @@ namespace AFR.Deployer.Models;
 /// <summary>
 /// 插件在某个 CAD 配置文件实例中的部署状态。
 /// </summary>
-public enum PluginDeployStatus
+internal enum PluginDeployStatus
 {
     /// <summary>注册表中不存在该插件的自动加载条目。</summary>
     NotInstalled,

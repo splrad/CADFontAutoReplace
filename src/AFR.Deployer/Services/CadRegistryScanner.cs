@@ -1,4 +1,3 @@
-using System.IO;
 using System.Text.RegularExpressions;
 using AFR.Deployer.Models;
 using Microsoft.Win32;
@@ -49,24 +48,9 @@ internal static class CadRegistryScanner
     {
         using var appKey = Registry.CurrentUser.OpenSubKey(appPath, false);
 
-        if (appKey is null)
-        {
-            return new CadInstallation(descriptor, profileSubKey, PluginDeployStatus.NotInstalled, null, null);
-        }
-
-        var installedVersion = appKey.GetValue("PluginVersion") as string;
-        var dllPath = appKey.GetValue("LOADER") as string;
-
-        // DLL 路径记录在注册表中，但物理文件已不存在
-        if (!string.IsNullOrEmpty(dllPath) && !File.Exists(dllPath))
-        {
-            return new CadInstallation(descriptor, profileSubKey, PluginDeployStatus.DllMissing, installedVersion, dllPath);
-        }
-
-        var currentVersion = DeployerVersionService.GetVersion();
-        var status = string.Equals(installedVersion, currentVersion, StringComparison.OrdinalIgnoreCase)
-            ? PluginDeployStatus.InstalledCurrent
-            : PluginDeployStatus.InstalledOutdated;
+        var installedVersion = appKey?.GetValue("PluginVersion") as string;
+        var dllPath          = appKey?.GetValue("LOADER") as string;
+        var status           = StatusResolver.Resolve(appKey is not null, dllPath, installedVersion);
 
         return new CadInstallation(descriptor, profileSubKey, status, installedVersion, dllPath);
     }
