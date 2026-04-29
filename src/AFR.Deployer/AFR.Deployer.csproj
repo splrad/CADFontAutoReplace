@@ -2,42 +2,26 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
-    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <RootNamespace>AFR.Deployer</RootNamespace>
     <AssemblyName>AFR.Deployer</AssemblyName>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <UseWinUI>true</UseWinUI>
+    <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <Platforms>x64</Platforms>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <!--
-      发布策略：自包含 .NET 10 + 单文件，但 Windows App Runtime 保持外置（由用户安装）。
-      用户机器仅需安装 Windows App Runtime 1.8 (x64) 即可运行。
+      发布策略：自包含 .NET 10 + 单文件。WPF 已内置于 .NET Desktop Runtime，
+      无需 Windows App Runtime 等外置依赖；用户双击即可运行，无伴随文件。
     -->
     <SelfContained>true</SelfContained>
-    <WindowsPackageType>None</WindowsPackageType>
-    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <EnableMsixTooling>true</EnableMsixTooling>
-    <AppxPackage>false</AppxPackage>
-    <!--
-      AFR.Deployer.pri 必须作为伴随文件留在 EXE 同级目录：
-      WinUI 3 的 Microsoft.UI.Xaml.dll 启动时只从磁盘加载 PRI，
-      若被压进单文件 bundle 会触发 0xc000027b 崩溃（XamlMetadataProviderGenerated 资源解析失败）。
-    -->
-    <GenerateAppxPackageOnBuild>false</GenerateAppxPackageOnBuild>
-    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
-
-  <ItemGroup>
-    <Page Remove="Views\MainWindow.xaml" />
-  </ItemGroup>
 
   <!-- Assets -->
   <ItemGroup>
@@ -46,18 +30,8 @@
     </Content>
   </ItemGroup>
 
-  <!-- XAML 页面（unpackaged WinUI 3 不会自动包含子目录下的 Page，需显式声明） -->
+  <!-- MVVM -->
   <ItemGroup>
-    <Page Include="Views\MainWindow.xaml">
-      <SubType>Designer</SubType>
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-  </ItemGroup>
-
-  <!-- WinUI 3 + MVVM -->
-  <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260416003" />
-    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
   </ItemGroup>
 
@@ -74,25 +48,6 @@
     <EmbeddedResource Include="Resources\AFR-ACAD2026.dll" Condition="Exists('Resources\AFR-ACAD2026.dll')" />
     <EmbeddedResource Include="Resources\AFR-ACAD2027.dll" Condition="Exists('Resources\AFR-ACAD2027.dll')" />
   </ItemGroup>
-  <ItemGroup>
-    <None Update="Views\MainWindow.xaml">
-      <Generator>MSBuild:Compile</Generator>
-    </None>
-  </ItemGroup>
-
-  <!--
-    强制把 PRI 资源索引保留为伴随文件，不进单文件 bundle。
-    WinUI 3 的 Microsoft.UI.Xaml.dll 只从磁盘加载 PRI，否则触发 0xc000027b。
-  -->
-  <Target Name="CopyPriBesideSingleFileExe" AfterTargets="Publish">
-    <ItemGroup>
-      <_PriBuildOutput Include="$(TargetDir)*.pri" />
-    </ItemGroup>
-    <Copy SourceFiles="@(_PriBuildOutput)"
-          DestinationFolder="$(PublishDir)"
-          SkipUnchangedFiles="true"
-          Condition="'@(_PriBuildOutput)' != ''" />
-  </Target>
 
 </Project>
 

@@ -1,4 +1,6 @@
-using Microsoft.UI.Xaml.Data;
+using System;
+using System.Globalization;
+using System.Windows.Data;
 
 namespace AFR.Deployer.Converters;
 
@@ -7,9 +9,9 @@ namespace AFR.Deployer.Converters;
 /// </summary>
 internal sealed class AvailabilityToOpacityConverter : IValueConverter
 {
-    public object Convert(object value, System.Type targetType, object parameter, string language)
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         => value is bool b && b ? 1.0 : 0.45;
 
-    public object ConvertBack(object value, System.Type targetType, object parameter, string language)
-        => throw new System.NotSupportedException();
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
 }
