@@ -2,37 +2,53 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>AFR.Deployer</RootNamespace>
     <AssemblyName>AFR.Deployer</AssemblyName>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <UseWPF>true</UseWPF>
+    <UseWinUI>true</UseWinUI>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <!-- EXE 文件图标（资源管理器 / 任务栏） -->
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
-    <!-- 不继承 Directory.Build.props 中的 CopyDllToReleases 目标 -->
     <Platforms>x64</Platforms>
-    <!-- 自包含单文件发布：用户双击即用，无需安装 .NET 运行时 -->
-    <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <PublishSingleFile>true</PublishSingleFile>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <!-- 排除不需要的本机调试组件以缩减体积 -->
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!-- Framework-Dependent: 用户需自行安装 .NET 10 Desktop Runtime + Windows App Runtime 1.7 -->
+    <SelfContained>false</SelfContained>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <AppxPackage>false</AppxPackage>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Page Remove="Views\MainWindow.xaml" />
+  </ItemGroup>
 
   <!-- Assets -->
   <ItemGroup>
-    <Resource Include="Assets\app.ico" />
+    <Content Include="Assets\app.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
-  <!-- UI 控件库 -->
+  <!-- XAML 页面（unpackaged WinUI 3 不会自动包含子目录下的 Page，需显式声明） -->
   <ItemGroup>
-    <PackageReference Include="HandyControl" Version="3.5.1" />
+    <Page Include="Views\MainWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
   </ItemGroup>
 
-  <!-- 嵌入所有插件 DLL（Release 构建后手动放入 Resources\ 目录） -->
+  <!-- WinUI 3 + MVVM -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260416003" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+  </ItemGroup>
+
+  <!-- 嵌入所有插件 DLL -->
   <ItemGroup>
     <EmbeddedResource Include="Resources\AFR-ACAD2018.dll" Condition="Exists('Resources\AFR-ACAD2018.dll')" />
     <EmbeddedResource Include="Resources\AFR-ACAD2019.dll" Condition="Exists('Resources\AFR-ACAD2019.dll')" />
@@ -45,5 +61,11 @@
     <EmbeddedResource Include="Resources\AFR-ACAD2026.dll" Condition="Exists('Resources\AFR-ACAD2026.dll')" />
     <EmbeddedResource Include="Resources\AFR-ACAD2027.dll" Condition="Exists('Resources\AFR-ACAD2027.dll')" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="Views\MainWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </None>
+  </ItemGroup>
 
 </Project>
+

@@ -8,7 +8,9 @@
          - Directory.Build.props 的 CopyDllToReleases Target 自动将 DLL 汇聚到
            artifacts\Releases\
       2. 从 artifacts\Releases\ 复制 DLL 到 AFR.Deployer\Resources\
-      3. dotnet publish AFR.Deployer -> 自包含单文件 EXE
+      3. dotnet publish AFR.Deployer -> Framework-dependent 单文件 EXE
+         （需用户机器已安装 .NET 10 Desktop Runtime + Windows App Runtime 1.8；
+           缺失时由 AFR.Deployer 启动期检测并弹原生对话框给出下载链接）
 .OUTPUTS
     <RepoRoot>\publish\AFR.Deployer\AFR.Deployer.exe
 .EXAMPLE

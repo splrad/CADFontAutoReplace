@@ -1,47 +1,37 @@
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using AFR.Deployer.Models;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AFR.Deployer.ViewModels;
 
 /// <summary>
 /// DataGrid 中单行的 ViewModel，对应本机一个 CAD 配置文件实例。
 /// </summary>
-internal sealed class CadEntryViewModel : INotifyPropertyChanged
+internal sealed partial class CadEntryViewModel : ObservableObject
 {
-    private bool _isSelected;
-    private PluginDeployStatus _status;
-
-    /// <summary>对应的扫描结果（只读，用于执行操作时定位注册表路径）。</summary>
+    /// <summary>对应的扫描结果（用于执行操作时定位注册表路径）。</summary>
     internal CadInstallation Installation { get; private set; }
 
-    /// <summary>用户是否勾选该条目（绑定 DataGrid CheckBox 列）。</summary>
-    public bool IsSelected
-    {
-        get => _isSelected;
-        set { _isSelected = value; OnPropertyChanged(); }
-    }
+    [ObservableProperty]
+    private bool _isSelected;
 
-    // ── 展示用属性（直接映射自 Installation） ──
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusText))]
+    private PluginDeployStatus _status;
+
+    [ObservableProperty]
+    private string _installedVersion = "—";
 
     /// <summary>品牌名称，如 "AutoCAD"。</summary>
-    public string Brand => Installation.Descriptor.Brand;
+    public string Brand   => Installation.Descriptor.Brand;
 
     /// <summary>版本年份，如 "2025"。</summary>
     public string Version => Installation.Descriptor.Version;
 
-    /// <summary>配置文件子键，如 "ACAD-12345:409"。</summary>
+    /// <summary>配置文件子键。</summary>
     public string Profile => Installation.ProfileSubKey;
 
-    /// <summary>已安装的插件版本号，未安装时显示 "—"。</summary>
-    public string InstalledVersion => Installation.InstalledVersion ?? "—";
-
-    /// <summary>插件部署状态。</summary>
-    public PluginDeployStatus Status
-    {
-        get => _status;
-        private set { _status = value; OnPropertyChanged(); OnPropertyChanged(nameof(StatusText)); }
-    }
+    /// <summary>品牌首字母，用于徽标显示。</summary>
+    public string BrandInitial => Brand.Length > 0 ? Brand[0].ToString().ToUpperInvariant() : "?";
 
     /// <summary>状态的中文显示文本。</summary>
     public string StatusText => Status switch
@@ -53,25 +43,18 @@ internal sealed class CadEntryViewModel : INotifyPropertyChanged
         _                                    => "未知"
     };
 
-    /// <summary>品牌首字母，用于徽标显示，如 "A"（AutoCAD）。</summary>
-    public string BrandInitial => Brand.Length > 0 ? Brand[0].ToString().ToUpperInvariant() : "?";
-
-
     internal CadEntryViewModel(CadInstallation installation)
     {
-        Installation = installation;
-        _status      = installation.Status;
+        Installation       = installation;
+        _status            = installation.Status;
+        _installedVersion  = installation.InstalledVersion ?? "—";
     }
 
-    /// <summary>用新的扫描结果刷新本行数据（操作完成后调用）。</summary>
+    /// <summary>用新的扫描结果刷新本行数据。</summary>
     internal void Refresh(CadInstallation newInstallation)
     {
-        Installation = newInstallation;
-        Status       = newInstallation.Status;
-        OnPropertyChanged(nameof(InstalledVersion));
+        Installation     = newInstallation;
+        Status           = newInstallation.Status;
+        InstalledVersion = newInstallation.InstalledVersion ?? "—";
     }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-    private void OnPropertyChanged([CallerMemberName] string? name = null)
-        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

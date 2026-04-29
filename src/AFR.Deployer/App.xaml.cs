@@ -1,23 +1,32 @@
-using System.Windows;
 using AFR.Deployer.Infrastructure;
 using AFR.Deployer.ViewModels;
 using AFR.Deployer.Views;
+using Microsoft.UI.Xaml;
 
 namespace AFR.Deployer;
 
 /// <summary>
-/// WPF 应用程序入口点。手动组装服务并创建主窗口，不使用 StartupUri。
+/// WinUI 3 应用入口；在 <see cref="OnLaunched"/> 中组装 ViewModel 并显示主窗口。
+/// 全局持有 <see cref="MainWindow"/> 引用，避免被 GC 回收导致窗口闪退。
 /// </summary>
 public partial class App : Application
 {
-    protected override void OnStartup(StartupEventArgs e)
-    {
-        base.OnStartup(e);
+    private MainWindow? _window;
 
-        var dialog       = new WpfDialogService();
-        var folderPicker = new WpfFolderPickerService();
+    public App()
+    {
+        InitializeComponent();
+    }
+
+    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        _window = new MainWindow();
+
+        var dialog       = new WinUiDialogService(_window);
+        var folderPicker = new WinUiFolderPickerService(_window);
         var viewModel    = new MainViewModel(dialog, folderPicker);
-        var window       = new MainWindow(viewModel);
-        window.Show();
+
+        _window.Initialize(viewModel);
+        _window.Activate();
     }
 }

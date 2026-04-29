@@ -4,15 +4,14 @@
 
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
-      <!-- Per-Monitor V2 高 DPI 感知（.NET 10 WPF 原生支持） -->
-      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">
-        PerMonitorV2
-      </dpiAwareness>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
       <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+    </windowsSettings>
+    <windowsSettings xmlns="http://schemas.microsoft.com/SMI/2020/WindowsSettings">
+      <heapType>SegmentHeap</heapType>
     </windowsSettings>
   </application>
 
-  <!-- 请求最高可用权限，普通用户以 HKCU 写注册表不需要管理员 -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
@@ -23,8 +22,9 @@
 
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
-      <!-- Windows 10/11 -->
+      <!-- Windows 10 / 11 -->
       <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+      <maxversiontested Id="10.0.22621.0" />
     </application>
   </compatibility>
 </assembly>
