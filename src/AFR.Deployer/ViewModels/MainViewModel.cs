@@ -39,6 +39,23 @@ internal sealed partial class MainViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(UninstallCommand))]
     private bool _isBusy;
 
+    /// <summary>是否在 UI 中显示未检测到的 CAD 版本（占位条目）。</summary>
+    [ObservableProperty]
+    private bool _showUnavailable = true;
+
+    /// <summary>已检测到（即本机已安装）的 CAD 版本数量。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DetectionSummary))]
+    private int _installedCount;
+
+    /// <summary>列表中条目总数。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DetectionSummary))]
+    private int _totalCount;
+
+    /// <summary>底部状态栏左侧显示的检测摘要。</summary>
+    public string DetectionSummary => $"已检测到 {InstalledCount} / {TotalCount} 版本";
+
     /// <summary>操作按钮是否可用。</summary>
     public bool CanOperate => !IsCadRunning && !IsBusy;
 
@@ -80,9 +97,12 @@ internal sealed partial class MainViewModel : ObservableObject
                 CadEntries.Add(new CadEntryViewModel(result));
         }
 
+        TotalCount     = CadEntries.Count;
+        InstalledCount = CadEntries.Count(e => e.IsCadInstalled);
+
         StatusText = CadEntries.Count == 0
             ? "未检测到任何受支持的 AutoCAD 安装"
-            : $"共列出 {CadEntries.Count} 个受支持的 CAD 条目";
+            : "就绪";
 
         CheckCadProcesses();
     }

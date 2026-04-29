@@ -1,10 +1,12 @@
 using AFR.Deployer.ViewModels;
+using System.Windows;
+using System.Windows.Controls;
 using Wpf.Ui.Controls;
 
 namespace AFR.Deployer.Views;
 
 /// <summary>
-/// WPF-UI FluentWindow 主窗口；尺寸固定为 940x640 逻辑像素，由 WPF 自动按 DPI 缩放。
+/// WPF-UI FluentWindow 主窗口。
 /// </summary>
 public partial class MainWindow : FluentWindow
 {
@@ -22,4 +24,14 @@ public partial class MainWindow : FluentWindow
         ViewModel = viewModel;
         DataContext = viewModel;
     }
+
+    /// <summary>顶部"全选"复选框点击：根据勾选状态对所有可用条目进行选中/取消。</summary>
+    private void OnSelectAllClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not CheckBox cb || ViewModel is null) return;
+        var param = cb.IsChecked == true ? "true" : "false";
+        if (ViewModel.SelectAllCommand.CanExecute(param))
+            ViewModel.SelectAllCommand.Execute(param);
+    }
 }
+

@@ -24,6 +24,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# 强制 UTF-8 控制台编码：dotnet CLI 默认输出 UTF-8，
+# 而 PowerShell 在中文 Windows 上默认按 GBK (CP936) 解码外部进程输出，
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding           = [System.Text.Encoding]::UTF8
+
 # ── 路径常量 ──────────────────────────────────────────────────────────────
 $RepoRoot       = (Resolve-Path "$PSScriptRoot\..\..").Path
 $PluginsRoot    = Join-Path $RepoRoot "src\AutoCAD"

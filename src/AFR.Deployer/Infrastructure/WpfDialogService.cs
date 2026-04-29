@@ -1,9 +1,14 @@
+using System.Threading.Tasks;
 using System.Windows;
+using Wpf.Ui.Controls;
+using WpfUiMessageBox = Wpf.Ui.Controls.MessageBox;
+using WpfUiMessageBoxResult = Wpf.Ui.Controls.MessageBoxResult;
 
 namespace AFR.Deployer.Infrastructure;
 
 /// <summary>
-/// <see cref="IDialogService"/> 的 WPF 实现，统一通过 <see cref="MessageBox"/> 显示。
+/// <see cref="IDialogService"/> 的 WPF-UI 实现，使用 <see cref="Wpf.Ui.Controls.MessageBox"/>，
+/// 与主窗口风格保持一致（Fluent 主题、可主题化）。
 /// </summary>
 internal sealed class WpfDialogService : IDialogService
 {
@@ -11,21 +16,47 @@ internal sealed class WpfDialogService : IDialogService
 
     internal WpfDialogService(Window owner) => _owner = owner;
 
-    public System.Threading.Tasks.Task ShowInfoAsync(string message, string title)
+    public async Task ShowInfoAsync(string message, string title)
     {
-        MessageBox.Show(_owner, message, title, MessageBoxButton.OK, MessageBoxImage.Information);
-        return System.Threading.Tasks.Task.CompletedTask;
+        var box = new WpfUiMessageBox
+        {
+            Title                 = title,
+            Content               = message,
+            CloseButtonText       = "确定",
+            CloseButtonAppearance = ControlAppearance.Primary,
+            Owner                 = _owner,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+        await box.ShowDialogAsync();
     }
 
-    public System.Threading.Tasks.Task ShowWarningAsync(string message, string title)
+    public async Task ShowWarningAsync(string message, string title)
     {
-        MessageBox.Show(_owner, message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
-        return System.Threading.Tasks.Task.CompletedTask;
+        var box = new WpfUiMessageBox
+        {
+            Title                 = title,
+            Content               = message,
+            CloseButtonText       = "知道了",
+            CloseButtonAppearance = ControlAppearance.Caution,
+            Owner                 = _owner,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+        await box.ShowDialogAsync();
     }
 
-    public System.Threading.Tasks.Task<bool> ConfirmAsync(string message, string title)
+    public async Task<bool> ConfirmAsync(string message, string title)
     {
-        var result = MessageBox.Show(_owner, message, title, MessageBoxButton.OKCancel, MessageBoxImage.Question);
-        return System.Threading.Tasks.Task.FromResult(result == MessageBoxResult.OK);
+        var box = new WpfUiMessageBox
+        {
+            Title                   = title,
+            Content                 = message,
+            PrimaryButtonText       = "确定",
+            PrimaryButtonAppearance = ControlAppearance.Primary,
+            CloseButtonText         = "取消",
+            Owner                   = _owner,
+            WindowStartupLocation   = WindowStartupLocation.CenterOwner,
+        };
+        var result = await box.ShowDialogAsync();
+        return result == WpfUiMessageBoxResult.Primary;
     }
 }

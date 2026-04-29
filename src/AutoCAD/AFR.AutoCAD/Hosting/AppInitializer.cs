@@ -91,6 +91,13 @@ internal static class AppInitializer
             WriteDefaultConfiguration(appPath);
             WriteIfChanged(appPath, ConfigSchemaVersionValueName, currentConfigSchemaVersion);
         }
+        else if (RegistryService.ReadDword(Registry.CurrentUser, appPath, "IsInitialized") != 1)
+        {
+            // 部署工具预创建注册表键时仅写入默认字体名 + IsInitialized=0，
+            // 需要在插件首次加载时释放内嵌 SHX 到 CAD Fonts 目录并将 IsInitialized 翻为 1。
+            CompleteDeployerInitialization(appPath);
+            WriteIfChanged(appPath, ConfigSchemaVersionValueName, currentConfigSchemaVersion);
+        }
         else if (installedConfigSchemaVersion != currentConfigSchemaVersion)
         {
             MigrateConfiguration(appPath, installedConfigSchemaVersion);
@@ -105,6 +112,40 @@ internal static class AppInitializer
                 $"插件版本已更新: {installedPluginVersion ?? "未设置"}+{installedBuildId ?? "未设置"} → {currentPluginVersion}+{currentBuildId}");
         }
         return isNewKey;
+    }
+
+    /// <summary>
+    /// 完成由部署工具预创建注册表键时的剩余初始化。
+    /// <para>
+    /// 部署工具无法定位 acad.exe 的 Fonts 目录，因此只写入字体名称和 IsInitialized=0；
+    /// 真正释放内嵌 SHX 文件由插件首次加载时执行，成功后将 IsInitialized 翻为 1。
+    /// 若用户已自行覆盖默认字体名（值非空），则保留用户值。
+    /// </para>
+    /// </summary>
+    private static void CompleteDeployerInitialization(string appPath)
+    {
+        bool deployed = EmbeddedFontDeployer.Deploy();
+
+        // 部署工具创建键时已写入默认值，这里仅在缺失/为空时补齐，避免覆盖用户自定义。
+        EnsureStringValue(appPath, "MainFont",     EmbeddedFontDeployer.DefaultMainFont);
+        EnsureStringValue(appPath, "BigFont",      EmbeddedFontDeployer.DefaultBigFont);
+        EnsureStringValue(appPath, "TrueTypeFont", EmbeddedFontDeployer.DefaultTrueTypeFont);
+
+        RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", deployed ? 1 : 0);
+        DiagnosticLogger.Log("初始化",
+            deployed
+                ? "部署工具预创建键 — 已释放内嵌字体并完成初始化"
+                : "部署工具预创建键 — 字体释放失败，等待用户手动配置");
+    }
+
+    /// <summary>当注册表中字符串值缺失或为空白时写入默认值，否则保留用户已有值。</summary>
+    private static void EnsureStringValue(string appPath, string name, string defaultValue)
+    {
+        var current = RegistryService.ReadString(Registry.CurrentUser, appPath, name);
+        if (string.IsNullOrWhiteSpace(current))
+        {
+            RegistryService.WriteString(Registry.CurrentUser, appPath, name, defaultValue);
+        }
     }
 
     /// <summary>写入首次安装时的默认配置。</summary>

@@ -2,6 +2,7 @@ using System.Windows;
 using AFR.Deployer.Infrastructure;
 using AFR.Deployer.ViewModels;
 using AFR.Deployer.Views;
+using Wpf.Ui.Appearance;
 
 namespace AFR.Deployer;
 
@@ -20,6 +21,10 @@ public partial class App : Application
         var viewModel    = new MainViewModel(dialog, folderPicker);
 
         window.Initialize(viewModel);
+
+        // 启用 WPF-UI 主题与 Mica 背景；窗口必须先创建后再 Apply。
+        ApplicationThemeManager.Apply(window);
+
         window.Show();
     }
 }
