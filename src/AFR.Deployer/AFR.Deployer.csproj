@@ -32,7 +32,8 @@
 
   <!-- MVVM -->
   <ItemGroup>
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="WPF-UI" Version="4.2.1" />
   </ItemGroup>
 
   <!-- 嵌入所有插件 DLL -->

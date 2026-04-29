@@ -1,12 +1,12 @@
-using System.Windows;
 using AFR.Deployer.ViewModels;
+using Wpf.Ui.Controls;
 
 namespace AFR.Deployer.Views;
 
 /// <summary>
-/// WPF 主窗口；尺寸固定为 940x600 逻辑像素，由 WPF 自动按 DPI 缩放。
+/// WPF-UI FluentWindow 主窗口；尺寸固定为 940x640 逻辑像素，由 WPF 自动按 DPI 缩放。
 /// </summary>
-public partial class MainWindow : Window
+public partial class MainWindow : FluentWindow
 {
     /// <summary>视图模型，由 <see cref="App"/> 在 <see cref="Initialize"/> 中注入。</summary>
     internal MainViewModel ViewModel { get; private set; } = null!;
