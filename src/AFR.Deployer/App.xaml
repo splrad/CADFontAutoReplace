@@ -10,6 +10,12 @@
             </ResourceDictionary.MergedDictionaries>
             <converters:StatusToBrushConverter x:Key="StatusToBrush" />
             <converters:RunningToBrushConverter x:Key="RunningToBrush" />
+            <converters:AvailabilityToOpacityConverter x:Key="AvailabilityToOpacity" />
+            <converters:AvailabilityToCardBackgroundConverter x:Key="AvailabilityToCardBackground" />
+            <converters:AvailabilityToBadgeBrushConverter x:Key="AvailabilityToBadgeBrush" />
+            <converters:AvailabilityToTextBrushConverter x:Key="AvailabilityToTextBrush" />
+            <converters:AvailabilityToBadgeBackgroundConverter x:Key="AvailabilityToBadgeBackground" />
+            <converters:BoolToVisibilityConverter x:Key="BoolToVisibility" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

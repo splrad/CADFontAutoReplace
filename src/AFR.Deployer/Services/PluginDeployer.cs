@@ -48,11 +48,12 @@ internal static class PluginDeployer
         try
         {
             using var key = Registry.CurrentUser.CreateSubKey(installation.RegistryAppPath, true);
-            key.SetValue("LOADER",        dllPath,                          RegistryValueKind.String);
-            key.SetValue("LOADCTRLS",     LoadCtrls,                        RegistryValueKind.DWord);
-            key.SetValue("MANAGED",       Managed,                          RegistryValueKind.DWord);
-            key.SetValue("DESCRIPTION",   Description,                      RegistryValueKind.String);
-            key.SetValue("PluginVersion", DeployerVersionService.GetVersion(), RegistryValueKind.String);
+            key.SetValue("LOADER",        dllPath,                                    RegistryValueKind.String);
+            key.SetValue("LOADCTRLS",     LoadCtrls,                                  RegistryValueKind.DWord);
+            key.SetValue("MANAGED",       Managed,                                    RegistryValueKind.DWord);
+            key.SetValue("DESCRIPTION",   Description,                                RegistryValueKind.String);
+            key.SetValue("PluginVersion", DeployerVersionService.GetDisplayVersion(), RegistryValueKind.String);
+            key.SetValue("PluginBuildId", DeployerVersionService.GetBuildId(),        RegistryValueKind.String);
 
             errorMessage = null;
             return true;

@@ -82,7 +82,7 @@ internal sealed partial class MainViewModel : ObservableObject
 
         StatusText = CadEntries.Count == 0
             ? "未检测到任何受支持的 AutoCAD 安装"
-            : $"共检测到 {CadEntries.Count} 个配置文件实例";
+            : $"共列出 {CadEntries.Count} 个受支持的 CAD 条目";
 
         CheckCadProcesses();
     }
@@ -121,7 +121,10 @@ internal sealed partial class MainViewModel : ObservableObject
     {
         bool selectAll = parameter is null || parameter != "false";
         foreach (var entry in CadEntries)
-            entry.IsSelected = selectAll;
+        {
+            if (entry.IsCadInstalled)
+                entry.IsSelected = selectAll;
+        }
     }
 
     // ── 安装 ──
@@ -129,7 +132,7 @@ internal sealed partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanOperate))]
     private async Task InstallAsync()
     {
-        var selected = CadEntries.Where(e => e.IsSelected).ToList();
+        var selected = CadEntries.Where(e => e.IsCadInstalled && e.IsSelected).ToList();
         if (selected.Count == 0)
         {
             await _dialog.ShowInfoAsync("请先在列表中勾选要安装的 CAD 版本。", "AFR 部署工具");
@@ -176,7 +179,7 @@ internal sealed partial class MainViewModel : ObservableObject
     private async Task UninstallAsync()
     {
         var selected = CadEntries
-            .Where(e => e.IsSelected && e.Status != PluginDeployStatus.NotInstalled)
+            .Where(e => e.IsCadInstalled && e.IsSelected && e.Status != PluginDeployStatus.NotInstalled)
             .ToList();
 
         if (selected.Count == 0)

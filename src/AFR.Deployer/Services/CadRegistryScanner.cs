@@ -17,9 +17,12 @@ internal static class CadRegistryScanner
         new(@"^ACAD-[A-Za-z0-9]+:[A-Za-z0-9]+$", RegexOptions.Compiled);
 
     /// <summary>
-    /// 扫描注册表，返回所有本机存在的 CAD 配置文件实例列表（按品牌 → 版本 → 配置文件排序）。
+    /// 扫描注册表，返回所有受支持 CAD 版本的条目列表（按品牌 → 版本 → 配置文件排序）。
     /// <para>
-    /// 仅返回注册表基路径实际存在的版本；若某版本未安装则不出现在结果中。
+    /// 无论本机是否安装某个受支持版本，<see cref="CadDescriptors.All"/> 中的每个版本至少返回
+    /// 一条记录：已安装则枚举其全部配置文件子键，未安装则返回单条占位条目
+    /// （<see cref="CadInstallation.IsCadInstalled"/> 为 false）。这样 UI 可以列出全部支持版本，
+    /// 并对未安装的版本禁用操作。
     /// </para>
     /// </summary>
     internal static IReadOnlyList<CadInstallation> Scan()
@@ -29,11 +32,25 @@ internal static class CadRegistryScanner
         foreach (var descriptor in CadDescriptors.All)
         {
             var profileNames = GetProfileSubKeys(descriptor.RegistryBasePath);
+
+            if (profileNames.Count == 0)
+            {
+                // 占位条目：本机未安装该 CAD 版本，UI 中需展示但禁用
+                results.Add(new CadInstallation(
+                    descriptor,
+                    ProfileSubKey:    string.Empty,
+                    IsCadInstalled:   false,
+                    Status:           PluginDeployStatus.NotInstalled,
+                    InstalledVersion: null,
+                    InstalledBuildId: null,
+                    InstalledDllPath: null));
+                continue;
+            }
+
             foreach (var profile in profileNames)
             {
                 var appPath = $@"{descriptor.RegistryBasePath}\{profile}\Applications\{descriptor.AppName}";
-                var installation = ReadInstallation(descriptor, profile, appPath);
-                results.Add(installation);
+                results.Add(ReadInstallation(descriptor, profile, appPath));
             }
         }
 
@@ -49,16 +66,24 @@ internal static class CadRegistryScanner
         using var appKey = Registry.CurrentUser.OpenSubKey(appPath, false);
 
         var installedVersion = appKey?.GetValue("PluginVersion") as string;
+        var installedBuildId = appKey?.GetValue("PluginBuildId") as string;
         var dllPath          = appKey?.GetValue("LOADER") as string;
-        var status           = StatusResolver.Resolve(appKey is not null, dllPath, installedVersion);
+        var status           = StatusResolver.Resolve(appKey is not null, dllPath, installedVersion, installedBuildId);
 
-        return new CadInstallation(descriptor, profileSubKey, status, installedVersion, dllPath);
+        return new CadInstallation(
+            descriptor,
+            profileSubKey,
+            IsCadInstalled:   true,
+            Status:           status,
+            InstalledVersion: installedVersion,
+            InstalledBuildId: installedBuildId,
+            InstalledDllPath: dllPath);
     }
 
     /// <summary>
     /// 获取指定注册表基路径下所有匹配 AutoCAD 配置文件模式的子键名称。
     /// </summary>
-    private static IEnumerable<string> GetProfileSubKeys(string basePath)
+    private static IReadOnlyList<string> GetProfileSubKeys(string basePath)
     {
         try
         {

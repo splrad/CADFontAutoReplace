@@ -24,6 +24,7 @@ internal static class AppInitializer
     private const int LoadCtrls = 2;   // 2 = 随 AutoCAD 启动自动加载
     private const int Managed = 1;     // 1 = 标识为托管 .NET 插件
     private const string PluginVersionValueName = "PluginVersion";
+    private const string PluginBuildIdValueName = "PluginBuildId";
     private const string ConfigSchemaVersionValueName = "ConfigSchemaVersion";
 
     /// <summary>
@@ -69,9 +70,11 @@ internal static class AppInitializer
     private static bool InitializeProfile(string appPath, string dllPath)
     {
         bool isNewKey = !RegistryService.KeyExists(Registry.CurrentUser, appPath);
-        string currentPluginVersion = PluginVersionService.GetPluginVersion();
+        string currentPluginVersion = PluginVersionService.GetDisplayVersion();
+        string currentBuildId = PluginVersionService.GetBuildId();
         int currentConfigSchemaVersion = PluginVersionService.ConfigSchemaVersion;
         string? installedPluginVersion = RegistryService.ReadString(Registry.CurrentUser, appPath, PluginVersionValueName);
+        string? installedBuildId = RegistryService.ReadString(Registry.CurrentUser, appPath, PluginBuildIdValueName);
         int? installedConfigSchemaVersion = RegistryService.ReadDword(Registry.CurrentUser, appPath, ConfigSchemaVersionValueName);
 
         // 自动加载键值（幂等写入 — 仅在值与预期不同时才写入注册表）
@@ -80,6 +83,7 @@ internal static class AppInitializer
         WriteIfChanged(appPath, "MANAGED", Managed);
         WriteIfChanged(appPath, "DESCRIPTION", Description);
         WriteIfChanged(appPath, PluginVersionValueName, currentPluginVersion);
+        WriteIfChanged(appPath, PluginBuildIdValueName, currentBuildId);
 
         // 首次初始化时部署内嵌字体并写入默认配置
         if (isNewKey)
@@ -94,10 +98,11 @@ internal static class AppInitializer
             DiagnosticLogger.Log("初始化",
                 $"配置版本已迁移: {installedConfigSchemaVersion?.ToString() ?? "未设置"} → {currentConfigSchemaVersion}");
         }
-        else if (!string.Equals(installedPluginVersion, currentPluginVersion, StringComparison.Ordinal))
+        else if (!string.Equals(installedPluginVersion, currentPluginVersion, StringComparison.Ordinal)
+              || !string.Equals(installedBuildId, currentBuildId, StringComparison.Ordinal))
         {
             DiagnosticLogger.Log("初始化",
-                $"插件版本已更新: {installedPluginVersion ?? "未设置"} → {currentPluginVersion}");
+                $"插件版本已更新: {installedPluginVersion ?? "未设置"}+{installedBuildId ?? "未设置"} → {currentPluginVersion}+{currentBuildId}");
         }
         return isNewKey;
     }

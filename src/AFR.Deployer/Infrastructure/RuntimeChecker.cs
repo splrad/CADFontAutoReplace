@@ -7,44 +7,35 @@ namespace AFR.Deployer.Infrastructure;
 /// <summary>
 /// 启动期运行时依赖检测。
 /// <para>
-/// AFR 部署工具是 unpackaged WinUI 3 应用，依赖两项前置组件：
-/// <list type="number">
-///   <item>.NET 10 Desktop Runtime (x64)</item>
-///   <item>Windows App Runtime 1.8 (x64)</item>
-/// </list>
-/// 实际上两者缺失时本进程根本无法进入托管入口：
+/// AFR 部署工具是 unpackaged WinUI 3 自包含单文件应用：
 /// <list type="bullet">
-///   <item>Desktop Runtime 缺失 → <c>apphost.exe</c> 先弹官方下载对话框并退出。</item>
-///   <item>Windows App Runtime 缺失 → <c>MddBootstrapAutoInitializer</c>（由 SDK 注入到 &lt;Module&gt; 构造）会先弹失败对话框并退出。</item>
+///   <item>.NET 10 Desktop Runtime — 已随 EXE 一并打包（self-contained），无需用户安装。</item>
+///   <item>Windows App Runtime 1.8 (x64) — 仍为外置依赖，由用户安装。</item>
 /// </list>
-/// 因此运行到 <see cref="EnsureRuntimesAvailable"/> 即可视为依赖齐全；该方法保留为
-/// "防御性兜底"：仅当 <c>GetModuleHandle</c> 显示 bootstrap DLL 未加载（极少见的禁用自动初始化场景）
-/// 时，才退化为弹原生对话框给出下载链接。
+/// 因此本检测仅校验 Windows App Runtime 是否就绪：通过查询 SDK 自动注入的
+/// bootstrap DLL 是否已加载到当前进程。该模块在 <c>Main</c> 之前由
+/// <c>MddBootstrapAutoInitializer</c> 调用 <c>MddBootstrapInitialize</c> 完成加载，
+/// 失败时 SDK 会先弹原生失败对话框并退出，本方法保留为防御性兜底。
 /// </para>
 /// </summary>
 internal static class RuntimeChecker
 {
-    private const string DotNetDownloadUrl =
-        "https://dotnet.microsoft.com/download/dotnet/10.0";
-
     private const string WindowsAppRuntimeUrl =
         "https://aka.ms/windowsappsdk/1.8/latest/windowsappruntimeinstall-x64.exe";
 
     /// <summary>
-    /// 执行运行时兜底检测；缺失则弹窗给出下载链接，并返回 false。
+    /// 执行运行时兜底检测；缺失则弹窗给出 Windows App Runtime 下载链接，并返回 false。
     /// </summary>
     internal static bool EnsureRuntimesAvailable()
     {
-        // 进程已进入托管入口 ⇒ Desktop Runtime 必在位（apphost 已校验过）。
-        // 仅在 Windows App Runtime bootstrap 模块未加载时才视为异常。
+        // .NET 10 已 self-contained，无需检测。
+        // 仅当 Windows App Runtime bootstrap 未加载时视为异常。
         if (IsBootstrapLoaded())
             return true;
 
         var message =
             "AFR 部署工具运行需要以下组件，请先安装后再启动：\n\n" +
             $"• Windows App Runtime 1.8 (x64)\n  下载：{WindowsAppRuntimeUrl}\n\n" +
-            "如启动时还提示缺少 .NET，请同时安装：\n" +
-            $"• .NET 10 桌面运行时 (x64)\n  下载：{DotNetDownloadUrl}\n\n" +
             "点击\"确定\"将打开下载页面。";
 
         var clicked = MessageBox(

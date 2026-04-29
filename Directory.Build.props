@@ -1,15 +1,31 @@
 <Project>
 
   <PropertyGroup>
-    <!-- 插件统一版本号：所有 AFR-ACAD20XX 适配 DLL 共用此版本。发版时由维护者手动更新。 -->
-	  <!-- NuGet / 包版本号 -->
-    <Version>1.0</Version>
-	  <!-- 程序集版本（CLR 用）-->
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-	  <!-- Windows 文件属性里的版本 -->
-    <FileVersion>1.0.0.0</FileVersion>
-	  <!-- 供开发者查看的版本（可包含更多信息，如预发布标签等） -->
-    <InformationalVersion>8.9</InformationalVersion>
+	<!--
+	  插件统一版本号：所有 AFR-ACAD20XX 适配 DLL 与部署工具共用此版本。发版时由维护者手动更新。
+
+	  ┌─────────────────────────────────────────────────────────────────────────┐
+	  │ 用户可见版本号 (X.X)：日志头、UI、文件属性「文件版本/产品版本」都使用此值， │
+	  │   不含构建日期/序号，避免在显示版本未变时产生混乱。                       │
+	  │ 开发者可见版本号 (X.X+构建号)：写入 AssemblyInformationalVersion，仅在反射 │
+	  │   或文件属性「详细信息 → 产品版本」(Win10+) 中可见，用于精确区分构建。     │
+	  └─────────────────────────────────────────────────────────────────────────┘
+	-->
+	<PluginDisplayVersion>9.0</PluginDisplayVersion>
+	<PluginBuildId>20260430.1</PluginBuildId>
+
+	<!-- 用户可见 -->
+	<Version>$(PluginDisplayVersion)</Version>                <!-- NuGet / 包版本号 -->
+	<AssemblyVersion>1.0.0.0</AssemblyVersion>   <!-- CLR 程序集版本（必须 4 段） -->
+	<FileVersion>$(PluginDisplayVersion).0.0</FileVersion>           <!-- Windows 文件属性「文件版本」 -->
+
+	<!-- 仅开发者可见：包含 build 后缀，运行时从程序集属性中拆分使用 -->
+	<InformationalVersion>$(PluginDisplayVersion)+$(PluginBuildId)</InformationalVersion>
+	<!--
+	  禁止 SDK 在 InformationalVersion 后自动追加 "+{Git 提交 SHA}"，
+	  否则会变成 "8.9+20260430.1+d2669bd..."，使日志/注册表里的 build 后缀变成 commit SHA 而非我们维护的 PluginBuildId。
+	-->
+	<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 
     <!-- 统一构建产物输出到 artifacts/ 目录（仅 bin，不含 obj） -->
     <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>

@@ -4,6 +4,7 @@
         xmlns:vm="using:AFR.Deployer.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:controls="using:Microsoft.UI.Xaml.Controls"
         mc:Ignorable="d">
 
     <Grid x:Name="RootGrid" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
@@ -13,7 +14,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- TitleBar：仅图标 + 应用名 -->
+        <!-- TitleBar -->
         <Grid x:Name="AppTitleBar" Grid.Row="0" Height="40"
               Background="Transparent"
               VerticalAlignment="Top">
@@ -27,14 +28,12 @@
             </StackPanel>
         </Grid>
 
-        <!-- 主内容区 -->
         <ScrollViewer Grid.Row="1"
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled"
-                      Padding="32,8,32,16">
-            <StackPanel Spacing="20">
+                      Padding="24,8,24,16">
+            <StackPanel Spacing="16">
 
-                <!-- 标题区 -->
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -43,7 +42,7 @@
                     <StackPanel Grid.Column="0" Spacing="4">
                         <TextBlock Text="插件部署"
                                    Style="{ThemeResource TitleTextBlockStyle}" />
-                        <TextBlock Text="自动检测本机已安装的 AutoCAD 版本，一键完成插件 DLL 的部署与注册。"
+                        <TextBlock Text="选中支持的 AutoCAD 版本，一键完成插件 DLL 的部署与注册。未安装的版本将自动禁用。"
                                    Style="{ThemeResource BodyTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
@@ -57,7 +56,6 @@
                     </Button>
                 </Grid>
 
-                <!-- 卡片 1：CAD 列表 -->
                 <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1"
@@ -75,14 +73,14 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10"
                                         VerticalAlignment="Center">
-                                <TextBlock Text="本机已安装的 AutoCAD"
+                                <TextBlock Text="支持的 AutoCAD 版本"
                                            Style="{ThemeResource SubtitleTextBlockStyle}" />
                                 <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                         CornerRadius="10" Padding="8,2"
                                         VerticalAlignment="Center">
                                     <TextBlock FontSize="11"
                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                                        <Run Text="{x:Bind ViewModel.CadEntries.Count, Mode=OneWay}" /><Run Text=" 个实例" />
+                                        <Run Text="{x:Bind ViewModel.CadEntries.Count, Mode=OneWay}" /><Run Text=" 项" />
                                     </TextBlock>
                                 </Border>
                             </StackPanel>
@@ -96,88 +94,91 @@
                             </StackPanel>
                         </Grid>
 
-                        <ListView Grid.Row="1"
-                                  ItemsSource="{x:Bind ViewModel.CadEntries}"
-                                  SelectionMode="None"
-                                  IsItemClickEnabled="False"
-                                  Padding="8,0,8,8">
-                            <ListView.ItemContainerStyle>
-                                <Style TargetType="ListViewItem">
-                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                    <Setter Property="Padding" Value="12,8" />
-                                    <Setter Property="MinHeight" Value="56" />
-                                </Style>
-                            </ListView.ItemContainerStyle>
-                            <ListView.ItemTemplate>
-                                <DataTemplate x:DataType="vm:CadEntryViewModel">
-                                    <Grid ColumnSpacing="14">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="120"  />
-                                            <ColumnDefinition Width="*"    />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
+                        <controls:ItemsRepeaterScrollHost Grid.Row="1"><ScrollViewer HorizontalScrollMode="Disabled" VerticalScrollBarVisibility="Auto"><controls:ItemsRepeater ItemsSource="{x:Bind ViewModel.CadEntries}"
+                                                    Margin="16,0,16,16">
+                                <controls:ItemsRepeater.Layout>
+                                    <controls:UniformGridLayout MinItemWidth="240"
+                                                                MinItemHeight="120"
+                                                                MinRowSpacing="12"
+                                                                MinColumnSpacing="12"
+                                                                MaximumRowsOrColumns="3"
+                                                                ItemsStretch="Fill" />
+                                </controls:ItemsRepeater.Layout>
+                                <controls:ItemsRepeater.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:CadEntryViewModel">
+                                        <Border BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="6"
+                                                Padding="14"
+                                                Background="{ThemeResource SubtleFillColorTransparentBrush}"
+                                                IsHitTestVisible="{x:Bind IsEnabled, Mode=OneWay}"
+                                                Opacity="{Binding IsEnabled, Converter={StaticResource AvailabilityToOpacity}}">
+                                            <Grid RowSpacing="8">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
 
-                                        <CheckBox Grid.Column="0"
-                                                  IsChecked="{x:Bind IsSelected, Mode=TwoWay}"
-                                                  MinWidth="0"
-                                                  VerticalAlignment="Center" />
+                                                <Grid Grid.Row="0" ColumnSpacing="10">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <CheckBox Grid.Column="0"
+                                                              IsChecked="{x:Bind IsSelected, Mode=TwoWay}"
+                                                              IsEnabled="{x:Bind IsEnabled, Mode=OneWay}"
+                                                              MinWidth="0"
+                                                              VerticalAlignment="Center" />
+                                                    <Border Grid.Column="1"
+                                                            Width="32" Height="32" CornerRadius="6"
+                                                            Background="#E53935"
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock Text="{x:Bind BrandInitial}"
+                                                                   Foreground="White"
+                                                                   FontWeight="SemiBold"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="0">
+                                                        <TextBlock Text="{x:Bind DisplayName}"
+                                                                   Style="{ThemeResource BodyStrongTextBlockStyle}"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{x:Bind Profile}"
+                                                                   FontSize="11"
+                                                                   FontFamily="Consolas, Microsoft YaHei UI"
+                                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                    </StackPanel>
+                                                </Grid>
 
-                                        <Border Grid.Column="1"
-                                                Width="32" Height="32" CornerRadius="6"
-                                                Background="#E53935"
-                                                VerticalAlignment="Center">
-                                            <TextBlock Text="{x:Bind BrandInitial}"
-                                                       Foreground="White"
-                                                       FontWeight="SemiBold"
-                                                       HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center" />
+                                                <Border Grid.Row="1"
+                                                        Padding="8,3" CornerRadius="10"
+                                                        HorizontalAlignment="Left"
+                                                        Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <Ellipse Width="8" Height="8" VerticalAlignment="Center"
+                                                                 Fill="{Binding Status, Converter={StaticResource StatusToBrush}}" />
+                                                        <TextBlock Text="{x:Bind StatusText, Mode=OneWay}"
+                                                                   FontSize="12"
+                                                                   VerticalAlignment="Center" />
+                                                    </StackPanel>
+                                                </Border>
+
+                                                <TextBlock Grid.Row="2"
+                                                           FontSize="11"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}">
+                                                    <Run Text="已安装版本：" /><Run Text="{x:Bind InstalledVersion, Mode=OneWay}" />
+                                                </TextBlock>
+                                            </Grid>
                                         </Border>
-
-                                        <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="2">
-                                            <TextBlock Text="{x:Bind Brand}"
-                                                       Style="{ThemeResource BodyStrongTextBlockStyle}" />
-                                            <TextBlock Text="{x:Bind Version}"
-                                                       Style="{ThemeResource CaptionTextBlockStyle}"
-                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                        </StackPanel>
-
-                                        <TextBlock Grid.Column="3"
-                                                   Text="{x:Bind Profile}"
-                                                   VerticalAlignment="Center"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   FontFamily="Consolas, Microsoft YaHei UI"
-                                                   Style="{ThemeResource BodyTextBlockStyle}"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-
-                                        <TextBlock Grid.Column="4"
-                                                   Text="{x:Bind InstalledVersion, Mode=OneWay}"
-                                                   VerticalAlignment="Center"
-                                                   MinWidth="80"
-                                                   Style="{ThemeResource BodyTextBlockStyle}" />
-
-                                        <Border Grid.Column="5"
-                                                Padding="8,3" CornerRadius="10"
-                                                VerticalAlignment="Center"
-                                                Background="{ThemeResource SubtleFillColorSecondaryBrush}">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <Ellipse Width="8" Height="8" VerticalAlignment="Center"
-                                                         Fill="{Binding Status, Converter={StaticResource StatusToBrush}}" />
-                                                <TextBlock Text="{x:Bind StatusText, Mode=OneWay}"
-                                                           FontSize="12"
-                                                           VerticalAlignment="Center" />
-                                            </StackPanel>
-                                        </Border>
-                                    </Grid>
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
-                        </ListView>
+                                    </DataTemplate>
+                                </controls:ItemsRepeater.ItemTemplate>
+                            </controls:ItemsRepeater></ScrollViewer></controls:ItemsRepeaterScrollHost>
                     </Grid>
                 </Border>
 
-                <!-- 卡片 2：安装目录 + 操作 -->
                 <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1"
@@ -210,7 +211,7 @@
                                        TextWrapping="Wrap"
                                        Style="{ThemeResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                                勾选列表中的版本，点击"安装"将 DLL 复制到安装目录并写入注册表；点击"卸载"删除 DLL 并清理注册表。
+                                勾选已安装的版本后，点击"安装"将 DLL 复制到目录并写入注册表；点击"卸载"删除 DLL 并清理注册表。
                             </TextBlock>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
                                 <Button Content="卸载"
@@ -227,7 +228,6 @@
             </StackPanel>
         </ScrollViewer>
 
-        <!-- 状态栏 -->
         <Border Grid.Row="2"
                 BorderThickness="0,1,0,0"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
