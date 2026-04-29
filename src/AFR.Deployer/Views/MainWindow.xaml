@@ -8,7 +8,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="AFR 部署工具"
-        Width="760" Height="600"
+        Width="900" Height="600"
         ResizeMode="CanMinimize"
         WindowStartupLocation="CenterScreen"
         WindowBackdropType="Mica"
@@ -18,25 +18,82 @@
         FontFamily="Segoe UI, Microsoft YaHei UI">
 
     <ui:FluentWindow.Resources>
-        <!-- 卡片选中态高亮（蓝色描边） -->
-        <Style x:Key="CadCardStyle" TargetType="Border">
+        <!--
+            卡片样式：使用 ToggleButton 实现整卡可点击。
+            - 默认态：浅色卡片背景 + 细描边
+            - 选中态（已安装）：浅绿底 + 强描边
+            - 选中态（未安装/通用）：蓝色强调描边
+            - Hover：略加亮
+            - Disabled（未检测到 CAD）：保留外观，仅降透明度
+        -->
+        <Style x:Key="CadCardStyle" TargetType="ToggleButton">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="True" />
+            <Setter Property="Margin" Value="0,0,10,10" />
+            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
             <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Padding" Value="12,10" />
-            <Setter Property="Margin" Value="0,0,10,10" />
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                    <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
-                    <Setter Property="BorderThickness" Value="2" />
-                    <Setter Property="Padding" Value="11,9" />
-                </DataTrigger>
-                <DataTrigger Binding="{Binding IsEnabled}" Value="False">
-                    <Setter Property="Opacity" Value="0.55" />
-                </DataTrigger>
-            </Style.Triggers>
+            <!-- 固定边框宽度，选中态仅变颜色，避免内容区出现微位移 -->
+            <Setter Property="BorderThickness" Value="1.5" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="PART_Border"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Stretch"
+                                              VerticalAlignment="Stretch" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="PART_Border" Property="Background"
+                                        Value="{DynamicResource CardBackgroundFillColorSecondaryBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="PART_Border" Property="Background" Value="#E8F7EE" />
+                                <Setter TargetName="PART_Border" Property="BorderBrush" Value="#3FAE6A" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.55" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
+
+        <!--
+            CAD 品牌徽标（矢量原创，参考用户提供的非 Autodesk 模板）：
+            - 红色径向渐变圆角底，营造立体光照
+            - 高光 / 阴影叠加层提升立体感
+            - 中央大写 "A"
+            - 底部深色色带 + 年份徽章
+        -->
+        <Style x:Key="BrandLogoStyle" TargetType="Grid">
+            <Setter Property="Width" Value="46" />
+            <Setter Property="Height" Value="46" />
+        </Style>
+
+        <LinearGradientBrush x:Key="BrandLogoBrush" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Offset="0"   Color="#F4B5B5" />
+            <GradientStop Offset="0.45" Color="#E26F6F" />
+            <GradientStop Offset="1"   Color="#A82323" />
+        </LinearGradientBrush>
+
+        <LinearGradientBrush x:Key="BrandLogoHighlight" StartPoint="0,0" EndPoint="0,1">
+            <GradientStop Offset="0"    Color="#80FFFFFF" />
+            <GradientStop Offset="0.55" Color="#10FFFFFF" />
+            <GradientStop Offset="1"    Color="#00FFFFFF" />
+        </LinearGradientBrush>
+
+        <SolidColorBrush x:Key="BrandLogoBandBrush" Color="#9A1F1F" />
     </ui:FluentWindow.Resources>
 
     <Grid>
@@ -162,60 +219,94 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:CadEntryViewModel}">
-                                <Border Style="{StaticResource CadCardStyle}" Width="126">
-                                    <Border.Visibility>
+                                <ToggleButton Style="{StaticResource CadCardStyle}"
+                                              Width="196"
+                                              IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                              IsEnabled="{Binding IsEnabled}">
+                                    <ToggleButton.Visibility>
                                         <MultiBinding Converter="{StaticResource InstalledOrShowAllToVisibility}">
                                             <Binding Path="IsCadInstalled" />
                                             <Binding Path="DataContext.ShowUnavailable"
                                                      RelativeSource="{RelativeSource AncestorType=ItemsControl}" />
                                         </MultiBinding>
-                                    </Border.Visibility>
+                                    </ToggleButton.Visibility>
                                     <Grid>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
 
-                                        <!-- 复选框 -->
-                                        <CheckBox Grid.Row="0"
-                                                  IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                                                  IsEnabled="{Binding IsEnabled}"
-                                                  HorizontalAlignment="Left" />
+                                        <!-- 左：矢量品牌徽标（红色渐变圆角底 + 立体 "A" + 底部年份色带） -->
+                                        <Grid Grid.Column="0" Style="{StaticResource BrandLogoStyle}"
+                                              VerticalAlignment="Center">
+                                            <!-- 主体：红色径向渐变 -->
+                                            <Border Background="{StaticResource BrandLogoBrush}"
+                                                    CornerRadius="9"
+                                                    SnapsToDevicePixels="True" />
+                                            <!-- 顶部光泽 -->
+                                            <Border CornerRadius="9,9,0,0"
+                                                    Margin="2,2,2,0"
+                                                    Height="20"
+                                                    VerticalAlignment="Top"
+                                                    Background="{StaticResource BrandLogoHighlight}" />
+                                            <!-- 大 "A" -->
+                                            <TextBlock Text="A"
+                                                       Foreground="#7A0F0F"
+                                                       FontWeight="Bold"
+                                                       FontSize="30"
+                                                       Margin="0,-4,0,6"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center">
+                                                <TextBlock.Effect>
+                                                    <DropShadowEffect Color="#FFFFFF"
+                                                                      BlurRadius="2"
+                                                                      ShadowDepth="0"
+                                                                      Opacity="0.55" />
+                                                </TextBlock.Effect>
+                                            </TextBlock>
+                                            <!-- 底部色带 + 年份徽章 -->
+                                            <Border Height="13"
+                                                    VerticalAlignment="Bottom"
+                                                    CornerRadius="0,0,9,9"
+                                                    Background="{StaticResource BrandLogoBandBrush}">
+                                                <TextBlock Text="{Binding Version}"
+                                                           Foreground="White"
+                                                           FontSize="9"
+                                                           FontWeight="SemiBold"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center" />
+                                            </Border>
+                                        </Grid>
 
-                                        <!-- 版本名 -->
-                                        <TextBlock Grid.Row="1"
-                                                   Text="{Binding DisplayName}"
-                                                   FontSize="13"
-                                                   FontWeight="SemiBold"
-                                                   Margin="0,6,0,0"
-                                                   TextTrimming="CharacterEllipsis" />
+                                        <!-- 右：版本名 / 状态 / 已安装版本号 -->
+                                        <StackPanel Grid.Column="1"
+                                                    VerticalAlignment="Center"
+                                                    Margin="10,0,0,0">
+                                            <TextBlock Text="{Binding DisplayName}"
+                                                       FontSize="13"
+                                                       FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis" />
 
-                                        <!-- 状态点 + 状态文字 -->
-                                        <StackPanel Grid.Row="2"
-                                                    Orientation="Horizontal"
-                                                    Margin="0,4,0,0">
-                                            <Ellipse Width="7" Height="7"
-                                                     VerticalAlignment="Center"
-                                                     Fill="{Binding Status, Converter={StaticResource StatusToBrush}}" />
-                                            <TextBlock Text="{Binding StatusText}"
+                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                                <Ellipse Width="7" Height="7"
+                                                         VerticalAlignment="Center"
+                                                         Fill="{Binding Status, Converter={StaticResource StatusToBrush}}" />
+                                                <TextBlock Text="{Binding StatusText}"
+                                                           FontSize="11"
+                                                           Margin="6,0,0,0"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            </StackPanel>
+
+                                            <TextBlock Text="{Binding InstalledVersion}"
                                                        FontSize="11"
-                                                       Margin="6,0,0,0"
-                                                       VerticalAlignment="Center"
-                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                       FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
+                                                       Margin="0,3,0,0"
+                                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                                       Visibility="{Binding CanUninstall, Converter={StaticResource BoolToVisibility}}" />
                                         </StackPanel>
-
-                                        <!-- 已安装版本号（仅当已部署时） -->
-                                        <TextBlock Grid.Row="3"
-                                                   Text="{Binding InstalledVersion}"
-                                                   FontSize="11"
-                                                   FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
-                                                   Margin="0,3,0,0"
-                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                                   Visibility="{Binding CanUninstall, Converter={StaticResource BoolToVisibility}}" />
                                     </Grid>
-                                </Border>
+                                </ToggleButton>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
