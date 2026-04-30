@@ -22,11 +22,24 @@
 
     <ui:FluentWindow.Resources>
         <!--
+            状态调色板：3 种形态共用。所有 Brush 在此集中定义，方便统一调色。
+            -  Current  绿系：图标/文字 #10884B；徽章底 #E6F4EC / 字 #10884B
+            -  Outdated 橙系：图标/文字 #C48300；徽章底 #FCEFD7 / 字 #B57500
+            -  NotInst  灰系：图标/文字 #8A8A8A；不显示徽章
+            -  DllMiss  红系：图标/文字 #C42B1C
+        -->
+        <SolidColorBrush x:Key="StatusCurrentBrush"  Color="#10884B" />
+        <SolidColorBrush x:Key="StatusOutdatedBrush" Color="#C48300" />
+        <SolidColorBrush x:Key="StatusNotInstBrush"  Color="#8A8A8A" />
+        <SolidColorBrush x:Key="StatusDllMissBrush"  Color="#C42B1C" />
+
+        <SolidColorBrush x:Key="BadgeCurrentBgBrush"   Color="#E6F4EC" />
+        <SolidColorBrush x:Key="BadgeOutdatedBgBrush"  Color="#FCEFD7" />
+
+        <!--
             卡片样式：使用 ToggleButton 实现整卡可点击。
-            - 默认态：浅色卡片背景 + 细描边
-            - 选中态（已安装）：浅绿底 + 强描边
-            - 选中态（未安装/通用）：蓝色强调描边
-            - Hover：略加亮
+            - 圆角 10、浅灰底、1px 描边；Hover 阴影增强 + 轻微上浮（Margin Y 调整模拟 translate）
+            - IsChecked / Status 视觉反馈仅微调描边色，主信息由模板内部的图标/文字承担
             - Disabled（未检测到 CAD）：保留外观，仅降透明度
         -->
         <Style x:Key="CadCardStyle" TargetType="ToggleButton">
@@ -36,31 +49,69 @@
             <Setter Property="Padding" Value="12,10" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Stretch" />
-            <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
-            <!-- 固定边框宽度，选中态仅变颜色，避免内容区出现微位移 -->
-            <Setter Property="BorderThickness" Value="1.5" />
+            <Setter Property="Background" Value="#FAFAFA" />
+            <Setter Property="BorderBrush" Value="#E5E5E5" />
+            <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
+                        <!-- Effect 提到 Border 上：BlurRadius/Opacity 在触发器里调整以实现"隆起" -->
                         <Border x:Name="PART_Border"
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="8"
+                                CornerRadius="10"
                                 Padding="{TemplateBinding Padding}"
                                 SnapsToDevicePixels="True">
+                            <Border.Effect>
+                                <DropShadowEffect x:Name="PART_Shadow"
+                                                  BlurRadius="6"
+                                                  ShadowDepth="1"
+                                                  Direction="270"
+                                                  Color="#000000"
+                                                  Opacity="0.06" />
+                            </Border.Effect>
                             <ContentPresenter HorizontalAlignment="Stretch"
                                               VerticalAlignment="Stretch" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="PART_Border" Property="Background"
-                                        Value="{DynamicResource CardBackgroundFillColorSecondaryBrush}" />
+                                <Setter TargetName="PART_Border" Property="Background" Value="#FFFFFF" />
+                                <Setter TargetName="PART_Border" Property="BorderBrush" Value="#D0D0D0" />
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="PART_Shadow"
+                                                             Storyboard.TargetProperty="BlurRadius"
+                                                             To="14" Duration="0:0:0.12" />
+                                            <DoubleAnimation Storyboard.TargetName="PART_Shadow"
+                                                             Storyboard.TargetProperty="Opacity"
+                                                             To="0.18" Duration="0:0:0.12" />
+                                            <DoubleAnimation Storyboard.TargetName="PART_Shadow"
+                                                             Storyboard.TargetProperty="ShadowDepth"
+                                                             To="3" Duration="0:0:0.12" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="PART_Shadow"
+                                                             Storyboard.TargetProperty="BlurRadius"
+                                                             To="6" Duration="0:0:0.15" />
+                                            <DoubleAnimation Storyboard.TargetName="PART_Shadow"
+                                                             Storyboard.TargetProperty="Opacity"
+                                                             To="0.06" Duration="0:0:0.15" />
+                                            <DoubleAnimation Storyboard.TargetName="PART_Shadow"
+                                                             Storyboard.TargetProperty="ShadowDepth"
+                                                             To="1" Duration="0:0:0.15" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="PART_Border" Property="Background" Value="#E8F7EE" />
                                 <Setter TargetName="PART_Border" Property="BorderBrush" Value="#3FAE6A" />
+                                <Setter TargetName="PART_Border" Property="BorderThickness" Value="1.5" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.55" />
@@ -178,7 +229,7 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:CadEntryViewModel}">
                                 <ToggleButton Style="{StaticResource CadCardStyle}"
-                                              MinHeight="68"
+                                              MinHeight="78"
                                               IsChecked="{Binding IsSelected, Mode=TwoWay}"
                                               IsEnabled="{Binding IsEnabled}">
                                     <ToggleButton.Visibility>
@@ -190,26 +241,17 @@
                                     </ToggleButton.Visibility>
                                     <Grid>
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="4" />
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
 
-                                        <!-- 左侧状态色条：与 StatusText 联动，强化"已装插件 / 仅装 CAD / 旧版 / 缺 DLL"的视觉差异 -->
-                                        <Border Grid.Column="0"
-                                                Width="4"
-                                                Margin="-8,-6,8,-6"
-                                                CornerRadius="2,0,0,2"
-                                                Background="{Binding Status, Converter={StaticResource StatusToBrush}}" />
-
                                         <!-- 左：AutoCAD 品牌图标 + 底部年份色带 -->
-                                        <Grid Grid.Column="1" Style="{StaticResource BrandLogoStyle}"
+                                        <Grid Grid.Column="0" Style="{StaticResource BrandLogoStyle}"
                                               VerticalAlignment="Center">
                                             <Image Source="pack://application:,,,/Icons/AutoCAD.ico"
                                                    Stretch="Uniform"
                                                    Margin="0,0,0,11"
                                                    RenderOptions.BitmapScalingMode="HighQuality" />
-                                            <!-- 底部色带 + 年份徽章 -->
                                             <Border Height="13"
                                                     VerticalAlignment="Bottom"
                                                     CornerRadius="3"
@@ -223,36 +265,101 @@
                                             </Border>
                                         </Grid>
 
-                                        <!-- 右：版本名 / 状态 / 已安装版本号 -->
-                                        <StackPanel Grid.Column="2"
+                                        <!-- 右：标题 / 状态行（图标 + 文字）/ 副文本或版本+徽章 -->
+                                        <StackPanel Grid.Column="1"
                                                     VerticalAlignment="Center"
-                                                    Margin="10,0,0,0">
+                                                    Margin="12,0,0,0">
                                             <TextBlock Text="{Binding DisplayName}"
-                                                       FontSize="13"
+                                                       FontSize="14"
                                                        FontWeight="SemiBold"
                                                        TextTrimming="CharacterEllipsis" />
 
-                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                                <Ellipse Width="7" Height="7"
-                                                         VerticalAlignment="Center"
-                                                         Fill="{Binding Status, Converter={StaticResource StatusToBrush}}" />
-                                                <TextBlock Text="{Binding StatusText}"
-                                                           FontSize="11"
+                                            <!-- 状态行：SymbolIcon + StatusText，颜色随 Status 切换 -->
+                                            <StackPanel x:Name="StatusRow"
+                                                        Orientation="Horizontal"
+                                                        Margin="0,4,0,0">
+                                                <ui:SymbolIcon x:Name="StatusIcon"
+                                                               Symbol="SubtractCircle24"
+                                                               FontSize="14"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{StaticResource StatusNotInstBrush}" />
+                                                <TextBlock x:Name="StatusLabel"
+                                                           Text="{Binding StatusText}"
+                                                           FontSize="11.5"
                                                            FontWeight="SemiBold"
-                                                           Margin="6,0,0,0"
+                                                           Margin="5,0,0,0"
                                                            VerticalAlignment="Center"
-                                                           Foreground="{Binding Status, Converter={StaticResource StatusToBrush}}" />
+                                                           Foreground="{StaticResource StatusNotInstBrush}" />
                                             </StackPanel>
 
-                                            <TextBlock Text="{Binding InstalledVersion}"
-                                                       FontSize="11"
-                                                       FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
+                                            <!-- 副文本（仅未安装 / DLL 缺失等无版本号场景显示） -->
+                                            <TextBlock Text="{Binding SubText}"
                                                        Margin="0,3,0,0"
+                                                       FontSize="11"
                                                        Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                                       Visibility="{Binding CanUninstall, Converter={StaticResource BoolToVisibility}}" />
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Visibility="{Binding ShowSubText, Converter={StaticResource BoolToVisibility}}" />
+
+                                            <!-- 版本行（仅已安装两种态显示）：版本 vX.Y + 最新版/旧版 徽章 -->
+                                            <StackPanel x:Name="VersionRow"
+                                                        Orientation="Horizontal"
+                                                        Margin="0,3,0,0"
+                                                        Visibility="{Binding ShowVersionRow, Converter={StaticResource BoolToVisibility}}">
+                                                <ui:SymbolIcon Symbol="Tag24"
+                                                               FontSize="12"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                                <TextBlock Text="{Binding InstalledVersion}"
+                                                           FontSize="11"
+                                                           FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
+                                                           Margin="5,0,0,0"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                <Border x:Name="VersionBadge"
+                                                        Margin="6,0,0,0"
+                                                        Padding="6,1"
+                                                        CornerRadius="6"
+                                                        VerticalAlignment="Center"
+                                                        Background="{StaticResource BadgeCurrentBgBrush}">
+                                                    <TextBlock x:Name="VersionBadgeText"
+                                                               Text="{Binding BadgeText}"
+                                                               FontSize="10"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{StaticResource StatusCurrentBrush}" />
+                                                </Border>
+                                            </StackPanel>
                                         </StackPanel>
                                     </Grid>
                                 </ToggleButton>
+
+                                <!--
+                                    DataTrigger 一次性切换状态相关的图标 / 颜色 / 徽章底色：
+                                    - InstalledCurrent  绿（CheckmarkCircle24 + 最新版徽章）
+                                    - InstalledOutdated 橙（Warning24       + 旧版徽章）
+                                    - DllMissing        红（ErrorCircle24）
+                                    - NotInstalled      灰（默认值，无需 Trigger）
+                                -->
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding Status}" Value="InstalledCurrent">
+                                        <Setter TargetName="StatusIcon"       Property="Symbol"     Value="CheckmarkCircle24" />
+                                        <Setter TargetName="StatusIcon"       Property="Foreground" Value="{StaticResource StatusCurrentBrush}" />
+                                        <Setter TargetName="StatusLabel"      Property="Foreground" Value="{StaticResource StatusCurrentBrush}" />
+                                        <Setter TargetName="VersionBadge"     Property="Background" Value="{StaticResource BadgeCurrentBgBrush}" />
+                                        <Setter TargetName="VersionBadgeText" Property="Foreground" Value="{StaticResource StatusCurrentBrush}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Status}" Value="InstalledOutdated">
+                                        <Setter TargetName="StatusIcon"       Property="Symbol"     Value="Warning24" />
+                                        <Setter TargetName="StatusIcon"       Property="Foreground" Value="{StaticResource StatusOutdatedBrush}" />
+                                        <Setter TargetName="StatusLabel"      Property="Foreground" Value="{StaticResource StatusOutdatedBrush}" />
+                                        <Setter TargetName="VersionBadge"     Property="Background" Value="{StaticResource BadgeOutdatedBgBrush}" />
+                                        <Setter TargetName="VersionBadgeText" Property="Foreground" Value="{StaticResource StatusOutdatedBrush}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Status}" Value="DllMissing">
+                                        <Setter TargetName="StatusIcon"  Property="Symbol"     Value="ErrorCircle24" />
+                                        <Setter TargetName="StatusIcon"  Property="Foreground" Value="{StaticResource StatusDllMissBrush}" />
+                                        <Setter TargetName="StatusLabel" Property="Foreground" Value="{StaticResource StatusDllMissBrush}" />
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>

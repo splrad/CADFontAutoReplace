@@ -19,6 +19,10 @@ internal sealed partial class CadEntryViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StatusText))]
     [NotifyPropertyChangedFor(nameof(CanUninstall))]
+    [NotifyPropertyChangedFor(nameof(SubText))]
+    [NotifyPropertyChangedFor(nameof(ShowSubText))]
+    [NotifyPropertyChangedFor(nameof(BadgeText))]
+    [NotifyPropertyChangedFor(nameof(ShowVersionRow))]
     private PluginDeployStatus _status;
 
     [ObservableProperty]
@@ -56,11 +60,41 @@ internal sealed partial class CadEntryViewModel : ObservableObject
         : Status switch
         {
             PluginDeployStatus.NotInstalled      => "未安装",
-            PluginDeployStatus.InstalledCurrent  => "已安装（最新）",
-            PluginDeployStatus.InstalledOutdated => "旧版本",
+            PluginDeployStatus.InstalledCurrent  => "已安装（最新版）",
+            PluginDeployStatus.InstalledOutdated => "已安装（旧版）",
             PluginDeployStatus.DllMissing        => "DLL 缺失",
             _                                    => "未知"
         };
+
+    /// <summary>
+    /// 卡片副文本：对状态做一句话补充说明。仅在状态为"未安装"时显示，
+    /// 其他状态由版本号 + 徽章承载信息，避免视觉重复。
+    /// </summary>
+    public string SubText => !IsCadInstalled
+        ? "未检测到本机已安装的 AutoCAD"
+        : Status switch
+        {
+            PluginDeployStatus.NotInstalled      => "该插件尚未安装到 AutoCAD",
+            PluginDeployStatus.DllMissing        => "注册表存在但 DLL 已丢失",
+            _                                    => string.Empty
+        };
+
+    /// <summary>是否需要显示副文本行。</summary>
+    public bool ShowSubText => !string.IsNullOrEmpty(SubText);
+
+    /// <summary>
+    /// 已安装时右侧显示的小徽章："最新版" / "旧版"。其他状态返回空。
+    /// </summary>
+    public string BadgeText => Status switch
+    {
+        PluginDeployStatus.InstalledCurrent  => "最新版",
+        PluginDeployStatus.InstalledOutdated => "旧版",
+        _                                    => string.Empty
+    };
+
+    /// <summary>是否显示"版本 vX.Y + 徽章"那一行（仅已安装的两种态显示）。</summary>
+    public bool ShowVersionRow => Status is PluginDeployStatus.InstalledCurrent
+                                          or PluginDeployStatus.InstalledOutdated;
 
     internal CadEntryViewModel(CadInstallation installation)
     {
