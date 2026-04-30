@@ -74,8 +74,8 @@ internal sealed partial class CadEntryViewModel : ObservableObject
         ? "本机未安装此版本"
         : Status switch
         {
-            PluginDeployStatus.NotInstalled      => "插件尚未部署，可点击安装",
-            PluginDeployStatus.DllMissing        => "注册表存在但 DLL 已丢失",
+            PluginDeployStatus.NotInstalled      => "尚未部署",
+            PluginDeployStatus.DllMissing        => "DLL 丢失",
             _                                    => string.Empty
         };
 

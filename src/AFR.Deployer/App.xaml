@@ -11,6 +11,7 @@
             </ResourceDictionary.MergedDictionaries>
             <converters:StatusToBrushConverter x:Key="StatusToBrush" />
             <converters:RunningToBrushConverter x:Key="RunningToBrush" />
+            <converters:StatusTextToBrushConverter x:Key="StatusTextToBrush" />
             <converters:AvailabilityToOpacityConverter x:Key="AvailabilityToOpacity" />
             <converters:AvailabilityToCardBackgroundConverter x:Key="AvailabilityToCardBackground" />
             <converters:AvailabilityToBadgeBrushConverter x:Key="AvailabilityToBadgeBrush" />

@@ -8,9 +8,9 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="AFR 部署工具"
-        Width="960" Height="640"
-        MinWidth="960" MinHeight="640"
-        MaxWidth="1120" MaxHeight="760"
+        Width="880" Height="640"
+        MinWidth="880" MinHeight="640"
+        MaxWidth="1040" MaxHeight="760"
         Icon="pack://application:,,,/Icons/app.ico"
         ResizeMode="CanMinimize"
         WindowStartupLocation="CenterScreen"
@@ -49,7 +49,7 @@
         <Style x:Key="CadCardStyle" TargetType="ToggleButton">
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Focusable" Value="True" />
-            <Setter Property="Margin" Value="0,0,10,10" />
+            <Setter Property="Margin" Value="5" />
             <Setter Property="Padding" Value="10,8" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Stretch" />
@@ -190,38 +190,18 @@
                     BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1"
                     CornerRadius="10"
-                    Padding="14,12">
+                    Padding="9,7">
                 <Grid>
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-
-                    <!-- 容器头：标题 + 全选 -->
-                    <Grid Grid.Row="0" Margin="0,0,0,12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0"
-                                   Text="支持的 AutoCAD 版本"
-                                   FontSize="13"
-                                   FontWeight="SemiBold"
-                                   VerticalAlignment="Center" />
-                        <CheckBox Grid.Column="1"
-                                  Content="全选"
-                                  Margin="24,0,0,0"
-                                  VerticalAlignment="Center"
-                                  Click="OnSelectAllClicked" />
-                    </Grid>
 
                     <!--
                         卡片网格：固定 4 列；行数由 ItemsSource 数量自动决定，
                         最后一行允许不占满（UniformGrid 默认行为，空格保持空白即可）。
                         新增 CAD 版本时仅需在 CadDescriptors 中追加，无需改动 XAML。
                     -->
-                    <ItemsControl Grid.Row="1" ItemsSource="{Binding CadEntries}">
+                    <ItemsControl Grid.Row="0" ItemsSource="{Binding CadEntries}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <UniformGrid Columns="4" />
@@ -420,7 +400,7 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0"
-                                   Text="插件将部署到所选目录，并完成注册。"
+                                   Text="插件将部署到所选目录并写入注册表，下次启动 CAD 时生效。"
                                    VerticalAlignment="Center"
                                    FontSize="12"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
@@ -468,17 +448,24 @@
                                Margin="6,0,0,0" />
                 </StackPanel>
 
-                <!-- 右：CAD 运行状态 / 操作状态 -->
-                <StackPanel Grid.Column="2" Orientation="Horizontal">
-                    <Ellipse Width="8" Height="8"
-                             VerticalAlignment="Center"
-                             Fill="{Binding IsCadRunning, Converter={StaticResource RunningToBrush}}" />
-                    <TextBlock Text="{Binding StatusText}"
-                               VerticalAlignment="Center"
-                               FontSize="12"
-                               Margin="8,0,0,0"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                </StackPanel>
+                <!-- 右：CAD 运行状态 / 操作状态（加大加粗，带胶囊背景避免忽视） -->
+                <Border Grid.Column="2"
+                        Background="{Binding StatusText, Converter={StaticResource StatusTextToBrush}, ConverterParameter=bg}"
+                        CornerRadius="10"
+                        Padding="10,3"
+                        VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse Width="9" Height="9"
+                                 VerticalAlignment="Center"
+                                 Fill="{Binding StatusText, Converter={StaticResource StatusTextToBrush}}" />
+                        <TextBlock Text="{Binding StatusText}"
+                                   VerticalAlignment="Center"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   Margin="8,0,0,0"
+                                   Foreground="{Binding StatusText, Converter={StaticResource StatusTextToBrush}}" />
+                    </StackPanel>
+                </Border>
             </Grid>
         </Border>
     </Grid>

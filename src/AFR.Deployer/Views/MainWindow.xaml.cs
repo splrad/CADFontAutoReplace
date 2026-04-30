@@ -28,13 +28,16 @@ public partial class MainWindow : FluentWindow
     public MainWindow()
     {
         InitializeComponent();
-        SourceInitialized += OnSourceInitializedApplyRoundCorners;
+        // ── 多个时机重复设置：FluentWindow 在 SourceInitialized 之后还会调整 WindowChrome/
+        //    背景，可能导致首次设置被覆盖；Loaded 与 Activated 兜底，确保最终生效。
+        SourceInitialized += (_, _) => ApplyRoundCorners();
+        Loaded            += (_, _) => ApplyRoundCorners();
+        Activated         += (_, _) => ApplyRoundCorners();
     }
 
-    private static void OnSourceInitializedApplyRoundCorners(object? sender, EventArgs e)
+    private void ApplyRoundCorners()
     {
-        if (sender is not Window window) return;
-        var hwnd = new WindowInteropHelper(window).Handle;
+        var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == IntPtr.Zero) return;
 
         int preference = DWMWCP_ROUND;
@@ -46,15 +49,6 @@ public partial class MainWindow : FluentWindow
     {
         ViewModel = viewModel;
         DataContext = viewModel;
-    }
-
-    /// <summary>顶部"全选"复选框点击：根据勾选状态对所有可用条目进行选中/取消。</summary>
-    private void OnSelectAllClicked(object sender, RoutedEventArgs e)
-    {
-        if (sender is not CheckBox cb || ViewModel is null) return;
-        var param = cb.IsChecked == true ? "true" : "false";
-        if (ViewModel.SelectAllCommand.CanExecute(param))
-            ViewModel.SelectAllCommand.Execute(param);
     }
 }
 

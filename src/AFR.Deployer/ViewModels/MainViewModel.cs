@@ -206,19 +206,6 @@ internal sealed partial class MainViewModel : ObservableObject
             DeployPath = selected;
     }
 
-    // ── 全选 / 取消全选 ──
-
-    [RelayCommand]
-    private void SelectAll(string? parameter)
-    {
-        bool selectAll = parameter is null || parameter != "false";
-        foreach (var entry in CadEntries)
-        {
-            if (entry.IsCadInstalled)
-                entry.IsSelected = selectAll;
-        }
-    }
-
     // ── 安装 ──
 
     [RelayCommand(CanExecute = nameof(CanOperate))]
@@ -263,7 +250,7 @@ internal sealed partial class MainViewModel : ObservableObject
                 $"以下版本安装失败：\n\n{string.Join("\n", errors)}",
                 "AFR 部署工具 — 安装错误");
         else
-            StatusText = $"✓ 已成功安装 {successes} 个配置文件实例，重启对应 CAD 后生效。";
+            StatusText = $"✓ 已成功安装 {successes} 个配置文件实例，启动 CAD 时插件生效。";
     }
 
     // ── 卸载 ──
