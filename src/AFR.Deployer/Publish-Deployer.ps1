@@ -37,19 +37,43 @@ $ResourcesDir   = Join-Path $PSScriptRoot "Resources"
 $DeployerCsproj = Join-Path $PSScriptRoot "AFR.Deployer.csproj"
 $PublishOutput  = Join-Path $RepoRoot "publish\AFR.Deployer"
 
-# 各插件项目名称与 TFM 表（TFM 仅用于日志显示）
+# 自动发现 src\AutoCAD\AFR-ACAD*\*.csproj，无需在新增 CAD 版本时手工维护此列表。
+# TFM 仅用于日志展示，从 csproj 中解析；解析失败则回落到 "(unknown)"。
+function Get-PluginTfm([string]$csprojPath) {
+    try {
+        [xml]$xml = Get-Content -LiteralPath $csprojPath -Raw
+        $tfm = $xml.Project.PropertyGroup.TargetFramework | Where-Object { $_ } | Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($tfm)) {
+            $tfm = $xml.Project.PropertyGroup.TargetFrameworks | Where-Object { $_ } | Select-Object -First 1
+        }
+        if ([string]::IsNullOrWhiteSpace($tfm)) { return '(unknown)' }
+        return $tfm
+    } catch {
+        return '(unknown)'
+    }
+}
+
 $Plugins = @(
-    [pscustomobject]@{ Name='AFR-ACAD2018'; TFM='net462'          }
-    [pscustomobject]@{ Name='AFR-ACAD2019'; TFM='net472'          }
-    [pscustomobject]@{ Name='AFR-ACAD2020'; TFM='net472'          }
-    [pscustomobject]@{ Name='AFR-ACAD2021'; TFM='net48'           }
-    [pscustomobject]@{ Name='AFR-ACAD2022'; TFM='net48'           }
-    [pscustomobject]@{ Name='AFR-ACAD2023'; TFM='net48'           }
-    [pscustomobject]@{ Name='AFR-ACAD2024'; TFM='net48'           }
-    [pscustomobject]@{ Name='AFR-ACAD2025'; TFM='net8.0-windows'  }
-    [pscustomobject]@{ Name='AFR-ACAD2026'; TFM='net8.0-windows'  }
-    [pscustomobject]@{ Name='AFR-ACAD2027'; TFM='net10.0-windows' }
+    Get-ChildItem -Path $PluginsRoot -Directory -Filter 'AFR-ACAD*' |
+        Sort-Object Name |
+        ForEach-Object {
+            $csproj = Join-Path $_.FullName "$($_.Name).csproj"
+            if (Test-Path $csproj) {
+                [pscustomobject]@{
+                    Name = $_.Name
+                    TFM  = Get-PluginTfm $csproj
+                }
+            }
+        }
 )
+
+if ($Plugins.Count -eq 0) {
+    Write-Host "未在 $PluginsRoot 下发现任何 AFR-ACAD*\*.csproj，终止发布。" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "自动发现 $($Plugins.Count) 个插件项目：" -ForegroundColor DarkGray
+$Plugins | ForEach-Object { Write-Host "    • $($_.Name) ($($_.TFM))" -ForegroundColor DarkGray }
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────
 function Write-Step([string]$msg) { Write-Host "`n── $msg" -ForegroundColor Cyan }

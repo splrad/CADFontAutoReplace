@@ -70,28 +70,12 @@
         </Style>
 
         <!--
-            CAD 品牌徽标（矢量原创，参考用户提供的非 Autodesk 模板）：
-            - 红色径向渐变圆角底，营造立体光照
-            - 高光 / 阴影叠加层提升立体感
-            - 中央大写 "A"
-            - 底部深色色带 + 年份徽章
+            CAD 品牌徽标占位容器：固定 46×46 显示 AutoCAD.ico + 底部年份色带。
         -->
         <Style x:Key="BrandLogoStyle" TargetType="Grid">
             <Setter Property="Width" Value="46" />
             <Setter Property="Height" Value="46" />
         </Style>
-
-        <LinearGradientBrush x:Key="BrandLogoBrush" StartPoint="0,0" EndPoint="0,1">
-            <GradientStop Offset="0"   Color="#F4B5B5" />
-            <GradientStop Offset="0.45" Color="#E26F6F" />
-            <GradientStop Offset="1"   Color="#A82323" />
-        </LinearGradientBrush>
-
-        <LinearGradientBrush x:Key="BrandLogoHighlight" StartPoint="0,0" EndPoint="0,1">
-            <GradientStop Offset="0"    Color="#80FFFFFF" />
-            <GradientStop Offset="0.55" Color="#10FFFFFF" />
-            <GradientStop Offset="1"    Color="#00FFFFFF" />
-        </LinearGradientBrush>
 
         <SolidColorBrush x:Key="BrandLogoBandBrush" Color="#9A1F1F" />
     </ui:FluentWindow.Resources>
@@ -103,39 +87,10 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- 标题栏：左侧蓝色 AFR 矢量徽标 + 标题 -->
+        <!-- 标题栏：使用项目主图标 app.ico -->
         <ui:TitleBar Grid.Row="0" Title="AFR 部署工具" ShowMaximize="False">
             <ui:TitleBar.Icon>
-                <ui:ImageIcon>
-                    <ui:ImageIcon.Source>
-                        <DrawingImage>
-                            <DrawingImage.Drawing>
-                                <DrawingGroup>
-                                    <GeometryDrawing Brush="#0F6CBD">
-                                        <GeometryDrawing.Geometry>
-                                            <RectangleGeometry Rect="0,0,32,32" RadiusX="7" RadiusY="7" />
-                                        </GeometryDrawing.Geometry>
-                                    </GeometryDrawing>
-                                    <GeometryDrawing Brush="White">
-                                        <GeometryDrawing.Geometry>
-                                            <GeometryGroup>
-                                                <!-- 简化的 "AFR" 字样：用矩形拼出 A 形态 -->
-                                                <RectangleGeometry Rect="6,9,2.5,14" />
-                                                <RectangleGeometry Rect="13,9,2.5,14" />
-                                                <RectangleGeometry Rect="6,9,9.5,2.2" />
-                                                <RectangleGeometry Rect="6,15,9.5,2.2" />
-                                                <RectangleGeometry Rect="19,9,2.5,14" />
-                                                <RectangleGeometry Rect="19,9,7,2.2" />
-                                                <RectangleGeometry Rect="19,15,7,2.2" />
-                                                <RectangleGeometry Rect="23.5,15,2.5,8" />
-                                            </GeometryGroup>
-                                        </GeometryDrawing.Geometry>
-                                    </GeometryDrawing>
-                                </DrawingGroup>
-                            </DrawingImage.Drawing>
-                        </DrawingImage>
-                    </ui:ImageIcon.Source>
-                </ui:ImageIcon>
+                <ui:ImageIcon Source="pack://application:,,,/Icons/app.ico" />
             </ui:TitleBar.Icon>
         </ui:TitleBar>
 
@@ -232,42 +187,29 @@
                                     </ToggleButton.Visibility>
                                     <Grid>
                                         <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="4" />
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
 
-                                        <!-- 左：矢量品牌徽标（红色渐变圆角底 + 立体 "A" + 底部年份色带） -->
-                                        <Grid Grid.Column="0" Style="{StaticResource BrandLogoStyle}"
+                                        <!-- 左侧状态色条：与 StatusText 联动，强化"已装插件 / 仅装 CAD / 旧版 / 缺 DLL"的视觉差异 -->
+                                        <Border Grid.Column="0"
+                                                Width="4"
+                                                Margin="-8,-6,8,-6"
+                                                CornerRadius="2,0,0,2"
+                                                Background="{Binding Status, Converter={StaticResource StatusToBrush}}" />
+
+                                        <!-- 左：AutoCAD 品牌图标 + 底部年份色带 -->
+                                        <Grid Grid.Column="1" Style="{StaticResource BrandLogoStyle}"
                                               VerticalAlignment="Center">
-                                            <!-- 主体：红色径向渐变 -->
-                                            <Border Background="{StaticResource BrandLogoBrush}"
-                                                    CornerRadius="9"
-                                                    SnapsToDevicePixels="True" />
-                                            <!-- 顶部光泽 -->
-                                            <Border CornerRadius="9,9,0,0"
-                                                    Margin="2,2,2,0"
-                                                    Height="20"
-                                                    VerticalAlignment="Top"
-                                                    Background="{StaticResource BrandLogoHighlight}" />
-                                            <!-- 大 "A" -->
-                                            <TextBlock Text="A"
-                                                       Foreground="#7A0F0F"
-                                                       FontWeight="Bold"
-                                                       FontSize="30"
-                                                       Margin="0,-4,0,6"
-                                                       HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center">
-                                                <TextBlock.Effect>
-                                                    <DropShadowEffect Color="#FFFFFF"
-                                                                      BlurRadius="2"
-                                                                      ShadowDepth="0"
-                                                                      Opacity="0.55" />
-                                                </TextBlock.Effect>
-                                            </TextBlock>
+                                            <Image Source="pack://application:,,,/Icons/AutoCAD.ico"
+                                                   Stretch="Uniform"
+                                                   Margin="0,0,0,11"
+                                                   RenderOptions.BitmapScalingMode="HighQuality" />
                                             <!-- 底部色带 + 年份徽章 -->
                                             <Border Height="13"
                                                     VerticalAlignment="Bottom"
-                                                    CornerRadius="0,0,9,9"
+                                                    CornerRadius="3"
                                                     Background="{StaticResource BrandLogoBandBrush}">
                                                 <TextBlock Text="{Binding Version}"
                                                            Foreground="White"
@@ -279,7 +221,7 @@
                                         </Grid>
 
                                         <!-- 右：版本名 / 状态 / 已安装版本号 -->
-                                        <StackPanel Grid.Column="1"
+                                        <StackPanel Grid.Column="2"
                                                     VerticalAlignment="Center"
                                                     Margin="10,0,0,0">
                                             <TextBlock Text="{Binding DisplayName}"
@@ -293,9 +235,10 @@
                                                          Fill="{Binding Status, Converter={StaticResource StatusToBrush}}" />
                                                 <TextBlock Text="{Binding StatusText}"
                                                            FontSize="11"
+                                                           FontWeight="SemiBold"
                                                            Margin="6,0,0,0"
                                                            VerticalAlignment="Center"
-                                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                           Foreground="{Binding Status, Converter={StaticResource StatusToBrush}}" />
                                             </StackPanel>
 
                                             <TextBlock Text="{Binding InstalledVersion}"

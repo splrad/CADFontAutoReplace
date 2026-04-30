@@ -9,7 +9,7 @@
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <ApplicationIcon>Icons\app.ico</ApplicationIcon>
     <Platforms>x64</Platforms>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <!--
@@ -23,11 +23,10 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
-  <!-- Assets -->
+  <!-- 图标资源：app.ico 用于 EXE 主图标 / 标题栏；AutoCAD.ico 用于卡片左侧徽标 -->
   <ItemGroup>
-    <Content Include="Assets\app.ico">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <Resource Include="Icons\app.ico" />
+    <Resource Include="Icons\AutoCAD.ico" />
   </ItemGroup>
 
   <!-- MVVM -->
@@ -36,18 +35,16 @@
     <PackageReference Include="WPF-UI" Version="4.2.1" />
   </ItemGroup>
 
-  <!-- 嵌入所有插件 DLL -->
+  <!--
+    嵌入所有插件 DLL：通配匹配 Resources\AFR-ACAD*.dll，新增 CAD 版本时由
+    Publish-Deployer.ps1 自动复制 DLL 到 Resources\，无需在此处手工新增条目。
+    LogicalName 与 CadDescriptors.EmbeddedResourceKey 约定保持一致：
+        AFR.Deployer.Resources.<DllFileName>
+  -->
   <ItemGroup>
-    <EmbeddedResource Include="Resources\AFR-ACAD2018.dll" Condition="Exists('Resources\AFR-ACAD2018.dll')" />
-    <EmbeddedResource Include="Resources\AFR-ACAD2019.dll" Condition="Exists('Resources\AFR-ACAD2019.dll')" />
-    <EmbeddedResource Include="Resources\AFR-ACAD2020.dll" Condition="Exists('Resources\AFR-ACAD2020.dll')" />
-    <EmbeddedResource Include="Resources\AFR-ACAD2021.dll" Condition="Exists('Resources\AFR-ACAD2021.dll')" />
-    <EmbeddedResource Include="Resources\AFR-ACAD2022.dll" Condition="Exists('Resources\AFR-ACAD2022.dll')" />
-    <EmbeddedResource Include="Resources\AFR-ACAD2023.dll" Condition="Exists('Resources\AFR-ACAD2023.dll')" />
-    <EmbeddedResource Include="Resources\AFR-ACAD2024.dll" Condition="Exists('Resources\AFR-ACAD2024.dll')" />
-    <EmbeddedResource Include="Resources\AFR-ACAD2025.dll" Condition="Exists('Resources\AFR-ACAD2025.dll')" />
-    <EmbeddedResource Include="Resources\AFR-ACAD2026.dll" Condition="Exists('Resources\AFR-ACAD2026.dll')" />
-    <EmbeddedResource Include="Resources\AFR-ACAD2027.dll" Condition="Exists('Resources\AFR-ACAD2027.dll')" />
+    <EmbeddedResource Include="Resources\AFR-ACAD*.dll">
+      <LogicalName>AFR.Deployer.Resources.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>
