@@ -15,7 +15,10 @@
         WindowBackdropType="Mica"
         ExtendsContentIntoTitleBar="True"
         UseLayoutRounding="True"
-        TextOptions.TextFormattingMode="Display">
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="ClearType"
+        TextOptions.TextHintingMode="Fixed"
+        RenderOptions.ClearTypeHint="Enabled">
 
     <ui:FluentWindow.Resources>
         <!--
