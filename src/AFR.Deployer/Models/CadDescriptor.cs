@@ -1,9 +1,17 @@
+using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace AFR.Deployer.Models;
 
 /// <summary>
 /// 编译期已知的 CAD 版本静态描述符，与 ICadPlatform 对应但不依赖插件程序集。
 /// <para>
-/// 所有支持的版本在 <see cref="CadDescriptors.All"/> 中统一维护。
+/// 描述符列表 <see cref="CadDescriptors.All"/> 由各插件项目（src\AutoCAD\AFR-ACAD20XX）
+/// 在构建时通过 MSBuild Target <c>EmitCadDescriptorJson</c> 生成的 <c>*.cad.json</c>
+/// 文件提供，AFR.Deployer 在编译期将这些 JSON 嵌入为程序集资源，运行时反序列化得到。
+/// 新增 CAD 版本/品牌时只需在新插件 csproj 中声明
+/// <c>CadBrand</c> / <c>CadVersion</c> / <c>CadRegistryBasePath</c>，无需在此处手工维护。
 /// </para>
 /// </summary>
 /// <param name="Brand">CAD 品牌，如 "AutoCAD"。</param>
@@ -21,26 +29,69 @@ internal sealed record CadDescriptor(
     string EmbeddedResourceKey);
 
 /// <summary>
-/// 所有受支持 CAD 版本的静态元数据表。
+/// 所有受支持 CAD 版本的元数据表（运行时由嵌入的 <c>*.cad.json</c> Sidecar 自动加载）。
 /// <para>
-/// 注册表键模式固定为 <c>^ACAD-[A-Za-z0-9]+:[A-Za-z0-9]+$</c>，对所有 AutoCAD 版本通用，
+/// 注册表配置文件子键模式固定为 <c>^ACAD-[A-Za-z0-9]+:[A-Za-z0-9]+$</c>，
 /// 由 <see cref="Services.CadRegistryScanner"/> 直接使用常量，不在此处重复声明。
 /// </para>
 /// </summary>
 internal static class CadDescriptors
 {
-    /// <summary>按版本年份升序排列的所有支持版本。</summary>
-    internal static readonly IReadOnlyList<CadDescriptor> All =
-    [
-        new("AutoCAD", "2018", "AutoCAD 2018", @"Software\Autodesk\AutoCAD\R22.0", "AFR-ACAD2018", "AFR.Deployer.Resources.AFR-ACAD2018.dll"),
-        new("AutoCAD", "2019", "AutoCAD 2019", @"Software\Autodesk\AutoCAD\R23.0", "AFR-ACAD2019", "AFR.Deployer.Resources.AFR-ACAD2019.dll"),
-        new("AutoCAD", "2020", "AutoCAD 2020", @"Software\Autodesk\AutoCAD\R23.1", "AFR-ACAD2020", "AFR.Deployer.Resources.AFR-ACAD2020.dll"),
-        new("AutoCAD", "2021", "AutoCAD 2021", @"Software\Autodesk\AutoCAD\R24.0", "AFR-ACAD2021", "AFR.Deployer.Resources.AFR-ACAD2021.dll"),
-        new("AutoCAD", "2022", "AutoCAD 2022", @"Software\Autodesk\AutoCAD\R24.1", "AFR-ACAD2022", "AFR.Deployer.Resources.AFR-ACAD2022.dll"),
-        new("AutoCAD", "2023", "AutoCAD 2023", @"Software\Autodesk\AutoCAD\R24.2", "AFR-ACAD2023", "AFR.Deployer.Resources.AFR-ACAD2023.dll"),
-        new("AutoCAD", "2024", "AutoCAD 2024", @"Software\Autodesk\AutoCAD\R24.3", "AFR-ACAD2024", "AFR.Deployer.Resources.AFR-ACAD2024.dll"),
-        new("AutoCAD", "2025", "AutoCAD 2025", @"Software\Autodesk\AutoCAD\R25.0", "AFR-ACAD2025", "AFR.Deployer.Resources.AFR-ACAD2025.dll"),
-        new("AutoCAD", "2026", "AutoCAD 2026", @"Software\Autodesk\AutoCAD\R25.1", "AFR-ACAD2026", "AFR.Deployer.Resources.AFR-ACAD2026.dll"),
-        new("AutoCAD", "2027", "AutoCAD 2027", @"Software\Autodesk\AutoCAD\R26.0", "AFR-ACAD2027", "AFR.Deployer.Resources.AFR-ACAD2027.dll"),
-    ];
+    /// <summary>嵌入资源前缀；与 csproj 中 <c>LogicalName</c> 约定保持一致。</summary>
+    private const string ResourcePrefix = "AFR.Deployer.Resources.";
+
+    /// <summary>JSON Sidecar 文件后缀。</summary>
+    private const string SidecarSuffix = ".cad.json";
+
+    /// <summary>按 (品牌, 版本) 升序排列的所有支持版本。</summary>
+    internal static readonly IReadOnlyList<CadDescriptor> All = LoadFromEmbeddedSidecars();
+
+    private static IReadOnlyList<CadDescriptor> LoadFromEmbeddedSidecars()
+    {
+        var assembly = typeof(CadDescriptors).Assembly;
+        var sidecarNames = assembly.GetManifestResourceNames()
+            .Where(n => n.StartsWith(ResourcePrefix, StringComparison.Ordinal)
+                     && n.EndsWith(SidecarSuffix, StringComparison.OrdinalIgnoreCase));
+
+        var list = new List<CadDescriptor>();
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            ReadCommentHandling  = JsonCommentHandling.Skip,
+            AllowTrailingCommas  = true,
+        };
+
+        foreach (var name in sidecarNames)
+        {
+            using var stream = assembly.GetManifestResourceStream(name);
+            if (stream is null) continue;
+
+            var dto = JsonSerializer.Deserialize<CadDescriptorDto>(stream, options);
+            if (dto is null) continue;
+
+            list.Add(new CadDescriptor(
+                Brand:               dto.Brand               ?? string.Empty,
+                Version:             dto.Version             ?? string.Empty,
+                DisplayName:         dto.DisplayName         ?? $"{dto.Brand} {dto.Version}",
+                RegistryBasePath:    dto.RegistryBasePath    ?? string.Empty,
+                AppName:             dto.AppName             ?? string.Empty,
+                EmbeddedResourceKey: dto.EmbeddedResourceKey ?? $"{ResourcePrefix}{dto.AppName}.dll"));
+        }
+
+        return list
+            .OrderBy(d => d.Brand,   StringComparer.OrdinalIgnoreCase)
+            .ThenBy (d => d.Version, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>JSON Sidecar 反序列化 DTO（与 EmitCadDescriptorJson Target 输出字段一致）。</summary>
+    private sealed class CadDescriptorDto
+    {
+        [JsonPropertyName("brand")]               public string? Brand               { get; set; }
+        [JsonPropertyName("version")]             public string? Version             { get; set; }
+        [JsonPropertyName("displayName")]         public string? DisplayName         { get; set; }
+        [JsonPropertyName("registryBasePath")]    public string? RegistryBasePath    { get; set; }
+        [JsonPropertyName("appName")]             public string? AppName             { get; set; }
+        [JsonPropertyName("embeddedResourceKey")] public string? EmbeddedResourceKey { get; set; }
+    }
 }

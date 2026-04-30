@@ -10,6 +10,11 @@
     <NoWarn>$(NoWarn);NU1701</NoWarn>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <Platforms>AnyCPU;x64</Platforms>
+
+    <!-- CAD 元数据：作为 AFR.Deployer 描述符表的权威源（方案 B） -->
+    <CadBrand>AutoCAD</CadBrand>
+    <CadVersion>2024</CadVersion>
+    <CadRegistryBasePath>Software\Autodesk\AutoCAD\R24.3</CadRegistryBasePath>
   </PropertyGroup>
 
   <!-- 导入共享源码 -->

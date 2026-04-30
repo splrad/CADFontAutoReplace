@@ -124,6 +124,17 @@ foreach ($p in $Plugins) {
         Write-Fail "$($p.Name).dll 未在 artifacts\Releases\ 中找到"
         $copyErrors += $p.Name
     }
+
+    # 方案 B：复制 CAD 元数据 JSON Sidecar（由 EmitCadDescriptorJson 目标生成）
+    $srcJson = Join-Path $ReleasesDir "$($p.Name).cad.json"
+    $dstJson = Join-Path $ResourcesDir "$($p.Name).cad.json"
+    if (Test-Path $srcJson) {
+        Copy-Item -Path $srcJson -Destination $dstJson -Force
+        Write-Ok "$($p.Name).cad.json → Resources\"
+    } else {
+        Write-Fail "$($p.Name).cad.json 未生成（请检查 csproj 中的 CadBrand/CadVersion/CadRegistryBasePath 属性）"
+        $copyErrors += "$($p.Name).cad.json"
+    }
 }
 
 if ($copyErrors.Count -gt 0) {

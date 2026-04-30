@@ -51,6 +51,13 @@
     <EmbeddedResource Include="Resources\AFR-ACAD*.dll">
       <LogicalName>AFR.Deployer.Resources.%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
+    <!--
+      方案 B：嵌入插件项目导出的 CAD 元数据 JSON Sidecar。
+      运行时由 CadDescriptors 静态构造函数反序列化，作为描述符表的权威源。
+    -->
+    <EmbeddedResource Include="Resources\AFR-ACAD*.cad.json">
+      <LogicalName>AFR.Deployer.Resources.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

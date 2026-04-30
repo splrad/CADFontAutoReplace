@@ -26,31 +26,74 @@ internal sealed class CadProcessWatcher : IDisposable
 
     internal void Start()
     {
+        // 优先尝试 ETW 推送式事件（真正零轮询，延迟 <100ms）。
+        // 失败的常见原因：当前用户不在 Performance Log Users 组、组策略禁用 ETW、
+        // WMI 服务被裁剪等——任一情况都自动回退到下一方案。
+        if (TryStartTrace()) return;
+
+        // 回退：__InstanceCreationEvent / __InstanceDeletionEvent + WITHIN。
+        // 进程端依然零轮询（事件式回调），但 WMI 服务内部会以 2s 周期轮询
+        // Win32_Process 表生成增量事件——这是 WMI 通用实例事件的固有机制，
+        // 不是本进程的定时器。无需任何提权，是兼容性最强的兜底方案。
+        TryStartInstanceEvents();
+    }
+
+    private bool TryStartTrace()
+    {
         try
         {
-            // 使用 __InstanceCreationEvent / __InstanceDeletionEvent + WITHIN，
-            // 无需管理员权限即可工作；WMI 会在内部按 2s 轮询，UI 端零轮询。
+            _startWatcher = new ManagementEventWatcher(
+                new WqlEventQuery("SELECT ProcessName FROM Win32_ProcessStartTrace"));
+            _startWatcher.EventArrived += OnTraceEvent;
+            _startWatcher.Start();
+
+            _stopWatcher = new ManagementEventWatcher(
+                new WqlEventQuery("SELECT ProcessName FROM Win32_ProcessStopTrace"));
+            _stopWatcher.EventArrived += OnTraceEvent;
+            _stopWatcher.Start();
+            return true;
+        }
+        catch
+        {
+            DisposeWatchers();
+            return false;
+        }
+    }
+
+    private void TryStartInstanceEvents()
+    {
+        try
+        {
             const string create = "SELECT TargetInstance FROM __InstanceCreationEvent "
                                 + "WITHIN 2 WHERE TargetInstance ISA 'Win32_Process'";
             const string delete = "SELECT TargetInstance FROM __InstanceDeletionEvent "
                                 + "WITHIN 2 WHERE TargetInstance ISA 'Win32_Process'";
 
             _startWatcher = new ManagementEventWatcher(new WqlEventQuery(create));
-            _startWatcher.EventArrived += OnEvent;
+            _startWatcher.EventArrived += OnInstanceEvent;
             _startWatcher.Start();
 
             _stopWatcher = new ManagementEventWatcher(new WqlEventQuery(delete));
-            _stopWatcher.EventArrived += OnEvent;
+            _stopWatcher.EventArrived += OnInstanceEvent;
             _stopWatcher.Start();
         }
         catch
         {
-            // WMI 不可用时静默退化：UI 仍能正常工作，只是失去实时进程感知。
-            Dispose();
+            // WMI 完全不可用时静默退化：UI 仍能正常工作，只是失去实时进程感知。
+            DisposeWatchers();
         }
     }
 
-    private void OnEvent(object sender, EventArrivedEventArgs e)
+    private void OnTraceEvent(object sender, EventArrivedEventArgs e)
+    {
+        var name = e.NewEvent?["ProcessName"] as string;
+        if (name is not null && Watched.Contains(name))
+        {
+            try { StateChanged?.Invoke(); } catch { /* ignore */ }
+        }
+    }
+
+    private void OnInstanceEvent(object sender, EventArrivedEventArgs e)
     {
         if (e.NewEvent?["TargetInstance"] is not ManagementBaseObject target) return;
         var name = target["Name"] as string;
@@ -64,7 +107,9 @@ internal sealed class CadProcessWatcher : IDisposable
     internal static bool IsAnyRunning(out IReadOnlyList<string> runningNames)
         => ProcessGuardService.IsAnyCadRunning(out runningNames);
 
-    public void Dispose()
+    public void Dispose() => DisposeWatchers();
+
+    private void DisposeWatchers()
     {
         try { _startWatcher?.Stop(); } catch { }
         try { _stopWatcher?.Stop();  } catch { }

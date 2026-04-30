@@ -8,6 +8,11 @@
     <UseWPF>true</UseWPF>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <Platforms>AnyCPU;x64</Platforms>
+
+    <!-- CAD 元数据：作为 AFR.Deployer 描述符表的权威源（方案 B） -->
+    <CadBrand>AutoCAD</CadBrand>
+    <CadVersion>2027</CadVersion>
+    <CadRegistryBasePath>Software\Autodesk\AutoCAD\R26.0</CadRegistryBasePath>
   </PropertyGroup>
 
   <!-- 导入共享源码 -->
