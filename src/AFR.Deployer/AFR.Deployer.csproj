@@ -23,6 +23,13 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Remove="Resources\**" />
+    <EmbeddedResource Remove="Resources\**" />
+    <None Remove="Resources\**" />
+    <Page Remove="Resources\**" />
+  </ItemGroup>
+
   <!-- 图标资源：app.ico 用于 EXE 主图标 / 标题栏；AutoCAD.ico 用于卡片左侧徽标 -->
   <ItemGroup>
     <Resource Include="Icons\app.ico" />
@@ -47,18 +54,6 @@
     LogicalName 与 CadDescriptors.EmbeddedResourceKey 约定保持一致：
         AFR.Deployer.Resources.<DllFileName>
   -->
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\AFR-ACAD*.dll">
-      <LogicalName>AFR.Deployer.Resources.%(Filename)%(Extension)</LogicalName>
-    </EmbeddedResource>
-    <!--
-      方案 B：嵌入插件项目导出的 CAD 元数据 JSON Sidecar。
-      运行时由 CadDescriptors 静态构造函数反序列化，作为描述符表的权威源。
-    -->
-    <EmbeddedResource Include="Resources\AFR-ACAD*.cad.json">
-      <LogicalName>AFR.Deployer.Resources.%(Filename)%(Extension)</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
 
 </Project>
 
