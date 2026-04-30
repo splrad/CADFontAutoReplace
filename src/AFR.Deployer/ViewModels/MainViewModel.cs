@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -24,7 +25,36 @@ internal sealed partial class MainViewModel : ObservableObject
     private readonly CadProcessWatcher             _processWatcher   = new();
 
     [ObservableProperty]
-    private string _deployPath = @"D:\CADPlugins\";
+    private string _deployPath = ResolveDefaultDeployPath();
+
+    /// <summary>
+    /// 选择默认部署根目录：优先使用首个非系统盘的固定盘（D:\、E:\…），
+    /// 若全机仅有系统盘（典型笔记本只有 C 盘），则回落到系统盘下的同名目录。
+    /// 末尾保留反斜杠，便于在文本框中直接拼接子目录。
+    /// </summary>
+    private static string ResolveDefaultDeployPath()
+    {
+        const string FolderName = "CADPlugins";
+        var systemRoot = Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.System))
+                         ?? @"C:\";
+
+        try
+        {
+            var preferred = DriveInfo.GetDrives()
+                .Where(d => d.DriveType == DriveType.Fixed && d.IsReady)
+                .Select(d => d.RootDirectory.FullName)
+                .FirstOrDefault(root => !string.Equals(root, systemRoot, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrEmpty(preferred))
+                return Path.Combine(preferred, FolderName) + Path.DirectorySeparatorChar;
+        }
+        catch
+        {
+            // 任何 IO 异常（权限、设备未就绪等）都回落到系统盘，保证 UI 始终有合法路径。
+        }
+
+        return Path.Combine(systemRoot, FolderName) + Path.DirectorySeparatorChar;
+    }
 
     [ObservableProperty]
     private string _statusText = "正在扫描已安装的 CAD……";
