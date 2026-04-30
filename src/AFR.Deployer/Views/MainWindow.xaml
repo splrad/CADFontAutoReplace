@@ -173,15 +173,52 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- 顶部：标题 + 副标题（注册表轮询自动刷新，无需手动按钮） -->
+            <!-- 顶部 header：左=图标+标题/副标题，右=检测摘要 chip（从底部状态栏上移，让职责更清晰：
+                 顶部呈现"静态事实"，底部状态栏只承担"动态操作反馈"） -->
             <Grid Grid.Row="0" Margin="0,0,0,14">
-                <StackPanel>
-                    <TextBlock Text="插件部署" FontSize="22" FontWeight="SemiBold" />
-                    <TextBlock Text="选择版本并安装插件"
-                               FontSize="12"
-                               Margin="0,2,0,0"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Width="40" Height="40"
+                            CornerRadius="10"
+                            Background="#E8F1FB"
+                            VerticalAlignment="Center">
+                        <ui:SymbolIcon Symbol="Apps24"
+                                       FontSize="22"
+                                       Foreground="#0F6CBD"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="插件部署" FontSize="22" FontWeight="SemiBold" />
+                        <TextBlock Text="选择 CAD 版本并一键安装 / 卸载 AFR 插件"
+                                   FontSize="12"
+                                   Margin="0,2,0,0"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
                 </StackPanel>
+
+                <Border Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        Padding="10,5">
+                    <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="CheckmarkCircle24"
+                                       FontSize="15"
+                                       Foreground="#10884B"
+                                       VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding DetectionSummary}"
+                                   VerticalAlignment="Center"
+                                   FontSize="12"
+                                   Margin="6,0,0,0" />
+                    </StackPanel>
+                </Border>
             </Grid>
 
             <!-- 中部：版本卡片容器 -->
@@ -424,11 +461,13 @@
             </Border>
         </Grid>
 
-        <!-- 状态栏 -->
+        <!-- 状态栏：检测摘要已上移到 header chip；此处只承担"动态操作反馈"
+             （CAD 运行警告 / 正在安装 / ✓ 成功），用左侧提示文字 + 右侧状态胶囊双指示提升可见性 -->
         <Border Grid.Row="2"
                 BorderThickness="0,1,0,0"
                 BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-                Padding="24,6">
+                Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                Padding="24,11">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -436,26 +475,21 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <!-- 左：检测计数 -->
-                <StackPanel Grid.Column="0" Orientation="Horizontal">
-                    <ui:SymbolIcon Symbol="CheckmarkCircle24"
-                                   Foreground="#10884B"
-                                   FontSize="16"
-                                   VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding DetectionSummary}"
-                               VerticalAlignment="Center"
-                               FontSize="12"
-                               Margin="6,0,0,0" />
-                </StackPanel>
+                <!-- 左：固定语义标签，让用户清楚右侧是"当前状态" -->
+                <TextBlock Grid.Column="0"
+                           Text="当前状态"
+                           VerticalAlignment="Center"
+                           FontSize="12"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
 
-                <!-- 右：CAD 运行状态 / 操作状态（加大加粗，带胶囊背景避免忽视） -->
+                <!-- 右：操作状态胶囊（颜色随 StatusText 语义切换） -->
                 <Border Grid.Column="2"
                         Background="{Binding StatusText, Converter={StaticResource StatusTextToBrush}, ConverterParameter=bg}"
-                        CornerRadius="10"
-                        Padding="10,3"
+                        CornerRadius="11"
+                        Padding="12,5"
                         VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal">
-                        <Ellipse Width="9" Height="9"
+                        <Ellipse Width="10" Height="10"
                                  VerticalAlignment="Center"
                                  Fill="{Binding StatusText, Converter={StaticResource StatusTextToBrush}}" />
                         <TextBlock Text="{Binding StatusText}"
