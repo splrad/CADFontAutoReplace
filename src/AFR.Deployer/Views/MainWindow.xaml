@@ -8,7 +8,9 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="AFR 部署工具"
-        Width="900" Height="600"
+        Width="960" Height="640"
+        MinWidth="960" MinHeight="640"
+        MaxWidth="1120" MaxHeight="760"
         Icon="pack://application:,,,/Icons/app.ico"
         ResizeMode="CanMinimize"
         WindowStartupLocation="CenterScreen"
@@ -48,7 +50,7 @@
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Focusable" Value="True" />
             <Setter Property="Margin" Value="0,0,10,10" />
-            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="Padding" Value="10,8" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Stretch" />
             <Setter Property="Background" Value="#FAFAFA" />
@@ -126,11 +128,26 @@
         </Style>
 
         <!--
-            CAD 品牌徽标占位容器：固定 46×46 仅显示 AutoCAD.ico。
+            CAD 品牌徽标占位容器：固定 44×44 仅显示 AutoCAD.ico。
+            （早期 76×76 在 4 列布局下挤占文字区，导致 DisplayName 被裁成 "AutoCAD 2..."）
         -->
         <Style x:Key="BrandLogoStyle" TargetType="Grid">
-            <Setter Property="Width" Value="76" />
-            <Setter Property="Height" Value="76" />
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Height" Value="44" />
+        </Style>
+
+        <!--
+            底部操作按钮通用样式：CAD 正在运行时按钮禁用，
+            WPF-UI 默认 Primary 在 Disabled 下前景接近白色，与浅灰底重叠导致"看不见文字"，
+            这里强制把禁用时的前景/图标改成可读的灰色。
+        -->
+        <Style x:Key="ActionButtonStyle" TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="#8A8A8A" />
+                    <Setter Property="Opacity" Value="0.85" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
     </ui:FluentWindow.Resources>
 
@@ -156,25 +173,15 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- 顶部：标题 + 副标题 + 刷新按钮 -->
+            <!-- 顶部：标题 + 副标题（注册表轮询自动刷新，无需手动按钮） -->
             <Grid Grid.Row="0" Margin="0,0,0,14">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
+                <StackPanel>
                     <TextBlock Text="插件部署" FontSize="22" FontWeight="SemiBold" />
                     <TextBlock Text="选择版本并安装插件"
                                FontSize="12"
                                Margin="0,2,0,0"
                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
-                <ui:Button Grid.Column="1"
-                           VerticalAlignment="Center"
-                           Appearance="Secondary"
-                           Content="刷新"
-                           Icon="{ui:SymbolIcon ArrowClockwise24}"
-                           Command="{Binding RefreshCommand}" />
             </Grid>
 
             <!-- 中部：版本卡片容器 -->
@@ -190,14 +197,12 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <!-- 容器头：标题 + 全选 + 显示未检测开关 -->
+                    <!-- 容器头：标题 + 全选 -->
                     <Grid Grid.Row="0" Margin="0,0,0,12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0"
                                    Text="支持的 AutoCAD 版本"
@@ -209,36 +214,26 @@
                                   Margin="24,0,0,0"
                                   VerticalAlignment="Center"
                                   Click="OnSelectAllClicked" />
-                        <TextBlock Grid.Column="3"
-                                   Text="显示未检测版本"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,10,0"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                        <ui:ToggleSwitch Grid.Column="4"
-                                         IsChecked="{Binding ShowUnavailable, Mode=TwoWay}"
-                                         VerticalAlignment="Center" />
                     </Grid>
 
-                    <!-- 卡片网格：UniformGrid 自动均分整行宽度，新增 CAD 版本时只需调整 Columns 与窗口高度 -->
+                    <!--
+                        卡片网格：固定 4 列；行数由 ItemsSource 数量自动决定，
+                        最后一行允许不占满（UniformGrid 默认行为，空格保持空白即可）。
+                        新增 CAD 版本时仅需在 CadDescriptors 中追加，无需改动 XAML。
+                    -->
                     <ItemsControl Grid.Row="1" ItemsSource="{Binding CadEntries}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <UniformGrid Columns="5" />
+                                <UniformGrid Columns="4" />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:CadEntryViewModel}">
                                 <ToggleButton Style="{StaticResource CadCardStyle}"
                                               MinHeight="78"
+                                              MaxHeight="110"
                                               IsChecked="{Binding IsSelected, Mode=TwoWay}"
                                               IsEnabled="{Binding IsEnabled}">
-                                    <ToggleButton.Visibility>
-                                        <MultiBinding Converter="{StaticResource InstalledOrShowAllToVisibility}">
-                                            <Binding Path="IsCadInstalled" />
-                                            <Binding Path="DataContext.ShowUnavailable"
-                                                     RelativeSource="{RelativeSource AncestorType=ItemsControl}" />
-                                        </MultiBinding>
-                                    </ToggleButton.Visibility>
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
@@ -263,9 +258,9 @@
                                         <!-- 右：标题 / 状态行（图标 + 文字）/ 副文本或版本+徽章 -->
                                         <StackPanel Grid.Column="1"
                                                     VerticalAlignment="Center"
-                                                    Margin="12,0,0,0">
+                                                    Margin="10,0,0,0">
                                             <TextBlock Text="{Binding DisplayName}"
-                                                       FontSize="14"
+                                                       FontSize="13"
                                                        FontWeight="SemiBold"
                                                        TextTrimming="CharacterEllipsis" />
 
@@ -295,32 +290,37 @@
                                                        TextTrimming="CharacterEllipsis"
                                                        Visibility="{Binding ShowSubText, Converter={StaticResource BoolToVisibility}}" />
 
-                                            <!-- 版本行（仅已安装两种态显示）：版本 vX.Y + 最新版/旧版 徽章 -->
+                                            <!-- 版本行（仅已安装两种态显示）：整块色徽章 = Tag 图标 + 版本号 + 最新版/旧版 -->
                                             <StackPanel x:Name="VersionRow"
                                                         Orientation="Horizontal"
                                                         Margin="0,3,0,0"
                                                         Visibility="{Binding ShowVersionRow, Converter={StaticResource BoolToVisibility}}">
-                                                <ui:SymbolIcon Symbol="Tag24"
-                                                               FontSize="12"
-                                                               VerticalAlignment="Center"
-                                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                                <TextBlock Text="{Binding InstalledVersion}"
-                                                           FontSize="11"
-                                                           FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
-                                                           Margin="5,0,0,0"
-                                                           VerticalAlignment="Center"
-                                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                                                 <Border x:Name="VersionBadge"
-                                                        Margin="6,0,0,0"
                                                         Padding="6,1"
                                                         CornerRadius="6"
                                                         VerticalAlignment="Center"
                                                         Background="{StaticResource BadgeCurrentBgBrush}">
-                                                    <TextBlock x:Name="VersionBadgeText"
-                                                               Text="{Binding BadgeText}"
-                                                               FontSize="10"
-                                                               FontWeight="SemiBold"
-                                                               Foreground="{StaticResource StatusCurrentBrush}" />
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <ui:SymbolIcon x:Name="VersionTagIcon"
+                                                                       Symbol="Tag24"
+                                                                       FontSize="12"
+                                                                       VerticalAlignment="Center"
+                                                                       Foreground="{StaticResource StatusCurrentBrush}" />
+                                                        <TextBlock x:Name="VersionNumberText"
+                                                                   Text="{Binding InstalledVersion}"
+                                                                   FontSize="11"
+                                                                   FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
+                                                                   FontWeight="SemiBold"
+                                                                   Margin="4,0,6,0"
+                                                                   VerticalAlignment="Center"
+                                                                   Foreground="{StaticResource StatusCurrentBrush}" />
+                                                        <TextBlock x:Name="VersionBadgeText"
+                                                                   Text="{Binding BadgeText}"
+                                                                   FontSize="10"
+                                                                   FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center"
+                                                                   Foreground="{StaticResource StatusCurrentBrush}" />
+                                                    </StackPanel>
                                                 </Border>
                                             </StackPanel>
                                         </StackPanel>
@@ -348,6 +348,8 @@
                                         <Setter TargetName="StatusIcon"       Property="Foreground" Value="{StaticResource StatusOutdatedBrush}" />
                                         <Setter TargetName="StatusLabel"      Property="Foreground" Value="{StaticResource StatusOutdatedBrush}" />
                                         <Setter TargetName="VersionBadge"     Property="Background" Value="{StaticResource BadgeOutdatedBgBrush}" />
+                                        <Setter TargetName="VersionTagIcon"   Property="Foreground" Value="{StaticResource StatusOutdatedBrush}" />
+                                        <Setter TargetName="VersionNumberText" Property="Foreground" Value="{StaticResource StatusOutdatedBrush}" />
                                         <Setter TargetName="VersionBadgeText" Property="Foreground" Value="{StaticResource StatusOutdatedBrush}" />
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding Status}" Value="DllMissing">
@@ -425,12 +427,14 @@
                         <ui:Button Grid.Column="1"
                                    Content="卸载已选版本"
                                    Appearance="Secondary"
+                                   Style="{StaticResource ActionButtonStyle}"
                                    Icon="{ui:SymbolIcon Delete24}"
                                    Command="{Binding UninstallCommand}"
                                    MinWidth="120" />
                         <ui:Button Grid.Column="2"
                                    Content="安装选中版本"
                                    Appearance="Primary"
+                                   Style="{StaticResource ActionButtonStyle}"
                                    Icon="{ui:SymbolIcon ArrowDownload24}"
                                    Command="{Binding InstallCommand}"
                                    MinWidth="132"

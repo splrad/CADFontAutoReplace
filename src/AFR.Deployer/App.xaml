@@ -17,7 +17,6 @@
             <converters:AvailabilityToTextBrushConverter x:Key="AvailabilityToTextBrush" />
             <converters:AvailabilityToBadgeBackgroundConverter x:Key="AvailabilityToBadgeBackground" />
             <converters:BoolToVisibilityConverter x:Key="BoolToVisibility" />
-            <converters:InstalledOrShowAllToVisibilityConverter x:Key="InstalledOrShowAllToVisibility" />
 
             <!--
                 字体单一来源说明：

@@ -60,8 +60,8 @@ internal sealed partial class CadEntryViewModel : ObservableObject
         : Status switch
         {
             PluginDeployStatus.NotInstalled      => "待安装",
-            PluginDeployStatus.InstalledCurrent  => "已安装（最新版）",
-            PluginDeployStatus.InstalledOutdated => "已安装（旧版）",
+            PluginDeployStatus.InstalledCurrent  => "已安装",
+            PluginDeployStatus.InstalledOutdated => "已安装",
             PluginDeployStatus.DllMissing        => "DLL 缺失",
             _                                    => "未知"
         };
@@ -71,7 +71,7 @@ internal sealed partial class CadEntryViewModel : ObservableObject
     /// 其他状态由版本号 + 徽章承载信息，避免视觉重复。
     /// </summary>
     public string SubText => !IsCadInstalled
-        ? "本机未检测到此版本"
+        ? "本机未安装此版本"
         : Status switch
         {
             PluginDeployStatus.NotInstalled      => "插件尚未部署，可点击安装",

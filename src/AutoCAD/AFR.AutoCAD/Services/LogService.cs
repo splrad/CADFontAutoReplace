@@ -238,6 +238,13 @@ internal sealed class LogService : ILogService
             // --- 第三步：首次输出时显示 AFR 插件的版本信息横幅 ---
             if (showHeader)
             {
+                // AFRUNLOAD 仅在 DEBUG 构建中暴露（Release 由外部部署工具 AFR.Deployer
+                // 统一管理安装/卸载），因此横幅中也按构建配置区分显示命令列表。
+#if DEBUG
+                const string commandsLine = "\n命令: AFR(配置) AFRLOG(日志) AFRUNLOAD(卸载)";
+#else
+                const string commandsLine = "\n命令: AFR(配置) AFRLOG(日志)";
+#endif
                 editor.WriteMessage(
                     "\n==========================================================================" +
                     $"\nAFR 缺失字体自动替换 v{PluginVersionService.GetDisplayVersion()}" +
@@ -245,7 +252,7 @@ internal sealed class LogService : ILogService
                     "\n项目地址：" +
                     "\nGitHub(国外)：github.com/splrad/CADFontAutoReplace" +
                     "\nGitee(国内)：gitee.com/splrad/CADFontAutoReplace" +
-                    "\n命令: AFR(配置) AFRLOG(日志) AFRUNLOAD(卸载)" +
+                    commandsLine +
                     "\n==========================================================================");
             }
 

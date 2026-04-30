@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Threading;
 using AFR.Deployer.Infrastructure;
 using AFR.Deployer.Models;
@@ -17,9 +18,10 @@ namespace AFR.Deployer.ViewModels;
 /// </summary>
 internal sealed partial class MainViewModel : ObservableObject
 {
-    private readonly IDialogService       _dialog;
-    private readonly IFolderPickerService _folderPicker;
-    private readonly DispatcherTimer      _processTimer;
+    private readonly IDialogService                _dialog;
+    private readonly IFolderPickerService          _folderPicker;
+    private readonly List<RegistryChangeWatcher>   _registryWatchers = [];
+    private readonly CadProcessWatcher             _processWatcher   = new();
 
     [ObservableProperty]
     private string _deployPath = @"D:\CADPlugins\";
@@ -38,10 +40,6 @@ internal sealed partial class MainViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(InstallCommand))]
     [NotifyCanExecuteChangedFor(nameof(UninstallCommand))]
     private bool _isBusy;
-
-    /// <summary>是否在 UI 中显示未检测到的 CAD 版本（占位条目）。</summary>
-    [ObservableProperty]
-    private bool _showUnavailable = true;
 
     /// <summary>已检测到（即本机已安装）的 CAD 版本数量。</summary>
     [ObservableProperty]
@@ -67,19 +65,60 @@ internal sealed partial class MainViewModel : ObservableObject
         _dialog       = dialog;
         _folderPicker = folderPicker;
 
-        _processTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        _processTimer.Tick += (_, _) => CheckCadProcesses();
-        _processTimer.Start();
+        // ── 进程实时监听（WMI）：CAD 启动/退出立即触发，无需 DispatcherTimer 轮询。
+        _processWatcher.StateChanged += OnProcessChanged;
+        _processWatcher.Start();
+
+        // ── 注册表实时监听：仅订阅各品牌"根"（如 Software\Autodesk\AutoCAD）的子树，
+        // 既覆盖版本子键的创建/删除（CAD 安装/卸载），也覆盖 Applications\AFR-ACADxxxx
+        // 的子键变更。即使根本身尚未存在，Watcher 会回退到更高祖先（HKCU\Software）等待
+        // 其被创建后自动升级，不会漏掉首次安装事件。
+        var brandRoots = CadDescriptors.All
+            .Select(d => GetBrandRoot(d.RegistryBasePath))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in brandRoots)
+        {
+            // fallbackRoot 取上一级（如 Software\Autodesk），避免目标根尚未创建时
+            // 监听器无键可监而失效；同时不至于宽到 HKCU\Software 整棵树。
+            var fallback = GetParent(root) ?? root;
+            var watcher  = new RegistryChangeWatcher(root, fallback);
+            watcher.Changed += OnRegistryChanged;
+            watcher.Start();
+            _registryWatchers.Add(watcher);
+        }
 
         Refresh();
+        CheckCadProcesses();
+    }
+
+    /// <summary>取 RegistryBasePath 的品牌根，如 R25.0 → AutoCAD。</summary>
+    private static string GetBrandRoot(string registryBasePath)
+        => GetParent(registryBasePath) ?? registryBasePath;
+
+    private static string? GetParent(string path)
+    {
+        var idx = path.LastIndexOf('\\');
+        return idx > 0 ? path[..idx] : null;
+    }
+
+    private void OnRegistryChanged()
+    {
+        // 注册表事件来自 ThreadPool；UI 操作必须 Marshal 回 Dispatcher。
+        Application.Current?.Dispatcher.BeginInvoke(() =>
+        {
+            if (!IsBusy) Refresh();
+        });
+    }
+
+    private void OnProcessChanged()
+    {
+        Application.Current?.Dispatcher.BeginInvoke(CheckCadProcesses);
     }
 
     // ── 扫描 ──
 
-    [RelayCommand]
     private void Refresh()
     {
-        StatusText = "正在扫描……";
         var results = CadRegistryScanner.Scan();
 
         var toRemove = CadEntries
@@ -100,11 +139,14 @@ internal sealed partial class MainViewModel : ObservableObject
         TotalCount     = CadEntries.Count;
         InstalledCount = CadEntries.Count(e => e.IsCadInstalled);
 
-        StatusText = CadEntries.Count == 0
-            ? "未检测到任何受支持的 AutoCAD 安装"
-            : "就绪";
-
-        CheckCadProcesses();
+        // 只在"未做任何操作"的中性态时才覆盖状态文字，避免抹掉 CAD 运行警告/安装结果。
+        if (!IsCadRunning && !IsBusy &&
+            (string.IsNullOrEmpty(StatusText) || StatusText is "就绪" or "正在扫描已安装的 CAD……"))
+        {
+            StatusText = CadEntries.Count == 0
+                ? "未检测到任何受支持的 AutoCAD 安装"
+                : "就绪";
+        }
     }
 
     private static bool IsSameEntry(CadInstallation r, CadEntryViewModel e)
