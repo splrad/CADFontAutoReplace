@@ -18,6 +18,13 @@
             <converters:AvailabilityToBadgeBackgroundConverter x:Key="AvailabilityToBadgeBackground" />
             <converters:BoolToVisibilityConverter x:Key="BoolToVisibility" />
             <converters:InstalledOrShowAllToVisibilityConverter x:Key="InstalledOrShowAllToVisibility" />
+
+            <!--
+                字体单一来源说明：
+                嵌入字体（HarmonyOS Sans SC）由 App.xaml.cs 静态构造 OverrideMetadata 注入到
+                TextElement.FontFamilyProperty 默认值，所有控件继承此默认值——不在 XAML 中重复声明，
+                避免出现两套字体来源。如需在某处显式引用，请使用 {x:Static local:App.EmbeddedFontFamily}。
+            -->
         </ResourceDictionary>
     </Application.Resources>
 </Application>

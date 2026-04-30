@@ -29,6 +29,11 @@
     <Resource Include="Icons\AutoCAD.ico" />
   </ItemGroup>
 
+  <!-- 嵌入字体：HarmonyOS Sans SC，作为 UI 默认中文字体打包进 EXE -->
+  <ItemGroup>
+    <Resource Include="Fonts\HarmonyOS_SansSC_Regular.ttf" />
+  </ItemGroup>
+
   <!-- MVVM -->
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />

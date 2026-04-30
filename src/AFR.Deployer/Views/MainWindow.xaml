@@ -9,13 +9,13 @@
         mc:Ignorable="d"
         Title="AFR 部署工具"
         Width="900" Height="600"
+        Icon="pack://application:,,,/Icons/app.ico"
         ResizeMode="CanMinimize"
         WindowStartupLocation="CenterScreen"
         WindowBackdropType="Mica"
         ExtendsContentIntoTitleBar="True"
         UseLayoutRounding="True"
-        TextOptions.TextFormattingMode="Display"
-        FontFamily="Segoe UI, Microsoft YaHei UI">
+        TextOptions.TextFormattingMode="Display">
 
     <ui:FluentWindow.Resources>
         <!--
@@ -165,17 +165,17 @@
                                          VerticalAlignment="Center" />
                     </Grid>
 
-                    <!-- 卡片网格：WrapPanel + 固定宽度，隐藏卡片不占槽，自动紧凑重排 -->
+                    <!-- 卡片网格：UniformGrid 自动均分整行宽度，新增 CAD 版本时只需调整 Columns 与窗口高度 -->
                     <ItemsControl Grid.Row="1" ItemsSource="{Binding CadEntries}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <WrapPanel Orientation="Horizontal" />
+                                <UniformGrid Columns="5" />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:CadEntryViewModel}">
                                 <ToggleButton Style="{StaticResource CadCardStyle}"
-                                              Width="196"
+                                              MinHeight="68"
                                               IsChecked="{Binding IsSelected, Mode=TwoWay}"
                                               IsEnabled="{Binding IsEnabled}">
                                     <ToggleButton.Visibility>
