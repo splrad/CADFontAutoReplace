@@ -59,7 +59,7 @@ internal sealed partial class CadEntryViewModel : ObservableObject
         ? "未检测到 CAD"
         : Status switch
         {
-            PluginDeployStatus.NotInstalled      => "未安装",
+            PluginDeployStatus.NotInstalled      => "待安装",
             PluginDeployStatus.InstalledCurrent  => "已安装（最新版）",
             PluginDeployStatus.InstalledOutdated => "已安装（旧版）",
             PluginDeployStatus.DllMissing        => "DLL 缺失",
@@ -71,10 +71,10 @@ internal sealed partial class CadEntryViewModel : ObservableObject
     /// 其他状态由版本号 + 徽章承载信息，避免视觉重复。
     /// </summary>
     public string SubText => !IsCadInstalled
-        ? "未检测到本机已安装的 AutoCAD"
+        ? "本机未检测到此版本"
         : Status switch
         {
-            PluginDeployStatus.NotInstalled      => "该插件尚未安装到 AutoCAD",
+            PluginDeployStatus.NotInstalled      => "插件尚未部署，可点击安装",
             PluginDeployStatus.DllMissing        => "注册表存在但 DLL 已丢失",
             _                                    => string.Empty
         };

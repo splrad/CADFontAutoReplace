@@ -23,13 +23,15 @@
     <ui:FluentWindow.Resources>
         <!--
             状态调色板：3 种形态共用。所有 Brush 在此集中定义，方便统一调色。
-            -  Current  绿系：图标/文字 #10884B；徽章底 #E6F4EC / 字 #10884B
-            -  Outdated 橙系：图标/文字 #C48300；徽章底 #FCEFD7 / 字 #B57500
-            -  NotInst  灰系：图标/文字 #8A8A8A；不显示徽章
+            -  Current  绿系：图标/文字 #10884B；徽章底 #E6F4EC
+            -  Outdated 橙系：图标/文字 #C48300；徽章底 #FCEFD7
+            -  Pending  蓝系：图标/文字 #0F6CBD —— "CAD 已装但插件待安装"，提示用户接下来要操作
+            -  NotInst  灰系：图标/文字 #8A8A8A —— "未检测到 CAD"，整张卡再叠 0.55 透明度
             -  DllMiss  红系：图标/文字 #C42B1C
         -->
         <SolidColorBrush x:Key="StatusCurrentBrush"  Color="#10884B" />
         <SolidColorBrush x:Key="StatusOutdatedBrush" Color="#C48300" />
+        <SolidColorBrush x:Key="StatusPendingBrush"  Color="#0F6CBD" />
         <SolidColorBrush x:Key="StatusNotInstBrush"  Color="#8A8A8A" />
         <SolidColorBrush x:Key="StatusDllMissBrush"  Color="#C42B1C" />
 
@@ -124,14 +126,12 @@
         </Style>
 
         <!--
-            CAD 品牌徽标占位容器：固定 46×46 显示 AutoCAD.ico + 底部年份色带。
+            CAD 品牌徽标占位容器：固定 46×46 仅显示 AutoCAD.ico。
         -->
         <Style x:Key="BrandLogoStyle" TargetType="Grid">
-            <Setter Property="Width" Value="46" />
-            <Setter Property="Height" Value="46" />
+            <Setter Property="Width" Value="76" />
+            <Setter Property="Height" Value="76" />
         </Style>
-
-        <SolidColorBrush x:Key="BrandLogoBandBrush" Color="#9A1F1F" />
     </ui:FluentWindow.Resources>
 
     <Grid>
@@ -245,24 +245,19 @@
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
 
-                                        <!-- 左：AutoCAD 品牌图标 + 底部年份色带 -->
+                                        <!-- 左：AutoCAD 品牌图标（外圈轻阴影，强化卡片层次） -->
                                         <Grid Grid.Column="0" Style="{StaticResource BrandLogoStyle}"
                                               VerticalAlignment="Center">
                                             <Image Source="pack://application:,,,/Icons/AutoCAD.ico"
                                                    Stretch="Uniform"
-                                                   Margin="0,0,0,11"
-                                                   RenderOptions.BitmapScalingMode="HighQuality" />
-                                            <Border Height="13"
-                                                    VerticalAlignment="Bottom"
-                                                    CornerRadius="3"
-                                                    Background="{StaticResource BrandLogoBandBrush}">
-                                                <TextBlock Text="{Binding Version}"
-                                                           Foreground="White"
-                                                           FontSize="9"
-                                                           FontWeight="SemiBold"
-                                                           HorizontalAlignment="Center"
-                                                           VerticalAlignment="Center" />
-                                            </Border>
+                                                   RenderOptions.BitmapScalingMode="HighQuality">
+                                                <Image.Effect>
+                                                    <DropShadowEffect BlurRadius="10"
+                                                                      ShadowDepth="0"
+                                                                      Color="#000000"
+                                                                      Opacity="0.16" />
+                                                </Image.Effect>
+                                            </Image>
                                         </Grid>
 
                                         <!-- 右：标题 / 状态行（图标 + 文字）/ 副文本或版本+徽章 -->
@@ -337,7 +332,8 @@
                                     - InstalledCurrent  绿（CheckmarkCircle24 + 最新版徽章）
                                     - InstalledOutdated 橙（Warning24       + 旧版徽章）
                                     - DllMissing        红（ErrorCircle24）
-                                    - NotInstalled      灰（默认值，无需 Trigger）
+                                    - NotInstalled + CAD 已装   蓝（AddCircle24，强调"待你安装"）
+                                    - NotInstalled + CAD 未装   灰（SubtractCircle24，默认值，无需 Trigger）
                                 -->
                                 <DataTemplate.Triggers>
                                     <DataTrigger Binding="{Binding Status}" Value="InstalledCurrent">
@@ -359,6 +355,16 @@
                                         <Setter TargetName="StatusIcon"  Property="Foreground" Value="{StaticResource StatusDllMissBrush}" />
                                         <Setter TargetName="StatusLabel" Property="Foreground" Value="{StaticResource StatusDllMissBrush}" />
                                     </DataTrigger>
+                                    <!-- CAD 已装但插件未装：升级为蓝色"待安装"，与"未检测到 CAD"的灰色明确区分 -->
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding Status}" Value="NotInstalled" />
+                                            <Condition Binding="{Binding IsCadInstalled}" Value="True" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter TargetName="StatusIcon"  Property="Symbol"     Value="AddCircle24" />
+                                        <Setter TargetName="StatusIcon"  Property="Foreground" Value="{StaticResource StatusPendingBrush}" />
+                                        <Setter TargetName="StatusLabel" Property="Foreground" Value="{StaticResource StatusPendingBrush}" />
+                                    </MultiDataTrigger>
                                 </DataTemplate.Triggers>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
