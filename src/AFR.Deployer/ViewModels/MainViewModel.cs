@@ -256,6 +256,7 @@ internal sealed partial class MainViewModel : ObservableObject
 
         IsBusy = false;
         Refresh();
+        ClearSelection();
 
         if (errors.Count > 0)
             await _dialog.ShowWarningAsync(
@@ -315,11 +316,19 @@ internal sealed partial class MainViewModel : ObservableObject
 
         IsBusy = false;
         Refresh();
+        ClearSelection();
 
         if (warnings.Count > 0)
             await _dialog.ShowWarningAsync(string.Join("\n", warnings),
                 "AFR 部署工具 — 卸载完成（含警告）");
         else
             StatusText = $"✓ 已成功卸载 {successes} 个配置文件实例。";
+    }
+
+    /// <summary>清空所有条目的勾选状态，避免上一次操作的选择残留到下一次操作。</summary>
+    private void ClearSelection()
+    {
+        foreach (var entry in CadEntries)
+            entry.IsSelected = false;
     }
 }
