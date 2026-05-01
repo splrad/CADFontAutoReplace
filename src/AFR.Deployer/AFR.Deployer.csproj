@@ -18,9 +18,25 @@
     -->
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
+    <!--
+      原生 DLL（PresentationNative_cor3 等）必须解压到磁盘才能被 Windows 加载器
+      LoadLibrary，故保持 true。
+    -->
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <!--
+      关闭"全部内容自解压"：本项目所有资源（字体 ttf / ico / 嵌入插件 DLL /
+      cad.json）都通过 pack URI 或 Assembly.GetManifestResourceStream 访问，
+      无需落盘。托管程序集保留在 EXE bundle 内由 CoreCLR 内存映射加载，
+      可减少 ~90 MB 的 %TEMP%\.net 缓存并缩短首次冷启动 ~300–700 ms。
+    -->
+    <IncludeAllContentForSelfExtract>false</IncludeAllContentForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!--
+      不启用 InvariantGlobalization：WPF 内部会调用
+      CultureInfo.GetCultureInfo("en-us") 等 API 设置 XmlLanguage 默认值，
+      在 Invariant 模式下抛 CultureNotFoundException，进程在 Application
+      初始化期即崩溃（dotnet/wpf 已知不兼容）。保留默认全球化（含 icudt.dat）。
+    -->
   </PropertyGroup>
 
   <ItemGroup>
