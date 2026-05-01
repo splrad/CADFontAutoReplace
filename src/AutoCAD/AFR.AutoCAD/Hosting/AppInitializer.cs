@@ -52,6 +52,10 @@ internal static class AppInitializer
                 if (InitializeProfile(appPath, dllPath))
                     isFirstRun = true;
             }
+
+            // 应用 [assembly: RegistryDefaultDwordAt(...)] 声明的外部默认值
+            // （NETLOAD 直装路径与部署工具路径共用同一份声明，保证两条入口结果一致）。
+            ExternalRegistryDefaultsApplier.Apply();
         }
         catch (Exception ex)
         {

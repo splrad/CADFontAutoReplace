@@ -136,14 +136,21 @@ internal static class PluginUninstaller
                 yield return currentPrefix;
         }
 
-        using var node = currentPrefix.Length == 0 ? root : root.OpenSubKey(currentPrefix, false);
+        // currentPrefix 为空时直接复用 root，避免迭代器 Dispose 时把调用方的根句柄一并释放。
+        RegistryKey? node = currentPrefix.Length == 0 ? root : root.OpenSubKey(currentPrefix, false);
         if (node is null) yield break;
-
-        foreach (var child in node.GetSubKeyNames())
+        try
         {
-            var next = currentPrefix.Length == 0 ? child : currentPrefix + "\\" + child;
-            foreach (var p in EnumerateOwnedSubPaths(root, next))
-                yield return p;
+            foreach (var child in node.GetSubKeyNames())
+            {
+                var next = currentPrefix.Length == 0 ? child : currentPrefix + "\\" + child;
+                foreach (var p in EnumerateOwnedSubPaths(root, next))
+                    yield return p;
+            }
+        }
+        finally
+        {
+            if (!ReferenceEquals(node, root)) node.Dispose();
         }
     }
 }

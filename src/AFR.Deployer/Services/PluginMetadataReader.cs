@@ -172,14 +172,29 @@ internal static class PluginMetadataReader
                     var namedCount = blob.ReadUInt16();
                     for (int i = 0; i < namedCount; i++)
                     {
-                        // 0x54 = property, 0x53 = field
-                        var kind = blob.ReadByte();
-                        var elemType = blob.ReadByte(); // 0x02 = ELEMENT_TYPE_BOOLEAN
+                        // 0x54 = property, 0x53 = field（本特性仅声明 property，但容错）
+                        _ = blob.ReadByte();
+                        // ELEMENT_TYPE_*：0x02=Boolean / 0x08=I4 / 0x0E=String，其他不识别
+                        var elemType = blob.ReadByte();
                         var propName = blob.ReadSerializedString();
-                        if (elemType != 0x02) { _ = blob.ReadByte(); continue; }
-                        var propValue = blob.ReadBoolean();
-                        if (propName == "ForceOverwrite") forceOverwrite = propValue;
-                        else if (propName == "RemoveOnUninstall") removeOnUninstall = propValue;
+                        switch (elemType)
+                        {
+                            case 0x02: // Boolean
+                                var bv = blob.ReadBoolean();
+                                if (propName == "ForceOverwrite") forceOverwrite = bv;
+                                else if (propName == "RemoveOnUninstall") removeOnUninstall = bv;
+                                break;
+                            case 0x08: // I4
+                                _ = blob.ReadInt32();
+                                break;
+                            case 0x0E: // String
+                                _ = blob.ReadSerializedString();
+                                break;
+                            default:
+                                // 未知元素类型无法确定占用字节数，停止继续解析剩余命名参数。
+                                i = namedCount;
+                                break;
+                        }
                     }
                 }
                 catch

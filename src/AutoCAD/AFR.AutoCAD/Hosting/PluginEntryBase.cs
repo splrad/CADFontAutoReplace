@@ -177,6 +177,9 @@ public abstract class PluginEntryBase : IExtensionApplication
         }
         catch { }
 
+        // 按所有权标记反向清理我们写入的外部注册表值（保留用户预设和中途手改）。
+        try { ExternalRegistryDefaultsApplier.Cleanup(); } catch { }
+
         PlatformManager.FontHook.Uninstall();
         DocumentContextManager.Instance.Clear();
         DiagnosticLogger.Disable();
