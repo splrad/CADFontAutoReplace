@@ -74,6 +74,8 @@ internal sealed partial class MainViewModel : ObservableObject
     /// <summary>已检测到（即本机已安装）的 CAD 版本数量。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DetectionSummary))]
+    [NotifyPropertyChangedFor(nameof(PluginSummary))]
+    [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
     private int _installedCount;
 
     /// <summary>列表中条目总数。</summary>
@@ -81,8 +83,54 @@ internal sealed partial class MainViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(DetectionSummary))]
     private int _totalCount;
 
-    /// <summary>底部状态栏左侧显示的检测摘要。</summary>
-    public string DetectionSummary => $"已检测到 {InstalledCount} / {TotalCount} 版本";
+    /// <summary>已部署且为最新版的插件实例数量。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PluginSummary))]
+    [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
+    private int _deployedCurrentCount;
+
+    /// <summary>已部署但版本陈旧的插件实例数量。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PluginSummary))]
+    [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
+    private int _deployedOutdatedCount;
+
+    /// <summary>注册表登记但 DLL 文件已丢失的插件实例数量。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PluginSummary))]
+    [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
+    private int _dllMissingCount;
+
+    /// <summary>已检测到 CAD 但插件尚未部署的配置文件实例数量。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PluginSummary))]
+    [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
+    private int _pendingCount;
+
+    /// <summary>顶部 chip 主行：检测到的 CAD 版本数 / 受支持版本总数。</summary>
+    public string DetectionSummary => $"检测到 {InstalledCount} 个 CAD · 共支持 {TotalCount} 个版本";
+
+    /// <summary>顶部 chip 副行：插件部署状态分布。</summary>
+    public string PluginSummary
+    {
+        get
+        {
+            if (InstalledCount == 0) return string.Empty;
+
+            var parts = new List<string>(4);
+            if (DeployedCurrentCount  > 0) parts.Add($"最新 {DeployedCurrentCount}");
+            if (DeployedOutdatedCount > 0) parts.Add($"旧版 {DeployedOutdatedCount}");
+            if (DllMissingCount       > 0) parts.Add($"DLL 缺失 {DllMissingCount}");
+            if (PendingCount          > 0) parts.Add($"待安装 {PendingCount}");
+            return parts.Count == 0 ? string.Empty : "插件：" + string.Join(" · ", parts);
+        }
+    }
+
+    /// <summary>是否需要显示插件部署副行。</summary>
+    public bool HasPluginSummary => !string.IsNullOrEmpty(PluginSummary);
+
+    /// <summary>部署工具自身的版本号，UI 显示用（X.Y 格式）。</summary>
+    public string DeployerVersion => $"v{DeployerVersionService.GetDisplayVersion()}";
 
     /// <summary>操作按钮是否可用。</summary>
     public bool CanOperate => !IsCadRunning && !IsBusy;
@@ -166,8 +214,12 @@ internal sealed partial class MainViewModel : ObservableObject
                 CadEntries.Add(new CadEntryViewModel(result));
         }
 
-        TotalCount     = CadEntries.Count;
-        InstalledCount = CadEntries.Count(e => e.IsCadInstalled);
+        TotalCount             = CadEntries.Count;
+        InstalledCount         = CadEntries.Count(e => e.IsCadInstalled);
+        DeployedCurrentCount   = CadEntries.Count(e => e.IsCadInstalled && e.Status == PluginDeployStatus.InstalledCurrent);
+        DeployedOutdatedCount  = CadEntries.Count(e => e.IsCadInstalled && e.Status == PluginDeployStatus.InstalledOutdated);
+        DllMissingCount        = CadEntries.Count(e => e.IsCadInstalled && e.Status == PluginDeployStatus.DllMissing);
+        PendingCount           = CadEntries.Count(e => e.IsCadInstalled && e.Status == PluginDeployStatus.NotInstalled);
 
         // 只在"未做任何操作"的中性态时才覆盖状态文字，避免抹掉 CAD 运行警告/安装结果。
         if (!IsCadRunning && !IsBusy &&

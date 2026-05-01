@@ -193,7 +193,22 @@
                                        VerticalAlignment="Center" />
                     </Border>
                     <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
-                        <TextBlock Text="插件部署" FontSize="22" FontWeight="SemiBold" />
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="插件部署" FontSize="22" FontWeight="SemiBold" />
+                            <Border Margin="10,2,0,0"
+                                    VerticalAlignment="Center"
+                                    Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="6,1">
+                                <TextBlock Text="{Binding DeployerVersion}"
+                                           FontSize="11"
+                                           FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            </Border>
+                        </StackPanel>
                         <TextBlock Text="选择 CAD 版本并一键安装 / 卸载 AFR 插件"
                                    FontSize="12"
                                    Margin="0,2,0,0"
@@ -207,16 +222,22 @@
                         BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1"
                         CornerRadius="10"
-                        Padding="10,5">
+                        Padding="12,7">
                     <StackPanel Orientation="Horizontal">
                         <ui:SymbolIcon Symbol="CheckmarkCircle24"
                                        FontSize="15"
                                        Foreground="#10884B"
                                        VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding DetectionSummary}"
-                                   VerticalAlignment="Center"
-                                   FontSize="12"
-                                   Margin="6,0,0,0" />
+                        <StackPanel Margin="8,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding DetectionSummary}"
+                                       FontSize="12"
+                                       FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding PluginSummary}"
+                                       FontSize="11"
+                                       Margin="0,2,0,0"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       Visibility="{Binding HasPluginSummary, Converter={StaticResource BoolToVisibility}}" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
             </Grid>
