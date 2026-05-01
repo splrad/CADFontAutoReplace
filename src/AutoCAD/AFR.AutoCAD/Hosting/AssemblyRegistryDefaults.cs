@@ -15,3 +15,15 @@ using AFR.Services;
 [assembly: RegistryDefaultString("TrueTypeFont", EmbeddedFontDeployer.DefaultTrueTypeFont)]
 [assembly: RegistryDefaultDword ("IsInitialized",       0)]
 [assembly: RegistryDefaultDword ("ConfigSchemaVersion", PluginVersionService.ConfigSchemaVersion)]
+
+// SHX 缺失对话框抑制：在 ProfileSubKey\FixedProfile\General Configuration 下写 FileDialog=1
+// 关闭 AutoCAD 2018+ 引入的"缺少 SHX 文件"对话框。
+//   * ForceOverwrite：值不存在或不为 1 时写入，把 CAD 默认行为压平成"不弹"。
+//   * RemoveOnUninstall：仅当我们实际写过（即 Applications\<AppName>\__Owned 下有标记）时
+//     才会在卸载时清除，从而保留用户在安装前的预设以及安装后中途的手动修改。
+// 注意：此键名与 AutoCAD 系统变量 FILEDIA 同名但行为不同——本键作用于 SHX 缺失对话框分支，
+// 验证机方法已在维护文档中记录。
+[assembly: RegistryDefaultDwordAt(
+    @"FixedProfile\General Configuration", "FileDialog", 1,
+    ForceOverwrite    = true,
+    RemoveOnUninstall = true)]

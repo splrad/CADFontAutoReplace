@@ -1,5 +1,6 @@
 using AFR.Deployer.Models;
 using Microsoft.Win32;
+using System.Collections.Generic;
 using System.IO;
 
 namespace AFR.Deployer.Services;
@@ -33,6 +34,9 @@ internal static class PluginUninstaller
         {
             using var appKey = Registry.CurrentUser.OpenSubKey(installation.RegistryAppPath, false);
             dllPath = appKey?.GetValue("LOADER") as string;
+
+            // 1b. 按 __Owned 标记清理外部键（FixedProfile 等），仅在标记值与现值一致时清除。
+            CleanupOwnedExternalValues(installation, appKey);
         }
         catch (Exception ex)
         {
@@ -70,6 +74,76 @@ internal static class PluginUninstaller
             warningMessage = (warningMessage is null ? "" : warningMessage + " | ")
                            + $"删除注册表项失败：{ex.Message}";
             return false;
+        }
+    }
+
+    /// <summary>
+    /// 按 <c>Applications\&lt;AppName&gt;\__Owned\&lt;SubPath&gt;</c> 下的所有权标记，
+    /// 反向清理 <c>ProfileSubKey\&lt;SubPath&gt;</c> 中由我们写入的外部键值。
+    /// <para>
+    /// 仅当外部键的现值与所有权标记中记录的值完全一致时才删除，从而保留用户在安装后中途的手动修改。
+    /// </para>
+    /// </summary>
+    private static void CleanupOwnedExternalValues(CadInstallation installation, RegistryKey? appKey)
+    {
+        if (appKey is null) return;
+
+        try
+        {
+            using var ownedRoot = appKey.OpenSubKey("__Owned", false);
+            if (ownedRoot is null) return;
+
+            var profileRoot = $@"{installation.Descriptor.RegistryBasePath}\{installation.ProfileSubKey}";
+
+            // 递归遍历 __Owned 下的每个子路径，子路径与外部目标路径一一对应。
+            foreach (var relSubPath in EnumerateOwnedSubPaths(ownedRoot, currentPrefix: ""))
+            {
+                using var ownedNode = ownedRoot.OpenSubKey(relSubPath, false);
+                if (ownedNode is null) continue;
+
+                var targetPath = $@"{profileRoot}\{relSubPath}";
+                using var target = Registry.CurrentUser.OpenSubKey(targetPath, true);
+                if (target is null) continue;
+
+                foreach (var name in ownedNode.GetValueNames())
+                {
+                    var owned = ownedNode.GetValue(name);
+                    var actual = target.GetValue(name);
+                    if (owned is int oi && actual is int ai && oi == ai)
+                    {
+                        try { target.DeleteValue(name, throwOnMissingValue: false); }
+                        catch { /* 单值删除失败不影响其他清理 */ }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // 清理标记失败不应阻断整体卸载流程。
+        }
+    }
+
+    /// <summary>
+    /// 枚举 <c>__Owned</c> 下所有"叶子或带值"的相对子路径（含中间含值的节点）。
+    /// </summary>
+    private static IEnumerable<string> EnumerateOwnedSubPaths(RegistryKey root, string currentPrefix)
+    {
+        // 仅当当前节点本身有值时才需要返回它（叶子或中间节点都可能存值）。
+        if (currentPrefix.Length > 0)
+        {
+            using var here = root.OpenSubKey(currentPrefix, false);
+            if (here is not null && here.ValueCount > 0)
+                yield return currentPrefix;
+        }
+
+        using var node = currentPrefix.Length == 0 ? root : root.OpenSubKey(currentPrefix, false);
+        if (node is null) yield break;
+
+        foreach (var child in node.GetSubKeyNames())
+        {
+            var next = currentPrefix.Length == 0 ? child : currentPrefix + "\\" + child;
+            foreach (var p in EnumerateOwnedSubPaths(root, next))
+                yield return p;
         }
     }
 }
