@@ -60,8 +60,17 @@ public static class AwsHideableDialogPatcher
             return 0;
         }
 
+        var paths = EnumerateTargetAwsFiles().ToArray();
+        if (paths.Length == 0)
+        {
+            // 全新机器或目标 Profile 尚未持久化时 FixedProfile.aws 不存在。
+            // 不主动伪造骨架（结构未实测）；本次跳过，等 CAD 首次正常启动写出文件后下次启动再抑制。
+            DiagnosticLogger.Log("AwsPatcher", "Apply 跳过：未找到任何 FixedProfile.aws，等待 CAD 首次启动生成。");
+            return 0;
+        }
+
         int count = 0;
-        foreach (var path in EnumerateTargetAwsFiles())
+        foreach (var path in paths)
         {
             try
             {
@@ -135,42 +144,36 @@ public static class AwsHideableDialogPatcher
 
     /// <summary>
     /// 枚举当前插件版本对应的所有 <c>FixedProfile.aws</c> 候选路径。
-    /// 形如 <c>%APPDATA%\Autodesk\AutoCAD&lt;year&gt;\R&lt;ver&gt;\&lt;lang&gt;\Support\Profiles\FixedProfile.aws</c>，
-    /// 其中 <c>R&lt;ver&gt;</c> 取自 <see cref="ICadPlatform.RegistryBasePath"/> 末段，仅扫描该版本目录下的所有语言子目录。
+    /// 形如 <c>%APPDATA%\Autodesk\AutoCAD &lt;year&gt;\R&lt;ver&gt;\&lt;lang&gt;\Support\Profiles\FixedProfile.aws</c>。
+    /// <list type="bullet">
+    ///   <item>产品段：硬拼 <c>"AutoCAD " + ICadPlatform.VersionName</c>（如 "AutoCAD 2025"），不再用通配匹配。</item>
+    ///   <item>版本段：取 <see cref="ICadPlatform.RegistryBasePath"/> 末段（如 "R25.0"）。</item>
+    ///   <item>语言段：枚举该版本目录下所有一级子目录（chs/enu/...）。</item>
+    ///   <item>文件段：<c>Support\Profiles\FixedProfile.aws</c> 直接相邻，不递归 Profile 子目录。</item>
+    /// </list>
+    /// 文件不存在时返回空序列；调用方需自行记录"等待 CAD 首次启动生成"的诊断信息。
     /// </summary>
     private static IEnumerable<string> EnumerateTargetAwsFiles()
     {
-        var versionTag = ExtractVersionTag(PlatformManager.Platform.RegistryBasePath);
-        if (string.IsNullOrEmpty(versionTag)) yield break;
+        var platform = PlatformManager.Platform;
+        var versionTag = ExtractVersionTag(platform.RegistryBasePath);
+        if (string.IsNullOrEmpty(versionTag) || string.IsNullOrEmpty(platform.VersionName)) yield break;
 
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var autodeskRoot = Path.Combine(appData, "Autodesk");
-        if (!Directory.Exists(autodeskRoot)) yield break;
+        var productDir = Path.Combine(appData, "Autodesk", "AutoCAD " + platform.VersionName);
+        if (!Directory.Exists(productDir)) yield break;
 
-        IEnumerable<string> productDirs;
-        try { productDirs = Directory.EnumerateDirectories(autodeskRoot, "AutoCAD*", SearchOption.TopDirectoryOnly); }
+        var versionDir = Path.Combine(productDir, versionTag);
+        if (!Directory.Exists(versionDir)) yield break;
+
+        IEnumerable<string> langDirs;
+        try { langDirs = Directory.EnumerateDirectories(versionDir, "*", SearchOption.TopDirectoryOnly); }
         catch { yield break; }
 
-        foreach (var productDir in productDirs)
+        foreach (var langDir in langDirs)
         {
-            var versionDir = Path.Combine(productDir, versionTag);
-            if (!Directory.Exists(versionDir)) continue;
-
-            IEnumerable<string> langDirs;
-            try { langDirs = Directory.EnumerateDirectories(versionDir, "*", SearchOption.TopDirectoryOnly); }
-            catch { continue; }
-
-            foreach (var langDir in langDirs)
-            {
-                var profilesDir = Path.Combine(langDir, "Support", "Profiles");
-                if (!Directory.Exists(profilesDir)) continue;
-
-                IEnumerable<string> files;
-                try { files = Directory.EnumerateFiles(profilesDir, FixedProfileFileName, SearchOption.AllDirectories); }
-                catch { continue; }
-
-                foreach (var f in files) yield return f;
-            }
+            var awsPath = Path.Combine(langDir, "Support", "Profiles", FixedProfileFileName);
+            if (File.Exists(awsPath)) yield return awsPath;
         }
     }
 

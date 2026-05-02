@@ -53,9 +53,12 @@ internal static class AppInitializer
                     isFirstRun = true;
             }
 
+            #if AFR_EXTERNAL_REGISTRY
             // 应用 [assembly: RegistryDefaultDwordAt(...)] 声明的外部默认值
             // （NETLOAD 直装路径与部署工具路径共用同一份声明，保证两条入口结果一致）。
+            // 默认禁用：当前版本不写入任何外部注册表值。定义 AFR_EXTERNAL_REGISTRY 即可恢复。
             ExternalRegistryDefaultsApplier.Apply();
+#endif
 
             // 抑制 AutoCAD“缺少 SHX 文件”弹窗：写入 FixedProfile.aws。
             // 仅在 AutoCAD 未运行时生效；NETLOAD 现场加载会被 Apply 内部进程检查拒绝。
