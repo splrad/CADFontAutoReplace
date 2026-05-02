@@ -10,7 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrCommands.cs" Link="Commands\AfrCommands.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Commands\MTextInsertCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\AutoCadFontHook.cs" Link="FontMapping\AutoCadFontHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\LdFileHook.cs" Link="FontMapping\LdFileHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextFontParser.cs" />
@@ -21,7 +20,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\DocumentContextManager.cs" Link="Hosting\DocumentContextManager.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\ExecutionController.cs" Link="Hosting\ExecutionController.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\PluginEntryBase.cs" Link="Hosting\PluginEntryBase.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Commands\MTextEditorCommand.cs" Link="Commands\MTextEditorCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\AutoCadFontScanner.cs" Link="Services\AutoCadFontScanner.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\CadEnvironmentSettings.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextEncodingRepairService.cs" />
@@ -34,6 +32,14 @@
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AssemblyRegistryDefaults.cs" Link="Hosting\AssemblyRegistryDefaults.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\ExternalRegistryDefaultsApplier.cs" Link="Hosting\ExternalRegistryDefaultsApplier.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Diagnostics\AwsHideableDialogPatcher.cs" Link="Diagnostics\AwsHideableDialogPatcher.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\AfrUnloadCommand.cs" Link="DebugCommands\AfrUnloadCommand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\Big5DiagnosticsCommand.cs" Link="DebugCommands\Big5DiagnosticsCommand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DumpDialogApiCommand.cs" Link="DebugCommands\DumpDialogApiCommand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\GenProbeScriptsCommand.cs" Link="DebugCommands\GenProbeScriptsCommand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextEditorCommand.cs" Link="DebugCommands\MTextEditorCommand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextInsertCommand.cs" Link="DebugCommands\MTextInsertCommand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\ProfileDumpCommand.cs" Link="DebugCommands\ProfileDumpCommand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\ShowAwsPathCommand.cs" Link="DebugCommands\ShowAwsPathCommand.cs" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)..\..\..\chore\Fonts\ming.shx">
@@ -45,5 +51,6 @@
   </ItemGroup>
   <ItemGroup>
     <Folder Include="$(MSBuildThisFileDirectory)Diagnostics\" />
+    <Folder Include="$(MSBuildThisFileDirectory)DebugCommands\" />
   </ItemGroup>
 </Project>

@@ -11,20 +11,15 @@ using RegistryKey = Microsoft.Win32.RegistryKey;
 using RegistryValueKind = Microsoft.Win32.RegistryValueKind;
 using RegistryValueOptions = Microsoft.Win32.RegistryValueOptions;
 
-[assembly: CommandClass(typeof(AFR.Diagnostics.ProfileDumpCommand))]
+[assembly: CommandClass(typeof(AFR.DebugCommands.ProfileDumpCommand))]
 
-namespace AFR.Diagnostics;
+namespace AFR.DebugCommands;
 
 /// <summary>
 /// 仅 DEBUG：导出 AutoCAD Profile 全量状态以定位"始终执行我的当前选择"等隐藏对话框开关。
 /// <para>注册表分支：HKCU\Software\Autodesk\AutoCAD\R**\ACAD-XXXX:XXX\</para>
 /// <para>磁盘 Profile 文件：%APPDATA%\Autodesk\AutoCAD*\R*\*\Support\Profiles\ 下所有文件的 SHA256 + 全量 hex。</para>
 /// <para><b>关键</b>：Profile 写盘发生在 AutoCAD 进程退出时，因此 dump A 与 dump B 之间必须 <b>完全重启 AutoCAD</b>，否则两份 dump 必然相同。</para>
-/// <para>正确取证步骤：</para>
-/// <para>1. 触发 SHX 弹窗，勾"始终执行我的当前选择"+"忽略缺少的 SHX 文件并继续"。</para>
-/// <para>2. <b>完全关闭 AutoCAD</b> → 重启 → 跑 <c>AFRDUMPPROFILE</c> 得到 dump A。</para>
-/// <para>3. OPTIONS → 系统 → 隐藏消息设置 → 重新启用该对话框 → <b>完全关闭 AutoCAD</b> → 重启 → 跑 <c>AFRDUMPPROFILE</c> 得到 dump B。</para>
-/// <para>4. 文本 diff A 与 B：变化的注册表值 / 文件 hex 即真实开关。</para>
 /// </summary>
 public static class ProfileDumpCommand
 {
@@ -77,10 +72,6 @@ public static class ProfileDumpCommand
         }
     }
 
-    /// <summary>
-    /// 在 HKCU\Software\Autodesk\AutoCAD\ 下查找首个 ACAD-XXXX:XXX 产品节点，返回相对路径。
-    /// 范围比单独 Profiles\&lt;active&gt; 更大，可覆盖 FixedProfile 等隐藏对话框可能落地的子键。
-    /// </summary>
     private static string? LocateProductRegistryPath(StringBuilder log)
     {
         const string rootPath = @"Software\Autodesk\AutoCAD";
@@ -102,7 +93,6 @@ public static class ProfileDumpCommand
         return null;
     }
 
-    /// <summary>枚举 %APPDATA%\Autodesk\AutoCAD*\R*\*\Support\Profiles\ 下所有文件，输出 SHA256 + 全量 hex。</summary>
     private static void DumpAppDataProfiles(StringBuilder sb)
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -113,13 +103,10 @@ public static class ProfileDumpCommand
             return;
         }
 
-        // AutoCAD 2025 / AutoCAD 2024 / ...
         foreach (var productDir in Directory.EnumerateDirectories(autodeskRoot, "AutoCAD*", SearchOption.TopDirectoryOnly))
         {
-            // R25.0 / R24.x ...
             foreach (var verDir in SafeEnumerateDirs(productDir, "R*"))
             {
-                // 语言子目录 chs / enu / ...
                 foreach (var langDir in SafeEnumerateDirs(verDir, "*"))
                 {
                     var profilesDir = Path.Combine(langDir, "Support", "Profiles");
@@ -151,20 +138,19 @@ public static class ProfileDumpCommand
         try
         {
             var bytes = File.ReadAllBytes(file);
-            var sha = Convert.ToHexString(SHA256.HashData(bytes));
+            using var sha256 = SHA256.Create();
+            var sha = BitConverter.ToString(sha256.ComputeHash(bytes)).Replace("-", "");
             var fi = new FileInfo(file);
             sb.AppendLine();
             sb.AppendLine($"### FILE: {file}");
             sb.AppendLine($"### Size={bytes.Length}  Modified={fi.LastWriteTime:yyyy-MM-dd HH:mm:ss}  SHA256={sha}");
 
-            // 文本预览（如果是可读文本）
             if (LooksLikeText(bytes))
             {
                 sb.AppendLine("### --- text view ---");
                 sb.AppendLine(Encoding.UTF8.GetString(bytes));
             }
 
-            // 全量 hex（限制 64KB 以防爆炸）
             sb.AppendLine("### --- hex view ---");
             int max = Math.Min(bytes.Length, 64 * 1024);
             for (int i = 0; i < max; i += 16)
@@ -201,15 +187,14 @@ public static class ProfileDumpCommand
         return sample > 0 && printable * 100 / sample > 90;
     }
 
-    /// <summary>递归 dump 注册表键。</summary>
     private static void DumpKeyRecursive(RegistryKey key, string indent, StringBuilder sb)
     {
         foreach (var name in key.GetValueNames().OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
         {
             object? v = null;
             RegistryValueKind kind = RegistryValueKind.Unknown;
-            try { v = key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames); } catch { /* ignore */ }
-            try { kind = key.GetValueKind(name); } catch { /* ignore */ }
+            try { v = key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames); } catch { }
+            try { kind = key.GetValueKind(name); } catch { }
 
             string displayName = name.Length == 0 ? "(Default)" : name;
             sb.AppendLine($"{indent}{displayName} : {kind} = {FormatValue(v)}");

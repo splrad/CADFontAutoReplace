@@ -1,3 +1,4 @@
+#if DEBUG
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
@@ -7,9 +8,9 @@ using AFR.Services;
 using AFR.UI;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
-#if DEBUG
+[assembly: CommandClass(typeof(AFR.DebugCommands.MTextInsertCommand))]
 
-namespace AFR.Commands;
+namespace AFR.DebugCommands;
 
 /// <summary>
 /// MText 插入器的 AutoCAD 命令定义。
@@ -104,5 +105,4 @@ public static class MTextInsertCommand
         }
     }
 }
-
 #endif

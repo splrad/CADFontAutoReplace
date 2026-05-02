@@ -5,10 +5,6 @@ using AFR.Hosting;
 
 [assembly: ExtensionApplication(typeof(AFR.PluginEntry))]
 [assembly: CommandClass(typeof(AFR.Commands.AfrCommands))]
-#if DEBUG
-[assembly: CommandClass(typeof(AFR.Commands.MTextEditorCommand))]
-[assembly: CommandClass(typeof(AFR.Commands.MTextInsertCommand))]
-#endif
 
 namespace AFR;
 
