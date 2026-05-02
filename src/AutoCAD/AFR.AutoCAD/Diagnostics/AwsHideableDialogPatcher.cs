@@ -210,15 +210,29 @@ public static class AwsHideableDialogPatcher
             // 用户预设节点存在 — 保留不动。
             return false;
         }
+        // 自身节点已存在且结构与目标完全一致：跳过写入，避免每次 Apply 都刷新文件 mtime。
+        if (existing is not null && IsOwnedNodeUpToDate(existing, ns))
+        {
+            return false;
+        }
         existing?.Remove();
 
+        var node = BuildOwnedNode(ns);
+        hideables.Add(node);
+
+        SaveAtomically(doc, path);
+        return true;
+    }
+
+    /// <summary>构造带 AFR 标记的目标节点（与 AutoCAD 自写结构一致）。</summary>
+    private static XElement BuildOwnedNode(XNamespace ns)
+    {
         XNamespace adWin = TaskDialogXmlns;
         var taskDialog = new XElement(adWin + "TaskDialog",
             new XAttribute("Source", TaskDialogSource),
             new XAttribute("Id", DialogId));
         var preview = new XElement(ns + "Preview", taskDialog);
-
-        var node = new XElement(ns + "HideableDialog",
+        return new XElement(ns + "HideableDialog",
             new XAttribute("id", DialogId),
             new XAttribute("title", DialogTitle),
             new XAttribute("category", DialogTitle),
@@ -226,9 +240,25 @@ public static class AwsHideableDialogPatcher
             new XAttribute("result", DialogResult),
             new XAttribute(OwnershipAttr, OwnershipToken),
             preview);
-        hideables.Add(node);
+    }
 
-        SaveAtomically(doc, path);
+    /// <summary>判断已存在的自有节点结构是否已经与当前目标完全一致（用于跳过冗余写入）。</summary>
+    private static bool IsOwnedNodeUpToDate(XElement existing, XNamespace ns)
+    {
+        if ((string?)existing.Attribute("title") != DialogTitle) return false;
+        if ((string?)existing.Attribute("category") != DialogTitle) return false;
+        if ((string?)existing.Attribute("application") != "") return false;
+        if ((string?)existing.Attribute("result") != DialogResult) return false;
+
+        var preview = existing.Element(ns + "Preview");
+        if (preview is null) return false;
+
+        XNamespace adWin = TaskDialogXmlns;
+        var taskDialog = preview.Element(adWin + "TaskDialog");
+        if (taskDialog is null) return false;
+        if ((string?)taskDialog.Attribute("Source") != TaskDialogSource) return false;
+        if ((string?)taskDialog.Attribute("Id") != DialogId) return false;
+
         return true;
     }
 
@@ -253,7 +283,11 @@ public static class AwsHideableDialogPatcher
         return true;
     }
 
-    /// <summary>原子方式保存 XML：先写临时文件再替换，避免崩溃留下半截 .aws。</summary>
+    /// <summary>
+    /// 原子方式保存 XML：先写临时文件，再用 <see cref="File.Replace(string, string, string?, bool)"/>
+    /// 在同卷上原子替换原文件（NTFS 通过 MoveFileEx + REPLACE_SEMANTICS 实现）。
+    /// 避免崩溃/断电时留下半截 .aws 导致 AutoCAD 拒绝加载该 Profile；不创建备份。
+    /// </summary>
     private static void SaveAtomically(XDocument doc, string path)
     {
         var dir = Path.GetDirectoryName(path)!;
@@ -264,8 +298,17 @@ public static class AwsHideableDialogPatcher
         {
             doc.Save(writer, SaveOptions.DisableFormatting);
         }
-        File.Copy(tmp, path, overwrite: true);
-        try { File.Delete(tmp); } catch { /* 残留临时文件不影响主流程 */ }
+
+        try
+        {
+            File.Replace(tmp, path, destinationBackupFileName: null, ignoreMetadataErrors: true);
+        }
+        catch (PlatformNotSupportedException)
+        {
+            // 极少数文件系统不支持 Replace（如部分网络共享）— 退化为非原子的 Copy + Delete。
+            File.Copy(tmp, path, overwrite: true);
+            try { File.Delete(tmp); } catch { /* 残留临时文件不影响主流程 */ }
+        }
     }
 
     private static XElement AddChild(XElement parent, XName name)

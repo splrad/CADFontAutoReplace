@@ -145,6 +145,17 @@ internal static class LdFileHook
         catch (Exception ex)
         {
             DiagnosticLogger.LogError("FontMapping: Hook 安装失败", ex);
+            // 部分失败回滚：释放已分配的 Trampoline 内存，并清理委托/字节备份引用。
+            // 否则进入 _installed=false 但 _trampolineAddr 非零的"半安装"状态，
+            // Uninstall() 因前置检查直接返回，导致一次性内存泄漏。
+            if (_trampolineAddr != IntPtr.Zero)
+            {
+                try { VirtualFree(_trampolineAddr, 0, 0x8000); } catch { }
+                _trampolineAddr = IntPtr.Zero;
+            }
+            _trampolineDelegate = null;
+            _hookDelegate = null;
+            _savedBytes = null;
         }
     }
 

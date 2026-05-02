@@ -1,0 +1,15 @@
+<Project>
+
+  <!-- 先导入仓库根的 Directory.Build.props（统一版本号、Releases 复制等） -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <!--
+      AutoCAD.NET 引用的 accoremgd / acdbmgd / acmgd 等程序集均为 AMD64-only。
+      若 PlatformTarget 保持默认（AnyCPU），MSBuild 会发出 MSB3270 架构不匹配警告。
+      AutoCAD 自身只在 x64 上运行，因此版本壳一律强制为 x64，消除噪声并与运行时一致。
+    -->
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+</Project>

@@ -42,7 +42,8 @@ internal static class AppInitializer
             var profiles = GetAcadProfiles();
             if (profiles.Count == 0)
             {
-                DiagnosticLogger.Log("初始化", "未找到有效的 AutoCAD R25.1 配置文件 (ACAD-xxxx:xxx)");
+                var versionTag = AutoCadBasePath.Substring(AutoCadBasePath.LastIndexOf('\\') + 1);
+                DiagnosticLogger.Log("初始化", $"未找到有效的 AutoCAD {versionTag} 配置文件 (ACAD-xxxx:xxx)");
                 return false;
             }
 
@@ -54,11 +55,10 @@ internal static class AppInitializer
             }
 
             #if AFR_EXTERNAL_REGISTRY
-            // 应用 [assembly: RegistryDefaultDwordAt(...)] 声明的外部默认值
-            // （NETLOAD 直装路径与部署工具路径共用同一份声明，保证两条入口结果一致）。
-            // 默认禁用：当前版本不写入任何外部注册表值。定义 AFR_EXTERNAL_REGISTRY 即可恢复。
+            // 应用 [assembly: RegistryDefaultDwordAt(...)] 声明的外部默认值（默认禁用）。
+            // 定义 AFR_EXTERNAL_REGISTRY 则 NETLOAD 与部署工具共用同一份声明。
             ExternalRegistryDefaultsApplier.Apply();
-#endif
+            #endif
 
             // 抑制 AutoCAD“缺少 SHX 文件”弹窗：写入 FixedProfile.aws。
             // 仅在 AutoCAD 未运行时生效；NETLOAD 现场加载会被 Apply 内部进程检查拒绝。
