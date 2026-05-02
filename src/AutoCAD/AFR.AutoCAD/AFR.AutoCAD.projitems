@@ -42,4 +42,7 @@
       <LogicalName>AFR.Fonts.tssdchn.shx</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
+  <ItemGroup>
+    <Folder Include="$(MSBuildThisFileDirectory)Diagnostics\" />
+  </ItemGroup>
 </Project>
