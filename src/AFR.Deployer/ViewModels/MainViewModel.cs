@@ -281,6 +281,11 @@ internal sealed partial class MainViewModel : ObservableObject
 
         await Task.Run(() =>
         {
+            // 收集成功安装涉及的 CAD 版本（按 Descriptor 去重），
+            // 在所有注册表/DLL 写入完成后统一处理 FixedProfile.aws，
+            // 避免对同一 CAD 版本的多语言目录重复扫描。
+            var patchedDescriptors = new HashSet<CadDescriptor>();
+
             foreach (var entry in selected)
             {
                 var key = (entry.Installation.Descriptor.AppName, entry.Installation.ProfileSubKey);
@@ -289,7 +294,18 @@ internal sealed partial class MainViewModel : ObservableObject
                 if (!PluginDeployer.TryInstall(fresh, DeployPath, out var err))
                     errors.Add($"{fresh.Descriptor.DisplayName} [{fresh.ProfileSubKey}]：{err}");
                 else
+                {
                     successes++;
+                    patchedDescriptors.Add(fresh.Descriptor);
+                }
+            }
+
+            // 抑制 "缺少 SHX 文件" 对话框：必须在 CAD 已关闭时写入 FixedProfile.aws，
+            // 这正是部署工具调用此方法的前置条件（CanOperate => !IsCadRunning）。
+            foreach (var desc in patchedDescriptors)
+            {
+                try { AwsHideableDialogPatcher.Apply(desc); }
+                catch { /* 单个版本失败不影响其它版本；安装本身已成功 */ }
             }
         });
 
@@ -302,7 +318,7 @@ internal sealed partial class MainViewModel : ObservableObject
                 $"以下版本安装失败：\n\n{string.Join("\n", errors)}",
                 "AFR 部署工具 — 安装错误");
         else
-            StatusText = $"✓ 已成功安装 {successes} 个配置文件实例并应用兼容性设置（含 SHX 缺失对话框抑制），启动 CAD 时插件生效。";
+            StatusText = $"✓ 已成功安装 {successes} 个配置文件实例并应用 SHX 缺失对话框抑制，启动 CAD 时插件生效。";
     }
 
     // ── 卸载 ──
@@ -337,6 +353,8 @@ internal sealed partial class MainViewModel : ObservableObject
 
         await Task.Run(() =>
         {
+            var patchedDescriptors = new HashSet<CadDescriptor>();
+
             foreach (var entry in selected)
             {
                 var key = (entry.Installation.Descriptor.AppName, entry.Installation.ProfileSubKey);
@@ -349,7 +367,15 @@ internal sealed partial class MainViewModel : ObservableObject
                     if (warn is not null)
                         warnings.Add($"{fresh.Descriptor.DisplayName} [{fresh.ProfileSubKey}]（警告）：{warn}");
                     successes++;
+                    patchedDescriptors.Add(fresh.Descriptor);
                 }
+            }
+
+            // 清理本插件写入的 FixedProfile.aws 抑制节点（用户手动设置的同名节点保留不动）。
+            foreach (var desc in patchedDescriptors)
+            {
+                try { AwsHideableDialogPatcher.Cleanup(desc); }
+                catch { /* 清理失败不影响卸载主流程 */ }
             }
         });
 
@@ -361,7 +387,7 @@ internal sealed partial class MainViewModel : ObservableObject
             await _dialog.ShowWarningAsync(string.Join("\n", warnings),
                 "AFR 部署工具 — 卸载完成（含警告）");
         else
-            StatusText = $"✓ 已成功卸载 {successes} 个配置文件实例并还原由本插件写入的兼容性设置。";
+            StatusText = $"✓ 已成功卸载 {successes} 个配置文件实例并还原由本插件写入的 SHX 缺失对话框抑制设置。";
     }
 
     /// <summary>清空所有条目的勾选状态，避免上一次操作的选择残留到下一次操作。</summary>
