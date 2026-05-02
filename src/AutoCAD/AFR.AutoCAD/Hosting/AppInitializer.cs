@@ -56,6 +56,10 @@ internal static class AppInitializer
             // 应用 [assembly: RegistryDefaultDwordAt(...)] 声明的外部默认值
             // （NETLOAD 直装路径与部署工具路径共用同一份声明，保证两条入口结果一致）。
             ExternalRegistryDefaultsApplier.Apply();
+
+            // 抑制 AutoCAD“缺少 SHX 文件”弹窗：写入 FixedProfile.aws。
+            // 仅在 AutoCAD 未运行时生效；NETLOAD 现场加载会被 Apply 内部进程检查拒绝。
+            try { Diagnostics.AwsHideableDialogPatcher.Apply(); } catch { }
         }
         catch (Exception ex)
         {

@@ -180,6 +180,9 @@ public abstract class PluginEntryBase : IExtensionApplication
         // 按所有权标记反向清理我们写入的外部注册表值（保留用户预设和中途手改）。
         try { ExternalRegistryDefaultsApplier.Cleanup(); } catch { }
 
+        // 清理 FixedProfile.aws 中带 AFR 所有权标记的弹窗抑制节点。
+        try { Diagnostics.AwsHideableDialogPatcher.Cleanup(); } catch { }
+
         PlatformManager.FontHook.Uninstall();
         DocumentContextManager.Instance.Clear();
         DiagnosticLogger.Disable();
