@@ -17,7 +17,7 @@ namespace AFR.DebugCommands;
 public static class GenProbeScriptsCommand
 {
     /// <summary>命令入口。</summary>
-    [CommandMethod("AFRGENPROBESCRIPTS")]
+    [CommandMethod(AFR.Constants.CommandNames.GenProbeScripts)]
     public static void GenerateProbeScripts()
     {
         var ed = AcadApp.DocumentManager.MdiActiveDocument?.Editor;

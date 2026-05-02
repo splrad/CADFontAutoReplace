@@ -18,7 +18,7 @@ namespace AFR.DebugCommands;
 public static class DumpDialogApiCommand
 {
     /// <summary>命令入口。</summary>
-    [CommandMethod("AFRDUMPDIALOGAPI")]
+    [CommandMethod(AFR.Constants.CommandNames.DumpDialogApi)]
     public static void DumpDialogApi()
     {
         var ed = AcadApp.DocumentManager.MdiActiveDocument?.Editor;

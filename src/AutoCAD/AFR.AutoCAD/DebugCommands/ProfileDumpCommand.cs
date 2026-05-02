@@ -24,7 +24,7 @@ namespace AFR.DebugCommands;
 public static class ProfileDumpCommand
 {
     /// <summary>导出注册表 + Profile 磁盘文件的全量 dump 到 %TEMP%\afr-profile-*.txt。</summary>
-    [CommandMethod("AFRDUMPPROFILE")]
+    [CommandMethod(AFR.Constants.CommandNames.DumpProfile)]
     public static void DumpCurrentProfile()
     {
         var doc = AcadApp.DocumentManager.MdiActiveDocument;

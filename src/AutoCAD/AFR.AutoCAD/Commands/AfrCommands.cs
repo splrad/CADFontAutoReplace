@@ -20,7 +20,7 @@ public class AfrCommands
     /// AFR 命令：打开字体配置界面，让用户选择 SHX/TrueType 替换字体。
     /// 保存配置后标记 IsInitialized = 1，并立即对当前文档执行一次字体替换。
     /// </summary>
-    [CommandMethod("AFR")]
+    [CommandMethod(AFR.Constants.CommandNames.Main)]
     public void AfrCommand()
     {
         var log = LogService.Instance;
@@ -104,7 +104,7 @@ public class AfrCommands
     /// 每次打开时重新检测数据库，以反映 ST 命令等外部修改后的最新状态。
     /// </para>
     /// </summary>
-    [CommandMethod("AFRLOG")]
+    [CommandMethod(AFR.Constants.CommandNames.Log)]
     public void AfrLogCommand()
     {
         var log = LogService.Instance;

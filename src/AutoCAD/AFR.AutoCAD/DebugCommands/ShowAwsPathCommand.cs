@@ -14,7 +14,7 @@ namespace AFR.DebugCommands;
 public static class ShowAwsPathCommand
 {
     /// <summary>命令入口。</summary>
-    [CommandMethod("AFRSHOWAWSPATH")]
+    [CommandMethod(AFR.Constants.CommandNames.ShowAwsPath)]
     public static void ShowAwsPath()
     {
         var ed = AcadApp.DocumentManager.MdiActiveDocument?.Editor;

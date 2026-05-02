@@ -21,7 +21,7 @@ public class MTextEditorCommand
     /// <summary>
     /// AFRVIEW 命令：让用户选中一个多行文字或多重引线对象，然后打开格式代码查看器窗口。
     /// </summary>
-    [CommandMethod("AFRVIEW")]
+    [CommandMethod(AFR.Constants.CommandNames.ViewMText)]
     public void ViewMText()
     {
         var log = LogService.Instance;

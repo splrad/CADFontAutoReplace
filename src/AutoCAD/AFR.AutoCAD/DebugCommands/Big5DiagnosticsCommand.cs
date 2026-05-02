@@ -25,7 +25,7 @@ public class Big5DiagnosticsCommand
     /// <summary>
     /// AFRBIG5DIAG 命令：扫描当前图纸中的单行文字，输出编码诊断样本。
     /// </summary>
-    [CommandMethod("AFRBIG5DIAG")]
+    [CommandMethod(AFR.Constants.CommandNames.Big5Diagnose)]
     public void DiagnoseBig5Text()
     {
         var log = LogService.Instance;
@@ -55,7 +55,7 @@ public class Big5DiagnosticsCommand
     /// <summary>
     /// AFRBIG5LEFT 命令：扫描自动修复后仍疑似残留乱码的单行文字。
     /// </summary>
-    [CommandMethod("AFRBIG5LEFT")]
+    [CommandMethod(AFR.Constants.CommandNames.Big5Residual)]
     public void DiagnoseResidualBig5Text()
     {
         var log = LogService.Instance;

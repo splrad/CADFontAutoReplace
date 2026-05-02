@@ -21,7 +21,7 @@ namespace AFR.DebugCommands;
 public class AfrUnloadCommand
 {
     /// <summary>AFRUNLOAD 命令入口。</summary>
-    [CommandMethod("AFRUNLOAD")]
+    [CommandMethod(AFR.Constants.CommandNames.Unload)]
     public void Execute()
     {
         var log = LogService.Instance;

@@ -21,7 +21,7 @@ public static class MTextInsertCommand
     /// <summary>
     /// AFRINSERT 命令：打开 MText 插入器窗口，选择模板或输入自定义内容后插入到图纸中。
     /// </summary>
-    [CommandMethod("AFRINSERT")]
+    [CommandMethod(AFR.Constants.CommandNames.InsertMText)]
     public static void InsertMText()
     {
         var log = LogService.Instance;

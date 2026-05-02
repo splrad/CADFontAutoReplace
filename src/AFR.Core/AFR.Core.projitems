@@ -15,6 +15,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Abstractions\IFontScanner.cs" Link="Abstractions\IFontScanner.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Abstractions\ILogService.cs" Link="Abstractions\ILogService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Abstractions\RegistryDefaultAttribute.cs" Link="Abstractions\RegistryDefaultAttribute.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Constants\CommandNames.cs" Link="Constants\CommandNames.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\FontCheckResult.cs" Link="Models\FontCheckResult.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\InlineFontFixRecord.cs" Link="Models\InlineFontFixRecord.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\StyleFontReplacement.cs" Link="Models\StyleFontReplacement.cs" />
