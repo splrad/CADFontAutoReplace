@@ -23,6 +23,7 @@ internal sealed partial class MainViewModel : ObservableObject
     private readonly IFolderPickerService          _folderPicker;
     private readonly List<RegistryChangeWatcher>   _registryWatchers = [];
     private readonly CadProcessWatcher             _processWatcher   = new();
+    private readonly DispatcherTimer               _processPollTimer;
 
     [ObservableProperty]
     private string _deployPath = ResolveDefaultDeployPath();
@@ -143,9 +144,22 @@ internal sealed partial class MainViewModel : ObservableObject
         _dialog       = dialog;
         _folderPicker = folderPicker;
 
-        // ── 进程实时监听（WMI）：CAD 启动/退出立即触发，无需 DispatcherTimer 轮询。
+        // ── 进程实时监听（WMI）：CAD 启动/退出低延迟触发（<100ms ~ 2s）。
         _processWatcher.StateChanged += OnProcessChanged;
         _processWatcher.Start();
+
+        // ── 兜底轮询：WMI 在以下场景可能漏事件或完全失败——
+        //    • ETW 路径需 SeSystemProfilePrivilege，普通账户启动时静默回退；
+        //    • __InstanceDeletionEvent 在受限组策略/SKU 下可能仅暴露同 SID 进程的部分事件；
+        //    • WMI 服务被裁剪/禁用时 Watcher 完全无回调。
+        // 用 2 秒 DispatcherTimer 兜底，确保 IsCadRunning / StatusText 最迟 2 秒内一定收敛。
+        // 由于 CheckCadProcesses 仅在状态实际变化时才修改 StatusText，空跑成本可忽略。
+        _processPollTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(2),
+        };
+        _processPollTimer.Tick += (_, _) => CheckCadProcesses();
+        _processPollTimer.Start();
 
         // ── 注册表实时监听：仅订阅各品牌"根"（如 Software\Autodesk\AutoCAD）的子树，
         // 既覆盖版本子键的创建/删除（CAD 安装/卸载），也覆盖 Applications\AFR-ACADxxxx
@@ -297,6 +311,17 @@ internal sealed partial class MainViewModel : ObservableObject
                 {
                     successes++;
                     patchedDescriptors.Add(fresh.Descriptor);
+
+                    // 释放内嵌 SHX 字体到当前配置文件实例对应的 <AcadLocation>\Fonts。
+                    // EXE 无法执行 DLL 内的部署逻辑，因此由部署器在此直接调用共享的
+                    // EmbeddedFontExtractor。失败仅记录警告，不阻断本次安装——用户事后
+                    // 仍可在插件 UI 中手动配置字体。
+                    try
+                    {
+                        if (!EmbeddedFontPatcher.Apply(fresh))
+                            errors.Add($"{fresh.Descriptor.DisplayName} [{fresh.ProfileSubKey}]：默认 SHX 字体释放失败，请手动放置 ming.shx / tssdchn.shx 到 CAD\\Fonts。");
+                    }
+                    catch { /* 字体释放失败不影响安装主流程 */ }
                 }
             }
 

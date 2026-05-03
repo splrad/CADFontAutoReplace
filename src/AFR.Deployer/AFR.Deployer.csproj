@@ -57,6 +57,21 @@
     <Resource Include="Fonts\HarmonyOS_SansSC_Regular.ttf" />
   </ItemGroup>
 
+  <!--
+    与 AFR.AutoCAD 共用同一份字体释放代码与资源命名，确保 NETLOAD（DLL 内部初始化）
+    与部署工具（EXE 主动释放）二选一安装都能把内嵌 SHX 字体写入 CAD\Fonts。
+    LogicalName 与 EmbeddedFontExtractor.ResourcePrefix（"AFR.Fonts."）保持一致。
+  -->
+  <ItemGroup>
+    <Compile Include="..\Shared\EmbeddedFontExtractor.cs" Link="Shared\EmbeddedFontExtractor.cs" />
+    <EmbeddedResource Include="..\..\chore\Fonts\ming.shx">
+      <LogicalName>AFR.Fonts.ming.shx</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\chore\Fonts\tssdchn.shx">
+      <LogicalName>AFR.Fonts.tssdchn.shx</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
   <!-- MVVM -->
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />

@@ -21,6 +21,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Models\StyleFontReplacement.cs" Link="Models\StyleFontReplacement.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Platform\PlatformManager.cs" Link="Platform\PlatformManager.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\ConfigService.cs" Link="Services\ConfigService.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\DiagnosticLogger.cs" Link="Services\DiagnosticLogger.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontManager.cs" Link="Services\FontManager.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\PluginVersionService.cs" Link="Services\PluginVersionService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\RegistryService.cs" Link="Services\RegistryService.cs" />
