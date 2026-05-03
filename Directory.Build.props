@@ -1,15 +1,24 @@
 <Project>
 
+  <!--
+	插件统一版本号被抽离到根目录 Version.props，方便维护者在 Solution Explorer
+	的 "Solution Items" 文件夹中直接打开修改（IDE 默认隐藏 Directory.Build.props）。
+  -->
+  <Import Project="$(MSBuildThisFileDirectory)Version.props" />
+
   <PropertyGroup>
-    <!-- 插件统一版本号：所有 AFR-ACAD20XX 适配 DLL 共用此版本。发版时由维护者手动更新。 -->
-	  <!-- NuGet / 包版本号 -->
-    <Version>1.0</Version>
-	  <!-- 程序集版本（CLR 用）-->
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-	  <!-- Windows 文件属性里的版本 -->
-    <FileVersion>1.0.0.0</FileVersion>
-	  <!-- 供开发者查看的版本（可包含更多信息，如预发布标签等） -->
-    <InformationalVersion>8.9</InformationalVersion>
+	<!-- 用户可见 -->
+	<Version>$(PluginDisplayVersion)</Version>                <!-- NuGet / 包版本号 -->
+	<AssemblyVersion>1.0.0.0</AssemblyVersion>   <!-- CLR 程序集版本（必须 4 段） -->
+	<FileVersion>$(PluginDisplayVersion).0.0</FileVersion>           <!-- Windows 文件属性「文件版本」 -->
+
+	<!-- 仅开发者可见：包含 build 后缀，运行时从程序集属性中拆分使用 -->
+	<InformationalVersion>$(PluginDisplayVersion)+$(PluginBuildId)</InformationalVersion>
+	<!--
+	  禁止 SDK 在 InformationalVersion 后自动追加 "+{Git 提交 SHA}"，
+	  否则会变成 "9.0+20260503.1+c6a2544..."，使日志/注册表里的 build 后缀变成 commit SHA 而非我们维护的 PluginBuildId。
+	-->
+	<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 
     <!-- 统一构建产物输出到 artifacts/ 目录（仅 bin，不含 obj） -->
     <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>

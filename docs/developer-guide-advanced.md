@@ -117,4 +117,4 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 
 ---
 
-入口导航：[`developer-guide.md`](developer-guide.md)
+入口导航：[`developer-guide-beginner.md`](developer-guide-beginner.md)

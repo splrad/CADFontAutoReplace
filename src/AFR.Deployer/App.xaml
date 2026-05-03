@@ -1,0 +1,30 @@
+<Application x:Class="AFR.Deployer.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="clr-namespace:AFR.Deployer.Converters"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ui:ThemesDictionary Theme="Light" />
+                <ui:ControlsDictionary />
+            </ResourceDictionary.MergedDictionaries>
+            <converters:StatusToBrushConverter x:Key="StatusToBrush" />
+            <converters:RunningToBrushConverter x:Key="RunningToBrush" />
+            <converters:StatusTextToBrushConverter x:Key="StatusTextToBrush" />
+            <converters:AvailabilityToOpacityConverter x:Key="AvailabilityToOpacity" />
+            <converters:AvailabilityToCardBackgroundConverter x:Key="AvailabilityToCardBackground" />
+            <converters:AvailabilityToBadgeBrushConverter x:Key="AvailabilityToBadgeBrush" />
+            <converters:AvailabilityToTextBrushConverter x:Key="AvailabilityToTextBrush" />
+            <converters:AvailabilityToBadgeBackgroundConverter x:Key="AvailabilityToBadgeBackground" />
+            <converters:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+
+            <!--
+                字体单一来源说明：
+                嵌入字体（HarmonyOS Sans SC）由 App.xaml.cs 静态构造 OverrideMetadata 注入到
+                TextElement.FontFamilyProperty 默认值，所有控件继承此默认值——不在 XAML 中重复声明，
+                避免出现两套字体来源。如需在某处显式引用，请使用 {x:Static local:App.EmbeddedFontFamily}。
+            -->
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

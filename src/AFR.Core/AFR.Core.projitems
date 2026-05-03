@@ -14,11 +14,14 @@
     <Compile Include="$(MSBuildThisFileDirectory)Abstractions\IFontHook.cs" Link="Abstractions\IFontHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Abstractions\IFontScanner.cs" Link="Abstractions\IFontScanner.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Abstractions\ILogService.cs" Link="Abstractions\ILogService.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Abstractions\RegistryDefaultAttribute.cs" Link="Abstractions\RegistryDefaultAttribute.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Constants\CommandNames.cs" Link="Constants\CommandNames.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\FontCheckResult.cs" Link="Models\FontCheckResult.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\InlineFontFixRecord.cs" Link="Models\InlineFontFixRecord.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\StyleFontReplacement.cs" Link="Models\StyleFontReplacement.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Platform\PlatformManager.cs" Link="Platform\PlatformManager.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\ConfigService.cs" Link="Services\ConfigService.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\DiagnosticLogger.cs" Link="Services\DiagnosticLogger.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontManager.cs" Link="Services\FontManager.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\PluginVersionService.cs" Link="Services\PluginVersionService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\RegistryService.cs" Link="Services\RegistryService.cs" />

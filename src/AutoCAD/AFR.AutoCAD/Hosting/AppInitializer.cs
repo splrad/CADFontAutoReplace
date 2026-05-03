@@ -24,6 +24,7 @@ internal static class AppInitializer
     private const int LoadCtrls = 2;   // 2 = 随 AutoCAD 启动自动加载
     private const int Managed = 1;     // 1 = 标识为托管 .NET 插件
     private const string PluginVersionValueName = "PluginVersion";
+    private const string PluginBuildIdValueName = "PluginBuildId";
     private const string ConfigSchemaVersionValueName = "ConfigSchemaVersion";
 
     /// <summary>
@@ -41,7 +42,8 @@ internal static class AppInitializer
             var profiles = GetAcadProfiles();
             if (profiles.Count == 0)
             {
-                DiagnosticLogger.Log("初始化", "未找到有效的 AutoCAD R25.1 配置文件 (ACAD-xxxx:xxx)");
+                var versionTag = AutoCadBasePath.Substring(AutoCadBasePath.LastIndexOf('\\') + 1);
+                DiagnosticLogger.Log("初始化", $"未找到有效的 AutoCAD {versionTag} 配置文件 (ACAD-xxxx:xxx)");
                 return false;
             }
 
@@ -51,6 +53,16 @@ internal static class AppInitializer
                 if (InitializeProfile(appPath, dllPath))
                     isFirstRun = true;
             }
+
+            #if AFR_EXTERNAL_REGISTRY
+            // 应用 [assembly: RegistryDefaultDwordAt(...)] 声明的外部默认值（默认禁用）。
+            // 定义 AFR_EXTERNAL_REGISTRY 则 NETLOAD 与部署工具共用同一份声明。
+            ExternalRegistryDefaultsApplier.Apply();
+            #endif
+
+            // 抑制 AutoCAD“缺少 SHX 文件”弹窗：写入 FixedProfile.aws。
+            // 仅在 AutoCAD 未运行时生效；NETLOAD 现场加载会被 Apply 内部进程检查拒绝。
+            try { Diagnostics.AwsHideableDialogPatcher.Apply(); } catch { }
         }
         catch (Exception ex)
         {
@@ -69,9 +81,11 @@ internal static class AppInitializer
     private static bool InitializeProfile(string appPath, string dllPath)
     {
         bool isNewKey = !RegistryService.KeyExists(Registry.CurrentUser, appPath);
-        string currentPluginVersion = PluginVersionService.GetPluginVersion();
+        string currentPluginVersion = PluginVersionService.GetDisplayVersion();
+        string currentBuildId = PluginVersionService.GetBuildId();
         int currentConfigSchemaVersion = PluginVersionService.ConfigSchemaVersion;
         string? installedPluginVersion = RegistryService.ReadString(Registry.CurrentUser, appPath, PluginVersionValueName);
+        string? installedBuildId = RegistryService.ReadString(Registry.CurrentUser, appPath, PluginBuildIdValueName);
         int? installedConfigSchemaVersion = RegistryService.ReadDword(Registry.CurrentUser, appPath, ConfigSchemaVersionValueName);
 
         // 自动加载键值（幂等写入 — 仅在值与预期不同时才写入注册表）
@@ -80,11 +94,19 @@ internal static class AppInitializer
         WriteIfChanged(appPath, "MANAGED", Managed);
         WriteIfChanged(appPath, "DESCRIPTION", Description);
         WriteIfChanged(appPath, PluginVersionValueName, currentPluginVersion);
+        WriteIfChanged(appPath, PluginBuildIdValueName, currentBuildId);
 
         // 首次初始化时部署内嵌字体并写入默认配置
         if (isNewKey)
         {
             WriteDefaultConfiguration(appPath);
+            WriteIfChanged(appPath, ConfigSchemaVersionValueName, currentConfigSchemaVersion);
+        }
+        else if (RegistryService.ReadDword(Registry.CurrentUser, appPath, "IsInitialized") != 1)
+        {
+            // 部署工具预创建注册表键时仅写入默认字体名 + IsInitialized=0，
+            // 需要在插件首次加载时释放内嵌 SHX 到 CAD Fonts 目录并将 IsInitialized 翻为 1。
+            CompleteDeployerInitialization(appPath);
             WriteIfChanged(appPath, ConfigSchemaVersionValueName, currentConfigSchemaVersion);
         }
         else if (installedConfigSchemaVersion != currentConfigSchemaVersion)
@@ -94,12 +116,47 @@ internal static class AppInitializer
             DiagnosticLogger.Log("初始化",
                 $"配置版本已迁移: {installedConfigSchemaVersion?.ToString() ?? "未设置"} → {currentConfigSchemaVersion}");
         }
-        else if (!string.Equals(installedPluginVersion, currentPluginVersion, StringComparison.Ordinal))
+        else if (!string.Equals(installedPluginVersion, currentPluginVersion, StringComparison.Ordinal)
+              || !string.Equals(installedBuildId, currentBuildId, StringComparison.Ordinal))
         {
             DiagnosticLogger.Log("初始化",
-                $"插件版本已更新: {installedPluginVersion ?? "未设置"} → {currentPluginVersion}");
+                $"插件版本已更新: {installedPluginVersion ?? "未设置"}+{installedBuildId ?? "未设置"} → {currentPluginVersion}+{currentBuildId}");
         }
         return isNewKey;
+    }
+
+    /// <summary>
+    /// 完成由部署工具预创建注册表键时的剩余初始化。
+    /// <para>
+    /// 部署工具无法定位 acad.exe 的 Fonts 目录，因此只写入字体名称和 IsInitialized=0；
+    /// 真正释放内嵌 SHX 文件由插件首次加载时执行，成功后将 IsInitialized 翻为 1。
+    /// 若用户已自行覆盖默认字体名（值非空），则保留用户值。
+    /// </para>
+    /// </summary>
+    private static void CompleteDeployerInitialization(string appPath)
+    {
+        bool deployed = EmbeddedFontDeployer.Deploy();
+
+        // 部署工具创建键时已写入默认值，这里仅在缺失/为空时补齐，避免覆盖用户自定义。
+        EnsureStringValue(appPath, "MainFont",     EmbeddedFontDeployer.DefaultMainFont);
+        EnsureStringValue(appPath, "BigFont",      EmbeddedFontDeployer.DefaultBigFont);
+        EnsureStringValue(appPath, "TrueTypeFont", EmbeddedFontDeployer.DefaultTrueTypeFont);
+
+        RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", deployed ? 1 : 0);
+        DiagnosticLogger.Log("初始化",
+            deployed
+                ? "部署工具预创建键 — 已释放内嵌字体并完成初始化"
+                : "部署工具预创建键 — 字体释放失败，等待用户手动配置");
+    }
+
+    /// <summary>当注册表中字符串值缺失或为空白时写入默认值，否则保留用户已有值。</summary>
+    private static void EnsureStringValue(string appPath, string name, string defaultValue)
+    {
+        var current = RegistryService.ReadString(Registry.CurrentUser, appPath, name);
+        if (string.IsNullOrWhiteSpace(current))
+        {
+            RegistryService.WriteString(Registry.CurrentUser, appPath, name, defaultValue);
+        }
     }
 
     /// <summary>写入首次安装时的默认配置。</summary>

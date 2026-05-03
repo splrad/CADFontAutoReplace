@@ -1,7 +1,7 @@
 <Project>
   <ItemGroup>
     <!-- UI 控件库 — 嵌入为程序集资源，不复制到输出 -->
-    <PackageReference Include="HandyControl" />
+    <PackageReference Include="HandyControl" Version="3.5.1" />
   </ItemGroup>
 
   <!-- 将 HandyControl DLL 嵌入为程序集资源，实现单 DLL 分发 -->
@@ -12,5 +12,37 @@
       </EmbeddedResource>
       <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)" Condition="'%(Filename)' == 'HandyControl'" />
     </ItemGroup>
+  </Target>
+
+  <!--
+    方案 B：每个插件项目导出 CAD 元数据 JSON Sidecar，作为 AFR.Deployer 描述符表的权威源。
+    需要在 csproj 中声明 CadBrand / CadVersion / CadRegistryBasePath 三个属性；
+    输出路径与 CopyDllToReleases 一致：artifacts\Releases\<AppName>.cad.json。
+    AFR.Deployer 构建时通过 EmbeddedResource 通配 *.cad.json 一并嵌入到单 EXE，
+    运行时反序列化生成 CadDescriptor 列表，无需手工维护 CadDescriptors.All。
+  -->
+  <Target Name="EmitCadDescriptorJson"
+          AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Release' and '$(CadBrand)' != '' and '$(CadVersion)' != '' and '$(CadRegistryBasePath)' != ''">
+    <PropertyGroup>
+      <_CadDescriptorAppName>$(MSBuildProjectName)</_CadDescriptorAppName>
+      <_CadDescriptorDisplayName>$(CadBrand) $(CadVersion)</_CadDescriptorDisplayName>
+      <_CadDescriptorRegistryEscaped>$([System.String]::Copy('$(CadRegistryBasePath)').Replace('\','\\'))</_CadDescriptorRegistryEscaped>
+      <_CadDescriptorJsonPath>$(MSBuildThisFileDirectory)..\..\artifacts\Releases\$(_CadDescriptorAppName).cad.json</_CadDescriptorJsonPath>
+      <_CadDescriptorJson>{
+  "brand": "$(CadBrand)",
+  "version": "$(CadVersion)",
+  "displayName": "$(_CadDescriptorDisplayName)",
+  "registryBasePath": "$(_CadDescriptorRegistryEscaped)",
+  "appName": "$(_CadDescriptorAppName)",
+  "embeddedResourceKey": "AFR.Deployer.Resources.$(_CadDescriptorAppName).dll"
+}</_CadDescriptorJson>
+    </PropertyGroup>
+    <MakeDir Directories="$(MSBuildThisFileDirectory)..\..\artifacts\Releases" />
+    <WriteLinesToFile File="$(_CadDescriptorJsonPath)"
+                      Lines="$(_CadDescriptorJson)"
+                      Overwrite="true"
+                      Encoding="UTF-8" />
+    <Message Importance="High" Text="[CAD Descriptor] 已生成 $(_CadDescriptorAppName).cad.json" />
   </Target>
 </Project>

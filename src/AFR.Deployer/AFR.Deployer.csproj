@@ -1,0 +1,94 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>AFR.Deployer</RootNamespace>
+    <AssemblyName>AFR.Deployer</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Icons\app.ico</ApplicationIcon>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!--
+      发布策略：自包含 .NET 10 + 单文件。WPF 已内置于 .NET Desktop Runtime，
+      无需 Windows App Runtime 等外置依赖；用户双击即可运行，无伴随文件。
+    -->
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <!--
+      原生 DLL（PresentationNative_cor3 等）必须解压到磁盘才能被 Windows 加载器
+      LoadLibrary，故保持 true。
+    -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!--
+      关闭"全部内容自解压"：本项目所有资源（字体 ttf / ico / 嵌入插件 DLL /
+      cad.json）都通过 pack URI 或 Assembly.GetManifestResourceStream 访问，
+      无需落盘。托管程序集保留在 EXE bundle 内由 CoreCLR 内存映射加载，
+      可减少 ~90 MB 的 %TEMP%\.net 缓存并缩短首次冷启动 ~300–700 ms。
+    -->
+    <IncludeAllContentForSelfExtract>false</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!--
+      不启用 InvariantGlobalization：WPF 内部会调用
+      CultureInfo.GetCultureInfo("en-us") 等 API 设置 XmlLanguage 默认值，
+      在 Invariant 模式下抛 CultureNotFoundException，进程在 Application
+      初始化期即崩溃（dotnet/wpf 已知不兼容）。保留默认全球化（含 icudt.dat）。
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Resources\**" />
+    <EmbeddedResource Remove="Resources\**" />
+    <None Remove="Resources\**" />
+    <Page Remove="Resources\**" />
+  </ItemGroup>
+
+  <!-- 图标资源：app.ico 用于 EXE 主图标 / 标题栏；AutoCAD.ico 用于卡片左侧徽标 -->
+  <ItemGroup>
+    <Resource Include="Icons\app.ico" />
+    <Resource Include="Icons\AutoCAD.ico" />
+  </ItemGroup>
+
+  <!-- 嵌入字体：HarmonyOS Sans SC，作为 UI 默认中文字体打包进 EXE -->
+  <ItemGroup>
+    <Resource Include="Fonts\HarmonyOS_SansSC_Regular.ttf" />
+  </ItemGroup>
+
+  <!--
+    与 AFR.AutoCAD 共用同一份字体释放代码与资源命名，确保 NETLOAD（DLL 内部初始化）
+    与部署工具（EXE 主动释放）二选一安装都能把内嵌 SHX 字体写入 CAD\Fonts。
+    LogicalName 与 EmbeddedFontExtractor.ResourcePrefix（"AFR.Fonts."）保持一致，
+    SHX 字体的 EmbeddedResource 声明集中在 AFR.HostIntegration.projitems，避免重复。
+  -->
+  <Import Project="..\AFR.HostIntegration\AFR.HostIntegration.projitems" Label="Shared" />
+
+  <!-- MVVM -->
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="WPF-UI" Version="4.2.1" />
+    <PackageReference Include="System.Management" Version="10.0.7" />
+  </ItemGroup>
+
+  <!--
+    嵌入所有插件 DLL 与 CAD 元数据 Sidecar：通配匹配 Resources\AFR-ACAD*.dll
+    与 Resources\AFR-ACAD*.cad.json，新增 CAD 版本时由 Publish-Deployer.ps1
+    自动复制文件到 Resources\，无需在此处手工新增条目。
+    LogicalName 与 CadDescriptors.EmbeddedResourceKey / SidecarSuffix 约定一致：
+        AFR.Deployer.Resources.<FileName>
+    必须晚于上面的 <EmbeddedResource Remove="Resources\**" />，这里再显式 Include
+    回来，确保通配条目仍参与嵌入。
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\AFR-ACAD*.dll">
+      <LogicalName>AFR.Deployer.Resources.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\AFR-ACAD*.cad.json">
+      <LogicalName>AFR.Deployer.Resources.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>
+

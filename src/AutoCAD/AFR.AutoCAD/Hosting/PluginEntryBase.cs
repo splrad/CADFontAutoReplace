@@ -177,9 +177,23 @@ public abstract class PluginEntryBase : IExtensionApplication
         }
         catch { }
 
+        #if AFR_EXTERNAL_REGISTRY
+        // 按所有权标记反向清理外部注册表值（默认禁用；旧版残留交由手动清理）。
+        try { ExternalRegistryDefaultsApplier.Cleanup(); } catch { }
+        #endif
+
+        // 清理 FixedProfile.aws 中带 AFR 所有权标记的弹窗抑制节点。
+        try { Diagnostics.AwsHideableDialogPatcher.Cleanup(); } catch { }
+
         PlatformManager.FontHook.Uninstall();
         DocumentContextManager.Instance.Clear();
         DiagnosticLogger.Disable();
+
+        // 注销嵌入程序集解析回调并释放缓存的 HandyControl 程序集。
+        // 否则 NETLOAD → AFRUNLOAD → NETLOAD 的反复加载会在 AppDomain.AssemblyResolve
+        // 上累加多份回调；同时静态字段持有旧 HandyControl 实例的引用会阻止旧 DLL 卸载。
+        AppDomain.CurrentDomain.AssemblyResolve -= OnResolveEmbeddedAssembly;
+        _resolvedHandyControl = null;
     }
 
     // ── 事件处理与延迟调度 ──

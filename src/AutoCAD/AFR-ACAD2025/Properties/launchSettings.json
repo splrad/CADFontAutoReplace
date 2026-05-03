@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "AutoCAD 2025": {
+      "commandName": "Executable",
+      "executablePath": "C:\\Apps\\Autodesk\\AutoCAD 2025\\acad.exe",
+      "workingDirectory": "C:\\Apps\\Autodesk\\AutoCAD 2025"
+    }
+  }
+}

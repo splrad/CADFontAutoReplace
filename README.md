@@ -5,8 +5,8 @@
 **打开图纸不再出现文字不显示、乱码，所有缺失字体自动搞定**
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE.txt)
-[![AutoCAD](https://img.shields.io/badge/AutoCAD-2026-red.svg)](#-已支持版本)
-[![.NET](https://img.shields.io/badge/.NET-8.0-purple.svg)](https://dotnet.microsoft.com/)
+[![AutoCAD](https://img.shields.io/badge/AutoCAD-2018%E2%80%932027-red.svg)](#-已支持版本)
+[![.NET](https://img.shields.io/badge/.NET-4.6.2%20%7C%204.7.2%20%7C%204.8%20%7C%208.0%20%7C%2010.0-purple.svg)](https://dotnet.microsoft.com/)
 
 [GitHub](https://github.com/splrad/CADFontAutoReplace) · [Gitee（国内镜像）](https://gitee.com/splrad/CADFontAutoReplace) · [Releases](https://github.com/splrad/CADFontAutoReplace/releases) · [提交 Issue](https://github.com/splrad/CADFontAutoReplace/issues)
 
@@ -18,31 +18,15 @@
 
 ## ✨ 项目亮点
 
-### 核心能力
-
-- 🚀 **自动化执行**：配置一次后，后续打开图纸自动检测并替换缺失字体。
-- 🎯 **三类字体全覆盖**：支持 `SHX 主字体`、`SHX 大字体`、`TrueType` 缺失修复。
-- 🧠 **类型安全替换**：自动区分主字体/大字体，避免替换类型错配。
-- 🔧 **双阶段修复链路**：`ldfile Hook` + 样式表替换，兼顾解析阶段与持久化结果。
-- 🧾 **MText 乱码专项处理**：对 MText 内联字体（`\F` / `\f`）缺失场景提供重定向修复能力。
-- 📦 **单 DLL 部署**：第三方 UI 依赖已嵌入，分发与部署成本低。
-- 🖥️ **可视化兜底**：`AFRLOG` 支持逐条调整与批量填充。
-- 🔄 **可回退可卸载**：仅修改当前图纸，不强制保存，支持 `AFRUNLOAD`。
-
-### 与常见方案对比
-
-| 常见做法 | 典型短板 | AFR 的增强点 |
-|---|---|---|
-| 仅依赖 `FONTALT` 回退 | 对复杂场景覆盖有限，人工干预多 | 自动检测 + 自动替换，减少手工操作 |
-| 仅改样式表字体 | 对 MText 内联字体覆盖不足 | 同时处理样式表与 MText 内联字体 |
-| 只替换 SHX | TrueType 缺失场景处理不完整 | SHX/大字体/TrueType 三类统一纳管 |
-| 只做“替换不验证” | 可能写入不可用字体 | 内置替换后二次验证与统计输出 |
-| 纯命令行流程 | 批量调整和复核成本高 | 配置窗口 + 日志窗口 + 手动兜底闭环 |
-
-### 工程化补充
-
-- 支持 `AFRVIEW` / `AFRINSERT`（Debug）用于内联字体问题复现与定位。
-- 诊断日志覆盖执行阶段、Hook 重定向与替换结果，便于问题排查。
+- ✅ **自动处理图纸中的缺失字体**：配置一次后，后续大多数图纸都能自动处理，不用反复手动改字体。
+- ✅ **覆盖三类常见缺失字体场景**：支持 `SHX 主字体`、`SHX 大字体` 与 `TrueType` 缺失的统一处理。
+- ✅ **支持 MText 乱码场景修复**：针对多行文字中的内联字体缺失提供专门处理，不限于普通文字样式替换。
+- ✅ **减少 SHX 缺失对话框干扰**：部署工具会自动关闭“缺少 SHX 文件”对话框，减少打开图纸时的重复确认。
+- ✅ **安装与卸载更省心**：使用 `部署工具`，无需手动处理注册表、自动加载项和文件放置。
+- ✅ **自动识别 CAD 版本**：发布包同时支持 AutoCAD 2018–2027，部署工具会自动扫描并列出可安装版本。
+- ✅ **插件状态清晰可见**：可以直接查看插件是否已安装、是否为最新版，以及是否存在 DLL 缺失或待安装项。
+- ✅ **运行中场景自动保护**：安装或卸载前会先检测 CAD 是否正在运行，降低操作冲突和写入失败的风险。
+- ✅ **支持结果复核与手动调整**：如果自动替换结果仍需优化，可以通过 `AFRLOG` 逐条查看、调整和复核。
 
 ---
 
@@ -50,12 +34,31 @@
 
 <table>
 <tr>
-<td align="center"><b>AFR 命令 — 字体配置</b></td>
-<td align="center"><b>AFRLOG 命令 — 替换日志</b></td>
+<td align="center" width="50%" valign="top" style="padding:12px;">
+  <span style="display:inline-block;padding:4px 10px;border-radius:999px;background:#eef3ff;color:#335dff;font-size:12px;">插件配置</span><br /><br />
+  <b>AFR 命令 — 字体配置</b><br /><br />
+  <img src="https://splrad-img.oss-cn-chengdu.aliyuncs.com/20260407005000713.jpg" alt="AFR 字体配置界面" width="100%" style="display:block;border-radius:16px;background:#ffffff;box-shadow:0 10px 28px rgba(0,0,0,.12);padding:8px;" />
+  <br /><sub>配置 SHX 主字体、大字体与 TrueType 替换目标。</sub>
+</td>
+<td align="center" width="50%" valign="top" style="padding:12px;">
+  <span style="display:inline-block;padding:4px 10px;border-radius:999px;background:#eefbf3;color:#15803d;font-size:12px;">日志复核</span><br /><br />
+  <b>AFRLOG 命令 — 替换日志</b><br /><br />
+  <img src="https://splrad-img.oss-cn-chengdu.aliyuncs.com/20260407005034079.jpg" alt="AFRLOG 替换日志界面" width="100%" style="display:block;border-radius:16px;background:#ffffff;box-shadow:0 10px 28px rgba(0,0,0,.12);padding:8px;" />
+  <br /><sub>查看缺失字体检测结果，并执行手动替换与复核。</sub>
+</td>
 </tr>
+</table>
+
+<table>
 <tr>
-<td align="center"><img src="https://splrad-img.oss-cn-chengdu.aliyuncs.com/20260407005000713.jpg" width="380" /></td>
-<td align="center"><img src="https://splrad-img.oss-cn-chengdu.aliyuncs.com/20260407005034079.jpg" width="380" /></td>
+<td align="center" valign="top" style="padding:12px;">
+  <span style="display:inline-block;padding:4px 10px;border-radius:999px;background:#fff4e8;color:#c2410c;font-size:12px;">部署管理</span><br /><br />
+  <b>AFR.Deployer — 扫描、安装、卸载一体化部署工具</b><br /><br />
+  <div style="max-width:920px;margin:0 auto;">
+    <img src="https://splrad-img.oss-cn-chengdu.aliyuncs.com/20260503193327546.jpg" alt="AFR 部署工具主界面" width="100%" style="display:block;border-radius:16px;background:#ffffff;box-shadow:0 10px 28px rgba(0,0,0,.12);padding:8px;" />
+  </div>
+  <br /><sub>扫描已安装 CAD、识别插件状态，并执行一键安装/卸载。</sub>
+</td>
 </tr>
 </table>
 
@@ -63,62 +66,48 @@
 
 ## ✅ 已支持版本
 
-| DLL 文件名 | AutoCAD 版本 | .NET |
+| CAD 版本 | DLL 文件名 | .NET |
 |:---:|:---:|:---:|
-| `AFR-ACAD2026.dll` | AutoCAD **2026**（R25.1） | .NET 8 |
-| `AFR-ACAD2024.dll` | AutoCAD **2024**（R24.3） | .NET 4.8 |
-
----
-
-## 🗺️ 开发计划
-
-| 平台 | 版本 | 状态 |
-|---|---|---|
-| AutoCAD | 2026 | ✅ **已支持** |
-| AutoCAD | 2025 | ✅ **已支持** |
-| AutoCAD | 2024 | ✅ **已支持** |
-| AutoCAD | 2023 | ✅ **已支持** |
-| AutoCAD | 2022 | ✅ **已支持** |
-| 中望CAD | 2026 | ⬜ 计划中 |
-| 中望CAD | 2025 | ⬜ 计划中 |
+| AutoCAD **2018**（R22.0） | `AFR-ACAD2018.dll` | .NET Framework 4.6.2 |
+| AutoCAD **2019**（R23.0） | `AFR-ACAD2019.dll` | .NET Framework 4.7.2 |
+| AutoCAD **2020**（R23.1） | `AFR-ACAD2020.dll` | .NET Framework 4.7.2 |
+| AutoCAD **2021**（R24.0） | `AFR-ACAD2021.dll` | .NET Framework 4.8 |
+| AutoCAD **2022**（R24.1） | `AFR-ACAD2022.dll` | .NET Framework 4.8 |
+| AutoCAD **2023**（R24.2） | `AFR-ACAD2023.dll` | .NET Framework 4.8 |
+| AutoCAD **2024**（R24.3） | `AFR-ACAD2024.dll` | .NET Framework 4.8 |
+| AutoCAD **2025**（R25.0） | `AFR-ACAD2025.dll` | .NET 8.0 |
+| AutoCAD **2026**（R25.1） | `AFR-ACAD2026.dll` | .NET 8.0 |
+| AutoCAD **2027**（R26.0） | `AFR-ACAD2027.dll` | .NET 10.0 |
 
 ---
 
 ## 🚀 快速开始
 
-> 面向首次使用 AutoCAD 插件的用户；有经验用户可直接查看[命令速查](#️-命令速查)。
+### 部署工具一键安装
 
-### 1) 下载插件
+1. 在 [Releases](https://github.com/splrad/CADFontAutoReplace/releases) 下载最新发行包，其中包含 `AFR.Deployer.exe` 与对应版本插件文件。
+2. **先关闭所有 AutoCAD 进程**（部署工具会在检测到 CAD 运行时禁用安装/卸载按钮）。
+3. 双击运行 `AFR.Deployer.exe`，工具会自动扫描本机已安装的 AutoCAD 版本。
+4. 勾选需要安装的项目，确认"部署路径"（默认会选中首个非系统盘下的 `\CADPlugins\`），点击"安装"。
+5. 工具会自动完成：
+   - 将对应版本 DLL 复制到部署路径；
+   - 在注册表写入自动加载项；
+   - 释放内嵌默认 SHX 字体到各 CAD 的 `Fonts` 目录；
+   - 写入 `FixedProfile.aws` 以抑制"缺少 SHX 文件"弹窗。
+6. 重启 AutoCAD 后，插件自动生效。
 
-1. 前往 [Releases](https://github.com/splrad/CADFontAutoReplace/releases)
-2. 下载与你 AutoCAD 版本对应的 DLL（命名：`AFR-ACAD20XX.dll`）
-3. 存放到固定路径（不要放桌面或临时目录）
+> 💡 部署工具会实时监听注册表变化：后续安装/卸载新的 CAD 版本或修改配置文件后，无需手动"刷新"，列表会自动更新。
+>
+> 卸载同样在部署工具中完成：勾选已安装的项目点击"卸载"，工具会同步还原注册表与 `FixedProfile.aws` 中由本插件写入的节点。
 
-> 💡 推荐路径：`D:\CADPlugins\AFR-ACAD20XX.dll`
+### 首次配置与验证
 
-### 2) 加载插件
-
-1. 打开 AutoCAD
-2. 命令行输入 `NETLOAD`
-3. 选择对应 DLL 并打开
-4. 如有安全提示，选择“始终加载”
-
-> ✅ 成功加载后，插件会在当前配置下写入自动启动项，后续重启 AutoCAD 会自动运行，无需重复使用 `NETLOAD` 操作。
-
-### 3) 首次配置字体
-
-1. 此时插件已自动将内置的默认字体释放到 CAD 的 Fonts 目录。
-2. 并在注册表中写入了默认配置：
-   - SHX 主字体：`K_roms.shx`
+1. 首次安装后启动 AutoCAD，插件会自动将内置默认字体释放到 CAD 的 `Fonts` 目录。
+2. 插件会自动写入默认配置：
+   - SHX 主字体：`ming.shx`
    - SHX 大字体：`tssdchn.shx`
    - TrueType 字体：`宋体`
-3. 提示信息显示“首次加载完成，默认替换字体已部署。请重启 CAD 使插件自动生效。”
-4. **重新启动 AutoCAD**（必须重启才能使 Hook 拦截模块生效）。
-
-如果需要修改默认配置，可在重启 CAD 后：
-1. 命令行输入 `AFR`
-2. 在弹出窗口中重新配置三类替换字体（下拉框支持跨类型搜索和关键字搜索）
-3. 点击“确认”即可立即生效。
+3. 如需修改默认配置，可在 AutoCAD 中输入 `AFR`，重新配置三类替换字体。
 
 > ⚠️ 字体精简建议：
 > - 建议将 CAD 安装目录 `Fonts` 中 SHX 字体精简至 100 个以内
@@ -127,21 +116,19 @@
 >
 > 👉 [点击下载 CAD 字体包（Fonts.zip）](https://github.com/splrad/CADFontAutoReplace/releases)
 
-### 4) 验证效果
-
 打开有缺失字体的 DWG，看到类似日志即说明工作正常：
 
 ```
 ====================================================================================
-AFR 缺失字体自动替换 v7.0
+AFR 缺失字体自动替换 v9.0
 项目地址GitHub(国外)：github.com/splrad/CADFontAutoReplace
 项目地址Gitee(国内)：gitee.com/splrad/CADFontAutoReplace
-命令: AFR(配置) AFRLOG(日志) AFRUNLOAD(卸载)
+命令: AFR(配置) AFRLOG(日志)
 ====================================================================================
-[字体修复]已替换缺失字体 3 个(SHX主字体:1,SHX大字体:1,TrueType:1) | MText内联字体映射：1
+[字体修复]已替换缺失字体 3 个(SHX主字体:1,SHX大字体:1,TrueType:1) | MText内联字体映射：0
 ```
 
-### 5) 手动兜底（可选）
+### 手动替换
 
 如果自动替换结果不理想：
 
@@ -156,13 +143,12 @@ AFR 缺失字体自动替换 v7.0
 
 ---
 
-## ⌨️ 命令速查
+## ⌨️ 命令说明
 
 | 命令 | 说明 |
 |:---:|---|
 | `AFR` | 打开字体配置界面，选择 SHX 主字体、大字体和 TrueType 替换字体 |
 | `AFRLOG` | 打开替换日志，查看检测结果，支持手动调整和批量填充 |
-| `AFRUNLOAD` | 完整卸载插件（注销事件、删除注册表项、清空运行状态） |
 
 ---
 
@@ -177,7 +163,6 @@ AFR 缺失字体自动替换 v7.0
 
 <details>
 <summary><b>替换后文字显示异常怎么办？</b></summary>
-
 **不要保存图纸。** 使用 `AFRLOG` 重新选择替换字体，直至显示正常。
 
 </details>
@@ -185,16 +170,7 @@ AFR 缺失字体自动替换 v7.0
 <details>
 <summary><b>如何卸载插件？</b></summary>
 
-输入 `AFRUNLOAD` 后，插件会停止功能并删除自动加载配置。下次启动 AutoCAD 不再加载。
-
-如需恢复，重启 AutoCAD 后再次执行 `NETLOAD`。
-
-</details>
-
-<details>
-<summary><b>CAD 打开图纸仍弹出“缺少 SHX 文件”对话框？</b></summary>
-
-本插件不会主动关闭该对话框。建议选择“忽略缺少的 SHX 文件并继续”，并勾选“始终执行我的当前选择”。
+使用 `AFR.Deployer` 执行卸载：勾选已安装项后点击“卸载”，工具会同步清理自动加载配置与由本插件写入的 `FixedProfile.aws` 节点。
 
 </details>
 
@@ -211,6 +187,8 @@ AFR 在 DWG 解析阶段通过 `ldfile` Hook 拦截字体加载请求。针对 M
 
 ## 🐞 问题反馈
 
+### Issues提交
+
 如果使用插件后仍出现“字体不显示”或“乱码”，欢迎提交 [Issues](https://github.com/splrad/CADFontAutoReplace/issues)。
 
 为便于快速定位，请尽量附上：
@@ -221,6 +199,12 @@ AFR 在 DWG 解析阶段通过 `ldfile` Hook 拦截字体加载请求。针对 M
 4. AutoCAD 版本 + 插件 DLL 版本 + 插件配置
 
 信息越完整，定位越快。
+
+### 联系作者
+
+QQ：1186191934
+微信：splrad
+电子邮箱：alearner@splrad.com
 
 ---
 
@@ -243,12 +227,19 @@ AFR 在 DWG 解析阶段通过 `ldfile` Hook 拦截字体加载请求。针对 M
 3. 本地构建：
 
 ```bash
+# 构建某个 CAD 版本适配壳
 dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
+
+# 构建部署工具
+dotnet build src/AFR.Deployer/AFR.Deployer.csproj
+
+# 一次构建所有项目
+dotnet build CADFontAutoReplace.slnx
 ```
 
-> 将 `20XX` 替换为当前目标版本（例如 `2026`）。
+> 将 `20XX` 替换为当前目标版本（例如 `2027`）。插件统一版本号集中在根目录的 `Version.props`（发版时仅修改这个文件）。
 
-4. 验证关键命令（`AFR` / `AFRLOG` / `AFRUNLOAD`，Debug 下可验证 `AFRVIEW` / `AFRINSERT`）。
+4. 验证关键命令（`AFR` / `AFRLOG` ，Debug 下可验证 `AFRVIEW` / `AFRINSERT` 等测试命令）。
 5. 推送分支后，流程会自动创建/更新 `你的分支 -> test` 的 PR。
 6. `test` 合并后，流程会自动创建/更新 `test -> main` 的 PR。
 7. 提交说明与 PR 描述会自动生成；不准确时请在 PR 评论补充。
@@ -262,9 +253,10 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 
 ### 贡献约定
 
-- 遵守分层依赖方向：`AFR.Core` / `AFR.UI` 不引用 AutoCAD SDK。
+- 遵守分层依赖方向：`AFR.Core` / `AFR.UI` 不引用 AutoCAD SDK；`AFR.HostIntegration` 由部署工具与 CAD 插件共用，不反向依赖其中任一方。
 - 新增命令必须在 `PluginEntry.cs` 注册，否则 CAD 无法识别。
 - 仅调试使用的功能请用 `#if DEBUG` 包裹（并在命令注册处同步控制）。
+- 发版需要修改版本号时，仅修改根目录 `Version.props`文件。
 - 聚焦当前问题，避免无关重构。
 
 ---
@@ -273,7 +265,12 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 
 | 库名 | 版本 | 作者 | 用途 | 许可协议 |
 |---|:---:|---|---|:---:|
-| [HandyControl](https://github.com/HandyOrg/HandyControl) | 3.5.1 | [NaBian](https://github.com/NaBian) | WPF UI 控件库，提供现代化界面组件 | MIT |
+| [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) | 8.4.2 | Microsoft / .NET Community Toolkit | 部署工具的 MVVM 属性通知、命令生成与 ViewModel 基础设施 | MIT |
+| [WPF-UI](https://github.com/lepoco/wpfui) | 4.2.1 | [lepoco](https://github.com/lepoco) | 部署工具的 WPF 现代化界面控件与窗口样式 | MIT |
+| [System.Management](https://www.nuget.org/packages/System.Management) | 10.0.7 | Microsoft | 部署工具中用于 WMI 进程监听与系统管理查询 | MIT |
+| [AutoCAD.NET](https://www.nuget.org/packages/AutoCAD.NET) | 22.0.0 ~ 26.0.0 | Autodesk / 社区封装分发 | 各版本 AutoCAD 托管 API 引用，供插件适配壳编译使用 | 依发布源约定 |
+| [System.ValueTuple](https://www.nuget.org/packages/System.ValueTuple) | 4.5.0 | Microsoft | 兼容 AutoCAD 2018 对应的 .NET Framework 4.6.2 目标 | MIT |
+| [HandyControl](https://github.com/HandyOrg/HandyControl) | 3.5.1 | [NaBian](https://github.com/NaBian) | 插件侧 WPF UI 控件库，用于字体配置窗口、日志窗口等界面能力 | MIT |
 
 ---
 

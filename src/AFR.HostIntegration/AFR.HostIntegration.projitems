@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <MSBuildAllProjects Condition="'$(MSBuildVersion)' == '' Or '$(MSBuildVersion)' &lt; '16.0'">$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <HasSharedItems>true</HasSharedItems>
+    <SharedGUID>{C1D2E3F4-A5B6-4C7D-8E9F-0A1B2C3D4E5F}</SharedGUID>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration">
+    <Import_RootNamespace>AFR</Import_RootNamespace>
+  </PropertyGroup>
+  <!--
+    宿主项目（AFR.Deployer / AFR-ACAD20XX）通过
+        <Import Project="..\AFR.HostIntegration\AFR.HostIntegration.projitems" Label="Shared" />
+    拉取共享源码，与 AFR.Core / AFR.UI 等共享项目保持一致。
+    Link 与磁盘相对路径一致，使解决方案视图中的目录结构与磁盘保持一致。
+  -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)AwsHideableDialogPatcherCore.cs" Link="AwsHideableDialogPatcherCore.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)EmbeddedFontExtractor.cs" Link="EmbeddedFontExtractor.cs" />
+  </ItemGroup>
+  <!--
+    内嵌默认 SHX 字体（ming.shx 主字体 + tssdchn.shx 大字体）：
+    LogicalName 与 EmbeddedFontExtractor.ResourcePrefix（"AFR.Fonts."）保持一致，
+    供插件 DLL 与部署器 EXE 共用。
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)Fonts\ming.shx" Link="Fonts\ming.shx">
+      <LogicalName>AFR.Fonts.ming.shx</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)Fonts\tssdchn.shx" Link="Fonts\tssdchn.shx">
+      <LogicalName>AFR.Fonts.tssdchn.shx</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+</Project>

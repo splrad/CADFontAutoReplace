@@ -1,16 +1,35 @@
 <Solution>
-  <Folder Name="/Core/">
-    <Project Path="src/AFR.Core/AFR.Core.shproj" Id="3eed6822-3b82-4bbd-9842-3f32258af0f0" />
-    <Project Path="src/AFR.Polyfills/AFR.Polyfills.shproj" Id="e1d65b0a-4f5c-42fb-b439-da31eaf465b1" />
-    <Project Path="src/AFR.UI/AFR.UI.shproj" Id="b542e201-51b9-4103-9a5c-8e87772186d1" />
-  </Folder>
-
   <Configurations>
     <Platform Name="Any CPU" />
     <Platform Name="x64" />
   </Configurations>
 
+  <Folder Name="/Solution Items/">
+    <File Path="Version.props" />
+  </Folder>
+
+  <Project Path="src/AFR.Core/AFR.Core.shproj" Id="3eed6822-3b82-4bbd-9842-3f32258af0f0" />
+  <Project Path="src/AFR.Polyfills/AFR.Polyfills.shproj" Id="e1d65b0a-4f5c-42fb-b439-da31eaf465b1" />
+  <Project Path="src/AFR.HostIntegration/AFR.HostIntegration.shproj" Id="c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f" />
+  <Project Path="src/AFR.UI/AFR.UI.shproj" Id="b542e201-51b9-4103-9a5c-8e87772186d1" />
+  <Project Path="src/AFR.Deployer/AFR.Deployer.csproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234567890">
+    <Platform Solution="*|x64" Project="x64" />
+  </Project>
+
   <Folder Name="/AutoCAD/">
+    <Project Path="src/AutoCAD/AFR.AutoCAD/AFR.AutoCAD.shproj" Id="3ce2a9ba-19c1-4439-9ec8-e68fdb3f533d" />
+    <Project Path="src/AutoCAD/AFR-ACAD2018/AFR-ACAD2018.csproj" Id="7ab78a85-217e-46d8-bc9c-cebe7062e697">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2019/AFR-ACAD2019.csproj" Id="505904ee-5fda-4e6e-a8c7-f1a743a98017">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2020/AFR-ACAD2020.csproj" Id="71997328-f134-427b-99d2-bac2ef3f7107">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2021/AFR-ACAD2021.csproj" Id="57e003a6-b28c-45e5-839e-90984eb70577">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
     <Project Path="src/AutoCAD/AFR-ACAD2022/AFR-ACAD2022.csproj" Id="96831ced-0cff-4431-900d-9aac9f6a0ba1">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
@@ -26,6 +45,10 @@
     <Project Path="src/AutoCAD/AFR-ACAD2026/AFR-ACAD2026.csproj" Id="d48e6fcc-a40c-4231-ad10-5383e93241b2">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
-    <Project Path="src/AutoCAD/AFR.AutoCAD/AFR.AutoCAD.shproj" Id="3ce2a9ba-19c1-4439-9ec8-e68fdb3f533d" />
+    <Project Path="src/AutoCAD/AFR-ACAD2027/AFR-ACAD2027.csproj" Id="0067f487-dbb2-4a4c-8c2f-afea74061fe6">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
   </Folder>
+
 </Solution>
+

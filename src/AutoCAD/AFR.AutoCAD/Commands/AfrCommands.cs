@@ -11,7 +11,8 @@ namespace AFR.Commands;
 
 /// <summary>
 /// AFR 插件的 AutoCAD 命令定义。
-/// 包含三个命令：AFR（配置替换字体）、AFRLOG（查看日志/手动替换）、AFRUNLOAD（卸载插件）。
+/// 包含发行版命令：AFR（配置替换字体）、AFRLOG（查看日志/手动替换）。
+/// DEBUG 专属命令位于 <c>AFR.DebugCommands</c> 模块。
 /// </summary>
 public class AfrCommands
 {
@@ -19,7 +20,7 @@ public class AfrCommands
     /// AFR 命令：打开字体配置界面，让用户选择 SHX/TrueType 替换字体。
     /// 保存配置后标记 IsInitialized = 1，并立即对当前文档执行一次字体替换。
     /// </summary>
-    [CommandMethod("AFR")]
+    [CommandMethod(AFR.Constants.CommandNames.Main)]
     public void AfrCommand()
     {
         var log = LogService.Instance;
@@ -103,7 +104,7 @@ public class AfrCommands
     /// 每次打开时重新检测数据库，以反映 ST 命令等外部修改后的最新状态。
     /// </para>
     /// </summary>
-    [CommandMethod("AFRLOG")]
+    [CommandMethod(AFR.Constants.CommandNames.Log)]
     public void AfrLogCommand()
     {
         var log = LogService.Instance;
@@ -256,40 +257,6 @@ public class AfrCommands
         }
         finally
         {
-            log.Flush();
-        }
-    }
-
-    /// <summary>
-    /// AFRUNLOAD 命令：完整卸载 AFR 插件。
-    /// <para>
-    /// 依次执行：注销所有事件监听 → 删除注册表自动加载条目 → 清空运行状态。
-    /// 卸载后插件不再随 CAD 启动自动加载，用户可通过 NETLOAD 命令重新加载。
-    /// </para>
-    /// </summary>
-    [CommandMethod("AFRUNLOAD")]
-    public void AfrUnloadCommand()
-    {
-        var log = LogService.Instance;
-        DiagnosticLogger.Info("命令", "AFRUNLOAD 命令启动");
-
-        try
-        {
-            // 第一步：注销事件监听、卸载 Hook、清空文档跟踪和执行队列
-            PluginEntryBase.Unload();
-
-            // 第二步：删除注册表中的自动加载条目
-            var config = ConfigService.Instance;
-            config.DeleteAllApplicationKeys();
-
-            log.Info("AFR 已卸载，重启 CAD 后可通过 NETLOAD 重新加载。");
-
-            // 输出日志
-            log.Flush();
-        }
-        catch (System.Exception ex)
-        {
-            log.Error("卸载失败", ex);
             log.Flush();
         }
     }

@@ -23,11 +23,13 @@ AFR-ACAD20XX（最终输出 DLL 的版本壳工程）
 
 ## 3. 本地环境准备
 
-- Visual Studio 2022 或更高版本
-- .NET 8 SDK
+- Visual Studio 2026 或更高版本
+- .NET SDK（仓库同时覆盖 `net462`、`net472`、`net48`、`net8.0-windows`、`net10.0-windows`，建议直接安装最新 .NET SDK 与对应桌面开发组件）
 - 对应版本的 AutoCAD（与目标版本壳匹配）
 
 建议一直用 Debug 配置开发。
+
+建议直接打开仓库根目录的 `CADFontAutoReplace.slnx` 作为日常开发入口。
 
 ## 4. 第一次编译
 
@@ -47,9 +49,10 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 2. AutoCAD 打开后，命令行输入：
    - `AFR`（配置替换字体）
    - `AFRLOG`（查看替换日志）
-   - `AFRUNLOAD`（卸载插件）
-   - `AFRVIEW`（Debug 下查看 MText 内容）
-   - `AFRINSERT`（Debug 下插入测试 MText）
+   - `AFRVIEW`（仅 Debug：查看 MText 内容）
+   - `AFRINSERT`（仅 Debug：插入测试 MText）
+
+> `AFRUNLOAD`、`AFRVIEW`、`AFRINSERT` 等命令只在 Debug 构建中提供；正式发布版默认通过 `AFR.Deployer` 管理安装/卸载。
 
 ## 6. 10 分钟上手路径（推荐）
 
@@ -58,8 +61,8 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 1. `dotnet build` 确认本地能编译。
 2. 启动目标版本壳调试，确保 CAD 正常拉起。
 3. 在 CAD 里执行 `AFR`，完成一次字体配置。
-4. 执行 `AFRINSERT` 插入测试样本，再执行 `AFRLOG` 看结果。
-5. 执行 `AFRVIEW` 检查 MText 原始内容，建立“输入-输出”直觉。
+4. 执行 `AFRLOG` 查看当前图纸的检测与替换结果。
+5. 如需调试 MText 场景，再在 Debug 构建下执行 `AFRINSERT` / `AFRVIEW` 建立“输入-输出”直觉。
 
 ## 7. 新增命令的正确姿势（最容易漏）
 

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
@@ -8,18 +8,26 @@
     <UseWPF>true</UseWPF>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <Platforms>AnyCPU;x64</Platforms>
+
+    <!-- CAD 元数据：作为 AFR.Deployer 描述符表的权威源（方案 B） -->
+    <CadBrand>AutoCAD</CadBrand>
+    <CadVersion>2026</CadVersion>
+    <CadRegistryBasePath>Software\Autodesk\AutoCAD\R25.1</CadRegistryBasePath>
   </PropertyGroup>
 
   <!-- 导入共享源码 -->
   <Import Project="..\..\AFR.Core\AFR.Core.projitems" Label="Shared" />
   <Import Project="..\..\AFR.UI\AFR.UI.projitems" Label="Shared" />
   <Import Project="..\AFR.AutoCAD\AFR.AutoCAD.projitems" Label="Shared" />
+  <Import Project="..\..\AFR.HostIntegration\AFR.HostIntegration.projitems" Label="Shared" />
 
   <ItemGroup>
     <!-- AutoCAD SDK — 由 AutoCAD 运行时提供，不复制到输出 -->
-    <PackageReference Include="AutoCAD.NET">
+    <PackageReference Include="AutoCAD.NET" Version="25.1.0">
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
   </ItemGroup>
+
+
 
 </Project>
