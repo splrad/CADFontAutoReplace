@@ -94,9 +94,24 @@ jobs:
           Invoke-WebRequest 'https://dot.net/v1/dotnet-install.ps1' -OutFile $installScript
 
           & $installScript -Version $sdkVersion -InstallDir $installDir -NoPath
-          if ($LASTEXITCODE -ne 0) {
-              throw ".NET SDK $sdkVersion 安装失败。"
-          }
+
+            # dotnet-install 在某些场景会残留非零 LASTEXITCODE，改为以“实际安装结果”判定是否成功。
+            $dotnetExe = Join-Path $installDir 'dotnet.exe'
+            if (-not (Test-Path -LiteralPath $dotnetExe)) {
+              throw ".NET SDK $sdkVersion 安装失败：未找到 $dotnetExe。"
+            }
+
+            $installedSdks = & $dotnetExe --list-sdks
+            if ($LASTEXITCODE -ne 0) {
+              throw ".NET SDK $sdkVersion 安装失败：dotnet --list-sdks 执行失败。"
+            }
+
+            $hasExactSdk = (($installedSdks -split "`r?`n") | Where-Object {
+              $_ -match ('^' + [regex]::Escape($sdkVersion) + '\\s')
+            }).Count -gt 0
+            if (-not $hasExactSdk) {
+              throw ".NET SDK $sdkVersion 安装失败：安装目录中未检测到该版本。"
+            }
 
           $installDir | Add-Content -LiteralPath $env:GITHUB_PATH
           "DOTNET_ROOT=$installDir" | Add-Content -LiteralPath $env:GITHUB_ENV
