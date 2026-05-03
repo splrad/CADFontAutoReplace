@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -24,6 +25,16 @@ internal sealed partial class MainViewModel : ObservableObject
     private readonly List<RegistryChangeWatcher>   _registryWatchers = [];
     private readonly CadProcessWatcher             _processWatcher   = new();
     private readonly DispatcherTimer               _processPollTimer;
+
+    /// <summary>
+    /// 刷新去抖定时器：注册表 / 进程事件密集触发时（实测可达 74 次/数百毫秒），
+    /// 每次都直接排入一次同步 Refresh 会把 Dispatcher 队列打爆，连任务栏点击激活
+    /// 都被堵在后面。这里把所有事件合并成一次 250ms 后的扫描调度。
+    /// </summary>
+    private readonly DispatcherTimer               _refreshDebouncer;
+    private static readonly TimeSpan               RefreshDebounceDelay = TimeSpan.FromMilliseconds(250);
+    /// <summary>同时仅允许一次后台扫描在飞，避免事件风暴下 ThreadPool 任务堆积。</summary>
+    private int                                    _backgroundScanInFlight;
 
     [ObservableProperty]
     private string _deployPath = ResolveDefaultDeployPath();
@@ -161,6 +172,15 @@ internal sealed partial class MainViewModel : ObservableObject
         _processPollTimer.Tick += (_, _) => CheckCadProcesses();
         _processPollTimer.Start();
 
+        // ── 刷新去抖定时器：合并注册表/进程事件风暴。
+        // 用 Background 优先级，确保 Input/Render 优先于扫描调度被 Dispatcher 处理，
+        // 避免反过来挤占任务栏激活等用户输入响应。
+        _refreshDebouncer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = RefreshDebounceDelay,
+        };
+        _refreshDebouncer.Tick += OnRefreshDebouncerTick;
+
         // ── 注册表实时监听：仅订阅各品牌"根"（如 Software\Autodesk\AutoCAD）的子树，
         // 既覆盖版本子键的创建/删除（CAD 安装/卸载），也覆盖 Applications\AFR-ACADxxxx
         // 的子键变更。即使根本身尚未存在，Watcher 会回退到更高祖先（HKCU\Software）等待
@@ -193,26 +213,105 @@ internal sealed partial class MainViewModel : ObservableObject
         return idx > 0 ? path[..idx] : null;
     }
 
-    private void OnRegistryChanged()
-    {
-        // 注册表事件来自 ThreadPool；UI 操作必须 Marshal 回 Dispatcher。
-        Application.Current?.Dispatcher.BeginInvoke(() =>
-        {
-            if (!IsBusy) Refresh();
-        });
-    }
+    /// <summary>
+    /// 注册表事件回调（来自 ThreadPool 线程）。
+    /// 不再每次直接 Marshal 一次同步 Refresh —— 而是 kick 去抖定时器，
+    /// 高频事件会塌缩为单次后台扫描。
+    /// </summary>
+    private void OnRegistryChanged() => ScheduleRefresh();
 
+    /// <summary>
+    /// 进程事件回调（来自 WMI 工作线程）。进程状态变化需要立即让 IsCadRunning 收敛，
+    /// 但同时也意味着可能伴随插件文件状态变化，顺便触发一次去抖刷新。
+    /// </summary>
     private void OnProcessChanged()
     {
         Application.Current?.Dispatcher.BeginInvoke(CheckCadProcesses);
+        ScheduleRefresh();
+    }
+
+    /// <summary>
+    /// 把"该刷新"信号送进节流定时器。采用 leading-edge throttle：首个事件启动定时器，
+    /// 随后约 <see cref="RefreshDebounceDelay"/> 内的事件被静默合并，到点 fire 一次扫描。
+    /// 这避免了实测中"事件间隔 &lt; 去抖窗口"时 Stop+Start 反复重置、定时器永远不
+    /// fire 的 starvation（调试实测：30 秒内 1042 次注册表事件、Tick 0 次的根因）。
+    /// 必须 Marshal 到 UI 线程：DispatcherTimer 只能在创建它的线程上 Start/Stop。
+    /// </summary>
+    private void ScheduleRefresh()
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null) return;
+
+        if (dispatcher.CheckAccess())
+            ArmThrottle();
+        else
+            dispatcher.BeginInvoke(ArmThrottle);
+    }
+
+    private void ArmThrottle()
+    {
+        if (IsBusy) return;                       // 安装 / 卸载进行中，扫描无意义。
+        if (_refreshDebouncer.IsEnabled) return;  // 已在计时 —— 本轮事件被节流合并。
+        _refreshDebouncer.Start();
+    }
+
+    private void OnRefreshDebouncerTick(object? sender, EventArgs e)
+    {
+        _refreshDebouncer.Stop();
+        if (IsBusy) return;
+
+        // 同时只允许一次后台扫描；CompareExchange 抢占失败说明已有扫描在跑，
+        // 它结束时不会自动重扫，但下一次注册表事件会再 kick 一次去抖，足够收敛。
+        if (Interlocked.CompareExchange(ref _backgroundScanInFlight, 1, 0) != 0)
+            return;
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null)
+        {
+            Interlocked.Exchange(ref _backgroundScanInFlight, 0);
+            return;
+        }
+
+        // 扫描放到 ThreadPool：CadRegistryScanner.Scan 涉及多次注册表打开/读取，
+        // 在事件风暴下连续在 UI 线程跑会显著堵 Dispatcher。
+        Task.Run(() =>
+        {
+            IReadOnlyList<CadInstallation> results;
+            try
+            {
+                results = CadRegistryScanner.Scan();
+            }
+            catch
+            {
+                Interlocked.Exchange(ref _backgroundScanInFlight, 0);
+                return;
+            }
+
+            dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    if (!IsBusy) ApplyScanResults(results);
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _backgroundScanInFlight, 0);
+                }
+            }));
+        });
     }
 
     // ── 扫描 ──
 
-    private void Refresh()
-    {
-        var results = CadRegistryScanner.Scan();
+    /// <summary>
+    /// 同步刷新入口：仅在构造期、安装/卸载完成后等"必须立刻看到结果"的场景使用。
+    /// 注册表事件路径不要再调用本方法，改用 <see cref="ScheduleRefresh"/>。
+    /// </summary>
+    private void Refresh() => ApplyScanResults(CadRegistryScanner.Scan());
 
+    /// <summary>把扫描结果应用到可观察集合并刷新汇总数。必须在 UI 线程调用。</summary>
+    private void ApplyScanResults(IReadOnlyList<CadInstallation> results)
+    {
         var toRemove = CadEntries
             .Where(e => !results.Any(r => IsSameEntry(r, e)))
             .ToList();
@@ -319,7 +418,7 @@ internal sealed partial class MainViewModel : ObservableObject
                     try
                     {
                         if (!EmbeddedFontPatcher.Apply(fresh))
-                            errors.Add($"{fresh.Descriptor.DisplayName} [{fresh.ProfileSubKey}]：默认 SHX 字体释放失败，请手动放置 ming.shx / tssdchn.shx 到 CAD\\Fonts。");
+                            errors.Add($"{fresh.Descriptor.DisplayName} [{fresh.ProfileSubKey}]：默认 SHX 字体释放失败，请手动在CAD中运行AFR插件进行字体配置");
                     }
                     catch { /* 字体释放失败不影响安装主流程 */ }
                 }
@@ -343,7 +442,7 @@ internal sealed partial class MainViewModel : ObservableObject
                 $"以下版本安装失败：\n\n{string.Join("\n", errors)}",
                 "AFR 部署工具 — 安装错误");
         else
-            StatusText = $"✓ 已成功安装 {successes} 个配置文件实例并应用 SHX 缺失对话框抑制，启动 CAD 时插件生效。";
+            StatusText = $"✓ 已成功安装 {successes} 个配置文件实例并应用 SHX 缺失弹窗抑制，启动 CAD 时插件生效";
     }
 
     // ── 卸载 ──
@@ -412,7 +511,7 @@ internal sealed partial class MainViewModel : ObservableObject
             await _dialog.ShowWarningAsync(string.Join("\n", warnings),
                 "AFR 部署工具 — 卸载完成（含警告）");
         else
-            StatusText = $"✓ 已成功卸载 {successes} 个配置文件实例并还原由本插件写入的 SHX 缺失对话框抑制设置。";
+            StatusText = $"✓ 已成功卸载 {successes} 个配置文件实例并还原由本插件写入的 SHX 缺失弹窗抑制设置";
     }
 
     /// <summary>清空所有条目的勾选状态，避免上一次操作的选择残留到下一次操作。</summary>
