@@ -107,7 +107,7 @@ jobs:
             }
 
             $hasExactSdk = (($installedSdks -split "`r?`n") | Where-Object {
-              $_ -match ('^' + [regex]::Escape($sdkVersion) + '\\s')
+              $_ -match ('^' + [regex]::Escape($sdkVersion) + '\s')
             }).Count -gt 0
             if (-not $hasExactSdk) {
               throw ".NET SDK $sdkVersion 安装失败：安装目录中未检测到该版本。"
