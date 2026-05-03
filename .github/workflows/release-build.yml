@@ -9,7 +9,7 @@ on:
       - Version.props
       - chore/Fonts.zip
       - src/**
-      - .github/workflows/release.yml
+      - .github/workflows/release-build.yml
   # 保留手动触发入口，便于维护者在 GitHub Actions 页面重新执行发布流程。
   workflow_dispatch:
 

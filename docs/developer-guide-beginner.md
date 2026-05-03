@@ -64,9 +64,35 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 4. 执行 `AFRLOG` 查看当前图纸的检测与替换结果。
 5. 如需调试 MText 场景，再在 Debug 构建下执行 `AFRINSERT` / `AFRVIEW` 建立“输入-输出”直觉。
 
-## 7. 新增命令的正确姿势（最容易漏）
+## 7. 生成部署器 EXE
 
-### 6.1 写命令类
+正式分发默认使用部署器安装，不手动 `NETLOAD`。生成部署器 EXE 时，在仓库根目录运行：
+
+```powershell
+./src/AFR.Deployer/Publish-Deployer.ps1
+```
+
+脚本会自动：
+
+1. Release 构建所有 `src/AutoCAD/AFR-ACAD20XX/` 插件 DLL；
+2. 将插件 DLL 与 `.cad.json` 元数据复制到 `src/AFR.Deployer/Resources/`；
+3. 发布自包含单文件部署器。
+
+最终输出：
+
+```text
+publish/AFR.Deployer/AFR-Deployer.exe
+```
+
+如果只是调试部署器界面或资源嵌入，且插件 DLL 已经构建过，可跳过插件重建：
+
+```powershell
+./src/AFR.Deployer/Publish-Deployer.ps1 -SkipPluginBuild
+```
+
+## 8. 新增命令的正确姿势（最容易漏）
+
+### 8.1 写命令类
 
 放到：`src/AutoCAD/AFR.AutoCAD/Commands/`
 
@@ -77,7 +103,7 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 public void YourCommand() { }
 ```
 
-### 6.2 注册命令类（必须）
+### 8.2 注册命令类（必须）
 
 修改：`src/AutoCAD/AFR-ACAD20XX/PluginEntry.cs`
 
@@ -95,7 +121,7 @@ public void YourCommand() { }
 #endif
 ```
 
-## 8. 新手常见错误
+## 9. 新手常见错误
 
 ### 错误 1：命令写了但 CAD 说无此命令
 
@@ -121,15 +147,16 @@ public void YourCommand() { }
 2. 确认当前是 Debug 配置；
 3. 重新构建并重启调试。
 
-## 9. 日常开发建议（新手版）
+## 10. 日常开发建议（新手版）
 
 - 先定位，再改代码：优先看 `ExecutionController` 调用链。
 - 先加日志，再动逻辑：避免“改完不知道哪里坏”。
 - 每次只改一个小目标：例如“只改 MText 解析，不碰 Hook”。
 
-## 10. 提交前快速检查
+## 11. 提交前快速检查
 
 - [ ] `dotnet build` 通过
+- [ ] 发布前已运行 `Publish-Deployer.ps1` 生成 `AFR-Deployer.exe`
 - [ ] 新命令已注册到 `PluginEntry.cs`
 - [ ] 没有把 AutoCAD 类型放进 `AFR.Core` / `AFR.UI`
 - [ ] Debug 功能已用 `#if DEBUG` 控制
