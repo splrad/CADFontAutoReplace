@@ -1,16 +1,20 @@
-<Solution>
-  <Folder Name="/Core/">
-    <Project Path="src/AFR.Core/AFR.Core.shproj" Id="3eed6822-3b82-4bbd-9842-3f32258af0f0" />
-    <Project Path="src/AFR.Polyfills/AFR.Polyfills.shproj" Id="e1d65b0a-4f5c-42fb-b439-da31eaf465b1" />
-    <Project Path="src/AFR.UI/AFR.UI.shproj" Id="b542e201-51b9-4103-9a5c-8e87772186d1" />
-  </Folder>
-
+﻿<Solution>
   <Configurations>
     <Platform Name="Any CPU" />
     <Platform Name="x64" />
   </Configurations>
 
-  <Folder Name="/AutoCAD/">
+  <Folder Name="/src/">
+    <Project Path="src/AFR.Core/AFR.Core.shproj" Id="3eed6822-3b82-4bbd-9842-3f32258af0f0" />
+    <Project Path="src/AFR.Polyfills/AFR.Polyfills.shproj" Id="e1d65b0a-4f5c-42fb-b439-da31eaf465b1" />
+    <Project Path="src/AFR.UI/AFR.UI.shproj" Id="b542e201-51b9-4103-9a5c-8e87772186d1" />
+    <Project Path="src/AFR.Deployer/AFR.Deployer.csproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234567890">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+  </Folder>
+
+  <Folder Name="/src/AutoCAD/">
+    <Project Path="src/AutoCAD/AFR.AutoCAD/AFR.AutoCAD.shproj" Id="3ce2a9ba-19c1-4439-9ec8-e68fdb3f533d" />
     <Project Path="src/AutoCAD/AFR-ACAD2018/AFR-ACAD2018.csproj" Id="7ab78a85-217e-46d8-bc9c-cebe7062e697">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
@@ -41,12 +45,28 @@
     <Project Path="src/AutoCAD/AFR-ACAD2027/AFR-ACAD2027.csproj" Id="0067f487-dbb2-4a4c-8c2f-afea74061fe6">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
-    <Project Path="src/AutoCAD/AFR.AutoCAD/AFR.AutoCAD.shproj" Id="3ce2a9ba-19c1-4439-9ec8-e68fdb3f533d" />
   </Folder>
 
-  <Folder Name="/Tools/">
-    <Project Path="src/AFR.Deployer/AFR.Deployer.csproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234567890">
-      <Platform Solution="*|x64" Project="x64" />
-    </Project>
+  <Folder Name="/src/Shared/">
+    <File Path="src/Shared/AwsHideableDialogPatcherCore.cs" />
+    <File Path="src/Shared/EmbeddedFontDeployer.cs" />
+    <File Path="src/Shared/EmbeddedFontExtractor.cs" />
+  </Folder>
+
+  <Folder Name="/chore/">
+    <File Path="chore/inspect-resources.ps1" />
+    <File Path="chore/inspect-types.ps1" />
+  </Folder>
+
+  <Folder Name="/tools/">
+    <File Path="tools/diff-procmon.ps1" />
+  </Folder>
+
+  <Folder Name="/docs/">
+    <File Path="docs/autodesk-fonts.md" />
+    <File Path="docs/developer-guide-advanced.md" />
+    <File Path="docs/developer-guide-beginner.md" />
+    <File Path="docs/git-branch-guidelines.md" />
+    <File Path="README.md" />
   </Folder>
 </Solution>

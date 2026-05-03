@@ -64,6 +64,7 @@
   -->
   <ItemGroup>
     <Compile Include="..\Shared\EmbeddedFontExtractor.cs" Link="Shared\EmbeddedFontExtractor.cs" />
+    <Compile Include="..\Shared\AwsHideableDialogPatcherCore.cs" Link="Shared\AwsHideableDialogPatcherCore.cs" />
     <EmbeddedResource Include="..\..\chore\Fonts\ming.shx">
       <LogicalName>AFR.Fonts.ming.shx</LogicalName>
     </EmbeddedResource>
