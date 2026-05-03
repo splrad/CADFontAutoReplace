@@ -32,7 +32,7 @@ jobs:
     secrets: inherit
 
   branch-policy-check:
-    name: 🧩 来源规则
+    name: 🧩 主干准入
     needs: merge-permission
     if: >-
       always() &&

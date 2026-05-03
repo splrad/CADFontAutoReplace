@@ -1,10 +1,10 @@
 # 📋 复用到新项目时的配置步骤：
 #   1. 在 main 分支保护规则中勾选「Require a pull request before merging」，
 #      禁止任何人直接推送到主分支，所有变更必须通过 PR 合入
-#   2. 在 main 分支保护规则中将「🛡️ PR检查 / 🧩 来源规则 / ⚙️ 合并来源校验」添加为必须通过的状态检查
+#   2. 在 main 分支保护规则中将「🛡️ PR检查 / 🧩 主干准入 / ⚙️ 来源限制」添加为必须通过的状态检查
 #   3. 修改下方 env 中的 ALLOWED_SOURCE_BRANCH 为允许向主分支合并的来源分支名
 #   4. 如需限制触发分支，请在编排工作流中配置 pull_request_target.branches（建议在 orchestrate-pr-events.yml 中维护）
-#   5. 核心开发者（TRUSTED_DEVELOPERS 变量中的用户）发起的 PR 将自动放行来源校验
+#   5. 核心开发者（TRUSTED_DEVELOPERS 变量中的用户）发起的 PR 将自动放行来源限制
 name: 🔒 主干分支合并规则校验
 
 on:
@@ -21,7 +21,7 @@ jobs:
   # ❗ ID 保持英文，方便系统识别和状态检查关联
   branch-policy-check:
     # ✅ 在 PR 检查列表显示的名称
-    name: ⚙️ 合并来源校验
+    name: ⚙️ 来源限制
     runs-on: ubuntu-latest
     # 设置合理的超时时间，防止长时间占用资源
     timeout-minutes: 5
