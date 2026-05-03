@@ -37,7 +37,7 @@ internal sealed partial class MainViewModel : ObservableObject
     private int                                    _backgroundScanInFlight;
 
     [ObservableProperty]
-    private string _deployPath = ResolveDefaultDeployPath();
+    public partial string DeployPath { get; set; } = ResolveDefaultDeployPath();
 
     /// <summary>
     /// 选择默认部署根目录：优先使用首个非系统盘的固定盘（D:\、E:\…），
@@ -69,55 +69,55 @@ internal sealed partial class MainViewModel : ObservableObject
     }
 
     [ObservableProperty]
-    private string _statusText = "正在扫描已安装的 CAD……";
+    public partial string StatusText { get; set; } = "正在扫描已安装的 CAD……";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanOperate))]
     [NotifyCanExecuteChangedFor(nameof(InstallCommand))]
     [NotifyCanExecuteChangedFor(nameof(UninstallCommand))]
-    private bool _isCadRunning;
+    public partial bool IsCadRunning { get; set; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanOperate))]
     [NotifyCanExecuteChangedFor(nameof(InstallCommand))]
     [NotifyCanExecuteChangedFor(nameof(UninstallCommand))]
-    private bool _isBusy;
+    public partial bool IsBusy { get; set; }
 
     /// <summary>已检测到（即本机已安装）的 CAD 版本数量。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DetectionSummary))]
     [NotifyPropertyChangedFor(nameof(PluginSummary))]
     [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
-    private int _installedCount;
+    public partial int InstalledCount { get; set; }
 
     /// <summary>列表中条目总数。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DetectionSummary))]
-    private int _totalCount;
+    public partial int TotalCount { get; set; }
 
     /// <summary>已部署且为最新版的插件实例数量。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PluginSummary))]
     [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
-    private int _deployedCurrentCount;
+    public partial int DeployedCurrentCount { get; set; }
 
     /// <summary>已部署但版本陈旧的插件实例数量。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PluginSummary))]
     [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
-    private int _deployedOutdatedCount;
+    public partial int DeployedOutdatedCount { get; set; }
 
     /// <summary>注册表登记但 DLL 文件已丢失的插件实例数量。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PluginSummary))]
     [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
-    private int _dllMissingCount;
+    public partial int DllMissingCount { get; set; }
 
     /// <summary>已检测到 CAD 但插件尚未部署的配置文件实例数量。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PluginSummary))]
     [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
-    private int _pendingCount;
+    public partial int PendingCount { get; set; }
 
     /// <summary>顶部 chip 主行：检测到的 CAD 版本数 / 受支持版本总数。</summary>
     public string DetectionSummary => $"检测到 {InstalledCount} 个 CAD · 共支持 {TotalCount} 个版本";
@@ -142,6 +142,12 @@ internal sealed partial class MainViewModel : ObservableObject
     public bool HasPluginSummary => !string.IsNullOrEmpty(PluginSummary);
 
     /// <summary>部署工具自身的版本号，UI 显示用（X.Y 格式）。</summary>
+    /// <remarks>
+    /// 保持为实例属性而非 static：MainWindow.xaml 通过 <c>{Binding DeployerVersion}</c>
+    /// 经 DataContext 解析；改成 static 会让绑定失败（需改用 {x:Static}）。
+    /// </remarks>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822:Mark members as static",
+        Justification = "WPF DataContext 绑定要求实例成员")]
     public string DeployerVersion => $"v{DeployerVersionService.GetDisplayVersion()}";
 
     /// <summary>操作按钮是否可用。</summary>

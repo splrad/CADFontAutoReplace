@@ -14,7 +14,7 @@ internal sealed partial class CadEntryViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsEnabled))]
-    private bool _isSelected;
+    public partial bool IsSelected { get; set; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StatusText))]
@@ -23,10 +23,10 @@ internal sealed partial class CadEntryViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ShowSubText))]
     [NotifyPropertyChangedFor(nameof(BadgeText))]
     [NotifyPropertyChangedFor(nameof(ShowVersionRow))]
-    private PluginDeployStatus _status;
+    public partial PluginDeployStatus Status { get; set; }
 
     [ObservableProperty]
-    private string _installedVersion = "—";
+    public partial string InstalledVersion { get; set; }
 
     /// <summary>本机是否已安装该 CAD 版本。未安装的占位条目在 UI 中应被禁用。</summary>
     public bool IsCadInstalled => Installation.IsCadInstalled;
@@ -99,8 +99,8 @@ internal sealed partial class CadEntryViewModel : ObservableObject
     internal CadEntryViewModel(CadInstallation installation)
     {
         Installation       = installation;
-        _status            = installation.Status;
-        _installedVersion  = installation.InstalledVersion ?? "—";
+        Status             = installation.Status;
+        InstalledVersion   = installation.InstalledVersion ?? "—";
     }
 
     /// <summary>用新的扫描结果刷新本块数据。</summary>
