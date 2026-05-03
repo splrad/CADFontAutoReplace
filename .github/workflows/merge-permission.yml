@@ -4,14 +4,20 @@
 #      禁止任何人直接推送到受保护分支，所有变更必须通过 PR 合入
 #   3. 在 test 分支保护规则中将「🛡️ PR检查 / 🧩 权限审查 / 🔒 规则文件保护」添加为必须通过的状态检查
 #   4. 在 main 分支保护规则中将「🛡️ PR检查 / 🧩 权限审查 / 🔐 主支合并授权」添加为必须通过的状态检查
-#   5. 取消勾选「要求代码所有者进行审查」，本工作流的权限校验 Job 已替代该功能
+#   5. 若允许核心成员跳过 test 直接向 main 发起 PR，且也希望保护 .github/workflows、.github/skills 目录，
+#      可在 main 分支保护规则中额外添加「🛡️ PR检查 / 🧩 权限审查 / 🔒 规则文件保护」
+#   6. 取消勾选「要求代码所有者进行审查」，本工作流的权限校验 Job 已替代该功能
 name: 🛡️ 合并审批权限校验
 
 on:
   workflow_call:
+    inputs:
+      mode:
+        required: true
+        type: string
 
 concurrency:
-  group: merge-permission-${{ github.event.pull_request.number || github.run_id }}
+  group: merge-permission-${{ inputs.mode || 'default' }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -22,12 +28,24 @@ jobs:
   # 修改了受保护配置文件 → 必须获得核心开发者有效审批（核心成员提交或核心成员审批）
   # ────────────────────────────────────────────────────────
   workflow-file-audit:
-    name: ${{ github.event.pull_request.base.ref == 'main' && '🔐 主支合并授权' || '🔒 规则文件保护' }}
+    name: ${{ inputs.mode == 'approval' && '🔐 主支合并授权' || '🔒 规则文件保护' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: >-
-      github.event.pull_request.base.ref == 'test' ||
-      github.event.pull_request.base.ref == 'main'
+      (
+        inputs.mode == 'audit' &&
+        (
+          github.event.pull_request.base.ref == 'test' ||
+          (
+            github.event.pull_request.base.ref == 'main' &&
+            github.event.pull_request.head.ref != 'test'
+          )
+        )
+      ) ||
+      (
+        inputs.mode == 'approval' &&
+        github.event.pull_request.base.ref == 'main'
+      )
 
     permissions:
       pull-requests: write
@@ -36,7 +54,7 @@ jobs:
 
     steps:
       - name: 🔍 检测受保护配置文件变更与核心审批
-        if: github.event.pull_request.base.ref == 'test'
+        if: inputs.mode == 'audit'
         id: audit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -153,7 +171,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: 💬 回写工作流配置保护状态说明
-        if: github.event.pull_request.base.ref == 'test' && always()
+        if: inputs.mode == 'audit' && always()
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -389,7 +407,7 @@ jobs:
           NODE
 
       - name: 🚫 阻断非授权自动化资源变更
-        if: github.event.pull_request.base.ref == 'test' && steps.audit.outputs.audit_status == 'unauthorized_workflow_change'
+        if: inputs.mode == 'audit' && steps.audit.outputs.audit_status == 'unauthorized_workflow_change'
         run: |
           echo "❌ 非授权用户修改了受保护配置文件，合并被阻断。"
           exit 1
@@ -399,7 +417,7 @@ jobs:
   # 检查审批人是否为核心开发者（PR 作者是核心开发者也直接通过）
   # ────────────────────────────────────────────────────────
       - name: 🔍 校验审批来源授权
-        if: github.event.pull_request.base.ref == 'main'
+        if: inputs.mode == 'approval'
         id: approval-check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -480,7 +498,7 @@ jobs:
           fi
 
       - name: 💬 回写主分支审批状态说明
-        if: github.event.pull_request.base.ref == 'main' && always()
+        if: inputs.mode == 'approval' && always()
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
