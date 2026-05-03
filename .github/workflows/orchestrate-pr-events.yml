@@ -1,4 +1,4 @@
-name: 🛡️ PR变更链路编排
+name: 🛡️ PR检查
 
 on:
   pull_request_target:
@@ -17,13 +17,13 @@ permissions:
 
 jobs:
   auto-approve:
-    name: 🛡️ 合并审批自动授权
+    name: 🧩 审批分类
     if: github.event_name == 'pull_request_target'
     uses: ./.github/workflows/pr-auto-approve.yml
     secrets: inherit
 
   merge-permission:
-    name: ${{ github.event.pull_request.base.ref == 'main' && '🔐 主分支合并权限审计' || '🔒 自动化资源保护规则' }}
+    name: 🧩 权限审查
     needs: auto-approve
     if: >-
       always() &&
@@ -32,7 +32,7 @@ jobs:
     secrets: inherit
 
   branch-policy-check:
-    name: ⚙️ 合并来源校验
+    name: 🧩 来源规则
     needs: merge-permission
     if: >-
       always() &&

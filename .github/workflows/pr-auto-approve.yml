@@ -21,7 +21,7 @@ concurrency:
 jobs:
   privileged-access:
     # ✅ 在 PR 检查列表显示的名称
-    name: 🔐 核心成员类别
+    name: 🔐 核心成员
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # 只有当 PR 作者在核心开发者列表中时，执行自动审批（覆盖 feature→test 和 test→main 两层 PR）
@@ -64,7 +64,7 @@ jobs:
 
   # 非核心开发者时保留可见检查结果，避免 PR 列表只有灰色 Skipped
   access-denied:
-    name: 🔐 普通成员类别
+    name: 🔐 普通成员
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: >-

@@ -28,7 +28,7 @@ env:
 jobs:
   automation-integration:
     # ✅ 在 PR 检查列表显示的名称
-    name: 🤖 合并变更至主干分支
+    name: 🤖 创建主干PR
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # test 分支推送走正常流程；核心开发者从其他分支推送走快速通道直达主分支

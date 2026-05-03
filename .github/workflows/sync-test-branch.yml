@@ -23,7 +23,7 @@ env:
 jobs:
   sync-test-to-main:
     # ✅ 在 PR 检查列表显示的名称
-    name: 🔄 同步测试分支至主分支最新提交
+    name: 🔄 同步测试分支
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # 在 main push（含强制推送）时执行；或在快速通道 PR 被核心开发者合并时执行

@@ -1,4 +1,4 @@
-name: 🚀 分支推送链路编排
+name: 🚀 推送自动化
 
 on:
   push:
@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   pr-auto-test:
-    name: 🚀 测试分支合并请求创建
+    name: 🧩 测试PR
     if: >-
       github.ref_name != 'test' &&
       github.ref_name != 'main' &&
@@ -25,7 +25,7 @@ jobs:
     secrets: inherit
 
   pr-auto-main:
-    name: 🚀 主干分支合并请求创建
+    name: 🧩 主干PR
     needs: pr-auto-test
     if: >-
       always() &&
@@ -40,7 +40,7 @@ jobs:
     secrets: inherit
 
   sync-test-branch:
-    name: 🔄 重置测试分支到主分支
+    name: 🧩 分支同步
     needs: pr-auto-main
     if: >-
       always() &&

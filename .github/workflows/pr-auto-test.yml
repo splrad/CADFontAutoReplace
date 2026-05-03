@@ -26,7 +26,7 @@ env:
 jobs:
   automation-integration:
     # ✅ 在 PR 检查列表显示的名称
-    name: 🤖 合并变更至测试分支
+    name: 🤖 创建测试PR
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # 核心开发者跳过本流程，直接走主分支快速通道
