@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 5
     # 只有当 PR 作者在核心开发者列表中时，执行自动审批（覆盖 feature→test 和 test→main 两层 PR）
     if: >-
-      contains(fromJSON(vars.TRUSTED_DEVELOPERS || '[]'), github.actor)
+      contains(fromJSON(vars.TRUSTED_DEVELOPERS || '[]'), github.event.pull_request.user.login)
     permissions:
       pull-requests: write
 
@@ -68,12 +68,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: >-
-      !contains(fromJSON(vars.TRUSTED_DEVELOPERS || '[]'), github.actor)
+      !contains(fromJSON(vars.TRUSTED_DEVELOPERS || '[]'), github.event.pull_request.user.login)
     permissions:
       contents: read
 
     steps:
       - name: ℹ️ 记录非核心成员路径
         run: |
-          echo "提交者不在核心开发者名单中，已跳过自动审批。"
+          echo "PR 提交者不在核心开发者名单中，已跳过自动审批。"
           echo "评论与通知由 merge-permission.yml 统一处理。"
