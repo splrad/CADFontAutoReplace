@@ -122,6 +122,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           # Version.props 是发布版本的唯一来源：Tag 使用 vX.Y，标题保留构建号。
           $versionFile = Join-Path $env:GITHUB_WORKSPACE 'Version.props'
@@ -139,8 +140,8 @@ jobs:
           $tagName = "v$displayVersion"
           $releaseTitle = "AFR v$displayVersion ($buildId)"
           # latestTag 用于生成变更记录；existingRelease 用于避免重复发布同一版本。
-          $latestTag = gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""'
-          $existingRelease = gh release view $tagName --json tagName --jq '.tagName' 2>$null
+          $latestTag = gh release list --repo $env:GH_REPO --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""'
+          $existingRelease = gh release view $tagName --repo $env:GH_REPO --json tagName --jq '.tagName' 2>$null
 
           "display_version=$displayVersion" >> $env:GITHUB_OUTPUT
           "build_id=$buildId" >> $env:GITHUB_OUTPUT
@@ -248,11 +249,13 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           # gh release create 会在 tag 不存在时基于 --target 自动创建 tag。
           gh release create '${{ steps.version.outputs.tag_name }}' `
             '${{ steps.package.outputs.exe_path }}' `
             '${{ steps.package.outputs.fonts_path }}' `
+            --repo $env:GH_REPO `
             --target '${{ github.sha }}' `
             --title '${{ steps.version.outputs.release_title }}' `
             --notes-file '${{ steps.notes.outputs.notes_path }}' `
