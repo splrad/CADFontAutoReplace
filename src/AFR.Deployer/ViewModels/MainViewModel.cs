@@ -27,22 +27,20 @@ internal sealed partial class MainViewModel : ObservableObject
     private readonly DispatcherTimer               _processPollTimer;
 
     /// <summary>
-    /// 刷新去抖定时器：注册表 / 进程事件密集触发时（实测可达 74 次/数百毫秒），
-    /// 每次都直接排入一次同步 Refresh 会把 Dispatcher 队列打爆，连任务栏点击激活
-    /// 都被堵在后面。这里把所有事件合并成一次 250ms 后的扫描调度。
+    /// 刷新节流定时器：把短时间内的注册表 / 进程事件合并为一次扫描，
+    /// 避免频繁刷新挤占 Dispatcher 队列。
     /// </summary>
     private readonly DispatcherTimer               _refreshDebouncer;
     private static readonly TimeSpan               RefreshDebounceDelay = TimeSpan.FromMilliseconds(250);
-    /// <summary>同时仅允许一次后台扫描在飞，避免事件风暴下 ThreadPool 任务堆积。</summary>
+    /// <summary>后台扫描互斥标记，避免事件风暴下重复排队。</summary>
     private int                                    _backgroundScanInFlight;
 
     [ObservableProperty]
     public partial string DeployPath { get; set; } = ResolveDefaultDeployPath();
 
     /// <summary>
-    /// 选择默认部署根目录：优先使用首个非系统盘的固定盘（D:\、E:\…），
-    /// 若全机仅有系统盘（典型笔记本只有 C 盘），则回落到系统盘下的同名目录。
-    /// 末尾保留反斜杠，便于在文本框中直接拼接子目录。
+    /// 选择默认部署根目录：优先使用首个非系统盘固定盘，
+    /// 否则回落到系统盘下的同名目录，并保留末尾目录分隔符。
     /// </summary>
     private static string ResolveDefaultDeployPath()
     {
@@ -62,7 +60,7 @@ internal sealed partial class MainViewModel : ObservableObject
         }
         catch
         {
-            // 任何 IO 异常（权限、设备未就绪等）都回落到系统盘，保证 UI 始终有合法路径。
+            // 任何 IO 异常都回落到系统盘，保证 UI 始终有可用路径。
         }
 
         return Path.Combine(systemRoot, FolderName) + Path.DirectorySeparatorChar;
@@ -143,8 +141,8 @@ internal sealed partial class MainViewModel : ObservableObject
 
     /// <summary>部署工具自身的版本号，UI 显示用（X.Y 格式）。</summary>
     /// <remarks>
-    /// 保持为实例属性而非 static：MainWindow.xaml 通过 <c>{Binding DeployerVersion}</c>
-    /// 经 DataContext 解析；改成 static 会让绑定失败（需改用 {x:Static}）。
+    /// 保持为实例属性：MainWindow.xaml 通过 <c>{Binding DeployerVersion}</c>
+    /// 依赖 DataContext 解析，改成 static 会导致现有绑定失效。
     /// </remarks>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822:Mark members as static",
         Justification = "WPF DataContext 绑定要求实例成员")]
@@ -161,16 +159,11 @@ internal sealed partial class MainViewModel : ObservableObject
         _dialog       = dialog;
         _folderPicker = folderPicker;
 
-        // ── 进程实时监听（WMI）：CAD 启动/退出低延迟触发（<100ms ~ 2s）。
+        // ── 进程实时监听（WMI）：尽快感知 CAD 启动与退出。
         _processWatcher.StateChanged += OnProcessChanged;
         _processWatcher.Start();
 
-        // ── 兜底轮询：WMI 在以下场景可能漏事件或完全失败——
-        //    • ETW 路径需 SeSystemProfilePrivilege，普通账户启动时静默回退；
-        //    • __InstanceDeletionEvent 在受限组策略/SKU 下可能仅暴露同 SID 进程的部分事件；
-        //    • WMI 服务被裁剪/禁用时 Watcher 完全无回调。
-        // 用 2 秒 DispatcherTimer 兜底，确保 IsCadRunning / StatusText 最迟 2 秒内一定收敛。
-        // 由于 CheckCadProcesses 仅在状态实际变化时才修改 StatusText，空跑成本可忽略。
+        // ── 兜底轮询：WMI 可能漏事件或不可用，2 秒轮询用于保证状态最终收敛。
         _processPollTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromSeconds(2),
@@ -178,26 +171,21 @@ internal sealed partial class MainViewModel : ObservableObject
         _processPollTimer.Tick += (_, _) => CheckCadProcesses();
         _processPollTimer.Start();
 
-        // ── 刷新去抖定时器：合并注册表/进程事件风暴。
-        // 用 Background 优先级，确保 Input/Render 优先于扫描调度被 Dispatcher 处理，
-        // 避免反过来挤占任务栏激活等用户输入响应。
+        // ── 刷新节流定时器：合并注册表 / 进程事件，并让输入与渲染优先处理。
         _refreshDebouncer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = RefreshDebounceDelay,
         };
         _refreshDebouncer.Tick += OnRefreshDebouncerTick;
 
-        // ── 注册表实时监听：仅订阅各品牌"根"（如 Software\Autodesk\AutoCAD）的子树，
-        // 既覆盖版本子键的创建/删除（CAD 安装/卸载），也覆盖 Applications\AFR-ACADxxxx
-        // 的子键变更。即使根本身尚未存在，Watcher 会回退到更高祖先（HKCU\Software）等待
-        // 其被创建后自动升级，不会漏掉首次安装事件。
+        // ── 注册表实时监听：订阅各品牌根节点，覆盖版本与插件子键变更；
+        //    若目标根尚不存在，则回退到上级节点等待其创建。
         var brandRoots = CadDescriptors.All
             .Select(d => GetBrandRoot(d.RegistryBasePath))
             .Distinct(StringComparer.OrdinalIgnoreCase);
         foreach (var root in brandRoots)
         {
-            // fallbackRoot 取上一级（如 Software\Autodesk），避免目标根尚未创建时
-            // 监听器无键可监而失效；同时不至于宽到 HKCU\Software 整棵树。
+            // fallbackRoot 取上一级，避免目标根尚未创建时监听失效。
             var fallback = GetParent(root) ?? root;
             var watcher  = new RegistryChangeWatcher(root, fallback);
             watcher.Changed += OnRegistryChanged;
@@ -220,15 +208,12 @@ internal sealed partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 注册表事件回调（来自 ThreadPool 线程）。
-    /// 不再每次直接 Marshal 一次同步 Refresh —— 而是 kick 去抖定时器，
-    /// 高频事件会塌缩为单次后台扫描。
+    /// 注册表事件回调（来自 ThreadPool 线程），通过节流定时器合并高频刷新请求。
     /// </summary>
     private void OnRegistryChanged() => ScheduleRefresh();
 
     /// <summary>
-    /// 进程事件回调（来自 WMI 工作线程）。进程状态变化需要立即让 IsCadRunning 收敛，
-    /// 但同时也意味着可能伴随插件文件状态变化，顺便触发一次去抖刷新。
+    /// 进程事件回调（来自 WMI 工作线程），同时更新运行状态并触发一次节流刷新。
     /// </summary>
     private void OnProcessChanged()
     {
@@ -237,11 +222,8 @@ internal sealed partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 把"该刷新"信号送进节流定时器。采用 leading-edge throttle：首个事件启动定时器，
-    /// 随后约 <see cref="RefreshDebounceDelay"/> 内的事件被静默合并，到点 fire 一次扫描。
-    /// 这避免了实测中"事件间隔 &lt; 去抖窗口"时 Stop+Start 反复重置、定时器永远不
-    /// fire 的 starvation（调试实测：30 秒内 1042 次注册表事件、Tick 0 次的根因）。
-    /// 必须 Marshal 到 UI 线程：DispatcherTimer 只能在创建它的线程上 Start/Stop。
+    /// 把刷新请求送入节流定时器：首个事件启动计时，其余事件在窗口期内合并。
+    /// 定时器只能在创建它的 UI 线程上启动或停止。
     /// </summary>
     private void ScheduleRefresh()
     {
@@ -256,8 +238,8 @@ internal sealed partial class MainViewModel : ObservableObject
 
     private void ArmThrottle()
     {
-        if (IsBusy) return;                       // 安装 / 卸载进行中，扫描无意义。
-        if (_refreshDebouncer.IsEnabled) return;  // 已在计时 —— 本轮事件被节流合并。
+        if (IsBusy) return;                       // 安装 / 卸载进行中，不触发刷新。
+        if (_refreshDebouncer.IsEnabled) return;  // 本轮事件已被合并。
         _refreshDebouncer.Start();
     }
 
@@ -266,8 +248,7 @@ internal sealed partial class MainViewModel : ObservableObject
         _refreshDebouncer.Stop();
         if (IsBusy) return;
 
-        // 同时只允许一次后台扫描；CompareExchange 抢占失败说明已有扫描在跑，
-        // 它结束时不会自动重扫，但下一次注册表事件会再 kick 一次去抖，足够收敛。
+        // 只允许一个后台扫描同时运行；若已有扫描在跑，则等待下一次事件再触发。
         if (Interlocked.CompareExchange(ref _backgroundScanInFlight, 1, 0) != 0)
             return;
 
@@ -278,8 +259,7 @@ internal sealed partial class MainViewModel : ObservableObject
             return;
         }
 
-        // 扫描放到 ThreadPool：CadRegistryScanner.Scan 涉及多次注册表打开/读取，
-        // 在事件风暴下连续在 UI 线程跑会显著堵 Dispatcher。
+        // 扫描放到 ThreadPool，避免注册表读取阻塞 UI 线程。
         Task.Run(() =>
         {
             IReadOnlyList<CadInstallation> results;
@@ -310,8 +290,7 @@ internal sealed partial class MainViewModel : ObservableObject
     // ── 扫描 ──
 
     /// <summary>
-    /// 同步刷新入口：仅在构造期、安装/卸载完成后等"必须立刻看到结果"的场景使用。
-    /// 注册表事件路径不要再调用本方法，改用 <see cref="ScheduleRefresh"/>。
+    /// 同步刷新入口，仅用于构造期和安装 / 卸载完成后这类需要立即收敛的场景。
     /// </summary>
     private void Refresh() => ApplyScanResults(CadRegistryScanner.Scan());
 
@@ -340,7 +319,7 @@ internal sealed partial class MainViewModel : ObservableObject
         DllMissingCount        = CadEntries.Count(e => e.IsCadInstalled && e.Status == PluginDeployStatus.DllMissing);
         PendingCount           = CadEntries.Count(e => e.IsCadInstalled && e.Status == PluginDeployStatus.NotInstalled);
 
-        // 只在"未做任何操作"的中性态时才覆盖状态文字，避免抹掉 CAD 运行警告/安装结果。
+        // 仅在空闲态覆盖状态文字，避免抹掉运行警告或操作结果。
         if (!IsCadRunning && !IsBusy &&
             (string.IsNullOrEmpty(StatusText) || StatusText is "就绪" or "正在扫描已安装的 CAD……"))
         {
@@ -400,9 +379,7 @@ internal sealed partial class MainViewModel : ObservableObject
 
         await Task.Run(() =>
         {
-            // 收集成功安装涉及的 CAD 版本（按 Descriptor 去重），
-            // 在所有注册表/DLL 写入完成后统一处理 FixedProfile.aws，
-            // 避免对同一 CAD 版本的多语言目录重复扫描。
+            // 收集安装成功的 CAD 版本，稍后统一处理 FixedProfile.aws。
             var patchedDescriptors = new HashSet<CadDescriptor>();
 
             foreach (var entry in selected)
@@ -417,10 +394,8 @@ internal sealed partial class MainViewModel : ObservableObject
                     successes++;
                     patchedDescriptors.Add(fresh.Descriptor);
 
-                    // 释放内嵌 SHX 字体到当前配置文件实例对应的 <AcadLocation>\Fonts。
-                    // EXE 无法执行 DLL 内的部署逻辑，因此由部署器在此直接调用共享的
-                    // EmbeddedFontExtractor。失败仅记录警告，不阻断本次安装——用户事后
-                    // 仍可在插件 UI 中手动配置字体。
+                    // 释放内嵌 SHX 字体到当前实例对应的 <AcadLocation>\Fonts。
+                    // 失败仅记录警告，不阻断安装主流程。
                     try
                     {
                         if (!EmbeddedFontPatcher.Apply(fresh))
@@ -430,8 +405,7 @@ internal sealed partial class MainViewModel : ObservableObject
                 }
             }
 
-            // 抑制 "缺少 SHX 文件" 对话框：必须在 CAD 已关闭时写入 FixedProfile.aws，
-            // 这正是部署工具调用此方法的前置条件（CanOperate => !IsCadRunning）。
+            // 抑制“缺少 SHX 文件”对话框：在全部写入完成后统一处理 FixedProfile.aws。
             foreach (var desc in patchedDescriptors)
             {
                 try { AwsHideableDialogPatcher.Apply(desc); }
@@ -501,7 +475,7 @@ internal sealed partial class MainViewModel : ObservableObject
                 }
             }
 
-            // 清理本插件写入的 FixedProfile.aws 抑制节点（用户手动设置的同名节点保留不动）。
+            // 清理本插件写入的 FixedProfile.aws 抑制节点。
             foreach (var desc in patchedDescriptors)
             {
                 try { AwsHideableDialogPatcher.Cleanup(desc); }
