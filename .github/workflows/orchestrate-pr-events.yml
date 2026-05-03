@@ -1,0 +1,42 @@
+name: 🛡️ PR变更链路编排
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+concurrency:
+  group: orchestrate-pr-events-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: write
+  issues: write
+  contents: read
+
+jobs:
+  auto-approve:
+    name: 🛡️ 合并审批自动授权
+    if: github.event_name == 'pull_request_target'
+    uses: ./.github/workflows/pr-auto-approve.yml
+    secrets: inherit
+
+  merge-permission:
+    name: ${{ github.event.pull_request.base.ref == 'main' && '🔐 主分支合并权限审计' || '🔒 自动化资源保护规则' }}
+    needs: auto-approve
+    if: >-
+      always() &&
+      (github.event_name == 'pull_request_target' || github.event_name == 'pull_request_review')
+    uses: ./.github/workflows/merge-permission.yml
+    secrets: inherit
+
+  branch-policy-check:
+    name: ⚙️ 合并来源校验
+    needs: merge-permission
+    if: >-
+      always() &&
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.base.ref == 'main'
+    uses: ./.github/workflows/branch-policy-check.yml
+    secrets: inherit

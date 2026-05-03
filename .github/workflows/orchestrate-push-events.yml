@@ -1,0 +1,49 @@
+name: 🚀 分支推送链路编排
+
+on:
+  push:
+    branches:
+      - '**'
+
+concurrency:
+  group: orchestrate-push-events-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: write
+  issues: write
+  contents: write
+
+jobs:
+  pr-auto-test:
+    name: 🚀 测试分支合并请求创建
+    if: >-
+      github.ref_name != 'test' &&
+      github.ref_name != 'main' &&
+      !contains(fromJSON(vars.TRUSTED_DEVELOPERS || '[]'), github.actor)
+    uses: ./.github/workflows/pr-auto-test.yml
+    secrets: inherit
+
+  pr-auto-main:
+    name: 🚀 主干分支合并请求创建
+    needs: pr-auto-test
+    if: >-
+      always() &&
+      (
+        github.ref_name == 'test' ||
+        (
+          github.ref_name != 'main' &&
+          contains(fromJSON(vars.TRUSTED_DEVELOPERS || '[]'), github.actor)
+        )
+      )
+    uses: ./.github/workflows/pr-auto-main.yml
+    secrets: inherit
+
+  sync-test-branch:
+    name: 🔄 重置测试分支到主分支
+    needs: pr-auto-main
+    if: >-
+      always() &&
+      github.ref_name == 'main'
+    uses: ./.github/workflows/sync-test-branch.yml
+    secrets: inherit

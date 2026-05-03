@@ -12,8 +12,7 @@
 name: 🛡️ 合并审批自动授权
 
 on:
-  pull_request_target:
-    types: [opened, reopened, synchronize]
+  workflow_call:
 
 concurrency:
   group: auto-approve-${{ github.event.pull_request.number }}
