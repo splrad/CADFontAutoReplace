@@ -1,5 +1,5 @@
 using AFR.Deployer.Models;
-using AFR.Shared;
+using AFR.HostIntegration;
 
 namespace AFR.Deployer.Services;
 

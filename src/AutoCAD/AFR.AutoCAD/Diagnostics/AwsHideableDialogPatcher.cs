@@ -1,6 +1,6 @@
 using AFR.Platform;
 using AFR.Services;
-using AFR.Shared;
+using AFR.HostIntegration;
 
 namespace AFR.Diagnostics;
 

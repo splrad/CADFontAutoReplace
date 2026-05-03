@@ -1,6 +1,6 @@
 using System.IO;
 using AFR.Deployer.Models;
-using AFR.Shared;
+using AFR.HostIntegration;
 using Microsoft.Win32;
 
 namespace AFR.Deployer.Services;

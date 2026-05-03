@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <MSBuildAllProjects Condition="'$(MSBuildVersion)' == '' Or '$(MSBuildVersion)' &lt; '16.0'">$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
@@ -27,9 +27,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetector.cs" Link="Services\FontDetector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontReplacer.cs" Link="Services\FontReplacer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\LogService.cs" Link="Services\LogService.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)..\..\Shared\EmbeddedFontExtractor.cs" Link="Shared\EmbeddedFontExtractor.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)..\..\Shared\EmbeddedFontDeployer.cs" Link="Shared\EmbeddedFontDeployer.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)..\..\Shared\AwsHideableDialogPatcherCore.cs" Link="Shared\AwsHideableDialogPatcherCore.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Hosting\EmbeddedFontDeployer.cs" Link="Hosting\EmbeddedFontDeployer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AssemblyRegistryDefaults.cs" Link="Hosting\AssemblyRegistryDefaults.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\ExternalRegistryDefaultsApplier.cs" Link="Hosting\ExternalRegistryDefaultsApplier.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Diagnostics\AwsHideableDialogPatcher.cs" Link="Diagnostics\AwsHideableDialogPatcher.cs" />
@@ -41,14 +39,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextInsertCommand.cs" Link="DebugCommands\MTextInsertCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\ProfileDumpCommand.cs" Link="DebugCommands\ProfileDumpCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\ShowAwsPathCommand.cs" Link="DebugCommands\ShowAwsPathCommand.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="$(MSBuildThisFileDirectory)..\..\..\chore\Fonts\ming.shx">
-      <LogicalName>AFR.Fonts.ming.shx</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="$(MSBuildThisFileDirectory)..\..\..\chore\Fonts\tssdchn.shx">
-      <LogicalName>AFR.Fonts.tssdchn.shx</LogicalName>
-    </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)Diagnostics\AwsHideableDialogPatcher.cs.new" />

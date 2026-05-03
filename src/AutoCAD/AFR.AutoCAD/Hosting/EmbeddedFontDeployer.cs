@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using AFR.Services;
-using AFR.Shared;
+using AFR.HostIntegration;
 
 namespace AFR.Hosting;
 

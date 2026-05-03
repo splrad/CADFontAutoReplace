@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Xml.Linq;
 
-namespace AFR.Shared;
+namespace AFR.HostIntegration;
 
 /// <summary>
 /// AutoCAD 2018+ "缺少 SHX 文件"对话框（id=Acad.UnresolvedFontFiles）抑制器的共享核心实现。

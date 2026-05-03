@@ -1,7 +1,7 @@
 using System.IO;
 using System.Reflection;
 
-namespace AFR.Shared;
+namespace AFR.HostIntegration;
 
 /// <summary>
 /// 将程序集嵌入的 SHX 字体释放到目标目录的纯抽取工具。
