@@ -56,7 +56,7 @@ jobs:
           }
 
           Get-ChildItem -LiteralPath $env:GITHUB_WORKSPACE -Force | Remove-Item -Recurse -Force
-          Copy-Item -LiteralPath (Join-Path $sourceRoot.FullName '*') -Destination $env:GITHUB_WORKSPACE -Recurse -Force
+          Copy-Item -Path (Join-Path $sourceRoot.FullName '*') -Destination $env:GITHUB_WORKSPACE -Recurse -Force
           "已通过 GitHub REST API 下载当前提交源码：${{ github.sha }}。" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
 
       - name: 🧰 安装 .NET SDK

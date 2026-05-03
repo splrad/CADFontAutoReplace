@@ -153,11 +153,7 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-$defaultExePath = Join-Path $PublishOutput "AFR.Deployer.exe"
-$exePath        = Join-Path $PublishOutput "AFR-Deployer.exe"
-if (Test-Path $defaultExePath) {
-    Move-Item -Path $defaultExePath -Destination $exePath -Force
-}
+$exePath = Join-Path $PublishOutput "AFR-Deployer.exe"
 $sizeMB  = [math]::Round((Get-Item $exePath).Length / 1MB, 1)
 Write-Host "`n✓ 发布完成！" -ForegroundColor Green
 Write-Host "  输出：$exePath ($sizeMB MB)" -ForegroundColor Green

@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 5
     # 只有当 PR 作者在核心开发者列表中时，执行自动审批（覆盖 feature→test 和 test→main 两层 PR）
     if: >-
-      contains(fromJSON(vars.TRUSTED_DEVELOPERS), github.actor)
+      contains(fromJSON(vars.TRUSTED_DEVELOPERS || '[]'), github.actor)
     permissions:
       pull-requests: write
 
@@ -68,7 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: >-
-      !contains(fromJSON(vars.TRUSTED_DEVELOPERS), github.actor)
+      !contains(fromJSON(vars.TRUSTED_DEVELOPERS || '[]'), github.actor)
     permissions:
       contents: read
 
