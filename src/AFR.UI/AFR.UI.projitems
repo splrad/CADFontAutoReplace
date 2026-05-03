@@ -10,9 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- FontSelection -->
-    <Compile Include="$(MSBuildThisFileDirectory)MTextInsert\MTextInsertWindow.xaml.cs" Condition="'$(Configuration)'=='Debug'">
-      <DependentUpon>MTextInsertWindow.xaml</DependentUpon>
-    </Compile>
     <Page Include="$(MSBuildThisFileDirectory)FontSelection\FontSelectionWindow.xaml" Link="FontSelection\FontSelectionWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
@@ -37,8 +34,14 @@
     </Compile>
     <Compile Include="$(MSBuildThisFileDirectory)MTextEditor\MTextEditorViewModel.cs" Link="MTextEditor\MTextEditorViewModel.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)MTextEditor\MTextSyntaxHighlighter.cs" Link="MTextEditor\MTextSyntaxHighlighter.cs" />
+    <!-- MTextInsert（仅 Debug 构建参与编译，Release 下整个分部类被 #if DEBUG 移除） -->
+    <Page Include="$(MSBuildThisFileDirectory)MTextInsert\MTextInsertWindow.xaml" Link="MTextInsert\MTextInsertWindow.xaml" Condition="'$(Configuration)'=='Debug'">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Compile Include="$(MSBuildThisFileDirectory)MTextInsert\MTextInsertWindow.xaml.cs" Link="MTextInsert\MTextInsertWindow.xaml.cs" Condition="'$(Configuration)'=='Debug'">
+      <DependentUpon>MTextInsertWindow.xaml</DependentUpon>
+    </Compile>
     <!-- Shared -->
     <Compile Include="$(MSBuildThisFileDirectory)WindowPositionHelper.cs" Link="WindowPositionHelper.cs" />
-    <Page Include="$(MSBuildThisFileDirectory)MTextInsert\MTextInsertWindow.xaml" Condition="'$(Configuration)'=='Debug'" />
   </ItemGroup>
 </Project>

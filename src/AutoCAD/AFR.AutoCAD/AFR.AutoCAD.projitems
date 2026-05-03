@@ -12,18 +12,18 @@
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrCommands.cs" Link="Commands\AfrCommands.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\AutoCadFontHook.cs" Link="FontMapping\AutoCadFontHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\LdFileHook.cs" Link="FontMapping\LdFileHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextFontParser.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontReplacer.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontScanner.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextFontParser.cs" Link="FontMapping\MTextFontParser.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontReplacer.cs" Link="FontMapping\MTextInlineFontReplacer.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontScanner.cs" Link="FontMapping\MTextInlineFontScanner.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AppInitializer.cs" Link="Hosting\AppInitializer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AutoCadHost.cs" Link="Hosting\AutoCadHost.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\DocumentContextManager.cs" Link="Hosting\DocumentContextManager.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\ExecutionController.cs" Link="Hosting\ExecutionController.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\PluginEntryBase.cs" Link="Hosting\PluginEntryBase.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\AutoCadFontScanner.cs" Link="Services\AutoCadFontScanner.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\CadEnvironmentSettings.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextEncodingRepairService.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetectionContext.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\CadEnvironmentSettings.cs" Link="Services\CadEnvironmentSettings.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextEncodingRepairService.cs" Link="Services\DbTextEncodingRepairService.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetectionContext.cs" Link="Services\FontDetectionContext.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetector.cs" Link="Services\FontDetector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontReplacer.cs" Link="Services\FontReplacer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\LogService.cs" Link="Services\LogService.cs" />
@@ -48,9 +48,5 @@
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)..\..\..\chore\Fonts\tssdchn.shx">
       <LogicalName>AFR.Fonts.tssdchn.shx</LogicalName>
     </EmbeddedResource>
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="$(MSBuildThisFileDirectory)Diagnostics\" />
-    <Folder Include="$(MSBuildThisFileDirectory)DebugCommands\" />
   </ItemGroup>
 </Project>
