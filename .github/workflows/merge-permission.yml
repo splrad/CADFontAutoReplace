@@ -22,7 +22,7 @@ jobs:
   # 修改了受保护配置文件 → 必须获得核心开发者有效审批（核心成员提交或核心成员审批）
   # ────────────────────────────────────────────────────────
   workflow-file-audit:
-    name: ${{ github.event.pull_request.base.ref == 'main' && '🔐 主分支合并授权' || '🔒 规则文件保护' }}
+    name: ${{ github.event.pull_request.base.ref == 'main' && '🔐 主支合并授权' || '🔒 规则文件保护' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: >-
