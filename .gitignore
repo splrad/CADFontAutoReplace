@@ -363,3 +363,7 @@ MigrationBackup/
 FodyWeavers.xsd
 /src/AFR.Deployer/Resources
 /_readme_patch.ps1
+/chore/inspect-resources.ps1
+/chore/inspect-types.ps1
+/tools/diff-procmon.ps1
+/chore/inspect-types.ps1
