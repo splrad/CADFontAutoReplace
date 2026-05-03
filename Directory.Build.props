@@ -1,19 +1,12 @@
 <Project>
 
+  <!--
+	插件统一版本号被抽离到根目录 Version.props，方便维护者在 Solution Explorer
+	的 "Solution Items" 文件夹中直接打开修改（IDE 默认隐藏 Directory.Build.props）。
+  -->
+  <Import Project="$(MSBuildThisFileDirectory)Version.props" />
+
   <PropertyGroup>
-	<!--
-	  插件统一版本号：所有 AFR-ACAD20XX 适配 DLL 与部署工具共用此版本。发版时由维护者手动更新。
-
-	  ┌─────────────────────────────────────────────────────────────────────────────┐
-	  │ 用户可见版本号 (X.X)：日志头、UI、文件属性「文件版本/产品版本」都使用此值， │
-	  │   不含构建日期/序号，避免在显示版本未变时产生混乱。                         │
-	  │ 开发者可见版本号 (X.X+构建号)：写入 AssemblyInformationalVersion，仅在反射  │
-	  │   或文件属性「详细信息 → 产品版本」(Win10+) 中可见，用于精确区分构建。      │
-	  └─────────────────────────────────────────────────────────────────────────────┘
-	-->
-	<PluginDisplayVersion>9.5</PluginDisplayVersion>
-	<PluginBuildId>20260430.2</PluginBuildId>
-
 	<!-- 用户可见 -->
 	<Version>$(PluginDisplayVersion)</Version>                <!-- NuGet / 包版本号 -->
 	<AssemblyVersion>1.0.0.0</AssemblyVersion>   <!-- CLR 程序集版本（必须 4 段） -->
@@ -23,7 +16,7 @@
 	<InformationalVersion>$(PluginDisplayVersion)+$(PluginBuildId)</InformationalVersion>
 	<!--
 	  禁止 SDK 在 InformationalVersion 后自动追加 "+{Git 提交 SHA}"，
-	  否则会变成 "8.9+20260430.1+d2669bd..."，使日志/注册表里的 build 后缀变成 commit SHA 而非我们维护的 PluginBuildId。
+	  否则会变成 "9.0+20260503.1+c6a2544..."，使日志/注册表里的 build 后缀变成 commit SHA 而非我们维护的 PluginBuildId。
 	-->
 	<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 

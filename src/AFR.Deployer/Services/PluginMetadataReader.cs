@@ -78,8 +78,8 @@ internal static class PluginMetadataReader
         bool RemoveOnUninstall = false);
 
     /// <summary>从插件 DLL 中读取的元数据快照。</summary>
-    /// <param name="DisplayVersion">展示用版本号，例如 <c>8.9</c>。</param>
-    /// <param name="BuildId">构建标识，例如 <c>20260430.1</c>。</param>
+    /// <param name="DisplayVersion">展示用版本号，例如 <c>9.0</c>。</param>
+    /// <param name="BuildId">构建标识，例如 <c>20260503.1</c>。</param>
     /// <param name="RegistryDefaults">DLL 自我描述的注册表默认值清单。</param>
     internal sealed record Metadata(
         string DisplayVersion,
@@ -105,7 +105,7 @@ internal static class PluginMetadataReader
             using var pe = new PEReader(stream);
             var reader = pe.GetMetadataReader();
 
-            // AssemblyInformationalVersion 形如 "8.9+20260430.1"
+            // AssemblyInformationalVersion 形如 "9.0+20260503.1"
             var informational = ReadAssemblyInformationalVersion(reader)
                                 ?? ReadAssemblyVersion(reader)
                                 ?? "0.0";
