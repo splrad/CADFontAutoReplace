@@ -85,7 +85,7 @@ AFR-ACAD20XX（版本适配壳，仅 PluginEntry + ICadPlatform 实现）
 - 服务类使用 `internal sealed class`（非接口实现用 `static class`）
 - 接口放在 `AFR.Core/Abstractions/`，命名以 `I` 开头
 - 单例模式使用 `Lazy<T>` 惰性初始化（参考 `ExecutionController`、`LogService`）
-- XML 文档注释覆盖所有 `public` / `internal` 类型及其公共成员，使用 `<summary>` + `<para>` 格式
+- XML 文档注释覆盖所有 `public` / `internal` 类型及其公共成员，使用 `<summary>` + `<para>` 格式；减少仅重复参数名含义的 XML `<param>` 注释，避免冗余注释。
 - 条件编译：`DiagnosticLogger` 仅在 `#if DEBUG` 下编译，Release 自动移除
 
 ### WPF / MVVM
