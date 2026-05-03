@@ -10,13 +10,7 @@
 name: 🔄 重置测试分支到主分支
 
 on:
-  push:
-    branches:
-      - main
-  pull_request_target:
-    branches:
-      - main
-    types: [closed]
+  workflow_call:
 
 concurrency:
   group: sync-test-branch
@@ -39,7 +33,7 @@ jobs:
         github.event_name == 'pull_request_target' &&
         github.event.pull_request.merged == true &&
         github.event.pull_request.head.ref != 'test' &&
-        contains(fromJSON(vars.TRUSTED_DEVELOPERS), github.event.pull_request.user.login)
+        contains(fromJSON(vars.TRUSTED_DEVELOPERS || '[]'), github.event.pull_request.user.login)
       )
 
     permissions:

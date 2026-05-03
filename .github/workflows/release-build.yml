@@ -1,0 +1,246 @@
+name: 📦 自动构建发布版本
+
+on:
+  # 只有主分支中会影响发布内容的文件变化时才自动发版。
+  push:
+    branches:
+      - main
+    paths:
+      - Version.props
+      - chore/Fonts.zip
+      - src/**
+      - .github/workflows/release-build.yml
+  # 保留手动触发入口，便于维护者在 GitHub Actions 页面重新执行发布流程。
+  workflow_dispatch:
+
+concurrency:
+  # 同一分支的发布流程串行执行，避免两个 Release 同时争用同一个版本号。
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  # 创建 tag、创建 Release、上传 Release 资产均需要 contents: write。
+  contents: write
+
+jobs:
+  release:
+    name: 📦 构建并创建 GitHub Release
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: 📦 执行代码检出
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 不使用 checkout Action，直接通过 GitHub REST API 下载当前提交源码归档。
+          $archivePath = Join-Path $env:RUNNER_TEMP 'source.zip'
+          $extractPath = Join-Path $env:RUNNER_TEMP 'source'
+          $headers = @{
+              Accept = 'application/vnd.github+json'
+              Authorization = "Bearer $env:GH_TOKEN"
+              'X-GitHub-Api-Version' = '2022-11-28'
+          }
+
+          Invoke-WebRequest `
+              -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/zipball/${{ github.sha }}" `
+              -Headers $headers `
+              -OutFile $archivePath
+
+          if (Test-Path -LiteralPath $extractPath) { Remove-Item -LiteralPath $extractPath -Recurse -Force }
+          Expand-Archive -LiteralPath $archivePath -DestinationPath $extractPath -Force
+          $sourceRoot = Get-ChildItem -LiteralPath $extractPath -Directory | Select-Object -First 1
+          if ($null -eq $sourceRoot) {
+              throw 'GitHub API 源码归档解压后未找到源码根目录。'
+          }
+
+          Get-ChildItem -LiteralPath $env:GITHUB_WORKSPACE -Force | Remove-Item -Recurse -Force
+          Copy-Item -Path (Join-Path $sourceRoot.FullName '*') -Destination $env:GITHUB_WORKSPACE -Recurse -Force
+          "已通过 GitHub REST API 下载当前提交源码：${{ github.sha }}。" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      - name: 🧰 安装 .NET SDK
+        shell: pwsh
+        run: |
+          # 读取 global.json，并通过 Microsoft 官方发布元数据确认 SDK 版本存在。
+          $globalJsonPath = Join-Path $env:GITHUB_WORKSPACE 'global.json'
+          $globalJson = Get-Content -LiteralPath $globalJsonPath -Raw | ConvertFrom-Json
+          $sdkVersion = [string]$globalJson.sdk.version
+          if ([string]::IsNullOrWhiteSpace($sdkVersion)) {
+              throw 'global.json 中缺少 sdk.version。'
+          }
+
+          if ($sdkVersion -notmatch '^(?<channel>\d+\.\d+)\.') {
+              throw "无法从 sdk.version 推断 .NET 发布通道：$sdkVersion"
+          }
+
+          $channelVersion = $Matches.channel
+          $releaseIndex = Invoke-RestMethod 'https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/releases-index.json'
+          $channel = $releaseIndex.'releases-index' | Where-Object { $_.'channel-version' -eq $channelVersion } | Select-Object -First 1
+          if ($null -eq $channel) {
+              throw "Microsoft .NET 发布元数据中未找到 $channelVersion 通道。"
+          }
+
+          $releaseMetadata = Invoke-RestMethod $channel.'releases.json'
+          $sdkExists = $releaseMetadata.releases.sdks.version -contains $sdkVersion
+          if (-not $sdkExists) {
+              throw "Microsoft .NET 发布元数据中未找到 SDK $sdkVersion。"
+          }
+
+          $installDir = Join-Path $env:RUNNER_TEMP 'dotnet-sdk'
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          $installScript = Join-Path $env:RUNNER_TEMP 'dotnet-install.ps1'
+          # 使用官方 dotnet-install.ps1 安装指定 SDK，避免固定 setup-dotnet Action 版本。
+          Invoke-WebRequest 'https://dot.net/v1/dotnet-install.ps1' -OutFile $installScript
+
+          & $installScript -Version $sdkVersion -InstallDir $installDir -NoPath
+          if ($LASTEXITCODE -ne 0) {
+              throw ".NET SDK $sdkVersion 安装失败。"
+          }
+
+          $installDir | Add-Content -LiteralPath $env:GITHUB_PATH
+          "DOTNET_ROOT=$installDir" | Add-Content -LiteralPath $env:GITHUB_ENV
+          "已通过 Microsoft .NET 发布元数据安装 SDK $sdkVersion。" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      - name: 🔎 读取并对比版本
+        id: version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Version.props 是发布版本的唯一来源：Tag 使用 vX.Y，标题保留构建号。
+          $versionFile = Join-Path $env:GITHUB_WORKSPACE 'Version.props'
+          [xml]$versionXml = Get-Content -LiteralPath $versionFile -Raw
+
+          $displayVersion = [string]$versionXml.Project.PropertyGroup.PluginDisplayVersion
+          $buildId = [string]$versionXml.Project.PropertyGroup.PluginBuildId
+          if ([string]::IsNullOrWhiteSpace($displayVersion) -or [string]::IsNullOrWhiteSpace($buildId)) {
+              throw 'Version.props 中缺少 PluginDisplayVersion 或 PluginBuildId。'
+          }
+          if ($displayVersion -notmatch '^\d+\.\d+$') {
+              throw "PluginDisplayVersion 必须保持 X.Y 格式，当前值：$displayVersion"
+          }
+
+          $tagName = "v$displayVersion"
+          $releaseTitle = "AFR v$displayVersion ($buildId)"
+          # latestTag 用于生成变更记录；existingRelease 用于避免重复发布同一版本。
+          $latestTag = gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""'
+          $existingRelease = gh release view $tagName --json tagName --jq '.tagName' 2>$null
+
+          "display_version=$displayVersion" >> $env:GITHUB_OUTPUT
+          "build_id=$buildId" >> $env:GITHUB_OUTPUT
+          "tag_name=$tagName" >> $env:GITHUB_OUTPUT
+          "release_title=$releaseTitle" >> $env:GITHUB_OUTPUT
+          "latest_tag=$latestTag" >> $env:GITHUB_OUTPUT
+
+          if (-not [string]::IsNullOrWhiteSpace($existingRelease)) {
+              "should_release=false" >> $env:GITHUB_OUTPUT
+              "版本 $tagName 已存在 Release，跳过构建与发布。" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+              exit 0
+          }
+
+          "should_release=true" >> $env:GITHUB_OUTPUT
+          if ([string]::IsNullOrWhiteSpace($latestTag)) {
+              "当前版本：$tagName；仓库暂无历史 Release，将创建首个 Release。" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          } else {
+              "当前版本：$tagName；最新 Release：$latestTag；检测到版本不同，将构建并创建 Release。" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: 🏗️ 构建部署器
+        if: steps.version.outputs.should_release == 'true'
+        shell: pwsh
+        run: ./src/AFR.Deployer/Publish-Deployer.ps1
+
+      - name: 📦 打包发布资产
+        if: steps.version.outputs.should_release == 'true'
+        id: package
+        shell: pwsh
+        run: |
+          # GitHub Release 会自动提供源码 zip/tar；这里仅额外上传部署器 EXE 与字体压缩包。
+          $tagName = '${{ steps.version.outputs.tag_name }}'
+          $safeTag = $tagName -replace '[^0-9A-Za-z._-]', '-'
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE 'publish/AFR.Deployer'
+          $fontsSourcePath = Join-Path $env:GITHUB_WORKSPACE 'chore/Fonts.zip'
+          $assetDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts/ReleaseAssets'
+          New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
+
+          $exeSourcePath = Join-Path $publishDir 'AFR-Deployer.exe'
+          $exeAssetPath = Join-Path $assetDir 'AFR-Deployer.exe'
+          $fontsAssetPath = Join-Path $assetDir 'Fonts.zip'
+          if (Test-Path -LiteralPath $exeAssetPath) { Remove-Item -LiteralPath $exeAssetPath -Force }
+          if (Test-Path -LiteralPath $fontsAssetPath) { Remove-Item -LiteralPath $fontsAssetPath -Force }
+          if (-not (Test-Path -LiteralPath $exeSourcePath)) {
+              throw '未找到 publish/AFR.Deployer/AFR-Deployer.exe，无法发布部署工具程序。'
+          }
+          if (-not (Test-Path -LiteralPath $fontsSourcePath)) {
+              throw '未找到 chore/Fonts.zip，无法发布字体压缩包。'
+          }
+
+          Copy-Item -LiteralPath $exeSourcePath -Destination $exeAssetPath -Force
+          Copy-Item -LiteralPath $fontsSourcePath -Destination $fontsAssetPath -Force
+
+          "exe_path=$exeAssetPath" >> $env:GITHUB_OUTPUT
+          "fonts_path=$fontsAssetPath" >> $env:GITHUB_OUTPUT
+
+      - name: 📝 生成发布说明
+        if: steps.version.outputs.should_release == 'true'
+        id: notes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 发布说明保持简洁：下载说明 + 相对上一 Release 的提交列表。
+          $notesPath = Join-Path $env:GITHUB_WORKSPACE 'release-notes.md'
+          $tagName = '${{ steps.version.outputs.tag_name }}'
+          $latestTag = '${{ steps.version.outputs.latest_tag }}'
+          $repoUrl = "https://github.com/$env:GITHUB_REPOSITORY"
+
+          $lines = [System.Collections.Generic.List[string]]::new()
+          $lines.Add('## 🚀 下载说明')
+          $lines.Add('')
+          $lines.Add('| 文件 | 用途 |')
+          $lines.Add('| --- | --- |')
+          $lines.Add('| `AFR-Deployer.exe` | 部署工具，双击运行后选择需要安装的 AutoCAD 版本。 |')
+          $lines.Add('| `Fonts.zip` | 字体压缩包，用于手动补充或备份字体资源。 |')
+          $lines.Add('')
+          $lines.Add('## 📝 变更记录')
+          $lines.Add('')
+
+          if (-not [string]::IsNullOrWhiteSpace($latestTag)) {
+              # 无 git 历史时使用 GitHub Compare API 生成变更记录。
+              $comparison = gh api "repos/$env:GITHUB_REPOSITORY/compare/$latestTag...${{ github.sha }}" | ConvertFrom-Json
+              if ($comparison.commits.Count -gt 0) {
+                  foreach ($commit in $comparison.commits) {
+                      $subject = ([string]$commit.commit.message -split "`n")[0]
+                      $shortSha = ([string]$commit.sha).Substring(0, 7)
+                      $author = [string]$commit.author.login
+                      if ([string]::IsNullOrWhiteSpace($author)) {
+                          $lines.Add("- $subject ([$shortSha]($repoUrl/commit/$($commit.sha)))")
+                      } else {
+                          $lines.Add("- $subject by @$author ([$shortSha]($repoUrl/commit/$($commit.sha)))")
+                      }
+                  }
+              } else {
+                  $lines.Add('- 本次发布未检测到相对上一版本的新提交。')
+              }
+          }
+
+          $lines | Set-Content -LiteralPath $notesPath -Encoding utf8
+          "notes_path=$notesPath" >> $env:GITHUB_OUTPUT
+
+      - name: 🚀 创建 GitHub Release
+        if: steps.version.outputs.should_release == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # gh release create 会在 tag 不存在时基于 --target 自动创建 tag。
+          gh release create '${{ steps.version.outputs.tag_name }}' `
+            '${{ steps.package.outputs.exe_path }}' `
+            '${{ steps.package.outputs.fonts_path }}' `
+            --target '${{ github.sha }}' `
+            --title '${{ steps.version.outputs.release_title }}' `
+            --notes-file '${{ steps.notes.outputs.notes_path }}' `
+            --latest
+
+          "已创建 Release：${{ steps.version.outputs.tag_name }}" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY

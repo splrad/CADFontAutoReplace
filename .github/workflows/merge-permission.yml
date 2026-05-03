@@ -8,10 +8,7 @@
 name: 🛡️ 合并审批权限校验
 
 on:
-  pull_request_target:
-    types: [opened, synchronize, reopened]
-  pull_request_review:
-    types: [submitted, dismissed]
+  workflow_call:
 
 concurrency:
   group: merge-permission-${{ github.event.pull_request.number || github.run_id }}

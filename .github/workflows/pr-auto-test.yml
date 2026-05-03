@@ -3,7 +3,7 @@
 #      Secret 名称必须与下方完全一致（区分大小写）：
 #      - DeepSeek_API_KEY：DeepSeek Key，示例值格式：sk-xxxxxxxx
 #      - REPO_ADMIN_TOKEN：GitHub PAT（建议最小权限覆盖：Pull requests 读写、Issues 读写、Contents 只读）
-#   2) 修改下方 branches-ignore 与 TARGET_BRANCH，使其符合你的测试分支命名
+#   2) 修改编排工作流中的 push 过滤规则与下方 TARGET_BRANCH，使其符合你的测试分支命名
 #   3) 可选：在仓库 Variables 中创建 TRUSTED_DEVELOPERS（JSON 数组）
 #      示例：["splrad", "another-user"]
 #      命中该名单的用户将跳过本流程，直接进入主分支 PR 快速通道
@@ -13,10 +13,7 @@
 name: 🚀 测试分支合并请求创建
 
 on:
-  push:
-    branches-ignore:
-      - test
-      - main
+  workflow_call:
 
 concurrency:
   group: pr-to-test-${{ github.ref }}

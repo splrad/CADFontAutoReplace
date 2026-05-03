@@ -100,7 +100,38 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - `MTextInlineFontReplacer`：看替换前后 `mtext.Contents`；
 - `ExecutionController.Execute` 第三阶段：核对三组修复记录合并结果。
 
-## 8. 回归清单（进阶）
+## 8. 部署器发布脚本
+
+部署器 EXE 由 `src/AFR.Deployer/Publish-Deployer.ps1` 统一生成，不手工复制 DLL 或直接发布 `AFR.Deployer.csproj`。
+
+脚本职责：
+
+1. 自动发现 `src/AutoCAD/AFR-ACAD*/AFR-ACAD*.csproj`；
+2. Release 构建每个版本壳；
+3. 依赖 `Directory.Build.props` 的 `CopyDllToReleases` 目标，将 DLL 汇聚到 `artifacts/Releases/`；
+4. 复制 `AFR-ACAD*.dll` 与 `AFR-ACAD*.cad.json` 到 `src/AFR.Deployer/Resources/`；
+5. 发布 `AFR.Deployer` 自包含单文件 EXE。
+
+常用命令：
+
+```powershell
+./src/AFR.Deployer/Publish-Deployer.ps1
+./src/AFR.Deployer/Publish-Deployer.ps1 -SkipPluginBuild
+```
+
+输出约定：
+
+```text
+publish/AFR.Deployer/AFR-Deployer.exe
+```
+
+注意事项：
+
+- EXE 文件名由 `AFR.Deployer.csproj` 的 `<AssemblyName>AFR-Deployer</AssemblyName>` 决定，不在发布后重命名。
+- 新增 CAD 版本时必须确保版本壳 `.csproj` 写入 `CadBrand` / `CadVersion` / `CadRegistryBasePath`，否则 `.cad.json` 元数据不会正确生成。
+- `Version.props` 是部署器与插件 DLL 的统一版本来源，发版只修改该文件。
+
+## 9. 回归清单（进阶）
 
 - [ ] 不同触发源（Startup / Command / DocumentCreated）都验证
 - [ ] Hook on/off 两条路径验证
@@ -108,7 +139,7 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - [ ] MText `\F` / `\f` / 参数段 / 路径残留 / `@` 前缀都覆盖
 - [ ] Release 构建下 Debug 功能完全排除
 
-## 9. 代码评审关注点（建议）
+## 10. 代码评审关注点（建议）
 
 - 是否破坏层级依赖方向；
 - 是否引入无必要抽象；

@@ -3,15 +3,12 @@
 #      禁止任何人直接推送到主分支，所有变更必须通过 PR 合入
 #   2. 在 main 分支保护规则中将「⚙️ 合并来源校验」添加为必须通过的状态检查
 #   3. 修改下方 env 中的 ALLOWED_SOURCE_BRANCH 为允许向主分支合并的来源分支名
-#   4. 修改 on.pull_request_target.branches 为实际的主分支名（master 或 main）
+#   4. 如需限制触发分支，请在编排工作流中配置 pull_request_target.branches（建议在 orchestrate-pr-events.yml 中维护）
 #   5. 核心开发者（TRUSTED_DEVELOPERS 变量中的用户）发起的 PR 将自动放行来源校验
 name: 🔒 主干分支合并规则校验
 
 on:
-  pull_request_target:
-    branches:
-      - main
-    types: [opened, synchronize, reopened]
+  workflow_call:
 
 concurrency:
   group: pr-branch-check-${{ github.event.pull_request.number || github.run_id }}

@@ -1,0 +1,37 @@
+name: 📣 PR关闭链路编排
+
+on:
+  pull_request_target:
+    branches:
+      - main
+    types: [closed]
+
+concurrency:
+  group: orchestrate-pr-close-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: write
+  issues: write
+  contents: write
+
+jobs:
+  pr-close-notify:
+    name: 📣 PR关闭状态通知
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.state == 'closed'
+    uses: ./.github/workflows/pr-close-notify.yml
+    secrets: inherit
+
+  sync-test-branch:
+    name: 🔄 重置测试分支到主分支
+    needs: pr-close-notify
+    if: >-
+      always() &&
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.state == 'closed'
+    uses: ./.github/workflows/sync-test-branch.yml
+    secrets: inherit

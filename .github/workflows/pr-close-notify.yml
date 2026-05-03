@@ -1,16 +1,14 @@
 # 📋 复用到新项目时的配置步骤：
 #   0. （可选）创建 REPO_ADMIN_TOKEN（或 MY_PAT）用于读取 API 的回退访问；评论写入不会回退到该令牌
 #   1. 确保仓库已创建 TRUSTED_DEVELOPERS 变量（JSON 数组格式的用户名列表）
-#   2. 修改下方 on.pull_request_target.branches 为实际主分支名（main 或 master）
+#   2. 在编排工作流中配置 pull_request_target.branches 为实际主分支名（main 或 master）
 #   3. 当 PR 关闭时自动发布状态评论，并通过评论中的 @对象触发 GitHub 官方通知邮件
-#   4. 若日志出现 github.token 无写权限，先确认仓库 Actions 默认权限为 Read and write，再确认本工作流 jobs.permissions 含 pull-requests: write 与 issues: write
+#   4. 未合并关闭 PR 时，最后一条非机器人评论必须来自关闭人；否则将自动恢复为打开状态
+#   5. 若日志出现 github.token 无写权限，先确认仓库 Actions 默认权限为 Read and write，再确认本工作流 jobs.permissions 含 pull-requests: write 与 issues: write
 name: 📣 PR关闭状态通知
 
 on:
-  pull_request_target:
-    branches:
-      - main
-    types: [closed]
+  workflow_call:
 
 concurrency:
   group: pr-close-notify-${{ github.event.pull_request.number || github.run_id }}
@@ -20,6 +18,10 @@ jobs:
   notify-pr-close-status:
     # ✅ 在 PR 检查列表显示的名称
     name: 📣 发布PR关闭状态通知
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.state == 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 3
 
@@ -130,6 +132,35 @@ jobs:
             "repos/$REPO/issues/$issue_number/comments" \
             -f per_page=100)
 
+          last_human_comment_author='无'
+          last_human_comment_body='无'
+          last_human_comment_url=''
+
+          last_human_comment_json=$(echo "$comments_json" | jq -c --arg marker "$marker" '
+            [ .[]
+              | select((.body // "") != "")
+              | select(((.user.type // "") | ascii_downcase) != "bot")
+              | select(((.user.login // "") | test("\\[bot\\]$")) | not)
+              | select(((.body // "") | contains($marker)) | not)
+            ]
+            | sort_by(.created_at)
+            | last // empty
+          ')
+
+          if [ -n "$last_human_comment_json" ]; then
+            last_human_comment_author=$(echo "$last_human_comment_json" | jq -r '.user.login // "无"')
+            last_human_comment_body=$(echo "$last_human_comment_json" | jq -r '.body // ""')
+            last_human_comment_url=$(echo "$last_human_comment_json" | jq -r '.html_url // ""')
+
+            last_human_comment_body=$(printf '%s' "$last_human_comment_body" \
+              | tr '\r\n' ' ' \
+              | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')
+
+            if [ -z "$last_human_comment_body" ]; then
+              last_human_comment_body='（仅包含空白字符）'
+            fi
+          fi
+
           existing_id=$(echo "$comments_json" | jq -r --arg marker "$marker" '.[] | select((.body // "") | contains($marker)) | .id' | head -n 1)
 
           pr_title="${PR_TITLE:-unknown}"
@@ -145,6 +176,32 @@ jobs:
               mention_text="@$pr_author"
             else
               mention_text="$mention_text；@$pr_author"
+            fi
+          fi
+
+          if [ "${PR_MERGED}" != "true" ]; then
+            closer_has_required_comment="false"
+            if [ "$last_human_comment_author" = "$pr_closed_by" ] && \
+               [ "$last_human_comment_body" != "无" ] && \
+               [ "$last_human_comment_body" != "（仅包含空白字符）" ]; then
+              closer_has_required_comment="true"
+            fi
+
+            if [ "$closer_has_required_comment" != "true" ]; then
+              run_gh_api "恢复未合规关闭的PR" "api-first" --method PATCH \
+                -H "Accept: application/vnd.github+json" \
+                "repos/$REPO/pulls/$issue_number" \
+                -f state='open' >/dev/null
+
+              enforcement_body='当前PR未说明关闭原因，无法关闭，请在评论区补充关闭原因'
+
+              run_gh_api "发布关闭校验失败提示" "comment-only" --method POST \
+                -H "Accept: application/vnd.github+json" \
+                "repos/$REPO/issues/$issue_number/comments" \
+                -f body="$enforcement_body" >/dev/null
+
+              echo "❌ 未合并关闭校验失败：关闭人未提供符合要求的评论，PR 已恢复为打开状态。"
+              exit 1
             fi
           fi
 
@@ -170,7 +227,7 @@ jobs:
               echo "- 合并人: $merged_by"
               echo "- 合并提交: $merge_commit_sha"
             else
-              echo "- 关闭原因: 未合并直接关闭"
+              echo "- 关闭原因: $last_human_comment_body"
               echo "- 关闭人: $pr_closed_by"
             fi
 

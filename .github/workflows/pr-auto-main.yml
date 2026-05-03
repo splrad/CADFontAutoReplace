@@ -13,9 +13,7 @@
 name: 🚀 主干分支合并请求创建
 
 on:
-  push:
-    branches-ignore:
-      - main
+  workflow_call:
 
 concurrency:
   group: pr-auto-create-${{ github.ref }}
