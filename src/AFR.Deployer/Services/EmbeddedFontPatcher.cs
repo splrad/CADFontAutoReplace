@@ -24,28 +24,33 @@ internal static class EmbeddedFontPatcher
     private const string FontsSubDirectory     = "Fonts";
 
     /// <summary>
-    /// 对单个配置文件实例释放内嵌字体。任何 IO/注册表异常一律视为本次跳过（不抛出）。
+    /// 对指定 CAD 版本下所有配置文件实例释放内嵌字体。任何 IO/注册表异常一律视为本次跳过（不抛出）。
     /// </summary>
     /// <returns>true 表示字体已就绪（释放成功或全部已存在）；false 表示无法定位 Fonts 目录或至少一个文件释放失败。</returns>
     public static bool Apply(CadInstallation installation)
     {
         if (!installation.IsCadInstalled) return false;
 
-        var fontsDir = ResolveFontsDirectory(installation);
-        if (fontsDir is null) return false;
+        var fontDirs = installation.ProfileSubKeys
+            .Select(profileSubKey => ResolveFontsDirectory(installation, profileSubKey))
+            .Where(fontsDir => fontsDir is not null)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (fontDirs.Count == 0) return false;
 
         var assembly = typeof(EmbeddedFontPatcher).Assembly;
-        return EmbeddedFontExtractor.ExtractAll(assembly, fontsDir, out _);
+        return fontDirs.All(fontsDir => EmbeddedFontExtractor.ExtractAll(assembly, fontsDir!, out _));
     }
 
     /// <summary>
-    /// 从注册表解析当前配置文件实例的 <c>&lt;AcadLocation&gt;\Fonts</c>。
+    /// 从注册表解析指定配置文件实例的 <c>&lt;AcadLocation&gt;\Fonts</c>。
     /// AutoCAD 把安装路径写在每个配置文件子键里：先尝试 HKLM（标准安装），
     /// 不存在再回退 HKCU（少数版本或便携安装）。任何失败都返回 null。
     /// </summary>
-    private static string? ResolveFontsDirectory(CadInstallation installation)
+    private static string? ResolveFontsDirectory(CadInstallation installation, string profileSubKey)
     {
-        var subPath = $@"{installation.Descriptor.RegistryBasePath}\{installation.ProfileSubKey}";
+        var subPath = installation.GetProfileRootPath(profileSubKey);
 
         var acadLocation = ReadString(Registry.LocalMachine, subPath, AcadLocationValueName)
                         ?? ReadString(Registry.CurrentUser, subPath, AcadLocationValueName);

@@ -215,6 +215,8 @@ public sealed class ConfigService
     public int DeleteAllApplicationKeys()
     {
         int deletedCount = 0;
+        if (string.IsNullOrWhiteSpace(AppName) || AppName.Contains("\\"))
+            return deletedCount;
 
         var subKeyNames = RegistryService.GetSubKeyNames(Registry.CurrentUser, AutoCadBasePath);
         foreach (var name in subKeyNames)

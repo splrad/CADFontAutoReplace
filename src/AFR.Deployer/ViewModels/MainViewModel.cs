@@ -93,25 +93,25 @@ internal sealed partial class MainViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(DetectionSummary))]
     public partial int TotalCount { get; set; }
 
-    /// <summary>已部署且为最新版的插件实例数量。</summary>
+    /// <summary>已部署且为最新版的 CAD 版本数量。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PluginSummary))]
     [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
     public partial int DeployedCurrentCount { get; set; }
 
-    /// <summary>已部署但版本陈旧的插件实例数量。</summary>
+    /// <summary>已部署但版本陈旧的 CAD 版本数量。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PluginSummary))]
     [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
     public partial int DeployedOutdatedCount { get; set; }
 
-    /// <summary>注册表登记但 DLL 文件已丢失的插件实例数量。</summary>
+    /// <summary>注册表登记但 DLL 文件已丢失的 CAD 版本数量。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PluginSummary))]
     [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
     public partial int DllMissingCount { get; set; }
 
-    /// <summary>已检测到 CAD 但插件尚未部署的配置文件实例数量。</summary>
+    /// <summary>已检测到 CAD 但插件尚未部署的 CAD 版本数量。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PluginSummary))]
     [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
@@ -331,7 +331,9 @@ internal sealed partial class MainViewModel : ObservableObject
 
     private static bool IsSameEntry(CadInstallation r, CadEntryViewModel e)
         => r.Descriptor.AppName == e.Installation.Descriptor.AppName
-        && r.ProfileSubKey      == e.Installation.ProfileSubKey;
+        && string.Equals(r.Descriptor.RegistryBasePath,
+                         e.Installation.Descriptor.RegistryBasePath,
+                         StringComparison.OrdinalIgnoreCase);
 
     // ── 进程检测 ──
 
@@ -369,7 +371,7 @@ internal sealed partial class MainViewModel : ObservableObject
         }
 
         var freshResults = CadRegistryScanner.Scan()
-            .ToDictionary(r => (r.Descriptor.AppName, r.ProfileSubKey));
+            .ToDictionary(r => r.Descriptor.AppName);
 
         IsBusy     = true;
         StatusText = "正在安装……";
@@ -384,11 +386,11 @@ internal sealed partial class MainViewModel : ObservableObject
 
             foreach (var entry in selected)
             {
-                var key = (entry.Installation.Descriptor.AppName, entry.Installation.ProfileSubKey);
+                var key = entry.Installation.Descriptor.AppName;
                 var fresh = freshResults.GetValueOrDefault(key, entry.Installation);
 
                 if (!PluginDeployer.TryInstall(fresh, DeployPath, out var err))
-                    errors.Add($"{fresh.Descriptor.DisplayName} [{fresh.ProfileSubKey}]：{err}");
+                    errors.Add($"{fresh.Descriptor.DisplayName}：{err}");
                 else
                 {
                     successes++;
@@ -399,7 +401,7 @@ internal sealed partial class MainViewModel : ObservableObject
                     try
                     {
                         if (!EmbeddedFontPatcher.Apply(fresh))
-                            errors.Add($"{fresh.Descriptor.DisplayName} [{fresh.ProfileSubKey}]：默认 SHX 字体释放失败，请手动在CAD中运行AFR插件进行字体配置");
+                            errors.Add($"{fresh.Descriptor.DisplayName}：默认 SHX 字体释放失败，请手动在CAD中运行AFR插件进行字体配置");
                     }
                     catch { /* 字体释放失败不影响安装主流程 */ }
                 }
@@ -422,7 +424,7 @@ internal sealed partial class MainViewModel : ObservableObject
                 $"以下版本安装失败：\n\n{string.Join("\n", errors)}",
                 "AFR 部署工具 — 安装错误");
         else
-            StatusText = $"✓ 已成功安装 {successes} 个配置文件实例并应用 SHX 缺失弹窗抑制，启动 CAD 时插件生效";
+            StatusText = $"✓ 已成功安装 {successes} 个 CAD 版本并应用 SHX 缺失弹窗抑制，启动 CAD 时插件生效";
     }
 
     // ── 卸载 ──
@@ -441,13 +443,13 @@ internal sealed partial class MainViewModel : ObservableObject
         }
 
         var confirmed = await _dialog.ConfirmAsync(
-            $"确定要从以下 {selected.Count} 个配置文件实例中卸载 AFR 插件？\n\n" +
-            string.Join("\n", selected.Select(e => $"  • {e.Installation.Descriptor.DisplayName} [{e.Profile}]")),
+            $"确定要从以下 {selected.Count} 个 CAD 版本中卸载 AFR 插件？\n\n" +
+            string.Join("\n", selected.Select(e => $"  • {e.Installation.Descriptor.DisplayName}")),
             "AFR 部署工具 — 确认卸载");
         if (!confirmed) return;
 
         var freshResults = CadRegistryScanner.Scan()
-            .ToDictionary(r => (r.Descriptor.AppName, r.ProfileSubKey));
+            .ToDictionary(r => r.Descriptor.AppName);
 
         IsBusy     = true;
         StatusText = "正在卸载……";
@@ -461,15 +463,15 @@ internal sealed partial class MainViewModel : ObservableObject
 
             foreach (var entry in selected)
             {
-                var key = (entry.Installation.Descriptor.AppName, entry.Installation.ProfileSubKey);
+                var key = entry.Installation.Descriptor.AppName;
                 var fresh = freshResults.GetValueOrDefault(key, entry.Installation);
 
                 if (!PluginUninstaller.TryUninstall(fresh, out var warn))
-                    warnings.Add($"{fresh.Descriptor.DisplayName} [{fresh.ProfileSubKey}]：{warn}");
+                    warnings.Add($"{fresh.Descriptor.DisplayName}：{warn}");
                 else
                 {
                     if (warn is not null)
-                        warnings.Add($"{fresh.Descriptor.DisplayName} [{fresh.ProfileSubKey}]（警告）：{warn}");
+                        warnings.Add($"{fresh.Descriptor.DisplayName}（警告）：{warn}");
                     successes++;
                     patchedDescriptors.Add(fresh.Descriptor);
                 }
@@ -491,7 +493,7 @@ internal sealed partial class MainViewModel : ObservableObject
             await _dialog.ShowWarningAsync(string.Join("\n", warnings),
                 "AFR 部署工具 — 卸载完成（含警告）");
         else
-            StatusText = $"✓ 已成功卸载 {successes} 个配置文件实例并还原由本插件写入的 SHX 缺失弹窗抑制设置";
+            StatusText = $"✓ 已成功卸载 {successes} 个 CAD 版本并还原由本插件写入的 SHX 缺失弹窗抑制设置";
     }
 
     /// <summary>清空所有条目的勾选状态，避免上一次操作的选择残留到下一次操作。</summary>
