@@ -160,23 +160,23 @@ jobs:
 
           & $installScript -Version $sdkVersion -InstallDir $installDir -NoPath
 
-            # dotnet-install 在某些场景会残留非零 LASTEXITCODE，改为以“实际安装结果”判定是否成功。
-            $dotnetExe = Join-Path $installDir 'dotnet.exe'
-            if (-not (Test-Path -LiteralPath $dotnetExe)) {
+          # dotnet-install 在某些场景会残留非零 LASTEXITCODE，改为以“实际安装结果”判定是否成功。
+          $dotnetExe = Join-Path $installDir 'dotnet.exe'
+          if (-not (Test-Path -LiteralPath $dotnetExe)) {
               throw ".NET SDK $sdkVersion 安装失败：未找到 $dotnetExe。"
-            }
+          }
 
-            $installedSdks = & $dotnetExe --list-sdks
-            if ($LASTEXITCODE -ne 0) {
+          $installedSdks = & $dotnetExe --list-sdks
+          if ($LASTEXITCODE -ne 0) {
               throw ".NET SDK $sdkVersion 安装失败：dotnet --list-sdks 执行失败。"
-            }
+          }
 
-            $hasExactSdk = (($installedSdks -split "`r?`n") | Where-Object {
+          $hasExactSdk = (($installedSdks -split "`r?`n") | Where-Object {
               $_ -match ('^' + [regex]::Escape($sdkVersion) + '\s')
-            }).Count -gt 0
-            if (-not $hasExactSdk) {
+          }).Count -gt 0
+          if (-not $hasExactSdk) {
               throw ".NET SDK $sdkVersion 安装失败：安装目录中未检测到该版本。"
-            }
+          }
 
           $installDir | Add-Content -LiteralPath $env:GITHUB_PATH
           "DOTNET_ROOT=$installDir" | Add-Content -LiteralPath $env:GITHUB_ENV
@@ -206,23 +206,23 @@ jobs:
           $releaseTitle = "AFR v$displayVersion ($buildId)"
           # latestTag 用于生成变更记录；existingRelease 用于避免重复发布同一版本。
           $latestTag = gh release list --repo $env:GH_REPO --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""'
-            $releaseHeaders = @{
+          $releaseHeaders = @{
               Accept = 'application/vnd.github+json'
               Authorization = "Bearer $env:GH_TOKEN"
               'X-GitHub-Api-Version' = '2022-11-28'
-            }
-            $releaseLookup = Invoke-WebRequest `
+          }
+          $releaseLookup = Invoke-WebRequest `
               -Uri "https://api.github.com/repos/$env:GH_REPO/releases/tags/$tagName" `
               -Headers $releaseHeaders `
               -SkipHttpErrorCheck
 
-            if ($releaseLookup.StatusCode -eq 200) {
+          if ($releaseLookup.StatusCode -eq 200) {
               $existingRelease = [string]((($releaseLookup.Content | ConvertFrom-Json).tag_name))
-            } elseif ($releaseLookup.StatusCode -eq 404) {
+          } elseif ($releaseLookup.StatusCode -eq 404) {
               $existingRelease = ''
-            } else {
+          } else {
               throw "查询 Release $tagName 失败，HTTP $($releaseLookup.StatusCode)。"
-            }
+          }
 
           "display_version=$displayVersion" >> $env:GITHUB_OUTPUT
           "build_id=$buildId" >> $env:GITHUB_OUTPUT
@@ -289,8 +289,10 @@ jobs:
         run: |
           # 发布说明优先使用 AI 基于“相对上一 Release 的相关代码差异”生成，并过滤工作流/文档等无关项。
           $notesPath = Join-Path $env:GITHUB_WORKSPACE 'release-notes.md'
-          $tagName = '${{ steps.version.outputs.tag_name }}'
-          $latestTag = '${{ steps.version.outputs.latest_tag }}'
+          $versionFile = Join-Path $env:GITHUB_WORKSPACE 'Version.props'
+          [xml]$versionXml = Get-Content -LiteralPath $versionFile -Raw
+          $tagName = "v$([string]$versionXml.Project.PropertyGroup.PluginDisplayVersion)"
+          $latestTag = gh release list --repo $env:GITHUB_REPOSITORY --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""'
           $maxDiffChars = 16000
           $fallbackReason = ''
           $deepSeekModelConfigPath = Join-Path $env:GITHUB_WORKSPACE '.github/deepseek-model.txt'
@@ -619,7 +621,7 @@ jobs:
               }
 
               $response = Invoke-WebRequest `
-                  -Uri 'https://api.deepseek.com/chat/completions' `
+                  -Uri '[https://api.deepseek.com/chat/completions](https://api.deepseek.com/chat/completions)' `
                   -Method Post `
                   -Headers @{ Authorization = "Bearer $env:DEEPSEEK_API_KEY" } `
                   -ContentType 'application/json' `
@@ -675,7 +677,7 @@ jobs:
           $releaseSummary = ''
 
           if (-not [string]::IsNullOrWhiteSpace($latestTag)) {
-              $comparisonRaw = gh api "repos/$env:GITHUB_REPOSITORY/compare/$latestTag...${{ github.sha }}" 2>$null
+              $comparisonRaw = gh api "repos/$env:GITHUB_REPOSITORY/compare/$latestTag...$env:GITHUB_SHA" 2>$null
               if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($comparisonRaw)) {
                   $comparison = $comparisonRaw | ConvertFrom-Json
                   $issueNumbersByFilePath = Get-IssueNumbersByRelevantFilePath -ComparisonCommits @($comparison.commits)
@@ -849,13 +851,13 @@ jobs:
         run: |
           # gh release create 会在 tag 不存在时基于 --target 自动创建 tag。
           gh release create '${{ steps.version.outputs.tag_name }}' `
-            '${{ steps.package.outputs.exe_path }}' `
-            '${{ steps.package.outputs.fonts_path }}' `
-            --repo $env:GH_REPO `
-            --target '${{ github.sha }}' `
-            --title '${{ steps.version.outputs.release_title }}' `
-            --notes-file '${{ steps.notes.outputs.notes_path }}' `
-            --latest
+              '${{ steps.package.outputs.exe_path }}' `
+              '${{ steps.package.outputs.fonts_path }}' `
+              --repo $env:GH_REPO `
+              --target '${{ github.sha }}' `
+              --title '${{ steps.version.outputs.release_title }}' `
+              --notes-file '${{ steps.notes.outputs.notes_path }}' `
+              --latest
 
           "已创建 Release：${{ steps.version.outputs.tag_name }}" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
 
@@ -909,7 +911,7 @@ jobs:
               }
 
               $versionResponse = Invoke-WebRequest `
-                  -Uri "https://api.github.com/repos/$env:GH_REPO/contents/Version.props?ref=$env:GITHUB_SHA" `
+                  -Uri "[https://api.github.com/repos/$env:GH_REPO/contents/Version.props?ref=$env:GITHUB_SHA](https://api.github.com/repos/$env:GH_REPO/contents/Version.props?ref=$env:GITHUB_SHA)" `
                   -Headers $headers `
                   -SkipHttpErrorCheck
 
@@ -1002,46 +1004,46 @@ jobs:
           $tagName = if ([string]::IsNullOrWhiteSpace($versionInfo.TagName)) { '未读取到' } else { $versionInfo.TagName }
           $releaseTitle = if ([string]::IsNullOrWhiteSpace($versionInfo.ReleaseTitle)) { '未读取到' } else { $versionInfo.ReleaseTitle }
 
-            if ($env:SHOULD_RELEASE -eq 'false') {
+          if ($env:SHOULD_RELEASE -eq 'false') {
               Write-Host '当前运行未检测到新版本号变化，跳过发布结果通知。'
               exit 0
-            }
+          }
 
-            if ([string]::IsNullOrWhiteSpace($env:SHOULD_RELEASE)) {
+          if ([string]::IsNullOrWhiteSpace($env:SHOULD_RELEASE)) {
               if ($tagName -eq '未读取到') {
-                Write-Host '::warning::无法判断当前运行是否对应版本号变化，跳过发布结果通知。'
-                exit 0
+                  Write-Host '::warning::无法判断当前运行是否对应版本号变化，跳过发布结果通知。'
+                  exit 0
               }
 
               $releaseLookup = Invoke-WebRequest `
-                -Uri "https://api.github.com/repos/$env:GH_REPO/releases/tags/$tagName" `
-                -Headers $headers `
-                -SkipHttpErrorCheck
+                  -Uri "[https://api.github.com/repos/$env:GH_REPO/releases/tags/$tagName](https://api.github.com/repos/$env:GH_REPO/releases/tags/$tagName)" `
+                  -Headers $headers `
+                  -SkipHttpErrorCheck
 
               if ($releaseLookup.StatusCode -eq 200) {
-                Write-Host '当前版本已存在 Release，本次运行不对应新的版本号变化，跳过发布结果通知。'
-                exit 0
+                  Write-Host '当前版本已存在 Release，本次运行不对应新的版本号变化，跳过发布结果通知。'
+                  exit 0
               }
 
               if ($releaseLookup.StatusCode -ne 404) {
-                throw "查询 Release $tagName 失败，HTTP $($releaseLookup.StatusCode)。"
+              throw "查询 Release $tagName 失败，HTTP $($releaseLookup.StatusCode)。"
               }
-            }
+          }
 
-            $pullRequestInfo = Resolve-MergedPullRequest
-            if ($null -eq $pullRequestInfo -or [string]::IsNullOrWhiteSpace([string]$pullRequestInfo.Number)) {
+          $pullRequestInfo = Resolve-MergedPullRequest
+          if ($null -eq $pullRequestInfo -or [string]::IsNullOrWhiteSpace([string]$pullRequestInfo.Number)) {
               Write-Host '::warning::未找到本次版本号变化对应的已合并且已关闭 PR，跳过发布结果通知。'
               exit 0
-            }
+          }
 
-            $prNumber = [string]$pullRequestInfo.Number
-            $prTitle = if ([string]::IsNullOrWhiteSpace([string]$pullRequestInfo.Title)) { '未读取到' } else { [string]$pullRequestInfo.Title }
-            $prUrl = "https://github.com/$env:GH_REPO/pull/$prNumber"
-          $releaseUrl = if ($tagName -eq '未读取到') { '未生成' } else { "https://github.com/$env:GH_REPO/releases/tag/$tagName" }
+          $prNumber = [string]$pullRequestInfo.Number
+          $prTitle = if ([string]::IsNullOrWhiteSpace([string]$pullRequestInfo.Title)) { '未读取到' } else { [string]$pullRequestInfo.Title }
+          $prUrl = "[https://github.com/$env:GH_REPO/pull/$prNumber](https://github.com/$env:GH_REPO/pull/$prNumber)"
+          $releaseUrl = if ($tagName -eq '未读取到') { '未生成' } else { "[https://github.com/$env:GH_REPO/releases/tag/$tagName](https://github.com/$env:GH_REPO/releases/tag/$tagName)" }
           $commitShortSha = ([string]$env:GITHUB_SHA).Substring(0, 7)
-          $runUrl = "https://github.com/$env:GH_REPO/actions/runs/$env:GITHUB_RUN_ID/attempts/$env:GITHUB_RUN_ATTEMPT"
+          $runUrl = "[https://github.com/$env:GH_REPO/actions/runs/$env:GITHUB_RUN_ID/attempts/$env:GITHUB_RUN_ATTEMPT](https://github.com/$env:GH_REPO/actions/runs/$env:GITHUB_RUN_ID/attempts/$env:GITHUB_RUN_ATTEMPT)"
 
-            if ($env:RELEASE_RESULT -eq 'success') {
+          if ($env:RELEASE_RESULT -eq 'success') {
               $title = '## 📦【版本发布】已完成'
               $resultText = 'Release 创建成功'
           } else {
