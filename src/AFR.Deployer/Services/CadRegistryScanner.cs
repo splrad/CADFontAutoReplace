@@ -10,11 +10,11 @@ namespace AFR.Deployer.Services;
 /// 每次调用 <see cref="Scan"/> 都会重新读取注册表，确保反映用户在工具运行期间的手动修改。
 /// </para>
 /// </summary>
-internal static class CadRegistryScanner
+internal static partial class CadRegistryScanner
 {
     /// <summary>AutoCAD 配置文件子键的匹配模式，对所有 AutoCAD 版本通用。</summary>
-    private static readonly Regex ProfilePattern =
-        new(@"^ACAD-[A-Za-z0-9]+:[A-Za-z0-9]+$", RegexOptions.Compiled);
+    [GeneratedRegex(@"^ACAD-[A-Za-z0-9]+:[A-Za-z0-9]+$")]
+    private static partial Regex ProfilePattern();
 
     /// <summary>
     /// 扫描注册表，返回所有受支持 CAD 版本的条目列表（按品牌 → 版本排序）。
@@ -56,7 +56,7 @@ internal static class CadRegistryScanner
     /// <summary>
     /// 读取同一 CAD 版本下所有配置文件实例的聚合插件状态。
     /// </summary>
-    private static CadInstallation ReadInstallation(CadDescriptor descriptor, IReadOnlyList<string> profileSubKeys)
+    private static CadInstallation ReadInstallation(CadDescriptor descriptor, List<string> profileSubKeys)
     {
         var statuses          = new List<PluginDeployStatus>(profileSubKeys.Count);
         string? firstVersion  = null;
@@ -104,17 +104,16 @@ internal static class CadRegistryScanner
     /// <summary>
     /// 获取指定注册表基路径下所有匹配 AutoCAD 配置文件模式的子键名称。
     /// </summary>
-    private static IReadOnlyList<string> GetProfileSubKeys(string basePath)
+    private static List<string> GetProfileSubKeys(string basePath)
     {
         try
         {
             using var baseKey = Registry.CurrentUser.OpenSubKey(basePath, false);
             if (baseKey is null) return [];
 
-            return baseKey.GetSubKeyNames()
-                          .Where(name => ProfilePattern.IsMatch(name))
-                          .OrderBy(name => name)
-                          .ToList();
+            return [.. baseKey.GetSubKeyNames()
+                               .Where(name => ProfilePattern().IsMatch(name))
+                               .OrderBy(name => name)];
         }
         catch
         {

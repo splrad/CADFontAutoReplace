@@ -35,7 +35,11 @@ public sealed class ConfigService
     private int? _isInitialized;
     // volatile 确保多线程场景下可见最新状态。
     private volatile bool _cacheLoaded;
+#if NET9_0_OR_GREATER
+    private readonly System.Threading.Lock _lock = new();
+#else
     private readonly object _lock = new();
+#endif
 
     // 缓存解析后的有效应用注册表路径。
     private List<string>? _resolvedAppPaths;
@@ -215,7 +219,7 @@ public sealed class ConfigService
     public int DeleteAllApplicationKeys()
     {
         int deletedCount = 0;
-        if (string.IsNullOrWhiteSpace(AppName) || AppName.Contains("\\"))
+        if (string.IsNullOrWhiteSpace(AppName) || AppName.Contains('\\'))
             return deletedCount;
 
         var subKeyNames = RegistryService.GetSubKeyNames(Registry.CurrentUser, AutoCadBasePath);
