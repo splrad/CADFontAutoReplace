@@ -1,13 +1,14 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    自动重生成所有 AutoCAD 插件 DLL，复制到 Resources\ 目录，再发布 AFR.Deployer 单文件 EXE。
+    自动构建所有 AutoCAD 插件 DLL，汇总到部署器资源目录，并发布 AFR.Deployer 单文件 EXE。
 .DESCRIPTION
     执行步骤：
-      1. Release x64 构建所有 AFR-ACAD20XX 项目
+      1. 以 Release 配置构建所有 AFR-ACAD20XX 项目
          - Directory.Build.props 的 CopyDllToReleases Target 自动将 DLL 汇聚到
            artifacts\Releases\
-      2. 从 artifacts\Releases\ 复制 DLL 到 AFR.Deployer\Resources\
+      2. 从 artifacts\Releases\ 复制插件 DLL 与 CAD 元数据 JSON 到
+         AFR.Deployer\Resources\
       3. dotnet publish AFR.Deployer -> 自包含 .NET 10 单文件 EXE
          （已内置 .NET 10 运行时；用户仅需额外安装 Windows App Runtime 1.8 (x64)，
            缺失时由 AFR.Deployer 启动期检测并弹原生对话框给出下载链接）
@@ -24,21 +25,22 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# 强制 UTF-8 控制台编码：dotnet CLI 默认输出 UTF-8，
-# 而 PowerShell 在中文 Windows 上默认按 GBK (CP936) 解码外部进程输出，
+# 强制控制台按 UTF-8 处理外部进程输出。
+# dotnet CLI 默认输出 UTF-8，而中文 Windows 上的 Windows PowerShell 5.1
+# 常按系统代码页（通常为 GBK / CP936）解释文本，导致中文日志乱码。
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 # ── 路径常量 ──────────────────────────────────────────────────────────────
 $RepoRoot       = (Resolve-Path "$PSScriptRoot\..\..").Path
 $PluginsRoot    = Join-Path $RepoRoot "src\AutoCAD"
-$ReleasesDir    = Join-Path $RepoRoot "artifacts\Releases"   # CopyDllToReleases 的汇聚点
-$ResourcesDir   = Join-Path $PSScriptRoot "Resources"
+$ReleasesDir    = Join-Path $RepoRoot "artifacts\Releases"   # 插件构建产物的统一汇聚目录
+$ResourcesDir   = Join-Path $PSScriptRoot "Resources"         # 部署器打包时嵌入的资源目录
 $DeployerCsproj = Join-Path $PSScriptRoot "AFR.Deployer.csproj"
 $PublishOutput  = Join-Path $RepoRoot "publish\AFR.Deployer"
 
-# 自动发现 src\AutoCAD\AFR-ACAD*\*.csproj，无需在新增 CAD 版本时手工维护此列表。
-# TFM 仅用于日志展示，从 csproj 中解析；解析失败则回落到 "(unknown)"。
+# 自动发现 src\AutoCAD\AFR-ACAD*\*.csproj，避免新增 CAD 版本时手工维护列表。
+# TFM 仅用于控制台日志展示；解析失败时回落为 "(unknown)"，不阻断发布流程。
 function Get-PluginTfm([string]$csprojPath) {
     try {
         [xml]$xml = Get-Content -LiteralPath $csprojPath -Raw
@@ -81,6 +83,9 @@ function Write-Ok([string]$msg)   { Write-Host "  ✓ $msg" -ForegroundColor Gre
 function Write-Fail([string]$msg) { Write-Host "  ✗ $msg" -ForegroundColor Red }
 
 # ── Step 1：构建所有插件 DLL ──────────────────────────────────────────────
+# 仅在未指定 -SkipPluginBuild 时执行。
+# 成功后，Directory.Build.props 中的 CopyDllToReleases 目标会把 DLL/JSON
+# 自动汇聚到 artifacts\Releases\，供后续统一复制。
 if (-not $SkipPluginBuild) {
     Write-Step "构建所有 AutoCAD 插件 DLL (Release)"
 
@@ -89,8 +94,7 @@ if (-not $SkipPluginBuild) {
         $csproj = Join-Path $PluginsRoot "$($p.Name)\$($p.Name).csproj"
         Write-Host "  → 构建 $($p.Name) ($($p.TFM))..." -NoNewline
 
-        # 使用 dotnet build；CopyDllToReleases Target 会在构建成功后自动
-        # 将 DLL 复制到 artifacts\Releases\
+        # 构建单个版本壳项目；构建成功后会自动触发产物汇聚。
         $output = dotnet build $csproj -c Release --nologo -v quiet 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "失败"
@@ -108,7 +112,8 @@ if (-not $SkipPluginBuild) {
     }
 }
 
-# ── Step 2：从 artifacts\Releases\ 复制 DLL 到 Resources\ ────────────────
+# ── Step 2：从 artifacts\Releases\ 复制产物到 Resources\ ────────────────
+# Resources\ 会被部署器项目作为嵌入资源打包，因此这里复制的是“发布输入”而非临时缓存。
 Write-Step "复制 DLL 到 Resources\"
 New-Item -ItemType Directory -Force -Path $ResourcesDir | Out-Null
 
@@ -125,7 +130,8 @@ foreach ($p in $Plugins) {
         $copyErrors += $p.Name
     }
 
-    # 方案 B：复制 CAD 元数据 JSON Sidecar（由 EmitCadDescriptorJson 目标生成）
+    # 复制 CAD 元数据 sidecar。
+    # 该 JSON 由 EmitCadDescriptorJson 目标生成，供部署器运行期识别品牌、版本与注册表路径。
     $srcJson = Join-Path $ReleasesDir "$($p.Name).cad.json"
     $dstJson = Join-Path $ResourcesDir "$($p.Name).cad.json"
     if (Test-Path $srcJson) {
@@ -144,6 +150,7 @@ if ($copyErrors.Count -gt 0) {
 }
 
 # ── Step 3：发布 AFR.Deployer 单文件 EXE ─────────────────────────────────
+# 此处只发布部署器本体；插件 DLL 已在上一步复制到 Resources\ 并随部署器一同打包。
 Write-Step "发布 AFR.Deployer (自包含单文件)"
 New-Item -ItemType Directory -Force -Path $PublishOutput | Out-Null
 
