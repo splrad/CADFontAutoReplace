@@ -19,14 +19,23 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  # 创建 tag、创建 Release、上传 Release 资产均需要 contents: write。
+  # 创建 tag、创建 Release、上传 Release 资产需要 contents: write；发布结果回写到 PR 需要 issues: write。
   contents: write
+  issues: write
 
 jobs:
   release:
     name: 📦 构建并创建 GitHub Release
     runs-on: windows-latest
     timeout-minutes: 45
+    outputs:
+      merged_pr_number: ${{ steps.merged-pr-guard.outputs.pr_number }}
+      merged_pr_title: ${{ steps.merged-pr-guard.outputs.pr_title }}
+      display_version: ${{ steps.version.outputs.display_version }}
+      build_id: ${{ steps.version.outputs.build_id }}
+      tag_name: ${{ steps.version.outputs.tag_name }}
+      release_title: ${{ steps.version.outputs.release_title }}
+      should_release: ${{ steps.version.outputs.should_release }}
 
     steps:
       - name: 📦 执行代码检出
@@ -58,6 +67,62 @@ jobs:
           Get-ChildItem -LiteralPath $env:GITHUB_WORKSPACE -Force | Remove-Item -Recurse -Force
           Copy-Item -Path (Join-Path $sourceRoot.FullName '*') -Destination $env:GITHUB_WORKSPACE -Recurse -Force
           "已通过 GitHub REST API 下载当前提交源码：${{ github.sha }}。" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      - name: 🔐 校验当前提交已完成 PR 合并关闭
+        id: merged-pr-guard
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $headers = @{
+              Accept = 'application/vnd.github+json'
+              Authorization = "Bearer $env:GH_TOKEN"
+              'X-GitHub-Api-Version' = '2022-11-28'
+          }
+
+          $maxAttempts = 10
+          $retrySeconds = 6
+          $mergedPullRequest = $null
+
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+              $pullsResponse = Invoke-WebRequest `
+                  -Uri "https://api.github.com/repos/$env:GH_REPO/commits/${{ github.sha }}/pulls" `
+                  -Headers $headers `
+                  -SkipHttpErrorCheck
+
+              if ($pullsResponse.StatusCode -ne 200) {
+                  throw "查询提交关联 PR 失败，HTTP $($pullsResponse.StatusCode)。"
+              }
+
+              $associatedPulls = @()
+              if (-not [string]::IsNullOrWhiteSpace($pullsResponse.Content)) {
+                  $associatedPulls = @($pullsResponse.Content | ConvertFrom-Json)
+              }
+
+              $mergedPullRequest = $associatedPulls | Where-Object {
+                  $_.state -eq 'closed' -and
+                  $null -ne $_.merged_at -and
+                  $_.base.ref -eq $env:GITHUB_REF_NAME
+              } | Select-Object -First 1
+
+              if ($null -ne $mergedPullRequest) {
+                  break
+              }
+
+              if ($attempt -lt $maxAttempts) {
+                  Write-Host "提交尚未关联到已合并并关闭的 $env:GITHUB_REF_NAME PR，等待 $retrySeconds 秒后重试（$attempt/$maxAttempts）。"
+                  Start-Sleep -Seconds $retrySeconds
+              }
+          }
+
+          if ($null -eq $mergedPullRequest) {
+              throw "当前提交 $env:GITHUB_SHA 未关联到已合并并关闭、目标分支为 $env:GITHUB_REF_NAME 的 PR，发布流程已阻断。"
+          }
+
+          "pr_number=$($mergedPullRequest.number)" >> $env:GITHUB_OUTPUT
+          "pr_title=$([string]$mergedPullRequest.title)" >> $env:GITHUB_OUTPUT
+          "已确认当前提交来自已合并并关闭的 PR #$($mergedPullRequest.number)。" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
 
       - name: 🧰 安装 .NET SDK
         shell: pwsh
@@ -214,48 +279,563 @@ jobs:
           "exe_path=$exeAssetPath" >> $env:GITHUB_OUTPUT
           "fonts_path=$fontsAssetPath" >> $env:GITHUB_OUTPUT
 
-      - name: 📝 生成发布说明
+      - name: 🧠 生成发布说明
         if: steps.version.outputs.should_release == 'true'
         id: notes
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          DEEPSEEK_API_KEY: ${{ secrets.DeepSeek_API_KEY }}
         run: |
-          # 发布说明保持简洁：下载说明 + 相对上一 Release 的提交列表。
+          # 发布说明优先使用 AI 基于“相对上一 Release 的相关代码差异”生成，并过滤工作流/文档等无关项。
           $notesPath = Join-Path $env:GITHUB_WORKSPACE 'release-notes.md'
           $tagName = '${{ steps.version.outputs.tag_name }}'
           $latestTag = '${{ steps.version.outputs.latest_tag }}'
-          $repoUrl = "https://github.com/$env:GITHUB_REPOSITORY"
+          $maxDiffChars = 16000
+          $fallbackReason = ''
+          $deepSeekModelConfigPath = Join-Path $env:GITHUB_WORKSPACE '.github/deepseek-model.txt'
+          $deepSeekModel = 'deepseek-v4-flash'
+
+          if (Test-Path -LiteralPath $deepSeekModelConfigPath) {
+              $configuredDeepSeekModel = [string](Get-Content -LiteralPath $deepSeekModelConfigPath -Raw).Trim()
+              if (-not [string]::IsNullOrWhiteSpace($configuredDeepSeekModel)) {
+                  $deepSeekModel = $configuredDeepSeekModel
+              }
+          }
+
+          function Get-FixedReleaseAttachmentSourcePaths {
+              # 固定发布附件只展示在“下载说明”，不纳入“变更记录”。
+              # 以后若新增固定附件源文件，只需要在这里补充路径。
+              return @(
+                  'chore/Fonts.zip'
+              )
+          }
+
+          function Get-PullRequestClosingIssueNumbers {
+              param(
+                  [int]$PullRequestNumber
+              )
+
+              $repositoryParts = @($env:GITHUB_REPOSITORY -split '/', 2)
+              if ($repositoryParts.Count -ne 2) {
+                  return @()
+              }
+
+              $graphQlQuery = @(
+                  'query($owner: String!, $name: String!, $number: Int!) {',
+                  '  repository(owner: $owner, name: $name) {',
+                  '    pullRequest(number: $number) {',
+                  '      closingIssuesReferences(first: 20) {',
+                  '        nodes { number }',
+                  '      }',
+                  '    }',
+                  '  }',
+                  '}'
+              ) -join "`n"
+
+              $issueResponseRaw = gh api graphql `
+                  -f query=$graphQlQuery `
+                  -f owner=$repositoryParts[0] `
+                  -f name=$repositoryParts[1] `
+                  -F number=$PullRequestNumber 2>$null
+
+              if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($issueResponseRaw)) {
+                  return @()
+              }
+
+              try {
+                  $issueResponse = $issueResponseRaw | ConvertFrom-Json
+                  return @(
+                      @($issueResponse.data.repository.pullRequest.closingIssuesReferences.nodes) |
+                      ForEach-Object { [int]$_.number } |
+                      Sort-Object -Unique
+                  )
+              } catch {
+                  return @()
+              }
+          }
+
+          function Get-RelevantReleaseFilePathsForPullRequest {
+              param(
+                  [int]$PullRequestNumber
+              )
+
+              $pullRequestFilesRaw = gh api "repos/$env:GITHUB_REPOSITORY/pulls/$PullRequestNumber/files?per_page=100" 2>$null
+              if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($pullRequestFilesRaw)) {
+                  return @()
+              }
+
+              try {
+                  $pullRequestFiles = @($pullRequestFilesRaw | ConvertFrom-Json)
+              } catch {
+                  return @()
+              }
+
+              $relevantPullRequestFiles = [System.Collections.Generic.List[string]]::new()
+              foreach ($fileEntry in @($pullRequestFiles)) {
+                  $filePath = [string]$fileEntry.filename
+                  if ([string]::IsNullOrWhiteSpace($filePath)) {
+                      continue
+                  }
+
+                  if (Test-IrrelevantReleaseFile -FilePath $filePath) {
+                      continue
+                  }
+
+                  if (-not ($relevantPullRequestFiles -contains $filePath)) {
+                      $relevantPullRequestFiles.Add($filePath)
+                  }
+              }
+
+              return @($relevantPullRequestFiles)
+          }
+
+          function Add-IssueNumbersToFileMap {
+              param(
+                  [hashtable]$IssueNumbersByFilePath,
+                  [string]$FilePath,
+                  [array]$IssueNumbers
+              )
+
+              $normalizedPath = $FilePath.Replace('\', '/')
+              if ([string]::IsNullOrWhiteSpace($normalizedPath) -or $IssueNumbers.Count -eq 0) {
+                  return
+              }
+
+              if (-not $IssueNumbersByFilePath.ContainsKey($normalizedPath)) {
+                  $IssueNumbersByFilePath[$normalizedPath] = [System.Collections.Generic.List[string]]::new()
+              }
+
+              $issueTags = $IssueNumbersByFilePath[$normalizedPath]
+              foreach ($issueNumber in @($IssueNumbers | Sort-Object -Unique)) {
+                  $issueTag = "#$issueNumber"
+                  if (-not ($issueTags -contains $issueTag)) {
+                      $issueTags.Add($issueTag)
+                  }
+              }
+          }
+
+          function Get-IssueDisplayForFilePath {
+              param(
+                  [hashtable]$IssueNumbersByFilePath,
+                  [string]$FilePath
+              )
+
+              $normalizedPath = $FilePath.Replace('\', '/')
+              if ([string]::IsNullOrWhiteSpace($normalizedPath) -or -not $IssueNumbersByFilePath.ContainsKey($normalizedPath)) {
+                  return ''
+              }
+
+              return [string]::Join('、', @($IssueNumbersByFilePath[$normalizedPath] | Sort-Object -Unique))
+          }
+
+          function Get-IssueSuffixForFilePath {
+              param(
+                  [hashtable]$IssueNumbersByFilePath,
+                  [string]$FilePath
+              )
+
+              $issueDisplay = Get-IssueDisplayForFilePath -IssueNumbersByFilePath $IssueNumbersByFilePath -FilePath $FilePath
+              if ([string]::IsNullOrWhiteSpace($issueDisplay)) {
+                  return ''
+              }
+
+              return " $issueDisplay"
+          }
+
+          function Get-IssueNumbersByRelevantFilePath {
+              param(
+                  [array]$ComparisonCommits
+              )
+
+              $issueNumbersByFilePath = @{}
+              $seenPullRequestNumbers = @{}
+
+              foreach ($commit in @($ComparisonCommits)) {
+                  $commitSha = [string]$commit.sha
+                  if ([string]::IsNullOrWhiteSpace($commitSha)) {
+                      continue
+                  }
+
+                  $pullsRaw = gh api "repos/$env:GITHUB_REPOSITORY/commits/$commitSha/pulls" 2>$null
+                  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($pullsRaw)) {
+                      continue
+                  }
+
+                  try {
+                      $associatedPulls = @($pullsRaw | ConvertFrom-Json)
+                  } catch {
+                      continue
+                  }
+
+                  foreach ($pullRequest in @($associatedPulls | Where-Object {
+                      $_.state -eq 'closed' -and
+                      $null -ne $_.merged_at -and
+                      $_.base.ref -eq $env:GITHUB_REF_NAME
+                  })) {
+                      $pullRequestNumberText = [string]$pullRequest.number
+                      if ([string]::IsNullOrWhiteSpace($pullRequestNumberText)) {
+                          continue
+                      }
+
+                      if ($seenPullRequestNumbers.ContainsKey($pullRequestNumberText)) {
+                          continue
+                      }
+                      $seenPullRequestNumbers[$pullRequestNumberText] = $true
+
+                      $issueNumbers = @(Get-PullRequestClosingIssueNumbers -PullRequestNumber ([int]$pullRequest.number))
+                      if ($issueNumbers.Count -eq 0) {
+                          continue
+                      }
+
+                      foreach ($filePath in @(Get-RelevantReleaseFilePathsForPullRequest -PullRequestNumber ([int]$pullRequest.number))) {
+                          Add-IssueNumbersToFileMap -IssueNumbersByFilePath $issueNumbersByFilePath -FilePath $filePath -IssueNumbers $issueNumbers
+                      }
+                  }
+              }
+
+              return $issueNumbersByFilePath
+          }
+
+          function Test-IrrelevantReleaseFile {
+              param(
+                  [string]$FilePath
+              )
+
+              $normalizedPath = $FilePath.Replace('\', '/')
+              $fixedReleaseAttachmentSourcePaths = @(Get-FixedReleaseAttachmentSourcePaths)
+              if ($normalizedPath -like '.github/*') { return $true }
+              if ($normalizedPath -like 'docs/*') { return $true }
+              if ($fixedReleaseAttachmentSourcePaths -contains $normalizedPath) { return $true }
+              if ($normalizedPath -in @('.gitignore', '.gitattributes', '.editorconfig')) { return $true }
+              if ($normalizedPath -match '(^|/)(README|CHANGELOG|CONTRIBUTING)(\.[^/]+)?$') { return $true }
+              if ($normalizedPath -match '\.(md|txt)$') { return $true }
+              return $false
+          }
+
+          function Normalize-AiBody {
+              param(
+                  [string]$RawText
+              )
+
+              if ([string]::IsNullOrWhiteSpace($RawText)) {
+                  return ''
+              }
+
+              $cleaned = ($RawText -replace "`r", '').Trim()
+              $cleaned = [regex]::Replace($cleaned, '^\s*```json\s*', '')
+              $cleaned = [regex]::Replace($cleaned, '^\s*```\s*', '')
+              $cleaned = [regex]::Replace($cleaned, '\s*```\s*$', '')
+              $summaryMatches = [regex]::Matches($cleaned, '(?m)^(##\s*🆕\s*更新摘要|\*\*(更新摘要|变更摘要)：\*\*)')
+              if ($summaryMatches.Count -gt 1) {
+                  $cleaned = $cleaned.Substring($summaryMatches[$summaryMatches.Count - 1].Index)
+              }
+
+              return $cleaned.Trim()
+          }
+
+          function Convert-ReleaseFileToFallbackLine {
+              param(
+                  [psobject]$FileEntry,
+                  [hashtable]$IssueNumbersByFilePath
+              )
+
+              $filePath = [string]$FileEntry.filename
+              $status = [string]$FileEntry.status
+              if ($filePath -eq 'Version.props') {
+                  return '- 更新版本基线与构建标识，便于安装与升级时识别当前发布版本。'
+              }
+
+              if ($filePath -like 'src/*') {
+                  $issueSuffix = Get-IssueSuffixForFilePath -IssueNumbersByFilePath $IssueNumbersByFilePath -FilePath $filePath
+                  return "- 优化本次版本涉及的部署、扫描与兼容性逻辑，提升使用稳定性与结果准确性$issueSuffix。"
+              }
+
+              return '- 补充本次版本所需的相关交付内容，完善发布准备。'
+          }
+
+          function Build-FallbackSummary {
+              param(
+                  [array]$RelevantFiles,
+                  [string]$Reason,
+                  [string]$LatestTagValue,
+                  [hashtable]$IssueNumbersByFilePath
+              )
+
+              $summaryLines = [System.Collections.Generic.List[string]]::new()
+              $summaryBullets = [System.Collections.Generic.List[string]]::new()
+              $hasSourceChanges = @($RelevantFiles | Where-Object { [string]$_.filename -like 'src/*' }).Count -gt 0
+              $hasVersionChanges = @($RelevantFiles | Where-Object { [string]$_.filename -eq 'Version.props' }).Count -gt 0
+
+              $summaryLines.Add('## 🆕 更新摘要')
+              $summaryLines.Add('')
+
+              if ($hasSourceChanges) {
+                  $summaryBullets.Add('部署体验与扫描准确性')
+                  $summaryBullets.Add('稳定性与性能')
+              }
+              if ($hasVersionChanges) {
+                  $summaryBullets.Add('版本基线与交付一致性')
+              }
+              if ($summaryBullets.Count -eq 0 -and [string]::IsNullOrWhiteSpace($LatestTagValue)) {
+                  $summaryBullets.Add('首发交付与基础可用性')
+                  $summaryBullets.Add('版本基线与发布准备')
+              }
+              if ($summaryBullets.Count -eq 0) {
+                  $summaryBullets.Add('发布资源与版本基线调整')
+                  $summaryBullets.Add('交付一致性')
+                  $summaryBullets.Add('基础升级准备')
+              }
+
+              foreach ($summaryBullet in @($summaryBullets | Select-Object -Unique -First 4)) {
+                  $summaryLines.Add("- $summaryBullet")
+              }
+
+              if ($RelevantFiles.Count -gt 0) {
+                  $summaryLines.Add('')
+                  $summaryLines.Add('------')
+                  $summaryLines.Add('')
+                  $summaryLines.Add('## ⚡ 优化')
+                  $summaryLines.Add('')
+                  foreach ($fileEntry in @($RelevantFiles | Select-Object -First 5)) {
+                      $summaryLines.Add((Convert-ReleaseFileToFallbackLine -FileEntry $fileEntry -IssueNumbersByFilePath $IssueNumbersByFilePath))
+                  }
+              }
+
+              return [string]::Join("`n", $summaryLines)
+          }
+
+          function Invoke-DeepSeekReleaseSummary {
+              param(
+                  [string]$PayloadJson
+              )
+
+              if ([string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) {
+                  return [pscustomobject]@{
+                      Success = $false
+                      Content = ''
+                      Reason = 'missing_api_key'
+                  }
+              }
+
+              $response = Invoke-WebRequest `
+                  -Uri 'https://api.deepseek.com/chat/completions' `
+                  -Method Post `
+                  -Headers @{ Authorization = "Bearer $env:DEEPSEEK_API_KEY" } `
+                  -ContentType 'application/json' `
+                  -Body $PayloadJson `
+                  -TimeoutSec 45 `
+                  -SkipHttpErrorCheck
+
+              if ($response.StatusCode -eq 200) {
+                  $responseJson = $response.Content | ConvertFrom-Json
+                  return [pscustomobject]@{
+                      Success = $true
+                      Content = [string]$responseJson.choices[0].message.content
+                      Reason = ''
+                  }
+              }
+
+              $reason = ''
+              if (-not [string]::IsNullOrWhiteSpace($response.Content)) {
+                  try {
+                      $errorPayload = $response.Content | ConvertFrom-Json
+                      $reason = [string]($errorPayload.error.message)
+                  } catch {
+                  }
+              }
+              if ([string]::IsNullOrWhiteSpace($reason)) {
+                  $reason = "HTTP_$($response.StatusCode)"
+              }
+
+              return [pscustomobject]@{
+                  Success = $false
+                  Content = ''
+                  Reason = $reason
+              }
+          }
 
           $lines = [System.Collections.Generic.List[string]]::new()
-          $lines.Add('## 🚀 下载说明')
+          $lines.Add('## 📦 下载说明')
           $lines.Add('')
-          $lines.Add('| 文件 | 用途 |')
+          $lines.Add('| 文件 | 说明 |')
           $lines.Add('| --- | --- |')
-          $lines.Add('| `AFR-Deployer.exe` | 部署工具，双击运行后选择需要安装的 AutoCAD 版本。 |')
-          $lines.Add('| `Fonts.zip` | 字体压缩包，用于手动补充或备份字体资源。 |')
+          $lines.Add('| **AFR-Deployer.exe** | 主安装程序，双击运行并选择 AutoCAD 版本 |')
+          $lines.Add('| Fonts.zip | 字体资源包（用于手动补充或备份） |')
           $lines.Add('')
-          $lines.Add('## 📝 变更记录')
+          $lines.Add('👉 **一般用户只需下载：AFR-Deployer.exe**')
+          $lines.Add('')
+          $lines.Add('------')
           $lines.Add('')
 
+          $relevantFiles = [System.Collections.Generic.List[object]]::new()
+          $changedFilesLines = [System.Collections.Generic.List[string]]::new()
+          $diffCandidates = [System.Collections.Generic.List[object]]::new()
+          $issueNumbersByFilePath = @{}
+          $releaseSummary = ''
+
           if (-not [string]::IsNullOrWhiteSpace($latestTag)) {
-              # 无 git 历史时使用 GitHub Compare API 生成变更记录。
-              $comparison = gh api "repos/$env:GITHUB_REPOSITORY/compare/$latestTag...${{ github.sha }}" | ConvertFrom-Json
-              if ($comparison.commits.Count -gt 0) {
-                  foreach ($commit in $comparison.commits) {
-                      $subject = ([string]$commit.commit.message -split "`n")[0]
-                      $shortSha = ([string]$commit.sha).Substring(0, 7)
-                      $author = [string]$commit.author.login
-                      if ([string]::IsNullOrWhiteSpace($author)) {
-                          $lines.Add("- $subject ([$shortSha]($repoUrl/commit/$($commit.sha)))")
+              $comparisonRaw = gh api "repos/$env:GITHUB_REPOSITORY/compare/$latestTag...${{ github.sha }}" 2>$null
+              if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($comparisonRaw)) {
+                  $comparison = $comparisonRaw | ConvertFrom-Json
+                  $issueNumbersByFilePath = Get-IssueNumbersByRelevantFilePath -ComparisonCommits @($comparison.commits)
+                  foreach ($fileEntry in @($comparison.files)) {
+                      $filePath = [string]$fileEntry.filename
+                      if (Test-IrrelevantReleaseFile -FilePath $filePath) {
+                          continue
+                      }
+
+                      $relevantFiles.Add($fileEntry)
+                      $additions = 0
+                      $deletions = 0
+                      if ($null -ne $fileEntry.additions) { $additions = [int]$fileEntry.additions }
+                      if ($null -ne $fileEntry.deletions) { $deletions = [int]$fileEntry.deletions }
+                      $issueDisplay = ''
+                      if ($filePath -like 'src/*') {
+                          $issueDisplay = Get-IssueDisplayForFilePath -IssueNumbersByFilePath $issueNumbersByFilePath -FilePath $filePath
+                      }
+                      $issueContext = if ([string]::IsNullOrWhiteSpace($issueDisplay)) { '' } else { "`t关联 Issues：$issueDisplay" }
+                      if ([string]::IsNullOrWhiteSpace([string]$fileEntry.patch)) {
+                          $changedFilesLines.Add("$(([string]$fileEntry.status).ToUpper())`t$filePath`t资源或二进制变更$issueContext")
                       } else {
-                          $lines.Add("- $subject by @$author ([$shortSha]($repoUrl/commit/$($commit.sha)))")
+                          $changedFilesLines.Add("$(([string]$fileEntry.status).ToUpper())`t$filePath`t+$additions/-$deletions$issueContext")
+                          $diffCandidates.Add([pscustomobject]@{
+                              FileName = $filePath
+                              Patch = [string]$fileEntry.patch
+                              Score = $additions + $deletions
+                              Additions = $additions
+                              Deletions = $deletions
+                          })
                       }
                   }
               } else {
-                  $lines.Add('- 本次发布未检测到相对上一版本的新提交。')
+                  $fallbackReason = 'compare_api_failed'
               }
           }
+
+          $changedFilesText = if ($changedFilesLines.Count -gt 0) {
+              [string]::Join("`n", $changedFilesLines)
+          } else {
+              '未检测到需要纳入说明的相关代码文件差异'
+          }
+
+          $diffBuilder = New-Object System.Text.StringBuilder
+          foreach ($candidate in @($diffCandidates | Sort-Object @{ Expression = 'Score'; Descending = $true }, @{ Expression = 'Additions'; Descending = $true }, @{ Expression = 'Deletions'; Descending = $true }, @{ Expression = 'FileName'; Descending = $false })) {
+              $diffBlock = "diff --git a/$($candidate.FileName) b/$($candidate.FileName)`n$($candidate.Patch)`n"
+              if (($diffBuilder.Length + $diffBlock.Length) -le $maxDiffChars) {
+                  [void]$diffBuilder.Append($diffBlock)
+                  continue
+              }
+
+              $remainingChars = $maxDiffChars - $diffBuilder.Length
+              if ($remainingChars -gt 0) {
+                  [void]$diffBuilder.Append($diffBlock.Substring(0, [Math]::Min($remainingChars, $diffBlock.Length)))
+              }
+              break
+          }
+
+          $diffSnippet = $diffBuilder.ToString().Trim()
+          if ([string]::IsNullOrWhiteSpace($diffSnippet) -and $relevantFiles.Count -gt 0) {
+              $diffSnippet = $changedFilesText
+          }
+
+          $systemPrompt = @(
+              '你是一个 GitHub Release 更新公告生成器。根据本次版本相对上一 Release 的净相关差异（文件清单与 diff 片段）生成一份简洁、专业、面向最终使用者的 Markdown 更新内容。',
+              '仅依据输入中的差异内容进行总结，禁止引用历史 PR 标题、历史提交列表、作者信息、历史版本说明或仓库其他上下文。',
+              '必须过滤并忽略以下内容，不要写进正文：CI/CD、工作流、仓库配置、注释清理、纯格式化、纯文档、无运行时影响的维护项。',
+              '不要输出标题、宣传语、下载说明或升级说明；这些内容由固定模板提供。',
+              '如果输入同时包含代码变更与资源更新，优先总结用户可感知的功能变化、兼容性改进、稳定性提升和资源更新；不要复述被过滤的流程类改动。',
+              '如果输入中的相关文件变更带有“关联 Issues：#123”之类的标记，且你能明确判断某条更新条目对应这些变化，请在该条末尾直接追加对应的 Issues 编号，例如“#123”或“#123、#124”。',
+              '只要某条更新内容明显对应了这些已映射的差异，就应优先保留并追加对应的 Issues 编号；除非映射关系明显不成立，否则不要省略输入中已经提供的编号。',
+              '不要单独罗列 Issues 编号，也不要为没有明确对应关系的条目猜测或补写 Issues 编号。',
+              '',
+              '严格按以下 JSON 格式输出，不要输出任何其他内容：',
+              '{"body":"Markdown正文"}',
+              '',
+              '正文要求：',
+              '- 只输出 Markdown 正文，不要额外加标题或代码块',
+              '- 必须以 `## 🆕 更新摘要` 开头',
+              '- 必须先输出如下结构：',
+              '  ## 🆕 更新摘要',
+              '',
+              '  - 2~4 条摘要要点，每条使用短语概括用户可感知收益，例如自动更新能力、扫描准确性、稳定性与性能',
+              '- 各小节之间插入一行 `------`，使版式与固定模板保持一致',
+              '- 可按差异内容择需追加以下小节，没有内容就删掉，不要保留占位说明：',
+              '  ## ✨ 新功能',
+              '  ## ⚡ 优化',
+              '  ## 🛠 修复',
+              '- 每个可选小节下放 1~4 条项目符号，直接描述变化与收益，不要以“部署工具：”“更新提示：”“兼容性：”“版本信息：”等分类标签起头',
+              '- 总长度控制在 8~18 行',
+              '- 使用专业、简洁、克制的产品公告语气',
+              '- 可自然描述部署、升级、兼容性、稳定性等变化，但不要把这些词写成每条开头的标签',
+              '- 除非完全无法避免，不要出现类名、方法名、脚本名、工作流名、注册表键名或文件路径',
+              '- 禁止出现提交哈希、PR 编号、作者名',
+              '- 若没有足够的代码级变化可总结，输出：',
+              '  ## 🆕 更新摘要',
+              '',
+              '  - 发布资源与版本基线调整',
+              '  - 交付一致性',
+              '  - 基础升级准备'
+          ) -join "`n"
+
+          if (-not [string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY) -and $relevantFiles.Count -gt 0) {
+              $payloadBase = @{
+                  model = $deepSeekModel
+                  messages = @(
+                      @{
+                          role = 'system'
+                          content = $systemPrompt
+                      },
+                      @{
+                          role = 'user'
+                          content = "版本标签：$tagName`n上一版本标签：$latestTag`n`n本次纳入说明的相关文件变更：`n$changedFilesText`n`n相关代码差异片段：`n$diffSnippet"
+                      }
+                  )
+              }
+
+              $payloadJson = $payloadBase | ConvertTo-Json -Depth 8 -Compress
+              $aiResult = Invoke-DeepSeekReleaseSummary -PayloadJson $payloadJson
+
+              if (-not $aiResult.Success -and -not [string]::IsNullOrWhiteSpace($diffSnippet)) {
+                  $truncatedDiffSnippet = $diffSnippet.Substring(0, [Math]::Min(8000, $diffSnippet.Length))
+                  $payloadBase.messages[1].content = "版本标签：$tagName`n上一版本标签：$latestTag`n`n本次纳入说明的相关文件变更：`n$changedFilesText`n`n相关代码差异片段：`n$truncatedDiffSnippet"
+                  $payloadJson = $payloadBase | ConvertTo-Json -Depth 8 -Compress
+                  $aiResult = Invoke-DeepSeekReleaseSummary -PayloadJson $payloadJson
+              }
+
+              if ($aiResult.Success) {
+                  $aiContent = Normalize-AiBody -RawText ([string]$aiResult.Content)
+                  try {
+                      $jsonCandidate = $aiContent | ConvertFrom-Json
+                      $releaseSummary = Normalize-AiBody -RawText ([string]$jsonCandidate.body)
+                  } catch {
+                      $fallbackReason = 'invalid_model_output'
+                  }
+              } else {
+                  $fallbackReason = [string]$aiResult.Reason
+              }
+          } elseif ($relevantFiles.Count -eq 0) {
+              $fallbackReason = 'no_relevant_code_changes'
+          } elseif ([string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) {
+              $fallbackReason = 'missing_api_key'
+          }
+
+          if ([string]::IsNullOrWhiteSpace($releaseSummary)) {
+              $releaseSummary = Build-FallbackSummary -RelevantFiles @($relevantFiles) -Reason $fallbackReason -LatestTagValue $latestTag -IssueNumbersByFilePath $issueNumbersByFilePath
+          }
+
+          foreach ($summaryLine in ($releaseSummary -split "`r?`n")) {
+              $lines.Add($summaryLine)
+          }
+
+          $lines.Add('')
+          $lines.Add('------')
+          $lines.Add('')
+          $lines.Add('## ⚠️ 升级说明')
+          $lines.Add('')
+          $lines.Add('- 支持 **直接覆盖安装**')
+          $lines.Add('- 无需卸载旧版本')
+          $lines.Add('- 已安装字体不会被删除')
 
           $lines | Set-Content -LiteralPath $notesPath -Encoding utf8
           "notes_path=$notesPath" >> $env:GITHUB_OUTPUT
@@ -278,3 +858,217 @@ jobs:
             --latest
 
           "已创建 Release：${{ steps.version.outputs.tag_name }}" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+  notify-release-result:
+    name: 📣 发布结果通知
+    runs-on: windows-latest
+    needs: release
+    if: always()
+    timeout-minutes: 10
+
+    steps:
+      - name: 📣 向核心开发者发送发布结果提醒
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
+          RELEASE_RESULT: ${{ needs.release.result }}
+          MERGED_PR_NUMBER: ${{ needs.release.outputs.merged_pr_number }}
+          MERGED_PR_TITLE: ${{ needs.release.outputs.merged_pr_title }}
+          DISPLAY_VERSION: ${{ needs.release.outputs.display_version }}
+          BUILD_ID: ${{ needs.release.outputs.build_id }}
+          TAG_NAME: ${{ needs.release.outputs.tag_name }}
+          RELEASE_TITLE: ${{ needs.release.outputs.release_title }}
+          SHOULD_RELEASE: ${{ needs.release.outputs.should_release }}
+        run: |
+          $headers = @{
+              Accept = 'application/vnd.github+json'
+              Authorization = "Bearer $env:GH_TOKEN"
+              'X-GitHub-Api-Version' = '2022-11-28'
+          }
+
+          function Resolve-VersionInfo {
+              $resolvedDisplayVersion = [string]$env:DISPLAY_VERSION
+              $resolvedBuildId = [string]$env:BUILD_ID
+              $resolvedTagName = [string]$env:TAG_NAME
+              $resolvedReleaseTitle = [string]$env:RELEASE_TITLE
+
+              if (
+                  -not [string]::IsNullOrWhiteSpace($resolvedDisplayVersion) -and
+                  -not [string]::IsNullOrWhiteSpace($resolvedBuildId) -and
+                  -not [string]::IsNullOrWhiteSpace($resolvedTagName) -and
+                  -not [string]::IsNullOrWhiteSpace($resolvedReleaseTitle)
+              ) {
+                  return [pscustomobject]@{
+                      DisplayVersion = $resolvedDisplayVersion
+                      BuildId = $resolvedBuildId
+                      TagName = $resolvedTagName
+                      ReleaseTitle = $resolvedReleaseTitle
+                  }
+              }
+
+              $versionResponse = Invoke-WebRequest `
+                  -Uri "https://api.github.com/repos/$env:GH_REPO/contents/Version.props?ref=$env:GITHUB_SHA" `
+                  -Headers $headers `
+                  -SkipHttpErrorCheck
+
+              if ($versionResponse.StatusCode -ne 200) {
+                  return [pscustomobject]@{
+                      DisplayVersion = $resolvedDisplayVersion
+                      BuildId = $resolvedBuildId
+                      TagName = $resolvedTagName
+                      ReleaseTitle = $resolvedReleaseTitle
+                  }
+              }
+
+              $versionPayload = $versionResponse.Content | ConvertFrom-Json
+              $encodedContent = [string]$versionPayload.content
+              if ([string]::IsNullOrWhiteSpace($encodedContent)) {
+                  return [pscustomobject]@{
+                      DisplayVersion = $resolvedDisplayVersion
+                      BuildId = $resolvedBuildId
+                      TagName = $resolvedTagName
+                      ReleaseTitle = $resolvedReleaseTitle
+                  }
+              }
+
+              $versionContent = [System.Text.Encoding]::UTF8.GetString(
+                  [System.Convert]::FromBase64String(($encodedContent -replace '\s', ''))
+              )
+              [xml]$versionXml = $versionContent
+
+              $resolvedDisplayVersion = [string]$versionXml.Project.PropertyGroup.PluginDisplayVersion
+              $resolvedBuildId = [string]$versionXml.Project.PropertyGroup.PluginBuildId
+              if (-not [string]::IsNullOrWhiteSpace($resolvedDisplayVersion)) {
+                  $resolvedTagName = "v$resolvedDisplayVersion"
+              }
+              if (
+                  -not [string]::IsNullOrWhiteSpace($resolvedDisplayVersion) -and
+                  -not [string]::IsNullOrWhiteSpace($resolvedBuildId)
+              ) {
+                  $resolvedReleaseTitle = "AFR v$resolvedDisplayVersion ($resolvedBuildId)"
+              }
+
+              return [pscustomobject]@{
+                  DisplayVersion = $resolvedDisplayVersion
+                  BuildId = $resolvedBuildId
+                  TagName = $resolvedTagName
+                  ReleaseTitle = $resolvedReleaseTitle
+              }
+          }
+
+          function Resolve-MergedPullRequest {
+              $resolvedPrNumber = [string]$env:MERGED_PR_NUMBER
+              $resolvedPrTitle = [string]$env:MERGED_PR_TITLE
+              if ([string]::IsNullOrWhiteSpace($resolvedPrNumber)) {
+                  return $null
+              }
+
+              return [pscustomobject]@{
+                  Number = $resolvedPrNumber
+                  Title = $resolvedPrTitle
+              }
+          }
+
+          $trustedUsers = @()
+          if (-not [string]::IsNullOrWhiteSpace($env:TRUSTED_LIST)) {
+              try {
+                  $parsedTrustedList = $env:TRUSTED_LIST | ConvertFrom-Json
+                  foreach ($user in @($parsedTrustedList)) {
+                      if ($user -is [string] -and -not [string]::IsNullOrWhiteSpace($user)) {
+                          $trustedUsers += $user.Trim()
+                      }
+                  }
+              } catch {
+                  Write-Host "::warning::TRUSTED_DEVELOPERS 解析失败：$($_.Exception.Message)"
+              }
+          }
+
+          $trustedUsers = @($trustedUsers | Select-Object -Unique)
+          $actor = [string]$env:GITHUB_ACTOR
+          $mentionUsers = @($trustedUsers | ForEach-Object { "@$_" })
+          if (-not [string]::IsNullOrWhiteSpace($actor) -and -not ($trustedUsers -contains $actor)) {
+              $mentionUsers += "@$actor"
+          }
+
+          $mentionDisplay = if ($mentionUsers.Count -gt 0) {
+              [string]::Join('；', $mentionUsers)
+          } else {
+              '（未配置通知对象）'
+          }
+
+          $versionInfo = Resolve-VersionInfo
+          $tagName = if ([string]::IsNullOrWhiteSpace($versionInfo.TagName)) { '未读取到' } else { $versionInfo.TagName }
+          $releaseTitle = if ([string]::IsNullOrWhiteSpace($versionInfo.ReleaseTitle)) { '未读取到' } else { $versionInfo.ReleaseTitle }
+
+            if ($env:SHOULD_RELEASE -eq 'false') {
+              Write-Host '当前运行未检测到新版本号变化，跳过发布结果通知。'
+              exit 0
+            }
+
+            if ([string]::IsNullOrWhiteSpace($env:SHOULD_RELEASE)) {
+              if ($tagName -eq '未读取到') {
+                Write-Host '::warning::无法判断当前运行是否对应版本号变化，跳过发布结果通知。'
+                exit 0
+              }
+
+              $releaseLookup = Invoke-WebRequest `
+                -Uri "https://api.github.com/repos/$env:GH_REPO/releases/tags/$tagName" `
+                -Headers $headers `
+                -SkipHttpErrorCheck
+
+              if ($releaseLookup.StatusCode -eq 200) {
+                Write-Host '当前版本已存在 Release，本次运行不对应新的版本号变化，跳过发布结果通知。'
+                exit 0
+              }
+
+              if ($releaseLookup.StatusCode -ne 404) {
+                throw "查询 Release $tagName 失败，HTTP $($releaseLookup.StatusCode)。"
+              }
+            }
+
+            $pullRequestInfo = Resolve-MergedPullRequest
+            if ($null -eq $pullRequestInfo -or [string]::IsNullOrWhiteSpace([string]$pullRequestInfo.Number)) {
+              Write-Host '::warning::未找到本次版本号变化对应的已合并且已关闭 PR，跳过发布结果通知。'
+              exit 0
+            }
+
+            $prNumber = [string]$pullRequestInfo.Number
+            $prTitle = if ([string]::IsNullOrWhiteSpace([string]$pullRequestInfo.Title)) { '未读取到' } else { [string]$pullRequestInfo.Title }
+            $prUrl = "https://github.com/$env:GH_REPO/pull/$prNumber"
+          $releaseUrl = if ($tagName -eq '未读取到') { '未生成' } else { "https://github.com/$env:GH_REPO/releases/tag/$tagName" }
+          $commitShortSha = ([string]$env:GITHUB_SHA).Substring(0, 7)
+          $runUrl = "https://github.com/$env:GH_REPO/actions/runs/$env:GITHUB_RUN_ID/attempts/$env:GITHUB_RUN_ATTEMPT"
+
+            if ($env:RELEASE_RESULT -eq 'success') {
+              $title = '## 📦【版本发布】已完成'
+              $resultText = 'Release 创建成功'
+          } else {
+              $title = '## 📦【版本发布】未完成'
+              $resultText = 'Release 创建失败'
+          }
+
+          $commentBody = @(
+              "<!-- release-build-status-notice:$env:GITHUB_RUN_ID:$env:GITHUB_RUN_ATTEMPT -->",
+              $title,
+              '',
+              "- 运行结果：**$resultText**",
+              "- PR链接：$prUrl",
+              "- PR标题：**$prTitle**",
+              "- 版本标签：**$tagName**",
+              "- 发布标题：**$releaseTitle**",
+              "- 目标分支：**$env:GITHUB_REF_NAME**",
+              "- 提交：**$commitShortSha**",
+              "- 触发人：**$actor**",
+              "- 工作流运行：$runUrl",
+              "- Release 链接：$releaseUrl",
+              "- 通知对象：$mentionDisplay",
+              '',
+              '> 本通知由 **GitHub Actions** 自动发布。'
+          ) -join "`n"
+
+          $payload = @{ body = $commentBody } | ConvertTo-Json -Compress
+          $payloadPath = Join-Path $env:RUNNER_TEMP "release-build-notice-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.json"
+          $payload | Set-Content -LiteralPath $payloadPath -Encoding utf8
+          gh api --method POST "repos/$env:GH_REPO/issues/$prNumber/comments" --input $payloadPath

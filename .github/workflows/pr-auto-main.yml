@@ -7,9 +7,11 @@
 #   3) 可选：在仓库 Variables 中创建 TRUSTED_DEVELOPERS（JSON 数组）
 #      示例：["splrad", "another-user"]
 #      命中该名单的用户可从非主分支走快速通道直接创建到主分支的 PR
-#   4) 通知机制：PR 创建/更新成功后，仅通过“成功状态评论”发送通知，评论内显式包含 @通知对象
+#   4) 可选：统一修改 .github/deepseek-model.txt
+#      默认值为 deepseek-v4-flash；如后续切换模型，只需改这一处文件
+#   5) 通知机制：PR 创建/更新成功后，仅通过“成功状态评论”发送通知，评论内显式包含 @通知对象
 #      为提升触达稳定性，评论由 github.token 身份发布（无需配置 SMTP）
-#   5) 验证建议：先推送一次分支，确认 PR 可创建且官方通知可正常送达
+#   6) 验证建议：先推送一次分支，确认 PR 可创建且官方通知可正常送达
 name: 🚀 主干分支合并请求创建
 
 on:
@@ -169,6 +171,10 @@ jobs:
           DIFF_RESOLVED="false"
           MAX_DIFF_CHARS=20000
           PRIORITY_TRUNCATE_THRESHOLD=20000
+          DEEPSEEK_MODEL_VALUE="$(tr -d '\r' < "$GITHUB_WORKSPACE/.github/deepseek-model.txt" 2>/dev/null | xargs || true)"
+          if [ -z "$DEEPSEEK_MODEL_VALUE" ]; then
+            DEEPSEEK_MODEL_VALUE="deepseek-v4-flash"
+          fi
 
           build_diff_from_compare_json() {
             local compare_json="$1"
@@ -402,8 +408,9 @@ jobs:
               --arg diff_snippet "$diff_snippet_for_payload" \
               --arg diff_source "$DIFF_SOURCE" \
               --arg system_prompt "$SYSTEM_PROMPT" \
+              --arg deepseek_model "$DEEPSEEK_MODEL_VALUE" \
               '{
-                model: "deepseek-chat",
+                model: $deepseek_model,
                 messages: [
                   {
                     role: "system",
@@ -424,7 +431,7 @@ jobs:
 
             http_code=$(curl -sS --max-time 45 --retry 1 --retry-delay 2 --retry-max-time 60 \
               -o "$response_file" -w "%{http_code}" \
-              https://api.deepseek.com/v1/chat/completions \
+              https://api.deepseek.com/chat/completions \
               -H "Authorization: Bearer $DEEPSEEK_API_KEY" \
               -H "Content-Type: application/json" \
               -d "$payload" 2>/dev/null || true)
