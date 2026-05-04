@@ -293,6 +293,15 @@ jobs:
           $latestTag = '${{ steps.version.outputs.latest_tag }}'
           $maxDiffChars = 16000
           $fallbackReason = ''
+          $deepSeekModelConfigPath = Join-Path $env:GITHUB_WORKSPACE '.github/deepseek-model.txt'
+          $deepSeekModel = 'deepseek-v4-flash'
+
+          if (Test-Path -LiteralPath $deepSeekModelConfigPath) {
+              $configuredDeepSeekModel = [string](Get-Content -LiteralPath $deepSeekModelConfigPath -Raw).Trim()
+              if (-not [string]::IsNullOrWhiteSpace($configuredDeepSeekModel)) {
+                  $deepSeekModel = $configuredDeepSeekModel
+              }
+          }
 
           function Get-FixedReleaseAttachmentSourcePaths {
               # 固定发布附件只展示在“下载说明”，不纳入“变更记录”。
@@ -517,7 +526,7 @@ jobs:
               $cleaned = [regex]::Replace($cleaned, '^\s*```json\s*', '')
               $cleaned = [regex]::Replace($cleaned, '^\s*```\s*', '')
               $cleaned = [regex]::Replace($cleaned, '\s*```\s*$', '')
-              $summaryMatches = [regex]::Matches($cleaned, '\*\*(更新摘要|变更摘要)：\*\*')
+              $summaryMatches = [regex]::Matches($cleaned, '(?m)^(##\s*🆕\s*更新摘要|\*\*(更新摘要|变更摘要)：\*\*)')
               if ($summaryMatches.Count -gt 1) {
                   $cleaned = $cleaned.Substring($summaryMatches[$summaryMatches.Count - 1].Index)
               }
@@ -534,15 +543,15 @@ jobs:
               $filePath = [string]$FileEntry.filename
               $status = [string]$FileEntry.status
               if ($filePath -eq 'Version.props') {
-                  return '- 更新版本号与构建标识，用于本次正式发布。'
+                  return '- 更新版本基线与构建标识，便于安装与升级时识别当前发布版本。'
               }
 
               if ($filePath -like 'src/*') {
                   $issueSuffix = Get-IssueSuffixForFilePath -IssueNumbersByFilePath $IssueNumbersByFilePath -FilePath $filePath
-                  return "- 整合本次版本的程序改动，提升部署、使用或兼容性体验$issueSuffix。"
+                  return "- 优化本次版本涉及的部署、扫描与兼容性逻辑，提升使用稳定性与结果准确性$issueSuffix。"
               }
 
-              return '- 补充本次版本所需的相关交付内容。'
+              return '- 补充本次版本所需的相关交付内容，完善发布准备。'
           }
 
           function Build-FallbackSummary {
@@ -554,23 +563,43 @@ jobs:
               )
 
               $summaryLines = [System.Collections.Generic.List[string]]::new()
-              $summaryLines.Add('**更新摘要：**')
-              if ($RelevantFiles.Count -gt 0) {
-                  $summaryLines.Add('本次更新说明未能完成自动摘要，以下为基于相关差异整理的版本公告兜底内容。')
-              } elseif ([string]::IsNullOrWhiteSpace($LatestTagValue)) {
-                  $summaryLines.Add('当前仓库暂无历史 Release，本次先保留首发版本的公告式兜底说明。')
-              } else {
-                  $summaryLines.Add('本次版本相对上一 Release 未检测到需要纳入公告的功能性变化，已过滤流程、文档和仓库维护类改动。')
-              }
+              $summaryBullets = [System.Collections.Generic.List[string]]::new()
+              $hasSourceChanges = @($RelevantFiles | Where-Object { [string]$_.filename -like 'src/*' }).Count -gt 0
+              $hasVersionChanges = @($RelevantFiles | Where-Object { [string]$_.filename -eq 'Version.props' }).Count -gt 0
+
+              $summaryLines.Add('## 🆕 更新摘要')
               $summaryLines.Add('')
-              $summaryLines.Add('**本次更新：**')
+
+              if ($hasSourceChanges) {
+                  $summaryBullets.Add('部署体验与扫描准确性')
+                  $summaryBullets.Add('稳定性与性能')
+              }
+              if ($hasVersionChanges) {
+                  $summaryBullets.Add('版本基线与交付一致性')
+              }
+              if ($summaryBullets.Count -eq 0 -and [string]::IsNullOrWhiteSpace($LatestTagValue)) {
+                  $summaryBullets.Add('首发交付与基础可用性')
+                  $summaryBullets.Add('版本基线与发布准备')
+              }
+              if ($summaryBullets.Count -eq 0) {
+                  $summaryBullets.Add('发布资源与版本基线调整')
+                  $summaryBullets.Add('交付一致性')
+                  $summaryBullets.Add('基础升级准备')
+              }
+
+              foreach ($summaryBullet in @($summaryBullets | Select-Object -Unique -First 4)) {
+                  $summaryLines.Add("- $summaryBullet")
+              }
 
               if ($RelevantFiles.Count -gt 0) {
+                  $summaryLines.Add('')
+                  $summaryLines.Add('------')
+                  $summaryLines.Add('')
+                  $summaryLines.Add('## ⚡ 优化')
+                  $summaryLines.Add('')
                   foreach ($fileEntry in @($RelevantFiles | Select-Object -First 5)) {
                       $summaryLines.Add((Convert-ReleaseFileToFallbackLine -FileEntry $fileEntry -IssueNumbersByFilePath $IssueNumbersByFilePath))
                   }
-              } else {
-                  $summaryLines.Add('- 完成版本归档与发布资产准备，未纳入流程、文档或仓库维护类内容。')
               }
 
               return [string]::Join("`n", $summaryLines)
@@ -590,7 +619,7 @@ jobs:
               }
 
               $response = Invoke-WebRequest `
-                  -Uri 'https://api.deepseek.com/v1/chat/completions' `
+                  -Uri 'https://api.deepseek.com/chat/completions' `
                   -Method Post `
                   -Headers @{ Authorization = "Bearer $env:DEEPSEEK_API_KEY" } `
                   -ContentType 'application/json' `
@@ -627,14 +656,16 @@ jobs:
           }
 
           $lines = [System.Collections.Generic.List[string]]::new()
-          $lines.Add('## 🚀 下载说明')
+          $lines.Add('## 📦 下载说明')
           $lines.Add('')
-          $lines.Add('| 文件 | 用途 |')
+          $lines.Add('| 文件 | 说明 |')
           $lines.Add('| --- | --- |')
-          $lines.Add('| `AFR-Deployer.exe` | 部署工具，双击运行后选择需要安装的 AutoCAD 版本。 |')
-          $lines.Add('| `Fonts.zip` | 字体压缩包，用于手动补充或备份字体资源。 |')
+          $lines.Add('| **AFR-Deployer.exe** | 主安装程序，双击运行并选择 AutoCAD 版本 |')
+          $lines.Add('| Fonts.zip | 字体资源包（用于手动补充或备份） |')
           $lines.Add('')
-          $lines.Add('## 📝 变更记录')
+          $lines.Add('👉 **一般用户只需下载：AFR-Deployer.exe**')
+          $lines.Add('')
+          $lines.Add('------')
           $lines.Add('')
 
           $relevantFiles = [System.Collections.Generic.List[object]]::new()
@@ -709,11 +740,13 @@ jobs:
           }
 
           $systemPrompt = @(
-              '你是一个 GitHub Release 更新公告生成器。根据本次版本相对上一 Release 的净相关差异（文件清单与 diff 片段）生成一份简洁、专业、面向最终使用者的 Markdown 更新公告。',
+              '你是一个 GitHub Release 更新公告生成器。根据本次版本相对上一 Release 的净相关差异（文件清单与 diff 片段）生成一份简洁、专业、面向最终使用者的 Markdown 更新内容。',
               '仅依据输入中的差异内容进行总结，禁止引用历史 PR 标题、历史提交列表、作者信息、历史版本说明或仓库其他上下文。',
               '必须过滤并忽略以下内容，不要写进正文：CI/CD、工作流、仓库配置、注释清理、纯格式化、纯文档、无运行时影响的维护项。',
+              '不要输出标题、宣传语、下载说明或升级说明；这些内容由固定模板提供。',
               '如果输入同时包含代码变更与资源更新，优先总结用户可感知的功能变化、兼容性改进、稳定性提升和资源更新；不要复述被过滤的流程类改动。',
               '如果输入中的相关文件变更带有“关联 Issues：#123”之类的标记，且你能明确判断某条更新条目对应这些变化，请在该条末尾直接追加对应的 Issues 编号，例如“#123”或“#123、#124”。',
+              '只要某条更新内容明显对应了这些已映射的差异，就应优先保留并追加对应的 Issues 编号；除非映射关系明显不成立，否则不要省略输入中已经提供的编号。',
               '不要单独罗列 Issues 编号，也不要为没有明确对应关系的条目猜测或补写 Issues 编号。',
               '',
               '严格按以下 JSON 格式输出，不要输出任何其他内容：',
@@ -721,28 +754,33 @@ jobs:
               '',
               '正文要求：',
               '- 只输出 Markdown 正文，不要额外加标题或代码块',
-              '- 必须包含且只包含以下两段：',
-              '  **更新摘要：**',
-              '  用 1~3 句话概括这次版本为用户带来的主要变化、体验提升或兼容性改进。',
+              '- 必须以 `## 🆕 更新摘要` 开头',
+              '- 必须先输出如下结构：',
+              '  ## 🆕 更新摘要',
               '',
-              '  **本次更新：**',
-              '  - 每条都应直接描述变化与收益，不要以“部署工具：”“更新提示：”“兼容性：”“版本信息：”等分类标签起头',
-              '- 总长度控制在 4~8 行',
+              '  - 2~4 条摘要要点，每条使用短语概括用户可感知收益，例如自动更新能力、扫描准确性、稳定性与性能',
+              '- 各小节之间插入一行 `------`，使版式与固定模板保持一致',
+              '- 可按差异内容择需追加以下小节，没有内容就删掉，不要保留占位说明：',
+              '  ## ✨ 新功能',
+              '  ## ⚡ 优化',
+              '  ## 🛠 修复',
+              '- 每个可选小节下放 1~4 条项目符号，直接描述变化与收益，不要以“部署工具：”“更新提示：”“兼容性：”“版本信息：”等分类标签起头',
+              '- 总长度控制在 8~18 行',
               '- 使用专业、简洁、克制的产品公告语气',
               '- 可自然描述部署、升级、兼容性、稳定性等变化，但不要把这些词写成每条开头的标签',
               '- 除非完全无法避免，不要出现类名、方法名、脚本名、工作流名、注册表键名或文件路径',
               '- 禁止出现提交哈希、PR 编号、作者名',
               '- 若没有足够的代码级变化可总结，输出：',
-              '  **更新摘要：**',
-              '  本次版本主要包含发布资源或版本基线调整，未纳入流程、文档或仓库维护类改动说明。',
+              '  ## 🆕 更新摘要',
               '',
-              '  **本次更新：**',
-              '  - 完成版本归档与发布资产准备，并保留与实际使用相关的交付内容。'
+              '  - 发布资源与版本基线调整',
+              '  - 交付一致性',
+              '  - 基础升级准备'
           ) -join "`n"
 
           if (-not [string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY) -and $relevantFiles.Count -gt 0) {
               $payloadBase = @{
-                  model = 'deepseek-chat'
+                  model = $deepSeekModel
                   messages = @(
                       @{
                           role = 'system'
@@ -789,6 +827,15 @@ jobs:
           foreach ($summaryLine in ($releaseSummary -split "`r?`n")) {
               $lines.Add($summaryLine)
           }
+
+          $lines.Add('')
+          $lines.Add('------')
+          $lines.Add('')
+          $lines.Add('## ⚠️ 升级说明')
+          $lines.Add('')
+          $lines.Add('- 支持 **直接覆盖安装**')
+          $lines.Add('- 无需卸载旧版本')
+          $lines.Add('- 已安装字体不会被删除')
 
           $lines | Set-Content -LiteralPath $notesPath -Encoding utf8
           "notes_path=$notesPath" >> $env:GITHUB_OUTPUT

@@ -25,7 +25,7 @@ concurrency:
 jobs:
   # ────────────────────────────────────────────────────────
   # 场景一：PR → test 分支
-  # 仅检查是否修改了 .github/workflows 或 .github/skills 下的文件
+  # 仅检查是否修改了 .github/workflows、.github/skills 或 .github/deepseek-model.txt
   # 未修改受保护配置文件 → 直接放行
   # 修改了受保护配置文件 → 必须获得核心开发者有效审批（核心成员提交或核心成员审批）
   # ────────────────────────────────────────────────────────
@@ -68,10 +68,10 @@ jobs:
             --paginate \
             --jq '.[].filename')
           
-          # 检查是否有 .github/workflows 或 .github/skills 下的文件被修改
+          # 检查是否有 .github/workflows、.github/skills 或 .github/deepseek-model.txt 被修改
           WORKFLOW_CHANGES=""
           while IFS= read -r file; do
-            if [[ "$file" == .github/workflows/* || "$file" == .github/skills/* ]]; then
+            if [[ "$file" == .github/workflows/* || "$file" == .github/skills/* || "$file" == .github/deepseek-model.txt ]]; then
               WORKFLOW_CHANGES="${WORKFLOW_CHANGES}${file}\n"
             fi
           done <<< "$CHANGED_FILES"
@@ -299,7 +299,7 @@ jobs:
               `- PR 提交人：**${prAuthor}**`,
               `- 通知对象：${mentionDisplay}`,
               '',
-              '未检测到 `.github/workflows/` 或 `.github/skills/` 目录变更，本次规则检查通过。',
+              '未检测到 `.github/workflows/`、`.github/skills/` 或 `.github/deepseek-model.txt` 变更，本次规则检查通过。',
               '',
               '> 本通知由 **GitHub Actions** 自动发布。' \
             ].join('\n');
@@ -364,7 +364,7 @@ jobs:
               fileList,
               '',
               '**处理方式：**',
-              '1. 撤回对 `.github/workflows/` 或 `.github/skills/` 目录下文件的修改',
+              '1. 撤回对 `.github/workflows/`、`.github/skills/` 或 `.github/deepseek-model.txt` 的修改',
               '2. 或联系任一核心成员进行有效审批。',
               '',
               '> 本通知由 **GitHub Actions** 自动发布。' \
