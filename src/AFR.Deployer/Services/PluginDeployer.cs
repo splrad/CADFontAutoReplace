@@ -14,13 +14,13 @@ internal static class PluginDeployer
     private const int    Managed     = 1;   // .NET 托管插件
 
     /// <summary>
-    /// 安装指定 CAD 配置文件实例的插件。
+    /// 安装指定 CAD 版本的插件。
     /// <para>
     /// 流程：
     /// 1) 提取 DLL；
     /// 2) 通过 <see cref="PluginMetadataReader"/> 从 DLL 中读取版本号、构建标识，
     ///    以及 DLL 自我描述的注册表默认值清单（<c>RegistryDefaultString/Dword</c> 程序集级特性）；
-    /// 3) 写入 AutoCAD 协议键（LOADER / LOADCTRLS / MANAGED / DESCRIPTION）以及插件版本标识
+    /// 3) 向该 CAD 版本下的所有配置文件写入 AutoCAD 协议键（LOADER / LOADCTRLS / MANAGED / DESCRIPTION）以及插件版本标识
     ///    （PluginVersion / PluginBuildId）；
     /// 4) 按 DLL 声明的清单写入默认值，仅当注册表中尚不存在该值时才写入，避免覆盖用户自定义。
     /// </para>
@@ -29,7 +29,7 @@ internal static class PluginDeployer
     /// 部署工具自动跟随，不再硬编码键名常量。
     /// </para>
     /// </summary>
-    /// <param name="installation">目标 CAD 配置文件实例（来自最新一次扫描结果）。</param>
+    /// <param name="installation">目标 CAD 版本（来自最新一次扫描结果）。</param>
     /// <param name="targetDirectory">DLL 的释放目录。</param>
     /// <param name="errorMessage">失败原因，成功时为 null。</param>
     /// <returns>true 表示安装成功。</returns>
@@ -62,39 +62,42 @@ internal static class PluginDeployer
         // 3. 写入注册表（幂等）
         try
         {
-            using var key = Registry.CurrentUser.CreateSubKey(installation.RegistryAppPath, true);
-
-            // 协议键 + 插件版本标识：始终覆写，确保升级后版本/路径与最新 DLL 一致。
-            key.SetValue("LOADER",        dllPath,             RegistryValueKind.String);
-            key.SetValue("LOADCTRLS",     LoadCtrls,           RegistryValueKind.DWord);
-            key.SetValue("MANAGED",       Managed,             RegistryValueKind.DWord);
-            key.SetValue("DESCRIPTION",   Description,         RegistryValueKind.String);
-            key.SetValue("PluginVersion", meta!.DisplayVersion, RegistryValueKind.String);
-            key.SetValue("PluginBuildId", meta.BuildId,        RegistryValueKind.String);
-
-            // DLL 自我描述的默认值。
-            // - String/Dword：写到 Applications\<AppName>，仅在缺失时写入；
-            // - DwordAt：写到 ProfileSubKey\<SubPath>（典型如 FixedProfile\General Configuration），
-            //   按 ForceOverwrite 决定是否覆盖；按 RemoveOnUninstall 在
-            //   Applications\<AppName>\__Owned\<SubPath> 下记录所有权标记，仅当卸载时
-            //   现值仍等于我们写入的内容才清除——保留用户预设与中途手改。
-            foreach (var item in meta.RegistryDefaults)
+            foreach (var profileSubKey in installation.ProfileSubKeys)
             {
-                switch (item.Kind)
+                using var key = Registry.CurrentUser.CreateSubKey(installation.GetRegistryAppPath(profileSubKey), true);
+
+                // 协议键 + 插件版本标识：始终覆写，确保升级后版本/路径与最新 DLL 一致。
+                key.SetValue("LOADER",        dllPath,             RegistryValueKind.String);
+                key.SetValue("LOADCTRLS",     LoadCtrls,           RegistryValueKind.DWord);
+                key.SetValue("MANAGED",       Managed,             RegistryValueKind.DWord);
+                key.SetValue("DESCRIPTION",   Description,         RegistryValueKind.String);
+                key.SetValue("PluginVersion", meta!.DisplayVersion, RegistryValueKind.String);
+                key.SetValue("PluginBuildId", meta.BuildId,        RegistryValueKind.String);
+
+                // DLL 自我描述的默认值。
+                // - String/Dword：写到 Applications\<AppName>，仅在缺失时写入；
+                // - DwordAt：写到 ProfileSubKey\<SubPath>（典型如 FixedProfile\General Configuration），
+                //   按 ForceOverwrite 决定是否覆盖；按 RemoveOnUninstall 在
+                //   Applications\<AppName>\__Owned\<SubPath> 下记录所有权标记，仅当卸载时
+                //   现值仍等于我们写入的内容才清除——保留用户预设与中途手改。
+                foreach (var item in meta.RegistryDefaults)
                 {
-                    case PluginMetadataReader.RegistryDefaultKind.String:
-                        if (key.GetValue(item.Name) is null)
-                            key.SetValue(item.Name, item.StringValue ?? string.Empty, RegistryValueKind.String);
-                        break;
+                    switch (item.Kind)
+                    {
+                        case PluginMetadataReader.RegistryDefaultKind.String:
+                            if (key.GetValue(item.Name) is null)
+                                key.SetValue(item.Name, item.StringValue ?? string.Empty, RegistryValueKind.String);
+                            break;
 
-                    case PluginMetadataReader.RegistryDefaultKind.Dword:
-                        if (key.GetValue(item.Name) is null)
-                            key.SetValue(item.Name, item.DwordValue, RegistryValueKind.DWord);
-                        break;
+                        case PluginMetadataReader.RegistryDefaultKind.Dword:
+                            if (key.GetValue(item.Name) is null)
+                                key.SetValue(item.Name, item.DwordValue, RegistryValueKind.DWord);
+                            break;
 
-                    case PluginMetadataReader.RegistryDefaultKind.DwordAt:
-                        WriteDwordAt(installation, key, item);
-                        break;
+                        case PluginMetadataReader.RegistryDefaultKind.DwordAt:
+                            WriteDwordAt(installation, profileSubKey, key, item);
+                            break;
+                    }
                 }
             }
 
@@ -124,13 +127,14 @@ internal static class PluginDeployer
     /// </summary>
     private static void WriteDwordAt(
         CadInstallation installation,
+        string profileSubKey,
         RegistryKey appKey,
         PluginMetadataReader.RegistryDefault item)
     {
         var subPath = item.SubPath;
         if (string.IsNullOrEmpty(subPath)) return;
 
-        var profilePath = $@"{installation.Descriptor.RegistryBasePath}\{installation.ProfileSubKey}\{subPath}";
+        var profilePath = $@"{installation.GetProfileRootPath(profileSubKey)}\{subPath}";
 
         try
         {

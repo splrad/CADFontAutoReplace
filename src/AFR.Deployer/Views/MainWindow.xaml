@@ -195,19 +195,59 @@
                     <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="插件部署" FontSize="22" FontWeight="SemiBold" />
-                            <Border Margin="10,2,0,0"
-                                    VerticalAlignment="Center"
-                                    Background="{DynamicResource SubtleFillColorTertiaryBrush}"
-                                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="6"
-                                    Padding="6,1">
-                                <TextBlock Text="{Binding DeployerVersion}"
-                                           FontSize="11"
-                                           FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
-                                           FontWeight="SemiBold"
-                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                            </Border>
+                            <Button Margin="10,2,0,0"
+                                    Padding="0"
+                                    BorderThickness="0"
+                                    Background="Transparent"
+                                    Command="{Binding OpenReleasePageCommand}"
+                                    Cursor="Hand"
+                                    ToolTip="{Binding UpdateToolTip}">
+                                <Border x:Name="VersionBadge"
+                                        VerticalAlignment="Center"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="6,1">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasUpdate}" Value="True">
+                                                    <Setter Property="Background" Value="#FFF4CE" />
+                                                    <Setter Property="BorderBrush" Value="#C48300" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <TextBlock x:Name="VersionBadgeTextBlock"
+                                               Text="{Binding VersionBadgeText}"
+                                               FontSize="11"
+                                               FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
+                                               FontWeight="SemiBold">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasUpdate}" Value="True">
+                                                        <Setter Property="Foreground" Value="#8A5A00" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Border>
+                                <Button.Style>
+                                    <Style TargetType="Button">
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="Button">
+                                                    <ContentPresenter />
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
                         </StackPanel>
                         <TextBlock Text="选择 CAD 版本并一键安装 / 卸载 AFR 插件"
                                    FontSize="12"

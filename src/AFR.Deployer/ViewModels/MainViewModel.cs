@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -34,6 +35,11 @@ internal sealed partial class MainViewModel : ObservableObject
     private static readonly TimeSpan               RefreshDebounceDelay = TimeSpan.FromMilliseconds(250);
     /// <summary>后台扫描互斥标记，避免事件风暴下重复排队。</summary>
     private int                                    _backgroundScanInFlight;
+    private bool                                   _hasUpdate;
+    private string                                 _latestVersion  = string.Empty;
+    private string                                 _releasePageUrl = UpdateCheckService.ReleasesPageUrl;
+    private UpdateCheckSource                      _updateSource   = UpdateCheckSource.GitHub;
+    private const int                              MaxUpdateCheckAttempts = 3;
 
     [ObservableProperty]
     public partial string DeployPath { get; set; } = ResolveDefaultDeployPath();
@@ -93,25 +99,25 @@ internal sealed partial class MainViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(DetectionSummary))]
     public partial int TotalCount { get; set; }
 
-    /// <summary>已部署且为最新版的插件实例数量。</summary>
+    /// <summary>已部署且为最新版的 CAD 版本数量。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PluginSummary))]
     [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
     public partial int DeployedCurrentCount { get; set; }
 
-    /// <summary>已部署但版本陈旧的插件实例数量。</summary>
+    /// <summary>已部署但版本陈旧的 CAD 版本数量。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PluginSummary))]
     [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
     public partial int DeployedOutdatedCount { get; set; }
 
-    /// <summary>注册表登记但 DLL 文件已丢失的插件实例数量。</summary>
+    /// <summary>注册表登记但 DLL 文件已丢失的 CAD 版本数量。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PluginSummary))]
     [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
     public partial int DllMissingCount { get; set; }
 
-    /// <summary>已检测到 CAD 但插件尚未部署的配置文件实例数量。</summary>
+    /// <summary>已检测到 CAD 但插件尚未部署的 CAD 版本数量。</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PluginSummary))]
     [NotifyPropertyChangedFor(nameof(HasPluginSummary))]
@@ -147,6 +153,58 @@ internal sealed partial class MainViewModel : ObservableObject
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822:Mark members as static",
         Justification = "WPF DataContext 绑定要求实例成员")]
     public string DeployerVersion => $"v{DeployerVersionService.GetDisplayVersion()}";
+
+    /// <summary>是否检测到比当前部署器更新的正式发行版。</summary>
+    public bool HasUpdate
+    {
+        get => _hasUpdate;
+        set
+        {
+            if (!SetProperty(ref _hasUpdate, value)) return;
+            OnPropertyChanged(nameof(VersionBadgeText));
+            OnPropertyChanged(nameof(UpdateToolTip));
+        }
+    }
+
+    /// <summary>GitHub 最新正式发行版版本号（X.Y）。</summary>
+    public string LatestVersion
+    {
+        get => _latestVersion;
+        set
+        {
+            if (!SetProperty(ref _latestVersion, value)) return;
+            OnPropertyChanged(nameof(VersionBadgeText));
+            OnPropertyChanged(nameof(UpdateToolTip));
+        }
+    }
+
+    /// <summary>点击更新提示时打开的发布页面。</summary>
+    public string ReleasePageUrl
+    {
+        get => _releasePageUrl;
+        set => SetProperty(ref _releasePageUrl, value);
+    }
+
+    /// <summary>检测到新版本的发布源。</summary>
+    public UpdateCheckSource UpdateSource
+    {
+        get => _updateSource;
+        set
+        {
+            if (!SetProperty(ref _updateSource, value)) return;
+            OnPropertyChanged(nameof(UpdateToolTip));
+        }
+    }
+
+    /// <summary>标题区版本徽章文本；发现新版本时作为更新入口。</summary>
+    public string VersionBadgeText => HasUpdate && !string.IsNullOrWhiteSpace(LatestVersion)
+        ? $"发现新版 v{LatestVersion}"
+        : DeployerVersion;
+
+    /// <summary>标题区版本徽章提示文本。</summary>
+    public string UpdateToolTip => HasUpdate && !string.IsNullOrWhiteSpace(LatestVersion)
+        ? $"当前版本 {DeployerVersion}，{GetUpdateSourceName(UpdateSource)} 最新版本 v{LatestVersion}。点击打开{GetUpdateSourceName(UpdateSource)}发行页下载。"
+        : $"当前版本 {DeployerVersion}";
 
     /// <summary>操作按钮是否可用。</summary>
     public bool CanOperate => !IsCadRunning && !IsBusy;
@@ -195,6 +253,7 @@ internal sealed partial class MainViewModel : ObservableObject
 
         Refresh();
         CheckCadProcesses();
+        _ = CheckForUpdatesAsync();
     }
 
     /// <summary>取 RegistryBasePath 的品牌根，如 R25.0 → AutoCAD。</summary>
@@ -331,7 +390,9 @@ internal sealed partial class MainViewModel : ObservableObject
 
     private static bool IsSameEntry(CadInstallation r, CadEntryViewModel e)
         => r.Descriptor.AppName == e.Installation.Descriptor.AppName
-        && r.ProfileSubKey      == e.Installation.ProfileSubKey;
+        && string.Equals(r.Descriptor.RegistryBasePath,
+                         e.Installation.Descriptor.RegistryBasePath,
+                         StringComparison.OrdinalIgnoreCase);
 
     // ── 进程检测 ──
 
@@ -356,6 +417,63 @@ internal sealed partial class MainViewModel : ObservableObject
             DeployPath = selected;
     }
 
+    // ── 更新检查 ──
+
+    /// <summary>启动后静默检查 GitHub 最新发行版，不影响部署器主流程。</summary>
+    private async Task CheckForUpdatesAsync()
+    {
+        var result = await CheckForUpdatesAsync(UpdateCheckSource.GitHub);
+        if (!result.HasUpdate && !result.IsReachable)
+            result = await CheckForUpdatesAsync(UpdateCheckSource.Gitee);
+
+        if (!result.HasUpdate) return;
+
+        LatestVersion  = result.LatestVersion;
+        ReleasePageUrl = string.IsNullOrWhiteSpace(result.ReleaseUrl)
+            ? UpdateCheckService.ReleasesPageUrl
+            : result.ReleaseUrl;
+        UpdateSource = result.Source;
+        HasUpdate = true;
+    }
+
+    /// <summary>对指定发布源最多尝试三次；每次请求自身有硬超时，避免单次网络阻塞拖住后续检查。</summary>
+    private static async Task<UpdateCheckResult> CheckForUpdatesAsync(UpdateCheckSource source)
+    {
+        for (var attempt = 1; attempt <= MaxUpdateCheckAttempts; attempt++)
+        {
+            var result = await UpdateCheckService.CheckAsync(source);
+            if (result.HasUpdate) return result;
+            if (result.IsReachable) return result;
+            if (attempt < MaxUpdateCheckAttempts)
+                await Task.Delay(TimeSpan.FromSeconds(2));
+        }
+
+        return UpdateCheckResult.Unreachable(source);
+    }
+
+    private static string GetUpdateSourceName(UpdateCheckSource source) => source switch
+    {
+        UpdateCheckSource.Gitee => "Gitee 镜像仓库",
+        _ => "GitHub",
+    };
+
+    [RelayCommand]
+    private async Task OpenReleasePageAsync()
+    {
+        var url = string.IsNullOrWhiteSpace(ReleasePageUrl)
+            ? UpdateCheckService.ReleasesPageUrl
+            : ReleasePageUrl;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch
+        {
+            await _dialog.ShowInfoAsync($"无法打开浏览器，请手动访问：\n{url}", "AFR 部署工具");
+        }
+    }
+
     // ── 安装 ──
 
     [RelayCommand(CanExecute = nameof(CanOperate))]
@@ -369,7 +487,7 @@ internal sealed partial class MainViewModel : ObservableObject
         }
 
         var freshResults = CadRegistryScanner.Scan()
-            .ToDictionary(r => (r.Descriptor.AppName, r.ProfileSubKey));
+            .ToDictionary(r => r.Descriptor.AppName);
 
         IsBusy     = true;
         StatusText = "正在安装……";
@@ -384,11 +502,11 @@ internal sealed partial class MainViewModel : ObservableObject
 
             foreach (var entry in selected)
             {
-                var key = (entry.Installation.Descriptor.AppName, entry.Installation.ProfileSubKey);
+                var key = entry.Installation.Descriptor.AppName;
                 var fresh = freshResults.GetValueOrDefault(key, entry.Installation);
 
                 if (!PluginDeployer.TryInstall(fresh, DeployPath, out var err))
-                    errors.Add($"{fresh.Descriptor.DisplayName} [{fresh.ProfileSubKey}]：{err}");
+                    errors.Add($"{fresh.Descriptor.DisplayName}：{err}");
                 else
                 {
                     successes++;
@@ -399,7 +517,7 @@ internal sealed partial class MainViewModel : ObservableObject
                     try
                     {
                         if (!EmbeddedFontPatcher.Apply(fresh))
-                            errors.Add($"{fresh.Descriptor.DisplayName} [{fresh.ProfileSubKey}]：默认 SHX 字体释放失败，请手动在CAD中运行AFR插件进行字体配置");
+                            errors.Add($"{fresh.Descriptor.DisplayName}：默认 SHX 字体释放失败，请手动在CAD中运行AFR插件进行字体配置");
                     }
                     catch { /* 字体释放失败不影响安装主流程 */ }
                 }
@@ -422,7 +540,7 @@ internal sealed partial class MainViewModel : ObservableObject
                 $"以下版本安装失败：\n\n{string.Join("\n", errors)}",
                 "AFR 部署工具 — 安装错误");
         else
-            StatusText = $"✓ 已成功安装 {successes} 个配置文件实例并应用 SHX 缺失弹窗抑制，启动 CAD 时插件生效";
+            StatusText = $"✓ 已成功安装 {successes} 个 CAD 版本并应用 SHX 缺失弹窗抑制，启动 CAD 时插件生效";
     }
 
     // ── 卸载 ──
@@ -441,13 +559,13 @@ internal sealed partial class MainViewModel : ObservableObject
         }
 
         var confirmed = await _dialog.ConfirmAsync(
-            $"确定要从以下 {selected.Count} 个配置文件实例中卸载 AFR 插件？\n\n" +
-            string.Join("\n", selected.Select(e => $"  • {e.Installation.Descriptor.DisplayName} [{e.Profile}]")),
+            $"确定要从以下 {selected.Count} 个 CAD 版本中卸载 AFR 插件？\n\n" +
+            string.Join("\n", selected.Select(e => $"  • {e.Installation.Descriptor.DisplayName}")),
             "AFR 部署工具 — 确认卸载");
         if (!confirmed) return;
 
         var freshResults = CadRegistryScanner.Scan()
-            .ToDictionary(r => (r.Descriptor.AppName, r.ProfileSubKey));
+            .ToDictionary(r => r.Descriptor.AppName);
 
         IsBusy     = true;
         StatusText = "正在卸载……";
@@ -461,15 +579,15 @@ internal sealed partial class MainViewModel : ObservableObject
 
             foreach (var entry in selected)
             {
-                var key = (entry.Installation.Descriptor.AppName, entry.Installation.ProfileSubKey);
+                var key = entry.Installation.Descriptor.AppName;
                 var fresh = freshResults.GetValueOrDefault(key, entry.Installation);
 
                 if (!PluginUninstaller.TryUninstall(fresh, out var warn))
-                    warnings.Add($"{fresh.Descriptor.DisplayName} [{fresh.ProfileSubKey}]：{warn}");
+                    warnings.Add($"{fresh.Descriptor.DisplayName}：{warn}");
                 else
                 {
                     if (warn is not null)
-                        warnings.Add($"{fresh.Descriptor.DisplayName} [{fresh.ProfileSubKey}]（警告）：{warn}");
+                        warnings.Add($"{fresh.Descriptor.DisplayName}（警告）：{warn}");
                     successes++;
                     patchedDescriptors.Add(fresh.Descriptor);
                 }
@@ -491,7 +609,7 @@ internal sealed partial class MainViewModel : ObservableObject
             await _dialog.ShowWarningAsync(string.Join("\n", warnings),
                 "AFR 部署工具 — 卸载完成（含警告）");
         else
-            StatusText = $"✓ 已成功卸载 {successes} 个配置文件实例并还原由本插件写入的 SHX 缺失弹窗抑制设置";
+            StatusText = $"✓ 已成功卸载 {successes} 个 CAD 版本并还原由本插件写入的 SHX 缺失弹窗抑制设置";
     }
 
     /// <summary>清空所有条目的勾选状态，避免上一次操作的选择残留到下一次操作。</summary>
