@@ -23,41 +23,18 @@ jobs:
     uses: ./.github/workflows/pr-auto-approve.yml
     secrets: inherit
 
-  rule-file-protection:
-    name: 🧩 权限审查
-    needs: auto-approve
-    if: >-
-      always() &&
-      (github.event_name == 'pull_request_target' || github.event_name == 'pull_request_review') &&
-      (
-        github.event.pull_request.base.ref == 'test' ||
-        (
-          github.event.pull_request.base.ref == 'main' &&
-          github.event.pull_request.head.ref != 'test'
-        )
-      )
-    uses: ./.github/workflows/merge-permission.yml
-    with:
-      mode: audit
-    secrets: inherit
-
   merge-permission:
     name: 🧩 权限审查
     needs: auto-approve
     if: >-
       always() &&
-      (github.event_name == 'pull_request_target' || github.event_name == 'pull_request_review') &&
-      github.event.pull_request.base.ref == 'main'
+      (github.event_name == 'pull_request_target' || github.event_name == 'pull_request_review')
     uses: ./.github/workflows/merge-permission.yml
-    with:
-      mode: approval
     secrets: inherit
 
   branch-policy-check:
     name: 🧩 主干准入
-    needs:
-      - rule-file-protection
-      - merge-permission
+    needs: merge-permission
     if: >-
       always() &&
       github.event_name == 'pull_request_target' &&

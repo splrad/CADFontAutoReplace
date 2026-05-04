@@ -141,7 +141,23 @@ jobs:
           $releaseTitle = "AFR v$displayVersion ($buildId)"
           # latestTag 用于生成变更记录；existingRelease 用于避免重复发布同一版本。
           $latestTag = gh release list --repo $env:GH_REPO --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""'
-          $existingRelease = gh release view $tagName --repo $env:GH_REPO --json tagName --jq '.tagName' 2>$null
+            $releaseHeaders = @{
+              Accept = 'application/vnd.github+json'
+              Authorization = "Bearer $env:GH_TOKEN"
+              'X-GitHub-Api-Version' = '2022-11-28'
+            }
+            $releaseLookup = Invoke-WebRequest `
+              -Uri "https://api.github.com/repos/$env:GH_REPO/releases/tags/$tagName" `
+              -Headers $releaseHeaders `
+              -SkipHttpErrorCheck
+
+            if ($releaseLookup.StatusCode -eq 200) {
+              $existingRelease = [string]((($releaseLookup.Content | ConvertFrom-Json).tag_name))
+            } elseif ($releaseLookup.StatusCode -eq 404) {
+              $existingRelease = ''
+            } else {
+              throw "查询 Release $tagName 失败，HTTP $($releaseLookup.StatusCode)。"
+            }
 
           "display_version=$displayVersion" >> $env:GITHUB_OUTPUT
           "build_id=$buildId" >> $env:GITHUB_OUTPUT
