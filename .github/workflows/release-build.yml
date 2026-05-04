@@ -19,14 +19,23 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  # 创建 tag、创建 Release、上传 Release 资产均需要 contents: write。
+  # 创建 tag、创建 Release、上传 Release 资产需要 contents: write；发布结果回写到 PR 需要 issues: write。
   contents: write
+  issues: write
 
 jobs:
   release:
     name: 📦 构建并创建 GitHub Release
     runs-on: windows-latest
     timeout-minutes: 45
+    outputs:
+      merged_pr_number: ${{ steps.merged-pr-guard.outputs.pr_number }}
+      merged_pr_title: ${{ steps.merged-pr-guard.outputs.pr_title }}
+      display_version: ${{ steps.version.outputs.display_version }}
+      build_id: ${{ steps.version.outputs.build_id }}
+      tag_name: ${{ steps.version.outputs.tag_name }}
+      release_title: ${{ steps.version.outputs.release_title }}
+      should_release: ${{ steps.version.outputs.should_release }}
 
     steps:
       - name: 📦 执行代码检出
@@ -58,6 +67,62 @@ jobs:
           Get-ChildItem -LiteralPath $env:GITHUB_WORKSPACE -Force | Remove-Item -Recurse -Force
           Copy-Item -Path (Join-Path $sourceRoot.FullName '*') -Destination $env:GITHUB_WORKSPACE -Recurse -Force
           "已通过 GitHub REST API 下载当前提交源码：${{ github.sha }}。" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      - name: 🔐 校验当前提交已完成 PR 合并关闭
+        id: merged-pr-guard
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $headers = @{
+              Accept = 'application/vnd.github+json'
+              Authorization = "Bearer $env:GH_TOKEN"
+              'X-GitHub-Api-Version' = '2022-11-28'
+          }
+
+          $maxAttempts = 10
+          $retrySeconds = 6
+          $mergedPullRequest = $null
+
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+              $pullsResponse = Invoke-WebRequest `
+                  -Uri "https://api.github.com/repos/$env:GH_REPO/commits/${{ github.sha }}/pulls" `
+                  -Headers $headers `
+                  -SkipHttpErrorCheck
+
+              if ($pullsResponse.StatusCode -ne 200) {
+                  throw "查询提交关联 PR 失败，HTTP $($pullsResponse.StatusCode)。"
+              }
+
+              $associatedPulls = @()
+              if (-not [string]::IsNullOrWhiteSpace($pullsResponse.Content)) {
+                  $associatedPulls = @($pullsResponse.Content | ConvertFrom-Json)
+              }
+
+              $mergedPullRequest = $associatedPulls | Where-Object {
+                  $_.state -eq 'closed' -and
+                  $null -ne $_.merged_at -and
+                  $_.base.ref -eq $env:GITHUB_REF_NAME
+              } | Select-Object -First 1
+
+              if ($null -ne $mergedPullRequest) {
+                  break
+              }
+
+              if ($attempt -lt $maxAttempts) {
+                  Write-Host "提交尚未关联到已合并并关闭的 $env:GITHUB_REF_NAME PR，等待 $retrySeconds 秒后重试（$attempt/$maxAttempts）。"
+                  Start-Sleep -Seconds $retrySeconds
+              }
+          }
+
+          if ($null -eq $mergedPullRequest) {
+              throw "当前提交 $env:GITHUB_SHA 未关联到已合并并关闭、目标分支为 $env:GITHUB_REF_NAME 的 PR，发布流程已阻断。"
+          }
+
+          "pr_number=$($mergedPullRequest.number)" >> $env:GITHUB_OUTPUT
+          "pr_title=$([string]$mergedPullRequest.title)" >> $env:GITHUB_OUTPUT
+          "已确认当前提交来自已合并并关闭的 PR #$($mergedPullRequest.number)。" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
 
       - name: 🧰 安装 .NET SDK
         shell: pwsh
@@ -278,3 +343,217 @@ jobs:
             --latest
 
           "已创建 Release：${{ steps.version.outputs.tag_name }}" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+  notify-release-result:
+    name: 📣 发布结果通知
+    runs-on: windows-latest
+    needs: release
+    if: always()
+    timeout-minutes: 10
+
+    steps:
+      - name: 📣 向核心开发者发送发布结果提醒
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TRUSTED_LIST: ${{ vars.TRUSTED_DEVELOPERS }}
+          RELEASE_RESULT: ${{ needs.release.result }}
+          MERGED_PR_NUMBER: ${{ needs.release.outputs.merged_pr_number }}
+          MERGED_PR_TITLE: ${{ needs.release.outputs.merged_pr_title }}
+          DISPLAY_VERSION: ${{ needs.release.outputs.display_version }}
+          BUILD_ID: ${{ needs.release.outputs.build_id }}
+          TAG_NAME: ${{ needs.release.outputs.tag_name }}
+          RELEASE_TITLE: ${{ needs.release.outputs.release_title }}
+          SHOULD_RELEASE: ${{ needs.release.outputs.should_release }}
+        run: |
+          $headers = @{
+              Accept = 'application/vnd.github+json'
+              Authorization = "Bearer $env:GH_TOKEN"
+              'X-GitHub-Api-Version' = '2022-11-28'
+          }
+
+          function Resolve-VersionInfo {
+              $resolvedDisplayVersion = [string]$env:DISPLAY_VERSION
+              $resolvedBuildId = [string]$env:BUILD_ID
+              $resolvedTagName = [string]$env:TAG_NAME
+              $resolvedReleaseTitle = [string]$env:RELEASE_TITLE
+
+              if (
+                  -not [string]::IsNullOrWhiteSpace($resolvedDisplayVersion) -and
+                  -not [string]::IsNullOrWhiteSpace($resolvedBuildId) -and
+                  -not [string]::IsNullOrWhiteSpace($resolvedTagName) -and
+                  -not [string]::IsNullOrWhiteSpace($resolvedReleaseTitle)
+              ) {
+                  return [pscustomobject]@{
+                      DisplayVersion = $resolvedDisplayVersion
+                      BuildId = $resolvedBuildId
+                      TagName = $resolvedTagName
+                      ReleaseTitle = $resolvedReleaseTitle
+                  }
+              }
+
+              $versionResponse = Invoke-WebRequest `
+                  -Uri "https://api.github.com/repos/$env:GH_REPO/contents/Version.props?ref=$env:GITHUB_SHA" `
+                  -Headers $headers `
+                  -SkipHttpErrorCheck
+
+              if ($versionResponse.StatusCode -ne 200) {
+                  return [pscustomobject]@{
+                      DisplayVersion = $resolvedDisplayVersion
+                      BuildId = $resolvedBuildId
+                      TagName = $resolvedTagName
+                      ReleaseTitle = $resolvedReleaseTitle
+                  }
+              }
+
+              $versionPayload = $versionResponse.Content | ConvertFrom-Json
+              $encodedContent = [string]$versionPayload.content
+              if ([string]::IsNullOrWhiteSpace($encodedContent)) {
+                  return [pscustomobject]@{
+                      DisplayVersion = $resolvedDisplayVersion
+                      BuildId = $resolvedBuildId
+                      TagName = $resolvedTagName
+                      ReleaseTitle = $resolvedReleaseTitle
+                  }
+              }
+
+              $versionContent = [System.Text.Encoding]::UTF8.GetString(
+                  [System.Convert]::FromBase64String(($encodedContent -replace '\s', ''))
+              )
+              [xml]$versionXml = $versionContent
+
+              $resolvedDisplayVersion = [string]$versionXml.Project.PropertyGroup.PluginDisplayVersion
+              $resolvedBuildId = [string]$versionXml.Project.PropertyGroup.PluginBuildId
+              if (-not [string]::IsNullOrWhiteSpace($resolvedDisplayVersion)) {
+                  $resolvedTagName = "v$resolvedDisplayVersion"
+              }
+              if (
+                  -not [string]::IsNullOrWhiteSpace($resolvedDisplayVersion) -and
+                  -not [string]::IsNullOrWhiteSpace($resolvedBuildId)
+              ) {
+                  $resolvedReleaseTitle = "AFR v$resolvedDisplayVersion ($resolvedBuildId)"
+              }
+
+              return [pscustomobject]@{
+                  DisplayVersion = $resolvedDisplayVersion
+                  BuildId = $resolvedBuildId
+                  TagName = $resolvedTagName
+                  ReleaseTitle = $resolvedReleaseTitle
+              }
+          }
+
+          function Resolve-MergedPullRequest {
+              $resolvedPrNumber = [string]$env:MERGED_PR_NUMBER
+              $resolvedPrTitle = [string]$env:MERGED_PR_TITLE
+              if ([string]::IsNullOrWhiteSpace($resolvedPrNumber)) {
+                  return $null
+              }
+
+              return [pscustomobject]@{
+                  Number = $resolvedPrNumber
+                  Title = $resolvedPrTitle
+              }
+          }
+
+          $trustedUsers = @()
+          if (-not [string]::IsNullOrWhiteSpace($env:TRUSTED_LIST)) {
+              try {
+                  $parsedTrustedList = $env:TRUSTED_LIST | ConvertFrom-Json
+                  foreach ($user in @($parsedTrustedList)) {
+                      if ($user -is [string] -and -not [string]::IsNullOrWhiteSpace($user)) {
+                          $trustedUsers += $user.Trim()
+                      }
+                  }
+              } catch {
+                  Write-Host "::warning::TRUSTED_DEVELOPERS 解析失败：$($_.Exception.Message)"
+              }
+          }
+
+          $trustedUsers = @($trustedUsers | Select-Object -Unique)
+          $actor = [string]$env:GITHUB_ACTOR
+          $mentionUsers = @($trustedUsers | ForEach-Object { "@$_" })
+          if (-not [string]::IsNullOrWhiteSpace($actor) -and -not ($trustedUsers -contains $actor)) {
+              $mentionUsers += "@$actor"
+          }
+
+          $mentionDisplay = if ($mentionUsers.Count -gt 0) {
+              [string]::Join('；', $mentionUsers)
+          } else {
+              '（未配置通知对象）'
+          }
+
+          $versionInfo = Resolve-VersionInfo
+          $tagName = if ([string]::IsNullOrWhiteSpace($versionInfo.TagName)) { '未读取到' } else { $versionInfo.TagName }
+          $releaseTitle = if ([string]::IsNullOrWhiteSpace($versionInfo.ReleaseTitle)) { '未读取到' } else { $versionInfo.ReleaseTitle }
+
+            if ($env:SHOULD_RELEASE -eq 'false') {
+              Write-Host '当前运行未检测到新版本号变化，跳过发布结果通知。'
+              exit 0
+            }
+
+            if ([string]::IsNullOrWhiteSpace($env:SHOULD_RELEASE)) {
+              if ($tagName -eq '未读取到') {
+                Write-Host '::warning::无法判断当前运行是否对应版本号变化，跳过发布结果通知。'
+                exit 0
+              }
+
+              $releaseLookup = Invoke-WebRequest `
+                -Uri "https://api.github.com/repos/$env:GH_REPO/releases/tags/$tagName" `
+                -Headers $headers `
+                -SkipHttpErrorCheck
+
+              if ($releaseLookup.StatusCode -eq 200) {
+                Write-Host '当前版本已存在 Release，本次运行不对应新的版本号变化，跳过发布结果通知。'
+                exit 0
+              }
+
+              if ($releaseLookup.StatusCode -ne 404) {
+                throw "查询 Release $tagName 失败，HTTP $($releaseLookup.StatusCode)。"
+              }
+            }
+
+            $pullRequestInfo = Resolve-MergedPullRequest
+            if ($null -eq $pullRequestInfo -or [string]::IsNullOrWhiteSpace([string]$pullRequestInfo.Number)) {
+              Write-Host '::warning::未找到本次版本号变化对应的已合并且已关闭 PR，跳过发布结果通知。'
+              exit 0
+            }
+
+            $prNumber = [string]$pullRequestInfo.Number
+            $prTitle = if ([string]::IsNullOrWhiteSpace([string]$pullRequestInfo.Title)) { '未读取到' } else { [string]$pullRequestInfo.Title }
+            $prUrl = "https://github.com/$env:GH_REPO/pull/$prNumber"
+          $releaseUrl = if ($tagName -eq '未读取到') { '未生成' } else { "https://github.com/$env:GH_REPO/releases/tag/$tagName" }
+          $commitShortSha = ([string]$env:GITHUB_SHA).Substring(0, 7)
+          $runUrl = "https://github.com/$env:GH_REPO/actions/runs/$env:GITHUB_RUN_ID/attempts/$env:GITHUB_RUN_ATTEMPT"
+
+            if ($env:RELEASE_RESULT -eq 'success') {
+              $title = '## 📦【版本发布】已完成'
+              $resultText = 'Release 创建成功'
+          } else {
+              $title = '## 📦【版本发布】未完成'
+              $resultText = 'Release 创建失败'
+          }
+
+          $commentBody = @(
+              "<!-- release-build-status-notice:$env:GITHUB_RUN_ID:$env:GITHUB_RUN_ATTEMPT -->",
+              $title,
+              '',
+              "- 运行结果：**$resultText**",
+              "- PR链接：$prUrl",
+              "- PR标题：**$prTitle**",
+              "- 版本标签：**$tagName**",
+              "- 发布标题：**$releaseTitle**",
+              "- 目标分支：**$env:GITHUB_REF_NAME**",
+              "- 提交：**$commitShortSha**",
+              "- 触发人：**$actor**",
+              "- 工作流运行：$runUrl",
+              "- Release 链接：$releaseUrl",
+              "- 通知对象：$mentionDisplay",
+              '',
+              '> 本通知由 **GitHub Actions** 自动发布。'
+          ) -join "`n"
+
+          $payload = @{ body = $commentBody } | ConvertTo-Json -Compress
+          $payloadPath = Join-Path $env:RUNNER_TEMP "release-build-notice-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.json"
+          $payload | Set-Content -LiteralPath $payloadPath -Encoding utf8
+          gh api --method POST "repos/$env:GH_REPO/issues/$prNumber/comments" --input $payloadPath
