@@ -38,6 +38,7 @@ internal sealed partial class MainViewModel : ObservableObject
     private bool                                   _hasUpdate;
     private string                                 _latestVersion  = string.Empty;
     private string                                 _releasePageUrl = UpdateCheckService.ReleasesPageUrl;
+    private const int                              MaxUpdateCheckAttempts = 3;
 
     [ObservableProperty]
     public partial string DeployPath { get; set; } = ResolveDefaultDeployPath();
@@ -409,7 +410,15 @@ internal sealed partial class MainViewModel : ObservableObject
     /// <summary>启动后静默检查 GitHub 最新发行版，不影响部署器主流程。</summary>
     private async Task CheckForUpdatesAsync()
     {
-        var result = await UpdateCheckService.CheckAsync();
+        UpdateCheckResult result = UpdateCheckResult.NoUpdate;
+        for (var attempt = 1; attempt <= MaxUpdateCheckAttempts; attempt++)
+        {
+            result = await UpdateCheckService.CheckAsync();
+            if (result.HasUpdate) break;
+            if (attempt < MaxUpdateCheckAttempts)
+                await Task.Delay(TimeSpan.FromSeconds(3));
+        }
+
         if (!result.HasUpdate) return;
 
         LatestVersion  = result.LatestVersion;

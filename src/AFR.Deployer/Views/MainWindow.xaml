@@ -202,17 +202,39 @@
                                     Command="{Binding OpenReleasePageCommand}"
                                     Cursor="Hand"
                                     ToolTip="{Binding UpdateToolTip}">
-                                <Border VerticalAlignment="Center"
-                                        Background="{DynamicResource SubtleFillColorTertiaryBrush}"
-                                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                <Border x:Name="VersionBadge"
+                                        VerticalAlignment="Center"
                                         BorderThickness="1"
                                         CornerRadius="6"
                                         Padding="6,1">
-                                    <TextBlock Text="{Binding VersionBadgeText}"
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasUpdate}" Value="True">
+                                                    <Setter Property="Background" Value="#FFF4CE" />
+                                                    <Setter Property="BorderBrush" Value="#C48300" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <TextBlock x:Name="VersionBadgeTextBlock"
+                                               Text="{Binding VersionBadgeText}"
                                                FontSize="11"
                                                FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
-                                               FontWeight="SemiBold"
-                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                               FontWeight="SemiBold">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasUpdate}" Value="True">
+                                                        <Setter Property="Foreground" Value="#8A5A00" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                 </Border>
                                 <Button.Style>
                                     <Style TargetType="Button">
