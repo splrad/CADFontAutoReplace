@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -34,6 +35,9 @@ internal sealed partial class MainViewModel : ObservableObject
     private static readonly TimeSpan               RefreshDebounceDelay = TimeSpan.FromMilliseconds(250);
     /// <summary>后台扫描互斥标记，避免事件风暴下重复排队。</summary>
     private int                                    _backgroundScanInFlight;
+    private bool                                   _hasUpdate;
+    private string                                 _latestVersion  = string.Empty;
+    private string                                 _releasePageUrl = UpdateCheckService.ReleasesPageUrl;
 
     [ObservableProperty]
     public partial string DeployPath { get; set; } = ResolveDefaultDeployPath();
@@ -148,6 +152,47 @@ internal sealed partial class MainViewModel : ObservableObject
         Justification = "WPF DataContext 绑定要求实例成员")]
     public string DeployerVersion => $"v{DeployerVersionService.GetDisplayVersion()}";
 
+    /// <summary>是否检测到比当前部署器更新的正式发行版。</summary>
+    public bool HasUpdate
+    {
+        get => _hasUpdate;
+        set
+        {
+            if (!SetProperty(ref _hasUpdate, value)) return;
+            OnPropertyChanged(nameof(VersionBadgeText));
+            OnPropertyChanged(nameof(UpdateToolTip));
+        }
+    }
+
+    /// <summary>GitHub 最新正式发行版版本号（X.Y）。</summary>
+    public string LatestVersion
+    {
+        get => _latestVersion;
+        set
+        {
+            if (!SetProperty(ref _latestVersion, value)) return;
+            OnPropertyChanged(nameof(VersionBadgeText));
+            OnPropertyChanged(nameof(UpdateToolTip));
+        }
+    }
+
+    /// <summary>点击更新提示时打开的发布页面。</summary>
+    public string ReleasePageUrl
+    {
+        get => _releasePageUrl;
+        set => SetProperty(ref _releasePageUrl, value);
+    }
+
+    /// <summary>标题区版本徽章文本；发现新版本时作为更新入口。</summary>
+    public string VersionBadgeText => HasUpdate && !string.IsNullOrWhiteSpace(LatestVersion)
+        ? $"发现新版 v{LatestVersion}"
+        : DeployerVersion;
+
+    /// <summary>标题区版本徽章提示文本。</summary>
+    public string UpdateToolTip => HasUpdate && !string.IsNullOrWhiteSpace(LatestVersion)
+        ? $"当前版本 {DeployerVersion}，最新版本 v{LatestVersion}。点击打开 GitHub Releases 下载。"
+        : $"当前版本 {DeployerVersion}";
+
     /// <summary>操作按钮是否可用。</summary>
     public bool CanOperate => !IsCadRunning && !IsBusy;
 
@@ -195,6 +240,7 @@ internal sealed partial class MainViewModel : ObservableObject
 
         Refresh();
         CheckCadProcesses();
+        _ = CheckForUpdatesAsync();
     }
 
     /// <summary>取 RegistryBasePath 的品牌根，如 R25.0 → AutoCAD。</summary>
@@ -356,6 +402,38 @@ internal sealed partial class MainViewModel : ObservableObject
         var selected = await _folderPicker.PickFolderAsync(DeployPath);
         if (!string.IsNullOrEmpty(selected))
             DeployPath = selected;
+    }
+
+    // ── 更新检查 ──
+
+    /// <summary>启动后静默检查 GitHub 最新发行版，不影响部署器主流程。</summary>
+    private async Task CheckForUpdatesAsync()
+    {
+        var result = await UpdateCheckService.CheckAsync();
+        if (!result.HasUpdate) return;
+
+        LatestVersion  = result.LatestVersion;
+        ReleasePageUrl = string.IsNullOrWhiteSpace(result.ReleaseUrl)
+            ? UpdateCheckService.ReleasesPageUrl
+            : result.ReleaseUrl;
+        HasUpdate = true;
+    }
+
+    [RelayCommand]
+    private async Task OpenReleasePageAsync()
+    {
+        var url = string.IsNullOrWhiteSpace(ReleasePageUrl)
+            ? UpdateCheckService.ReleasesPageUrl
+            : ReleasePageUrl;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch
+        {
+            await _dialog.ShowInfoAsync($"无法打开浏览器，请手动访问：\n{url}", "AFR 部署工具");
+        }
     }
 
     // ── 安装 ──
