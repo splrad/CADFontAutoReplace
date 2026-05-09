@@ -253,30 +253,43 @@ jobs:
         id: package
         shell: pwsh
         run: |
-          # GitHub Release 会自动提供源码 zip/tar；这里仅额外上传部署器 EXE 与字体压缩包。
+          # GitHub Release 会自动提供源码 zip/tar；这里仅额外上传部署器 EXE、插件 DLL 包与字体压缩包。
           $tagName = '${{ steps.version.outputs.tag_name }}'
-          $safeTag = $tagName -replace '[^0-9A-Za-z._-]', '-'
-          $publishDir = Join-Path $env:GITHUB_WORKSPACE 'publish/AFR.Deployer'
+          $releasesDir = Join-Path $env:GITHUB_WORKSPACE 'Releases'
           $fontsSourcePath = Join-Path $env:GITHUB_WORKSPACE 'chore/Fonts.zip'
           $assetDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts/ReleaseAssets'
           New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
 
-          $exeSourcePath = Join-Path $publishDir 'AFR-Deployer.exe'
-          $exeAssetPath = Join-Path $assetDir 'AFR-Deployer.exe'
-          $fontsAssetPath = Join-Path $assetDir 'Fonts.zip'
-          if (Test-Path -LiteralPath $exeAssetPath) { Remove-Item -LiteralPath $exeAssetPath -Force }
-          if (Test-Path -LiteralPath $fontsAssetPath) { Remove-Item -LiteralPath $fontsAssetPath -Force }
-          if (-not (Test-Path -LiteralPath $exeSourcePath)) {
-              throw '未找到 publish/AFR.Deployer/AFR-Deployer.exe，无法发布部署工具程序。'
-          }
-          if (-not (Test-Path -LiteralPath $fontsSourcePath)) {
-              throw '未找到 chore/Fonts.zip，无法发布字体压缩包。'
+          function Assert-ReleaseAssetSource([string]$Path, [string]$Description) {
+              if (-not (Test-Path -LiteralPath $Path)) {
+                  throw "未找到 $Description：$Path"
+              }
+
+              $item = Get-Item -LiteralPath $Path
+              if ($item.Length -le 0) {
+                  throw "$Description 文件为空：$Path"
+              }
           }
 
+          $exeSourcePath = Join-Path $releasesDir "AFR-Deployer_$tagName.exe"
+          $dllZipSourcePath = Join-Path $releasesDir "AFR-DLL_$tagName.zip"
+          $exeAssetPath = Join-Path $assetDir "AFR-Deployer_$tagName.exe"
+          $dllZipAssetPath = Join-Path $assetDir "AFR-DLL_$tagName.zip"
+          $fontsAssetPath = Join-Path $assetDir 'Fonts.zip'
+          if (Test-Path -LiteralPath $exeAssetPath) { Remove-Item -LiteralPath $exeAssetPath -Force }
+          if (Test-Path -LiteralPath $dllZipAssetPath) { Remove-Item -LiteralPath $dllZipAssetPath -Force }
+          if (Test-Path -LiteralPath $fontsAssetPath) { Remove-Item -LiteralPath $fontsAssetPath -Force }
+
+          Assert-ReleaseAssetSource -Path $exeSourcePath -Description '版本化部署工具程序'
+          Assert-ReleaseAssetSource -Path $dllZipSourcePath -Description '版本化插件 DLL 压缩包'
+          Assert-ReleaseAssetSource -Path $fontsSourcePath -Description '字体压缩包'
+
           Copy-Item -LiteralPath $exeSourcePath -Destination $exeAssetPath -Force
+          Copy-Item -LiteralPath $dllZipSourcePath -Destination $dllZipAssetPath -Force
           Copy-Item -LiteralPath $fontsSourcePath -Destination $fontsAssetPath -Force
 
           "exe_path=$exeAssetPath" >> $env:GITHUB_OUTPUT
+          "dll_zip_path=$dllZipAssetPath" >> $env:GITHUB_OUTPUT
           "fonts_path=$fontsAssetPath" >> $env:GITHUB_OUTPUT
 
       - name: 🧠 生成发布说明
@@ -662,10 +675,11 @@ jobs:
           $lines.Add('')
           $lines.Add('| 文件 | 说明 |')
           $lines.Add('| --- | --- |')
-          $lines.Add('| **AFR-Deployer.exe** | 主安装程序，双击运行并选择 AutoCAD 版本 |')
+          $lines.Add("| **AFR-Deployer_$tagName.exe** | 主安装程序，双击运行并选择 AutoCAD 版本 |")
+          $lines.Add("| AFR-DLL_$tagName.zip | 手动 NETLOAD 用插件 DLL 包 |")
           $lines.Add('| Fonts.zip | 字体资源包（用于手动补充或备份） |')
           $lines.Add('')
-          $lines.Add('👉 **一般用户只需下载：AFR-Deployer.exe**')
+          $lines.Add("👉 **一般用户只需下载：AFR-Deployer_$tagName.exe**")
           $lines.Add('')
           $lines.Add('------')
           $lines.Add('')
@@ -852,6 +866,7 @@ jobs:
           # gh release create 会在 tag 不存在时基于 --target 自动创建 tag。
           gh release create '${{ steps.version.outputs.tag_name }}' `
               '${{ steps.package.outputs.exe_path }}' `
+              '${{ steps.package.outputs.dll_zip_path }}' `
               '${{ steps.package.outputs.fonts_path }}' `
               --repo $env:GH_REPO `
               --target '${{ github.sha }}' `
