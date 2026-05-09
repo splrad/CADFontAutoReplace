@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     自动构建所有 AutoCAD 插件 DLL，汇总到部署器资源目录，并发布 AFR.Deployer 单文件 EXE。
@@ -12,8 +12,13 @@
       3. dotnet publish AFR.Deployer -> 自包含 .NET 10 单文件 EXE
          （已内置 .NET 10 运行时；用户仅需额外安装 Windows App Runtime 1.8 (x64)，
            缺失时由 AFR.Deployer 启动期检测并弹原生对话框给出下载链接）
+      4. 额外归档发布文件到仓库根目录 Releases\
+         - AFR-Deployer_vX.Y.exe：仅部署器 EXE 本体
+         - AFR-DLL_vX.Y.zip：仅 AFR-ACAD*.dll 插件主 DLL
 .OUTPUTS
     <RepoRoot>\publish\AFR.Deployer\AFR.Deployer.exe
+    <RepoRoot>\Releases\AFR-Deployer_vX.Y.exe
+    <RepoRoot>\Releases\AFR-DLL_vX.Y.zip
 .EXAMPLE
     .\Publish-Deployer.ps1
     .\Publish-Deployer.ps1 -SkipPluginBuild   # 跳过插件构建，仅重新发布 EXE
@@ -35,9 +40,12 @@ $OutputEncoding           = [System.Text.Encoding]::UTF8
 $RepoRoot       = (Resolve-Path "$PSScriptRoot\..\..").Path
 $PluginsRoot    = Join-Path $RepoRoot "src\AutoCAD"
 $ReleasesDir    = Join-Path $RepoRoot "artifacts\Releases"   # 插件构建产物的统一汇聚目录
+$FinalReleasesDir = Join-Path $RepoRoot "Releases"            # 最终对外归档目录，仅放版本化发布产物
+$ArchiveTempDir = Join-Path $RepoRoot "artifacts\ReleaseArchiveTemp"
 $ResourcesDir   = Join-Path $PSScriptRoot "Resources"         # 部署器打包时嵌入的资源目录
 $DeployerCsproj = Join-Path $PSScriptRoot "AFR.Deployer.csproj"
 $PublishOutput  = Join-Path $RepoRoot "publish\AFR.Deployer"
+$VersionProps    = Join-Path $RepoRoot "Version.props"
 
 # 自动发现 src\AutoCAD\AFR-ACAD*\*.csproj，避免新增 CAD 版本时手工维护列表。
 # TFM 仅用于控制台日志展示；解析失败时回落为 "(unknown)"，不阻断发布流程。
@@ -81,6 +89,22 @@ $Plugins | ForEach-Object { Write-Host "    • $($_.Name) ($($_.TFM))" -Foregro
 function Write-Step([string]$msg) { Write-Host "`n── $msg" -ForegroundColor Cyan }
 function Write-Ok([string]$msg)   { Write-Host "  ✓ $msg" -ForegroundColor Green }
 function Write-Fail([string]$msg) { Write-Host "  ✗ $msg" -ForegroundColor Red }
+function Get-ReleaseVersion {
+    try {
+        [xml]$xml = Get-Content -LiteralPath $VersionProps -Raw
+        $version = $xml.Project.PropertyGroup.PluginDisplayVersion | Where-Object { $_ } | Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "PluginDisplayVersion 为空"
+        }
+        return $version.Trim()
+    } catch {
+        Write-Fail "无法从 Version.props 读取 PluginDisplayVersion: $($_.Exception.Message)"
+        exit 1
+    }
+}
+
+$ReleaseVersion = Get-ReleaseVersion
+$ReleaseTag = "v$ReleaseVersion"
 
 # ── Step 1：构建所有插件 DLL ──────────────────────────────────────────────
 # 仅在未指定 -SkipPluginBuild 时执行。
@@ -162,5 +186,45 @@ if ($LASTEXITCODE -ne 0) {
 
 $exePath = Join-Path $PublishOutput "AFR-Deployer.exe"
 $sizeMB  = [math]::Round((Get-Item $exePath).Length / 1MB, 1)
+
+# ── Step 4：归档最终发布产物到 Releases\ ────────────────────────────────
+Write-Step "归档发布产物到 Releases\"
+New-Item -ItemType Directory -Force -Path $FinalReleasesDir | Out-Null
+
+$versionedExe = Join-Path $FinalReleasesDir "AFR-Deployer_$ReleaseTag.exe"
+Copy-Item -LiteralPath $exePath -Destination $versionedExe -Force
+Write-Ok "部署器 EXE → $versionedExe"
+
+$versionedDllZip = Join-Path $FinalReleasesDir "AFR-DLL_$ReleaseTag.zip"
+if (Test-Path -LiteralPath $ArchiveTempDir) {
+    Remove-Item -LiteralPath $ArchiveTempDir -Recurse -Force
+}
+New-Item -ItemType Directory -Force -Path $ArchiveTempDir | Out-Null
+
+try {
+    foreach ($p in $Plugins) {
+        $srcDll = Join-Path $ReleasesDir "$($p.Name).dll"
+        if (-not (Test-Path -LiteralPath $srcDll)) {
+            Write-Fail "$($p.Name).dll 未在 artifacts\Releases\ 中找到，无法生成 DLL 压缩包"
+            exit 1
+        }
+
+        Copy-Item -LiteralPath $srcDll -Destination (Join-Path $ArchiveTempDir "$($p.Name).dll") -Force
+    }
+
+    if (Test-Path -LiteralPath $versionedDllZip) {
+        Remove-Item -LiteralPath $versionedDllZip -Force
+    }
+
+    Compress-Archive -Path (Join-Path $ArchiveTempDir "*.dll") -DestinationPath $versionedDllZip -Force
+    Write-Ok "插件 DLL ZIP → $versionedDllZip"
+} finally {
+    if (Test-Path -LiteralPath $ArchiveTempDir) {
+        Remove-Item -LiteralPath $ArchiveTempDir -Recurse -Force
+    }
+}
+
 Write-Host "`n✓ 发布完成！" -ForegroundColor Green
 Write-Host "  输出：$exePath ($sizeMB MB)" -ForegroundColor Green
+Write-Host "  归档：$versionedExe" -ForegroundColor Green
+Write-Host "  归档：$versionedDllZip" -ForegroundColor Green

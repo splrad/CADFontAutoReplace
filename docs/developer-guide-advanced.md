@@ -111,7 +111,8 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 2. Release 构建每个版本壳；
 3. 依赖 `Directory.Build.props` 的 `CopyDllToReleases` 目标，将 DLL 汇聚到 `artifacts/Releases/`；
 4. 复制 `AFR-ACAD*.dll` 与 `AFR-ACAD*.cad.json` 到 `src/AFR.Deployer/Resources/`；
-5. 发布 `AFR.Deployer` 自包含单文件 EXE。
+5. 发布 `AFR.Deployer` 自包含单文件 EXE；
+6. 从 `Version.props` 读取当前版本，将部署器 EXE 复制为 `Releases/AFR-Deployer_vX.Y.exe`，并将 `AFR-ACAD*.dll` 打包为 `Releases/AFR-DLL_vX.Y.zip`。
 
 常用命令：
 
@@ -124,11 +125,15 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 
 ```text
 publish/AFR.Deployer/AFR-Deployer.exe
+Releases/AFR-Deployer_vX.Y.exe
+Releases/AFR-DLL_vX.Y.zip
 ```
 
 注意事项：
 
 - EXE 文件名由 `AFR.Deployer.csproj` 的 `<AssemblyName>AFR-Deployer</AssemblyName>` 决定，不在发布后重命名。
+- `Releases/AFR-Deployer_vX.Y.exe` 是额外归档副本，正式发布输出仍保留在 `publish/AFR.Deployer/`。
+- `Releases/AFR-DLL_vX.Y.zip` 只包含插件主 DLL，不包含 `.cad.json`、`.pdb`、`.xml` 或其它依赖文件。
 - 新增 CAD 版本时必须确保版本壳 `.csproj` 写入 `CadBrand` / `CadVersion` / `CadRegistryBasePath`，否则 `.cad.json` 元数据不会正确生成。
 - `Version.props` 是部署器与插件 DLL 的统一版本来源，发版只修改该文件。
 
