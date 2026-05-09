@@ -52,7 +52,7 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
    - `AFRVIEW`（仅 Debug：查看 MText 内容）
    - `AFRINSERT`（仅 Debug：插入测试 MText）
 
-> `AFRUNLOAD`、`AFRVIEW`、`AFRINSERT` 等命令只在 Debug 构建中提供；正式发布版默认通过 `AFR.Deployer` 管理安装/卸载。
+> `AFRUNLOAD` 是隐藏维护入口：Debug/Release 均可完整输入执行，但不会出现在 CAD 自动补全、动态输入建议或命令横幅中；`AFRVIEW`、`AFRINSERT` 等测试命令仍仅在 Debug 构建中提供。
 
 ## 6. 10 分钟上手路径（推荐）
 

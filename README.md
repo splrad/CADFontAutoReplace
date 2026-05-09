@@ -1,5 +1,4 @@
 <div align="center">
-
 # AFR — CAD 缺失字体自动替换工具
 
 **打开图纸不再出现文字不显示、乱码，所有缺失字体自动搞定**
@@ -254,7 +253,7 @@ dotnet build CADFontAutoReplace.slnx
 ### 贡献约定
 
 - 遵守分层依赖方向：`AFR.Core` / `AFR.UI` 不引用 AutoCAD SDK；`AFR.HostIntegration` 由部署工具与 CAD 插件共用，不反向依赖其中任一方。
-- 新增命令必须在 `PluginEntry.cs` 注册，否则 CAD 无法识别。
+- 新增常规命令必须在 `PluginEntry.cs` 注册，否则 CAD 无法识别；隐藏维护入口需避免进入 CAD 命令补全体系。
 - 仅调试使用的功能请用 `#if DEBUG` 包裹（并在命令注册处同步控制）。
 - 发版需要修改版本号时，仅修改根目录 `Version.props`文件。
 - 聚焦当前问题，避免无关重构。

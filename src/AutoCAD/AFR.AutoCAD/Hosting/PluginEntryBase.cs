@@ -2,6 +2,9 @@ using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Runtime;
 using System.Reflection;
 using AFR.Abstractions;
+using AFR.Commands;
+using AFR.Constants;
+using AFR.FontMapping;
 using AFR.Platform;
 using AFR.Services;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
@@ -26,6 +29,10 @@ public abstract class PluginEntryBase : IExtensionApplication
     // 标记插件是否已卸载，卸载后不再处理任何事件
     private static volatile bool _unloaded;
     private static readonly object _scheduleLock = new();
+    private static readonly object _hiddenUnloadLock = new();
+    private static readonly HashSet<Document> _hiddenUnloadDocuments = new();
+    private static bool _hiddenUnloadRegistered;
+    private static bool _hiddenUnloadInProgress;
 
     // 嵌入程序集缓存：HandyControl 等第三方依赖以嵌入资源形式打包在插件 DLL 中
     private static Assembly? _resolvedHandyControl;
@@ -92,6 +99,8 @@ public abstract class PluginEntryBase : IExtensionApplication
     /// </summary>
     public void Initialize()
     {
+        _unloaded = false;
+
         // 诊断日志仅在 Debug 构建时自动启用，用于开发调试
 #if DEBUG
         DiagnosticLogger.Enable();
@@ -99,6 +108,10 @@ public abstract class PluginEntryBase : IExtensionApplication
 
         // 注册嵌入程序集解析回调，使 HandyControl 等打包在 DLL 资源中的依赖可被加载
         AppDomain.CurrentDomain.AssemblyResolve += OnResolveEmbeddedAssembly;
+
+        // 隐藏卸载入口必须在首次 NETLOAD、自动加载和部署加载场景下都可用。
+        // 它不进入 CommandMethod/命令栈，只由 UnknownCommand 的完整名称匹配触发。
+        RegisterHiddenUnloadCommand();
 
         // 第负一阶段: 注册平台服务 — 必须最先执行，后续所有功能依赖 PlatformManager
         PlatformManager.Initialize(CreatePlatform(), CreateFontHook(), CreateHost(), CreateLogger(), CreateFontScanner());
@@ -126,6 +139,12 @@ public abstract class PluginEntryBase : IExtensionApplication
             if (PlatformManager.Platform.SupportsLdFileHook)
                 PlatformManager.FontHook.Install();
 
+#if DEBUG
+            // DEBUG 专用: DBCS Code Page Family 修复 Hook，在 DWG 反序列化时修正 code_page_id 字段。
+            // 必须在图纸打开前安装，才能拦截 MText/DBText 的 DBCS 字节解码。
+            CodePageFamilyHook.Install();
+#endif
+
             // 第零阶段 B: 预热系统字体索引 — 提前扫描可用字体，加速后续检测
             FontDetector.PrewarmSystemFonts();
 
@@ -133,9 +152,11 @@ public abstract class PluginEntryBase : IExtensionApplication
             var docMgr = AcadApp.DocumentManager;
             docMgr.DocumentCreated += OnDocumentCreated;
             docMgr.DocumentToBeDestroyed += OnDocumentToBeDestroyed;
+#if DEBUG
+            docMgr.DocumentCreateStarted += OnDocumentCreateStarted;
+#endif
 
             // 第三阶段: 延迟启动执行 — 对当前已打开的文档安排字体替换
-            _unloaded = false;
             ScheduleExecution(null, "Startup");
         }
         catch (System.Exception ex)
@@ -148,6 +169,9 @@ public abstract class PluginEntryBase : IExtensionApplication
     /// <summary>AutoCAD 卸载插件时调用（通常在 CAD 退出时）。</summary>
     public void Terminate()
     {
+#if DEBUG
+        CodePageFamilyHook.Uninstall();
+#endif
         DiagnosticLogger.Disable();
         PlatformManager.FontHook.Uninstall();
         UnregisterEvents();
@@ -155,7 +179,7 @@ public abstract class PluginEntryBase : IExtensionApplication
 
     /// <summary>
     /// 卸载插件：注销所有事件、清空执行队列和文档跟踪。
-    /// 由 AFRUNLOAD 命令调用。
+    /// 由隐藏 AFRUNLOAD 入口调用。
     /// </summary>
     internal static void Unload()
     {
@@ -186,6 +210,9 @@ public abstract class PluginEntryBase : IExtensionApplication
         try { Diagnostics.AwsHideableDialogPatcher.Cleanup(); } catch { }
 
         PlatformManager.FontHook.Uninstall();
+#if DEBUG
+        CodePageFamilyHook.Uninstall();
+#endif
         DocumentContextManager.Instance.Clear();
         DiagnosticLogger.Disable();
 
@@ -206,8 +233,111 @@ public abstract class PluginEntryBase : IExtensionApplication
             var docMgr = AcadApp.DocumentManager;
             docMgr.DocumentCreated -= OnDocumentCreated;
             docMgr.DocumentToBeDestroyed -= OnDocumentToBeDestroyed;
+#if DEBUG
+            docMgr.DocumentCreateStarted -= OnDocumentCreateStarted;
+#endif
         }
         catch { }
+
+        UnregisterHiddenUnloadCommand();
+    }
+
+    /// <summary>
+    /// Registers the hidden unload route without adding AFRUNLOAD to AutoCAD's command stack.
+    /// </summary>
+    private static void RegisterHiddenUnloadCommand()
+    {
+        lock (_hiddenUnloadLock)
+        {
+            if (_hiddenUnloadRegistered) return;
+
+            var docMgr = AcadApp.DocumentManager;
+            docMgr.DocumentCreated += OnHiddenUnloadDocumentCreated;
+            docMgr.DocumentToBeDestroyed += OnHiddenUnloadDocumentToBeDestroyed;
+
+            foreach (Document doc in docMgr)
+            {
+                AttachHiddenUnloadHandler(doc);
+            }
+
+            _hiddenUnloadRegistered = true;
+        }
+    }
+
+    /// <summary>Unregisters the hidden unload route from all tracked documents.</summary>
+    private static void UnregisterHiddenUnloadCommand()
+    {
+        lock (_hiddenUnloadLock)
+        {
+            try
+            {
+                var docMgr = AcadApp.DocumentManager;
+                docMgr.DocumentCreated -= OnHiddenUnloadDocumentCreated;
+                docMgr.DocumentToBeDestroyed -= OnHiddenUnloadDocumentToBeDestroyed;
+            }
+            catch { }
+
+            foreach (var doc in _hiddenUnloadDocuments.ToArray())
+            {
+                DetachHiddenUnloadHandler(doc);
+            }
+
+            _hiddenUnloadDocuments.Clear();
+            _hiddenUnloadRegistered = false;
+            _hiddenUnloadInProgress = false;
+        }
+    }
+
+    /// <summary>Attaches the UnknownCommand route for one document.</summary>
+    private static void AttachHiddenUnloadHandler(Document? doc)
+    {
+        if (doc == null || doc.IsDisposed) return;
+
+        doc.UnknownCommand -= OnHiddenUnloadUnknownCommand;
+        doc.UnknownCommand += OnHiddenUnloadUnknownCommand;
+        _hiddenUnloadDocuments.Add(doc);
+    }
+
+    /// <summary>Detaches the UnknownCommand route for one document.</summary>
+    private static void DetachHiddenUnloadHandler(Document? doc)
+    {
+        if (doc == null) return;
+
+        try { doc.UnknownCommand -= OnHiddenUnloadUnknownCommand; } catch { }
+        _hiddenUnloadDocuments.Remove(doc);
+    }
+
+    private static void OnHiddenUnloadDocumentCreated(object sender, DocumentCollectionEventArgs e)
+    {
+        lock (_hiddenUnloadLock)
+        {
+            AttachHiddenUnloadHandler(e.Document);
+        }
+    }
+
+    private static void OnHiddenUnloadDocumentToBeDestroyed(object sender, DocumentCollectionEventArgs e)
+    {
+        lock (_hiddenUnloadLock)
+        {
+            DetachHiddenUnloadHandler(e.Document);
+        }
+    }
+
+    private static void OnHiddenUnloadUnknownCommand(object sender, UnknownCommandEventArgs e)
+    {
+        if (_unloaded) return;
+
+        var commandName = e.GlobalCommandName?.Trim();
+        if (!string.Equals(commandName, CommandNames.Unload, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        lock (_hiddenUnloadLock)
+        {
+            if (_hiddenUnloadInProgress) return;
+            _hiddenUnloadInProgress = true;
+        }
+
+        AfrUnloadCommand.Execute();
     }
 
     /// <summary>
@@ -270,6 +400,35 @@ public abstract class PluginEntryBase : IExtensionApplication
             ScheduleExecution(e.Document, "DocumentCreated");
     }
 
+#if DEBUG
+    /// <summary>
+    /// 文档开始打开事件：在 DWG 文件加载开始前，从文件头读取 code page 并预设状态缓存。
+    /// <para>
+    /// 此事件在 AutoCAD 开始读取 DWG 文件之前触发，此时文档对象尚未完全创建。
+    /// 通过直接读取 DWG 二进制头部判断图纸 code page，为随后的 native hook
+    /// 提供正确的 Big5/GBK 判断依据，确保 hook 在 MText/DBText 反序列化期间修正 code_page_id 字段。
+    /// </para>
+    /// </summary>
+    private static void OnDocumentCreateStarted(object sender, DocumentCollectionEventArgs e)
+    {
+        // 先重置：防止上一个 Big5 图纸的缓存状态污染本次文档的反序列化路径。
+        CodePageFamilyHook.SetCurrentDrawingIsBig5(false);
+        try
+        {
+            // DocumentCreateStarted 在文档对象创建、DWG 文件内容尚未读入时触发。
+            // 此时 e.Document.Name 为将要打开的文件路径，不得为新建图纸（没有路径）。
+            // TryIsDwgFileBig5 内部已过滤 UNC 路径，可在主线程安全调用。
+            string filePath = e.Document?.Name ?? string.Empty;
+            bool isBig5 = CodePageFamilyHook.TryIsDwgFileBig5(filePath);
+            CodePageFamilyHook.SetCurrentDrawingIsBig5(isBig5);
+        }
+        catch (System.Exception ex)
+        {
+            DiagnosticLogger.LogError("OnDocumentCreateStarted: 读取 DWG 文件头失败", ex);
+        }
+    }
+#endif
+
     /// <summary>文档即将销毁事件：清理该文档的执行记录和检测结果缓存。</summary>
     private static void OnDocumentToBeDestroyed(object sender, DocumentCollectionEventArgs e)
     {
@@ -279,5 +438,9 @@ public abstract class PluginEntryBase : IExtensionApplication
                 DocumentContextManager.Instance.Remove(e.Document);
         }
         catch { }
+#if DEBUG
+        // 文档销毁后重置缓存，防止旧值影响下一个文档的 hook 修复判断。
+        try { CodePageFamilyHook.SetCurrentDrawingIsBig5(false); } catch { }
+#endif
     }
 }

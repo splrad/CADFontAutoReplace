@@ -24,7 +24,7 @@ internal sealed class DocumentContextManager
     public static DocumentContextManager Instance => _instance.Value;
 
     // Key: 图纸唯一标识（已保存 = Database.Filename，未保存 = Document.Name）
-    // Value: 首次执行字体替换的时间戳
+    // Value: 首次执行完整字体替换流程的时间戳
     private readonly Dictionary<string, DateTime> _executedDocuments = new(StringComparer.OrdinalIgnoreCase);
     // 缺失字体检测结果（替换前的原始状态）
     private readonly Dictionary<string, List<FontCheckResult>> _detectionResults = new(StringComparer.OrdinalIgnoreCase);

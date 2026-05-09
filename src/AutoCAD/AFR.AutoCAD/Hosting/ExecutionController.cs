@@ -40,16 +40,16 @@ internal sealed class ExecutionController
 
         try
         {
-            // 门控: 仅在用户已通过 AFR 命令配置替换字体后才自动执行
+            // 重复执行防护
+            var contextMgr = DocumentContextManager.Instance;
+            if (contextMgr.HasExecuted(doc)) return;
+
+            // 门控: 未配置替换字体时跳过
             if (!config.IsInitialized)
             {
                 log.Info("请输入 AFR 命令配置替换字体。");
                 return;
             }
-
-            // 重复执行防护: 同一文档在本次会话中只执行一次字体替换
-            var contextMgr = DocumentContextManager.Instance;
-            if (contextMgr.HasExecuted(doc)) return;
 
             // 获取文档写入锁 — 修改样式表需要写锁
             using (doc.LockDocument())
@@ -147,20 +147,9 @@ internal sealed class ExecutionController
                 if (ttfFixRecords.Count > 0)
                     doc.Editor.Regen();
 
-                // 第四阶段: 修复旧图纸中单行文字的 Big5/GBK 代码页错配乱码。
-                // 该模块仅处理 DBText，并在高置信度判断为 Big5 字节误解码时改写文本内容。
-                DiagnosticLogger.BeginPhase("修复DBText编码乱码");
-                int dbTextEncodingFixCount = DbTextEncodingRepairService.Repair(doc.Database);
-                DiagnosticLogger.EndPhase($"修复: {dbTextEncodingFixCount}个");
-
-                if (dbTextEncodingFixCount > 0)
-                    doc.Editor.Regen();
-            
                 // 统计汇总 — Regen 之后输出，确保统计信息是最后一行实质内容
                 if (missingFonts.Count > 0 || inlineFixResults.Count > 0)
                     log.AddStatistics(missingFonts, stillMissingSlotCount, inlineFixResults.Count);
-                else if (dbTextEncodingFixCount > 0)
-                    log.Info($"[字体修复]已修复单行文字编码乱码 {dbTextEncodingFixCount} 个。");
                 else
                     log.Info("未检测到缺失字体。");
                 DiagnosticLogger.WriteSummary();

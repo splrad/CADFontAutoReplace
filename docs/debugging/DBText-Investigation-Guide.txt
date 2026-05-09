@@ -1,0 +1,6 @@
+# DBText Code Page Family 调查指南
+
+完整版本请查看仓库中的以下文件：
+- DbTextHookTracer.cs
+- DbTextCodePageProbeCommand.cs
+- DbTextTracerCommand.cs

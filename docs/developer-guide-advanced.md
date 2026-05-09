@@ -19,6 +19,7 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 
 - 命令类位于 `AFR.AutoCAD/Commands`。
 - 壳工程 `PluginEntry.cs` 通过 `CommandClass` 声明进行注册。
+- `AFRUNLOAD` 是例外：它是隐藏维护入口，不使用 `CommandMethod`/`CommandClass` 注册，避免进入 CAD 自动补全与动态输入建议；插件入口只在 `UnknownCommand` 完整匹配时调用卸载逻辑。
 - Debug-only 命令必须双层控制：
   - 命令类文件 `#if DEBUG`
   - `PluginEntry.cs` 注册处 `#if DEBUG`

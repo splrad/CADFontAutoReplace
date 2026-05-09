@@ -10,7 +10,12 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrCommands.cs" Link="Commands\AfrCommands.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrUnloadCommand.cs" Link="Commands\AfrUnloadCommand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DbTextCodePageProbeCommand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DbTextTracerCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\AutoCadFontHook.cs" Link="FontMapping\AutoCadFontHook.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\CodePageFamilyHook.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextHookTracer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\LdFileHook.cs" Link="FontMapping\LdFileHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextFontParser.cs" Link="FontMapping\MTextFontParser.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontReplacer.cs" Link="FontMapping\MTextInlineFontReplacer.cs" />
@@ -22,7 +27,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\PluginEntryBase.cs" Link="Hosting\PluginEntryBase.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\AutoCadFontScanner.cs" Link="Services\AutoCadFontScanner.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\CadEnvironmentSettings.cs" Link="Services\CadEnvironmentSettings.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextEncodingRepairService.cs" Link="Services\DbTextEncodingRepairService.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextEncodingRepairService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetectionContext.cs" Link="Services\FontDetectionContext.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetector.cs" Link="Services\FontDetector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontReplacer.cs" Link="Services\FontReplacer.cs" />
@@ -31,8 +36,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AssemblyRegistryDefaults.cs" Link="Hosting\AssemblyRegistryDefaults.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\ExternalRegistryDefaultsApplier.cs" Link="Hosting\ExternalRegistryDefaultsApplier.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Diagnostics\AwsHideableDialogPatcher.cs" Link="Diagnostics\AwsHideableDialogPatcher.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\AfrUnloadCommand.cs" Link="DebugCommands\AfrUnloadCommand.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\Big5DiagnosticsCommand.cs" Link="DebugCommands\Big5DiagnosticsCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DumpDialogApiCommand.cs" Link="DebugCommands\DumpDialogApiCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\GenProbeScriptsCommand.cs" Link="DebugCommands\GenProbeScriptsCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextEditorCommand.cs" Link="DebugCommands\MTextEditorCommand.cs" />
