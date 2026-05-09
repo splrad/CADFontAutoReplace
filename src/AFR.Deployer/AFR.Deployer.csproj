@@ -73,19 +73,17 @@
   </ItemGroup>
 
   <!--
-    嵌入所有插件 DLL 与 CAD 元数据 Sidecar：通配匹配 Resources\AFR-ACAD*.dll
-    与 Resources\AFR-ACAD*.cad.json，新增 CAD 版本时由 Publish-Deployer.ps1
-    自动复制文件到 Resources\，无需在此处手工新增条目。
+    嵌入所有插件 DLL 与 CAD 元数据 Sidecar：直接从标准 Release 构建输出读取
+    artifacts\bin\AFR-ACAD*\release\AFR-ACAD*.dll 与 *.cad.json。
+    新增 CAD 版本时由 Publish-Deployer.ps1 先构建版本壳，无需复制到 Resources\。
     LogicalName 与 CadDescriptors.EmbeddedResourceKey / SidecarSuffix 约定一致：
         AFR.Deployer.Resources.<FileName>
-    必须晚于上面的 <EmbeddedResource Remove="Resources\**" />，这里再显式 Include
-    回来，确保通配条目仍参与嵌入。
   -->
   <ItemGroup>
-    <EmbeddedResource Include="Resources\AFR-ACAD*.dll">
+    <EmbeddedResource Include="..\..\artifacts\bin\AFR-ACAD*\release\AFR-ACAD*.dll">
       <LogicalName>AFR.Deployer.Resources.%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="Resources\AFR-ACAD*.cad.json">
+    <EmbeddedResource Include="..\..\artifacts\bin\AFR-ACAD*\release\AFR-ACAD*.cad.json">
       <LogicalName>AFR.Deployer.Resources.%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
   </ItemGroup>

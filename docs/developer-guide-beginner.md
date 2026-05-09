@@ -75,8 +75,8 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 脚本会自动：
 
 1. Release 构建所有 `src/AutoCAD/AFR-ACAD20XX/` 插件 DLL；
-2. 将插件 DLL 与 `.cad.json` 元数据复制到 `src/AFR.Deployer/Resources/`；
-3. 发布自包含单文件部署器；
+2. 校验 `artifacts/bin/AFR-ACAD20XX/release/` 下的插件 DLL 与 `.cad.json` 元数据；
+3. 从标准构建输出直接嵌入插件资源并发布自包含单文件部署器；
 4. 将版本化 EXE 与纯 DLL 压缩包归档到仓库根目录 `Releases/`。
 
 最终输出：

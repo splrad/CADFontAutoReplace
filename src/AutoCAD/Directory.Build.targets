@@ -17,8 +17,8 @@
   <!--
     方案 B：每个插件项目导出 CAD 元数据 JSON Sidecar，作为 AFR.Deployer 描述符表的权威源。
     需要在 csproj 中声明 CadBrand / CadVersion / CadRegistryBasePath 三个属性；
-    输出路径与 CopyDllToReleases 一致：artifacts\Releases\<AppName>.cad.json。
-    AFR.Deployer 构建时通过 EmbeddedResource 通配 *.cad.json 一并嵌入到单 EXE，
+    输出路径与插件主 DLL 一致：$(TargetDir)<AppName>.cad.json。
+    AFR.Deployer 构建时直接从标准构建输出目录嵌入 DLL 与 *.cad.json，
     运行时反序列化生成 CadDescriptor 列表，无需手工维护 CadDescriptors.All。
   -->
   <Target Name="EmitCadDescriptorJson"
@@ -28,7 +28,7 @@
       <_CadDescriptorAppName>$(MSBuildProjectName)</_CadDescriptorAppName>
       <_CadDescriptorDisplayName>$(CadBrand) $(CadVersion)</_CadDescriptorDisplayName>
       <_CadDescriptorRegistryEscaped>$([System.String]::Copy('$(CadRegistryBasePath)').Replace('\','\\'))</_CadDescriptorRegistryEscaped>
-      <_CadDescriptorJsonPath>$(MSBuildThisFileDirectory)..\..\artifacts\Releases\$(_CadDescriptorAppName).cad.json</_CadDescriptorJsonPath>
+      <_CadDescriptorJsonPath>$(TargetDir)$(_CadDescriptorAppName).cad.json</_CadDescriptorJsonPath>
       <_CadDescriptorJson>{
   "brand": "$(CadBrand)",
   "version": "$(CadVersion)",
@@ -38,7 +38,7 @@
   "embeddedResourceKey": "AFR.Deployer.Resources.$(_CadDescriptorAppName).dll"
 }</_CadDescriptorJson>
     </PropertyGroup>
-    <MakeDir Directories="$(MSBuildThisFileDirectory)..\..\artifacts\Releases" />
+    <MakeDir Directories="$(TargetDir)" />
     <WriteLinesToFile File="$(_CadDescriptorJsonPath)"
                       Lines="$(_CadDescriptorJson)"
                       Overwrite="true"

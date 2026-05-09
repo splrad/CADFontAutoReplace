@@ -109,10 +109,9 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 
 1. 自动发现 `src/AutoCAD/AFR-ACAD*/AFR-ACAD*.csproj`；
 2. Release 构建每个版本壳；
-3. 依赖 `Directory.Build.props` 的 `CopyDllToReleases` 目标，将 DLL 汇聚到 `artifacts/Releases/`；
-4. 复制 `AFR-ACAD*.dll` 与 `AFR-ACAD*.cad.json` 到 `src/AFR.Deployer/Resources/`；
-5. 发布 `AFR.Deployer` 自包含单文件 EXE；
-6. 从 `Version.props` 读取当前版本，将部署器 EXE 复制为 `Releases/AFR-Deployer_vX.Y.exe`，并将 `AFR-ACAD*.dll` 打包为 `Releases/AFR-DLL_vX.Y.zip`。
+3. 校验 `artifacts/bin/AFR-ACAD*/release/` 下的插件 DLL 与 `.cad.json` 元数据；
+4. 发布 `AFR.Deployer` 自包含单文件 EXE，插件资源由项目文件直接从标准构建输出嵌入；
+5. 从 `Version.props` 读取当前版本，将部署器 EXE 复制为 `Releases/AFR-Deployer_vX.Y.exe`，并将 `AFR-ACAD*.dll` 打包为 `Releases/AFR-DLL_vX.Y.zip`。
 
 常用命令：
 
