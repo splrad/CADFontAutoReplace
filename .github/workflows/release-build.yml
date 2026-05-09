@@ -8,6 +8,7 @@ on:
     paths:
       - Version.props
       - chore/Fonts.zip
+      - tools/Publish-ReleaseAssets.ps1
       - src/**
       - .github/workflows/release-build.yml
   # 保留手动触发入口，便于维护者在 GitHub Actions 页面重新执行发布流程。
@@ -246,7 +247,7 @@ jobs:
       - name: 🏗️ 构建部署器
         if: steps.version.outputs.should_release == 'true'
         shell: pwsh
-        run: ./src/AFR.Deployer/Publish-Deployer.ps1
+        run: ./tools/Publish-ReleaseAssets.ps1
 
       - name: 📦 打包发布资产
         if: steps.version.outputs.should_release == 'true'
@@ -255,8 +256,6 @@ jobs:
         run: |
           # GitHub Release 会自动提供源码 zip/tar；这里仅额外上传部署器 EXE、插件 DLL 包与字体压缩包。
           $tagName = '${{ steps.version.outputs.tag_name }}'
-          $releasesDir = Join-Path $env:GITHUB_WORKSPACE 'Releases'
-          $fontsSourcePath = Join-Path $env:GITHUB_WORKSPACE 'chore/Fonts.zip'
           $assetDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts/ReleaseAssets'
           New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
 
@@ -271,22 +270,13 @@ jobs:
               }
           }
 
-          $exeSourcePath = Join-Path $releasesDir "AFR-Deployer_$tagName.exe"
-          $dllZipSourcePath = Join-Path $releasesDir "AFR-DLL_$tagName.zip"
           $exeAssetPath = Join-Path $assetDir "AFR-Deployer_$tagName.exe"
           $dllZipAssetPath = Join-Path $assetDir "AFR-DLL_$tagName.zip"
           $fontsAssetPath = Join-Path $assetDir 'Fonts.zip'
-          if (Test-Path -LiteralPath $exeAssetPath) { Remove-Item -LiteralPath $exeAssetPath -Force }
-          if (Test-Path -LiteralPath $dllZipAssetPath) { Remove-Item -LiteralPath $dllZipAssetPath -Force }
-          if (Test-Path -LiteralPath $fontsAssetPath) { Remove-Item -LiteralPath $fontsAssetPath -Force }
 
-          Assert-ReleaseAssetSource -Path $exeSourcePath -Description '版本化部署工具程序'
-          Assert-ReleaseAssetSource -Path $dllZipSourcePath -Description '版本化插件 DLL 压缩包'
-          Assert-ReleaseAssetSource -Path $fontsSourcePath -Description '字体压缩包'
-
-          Copy-Item -LiteralPath $exeSourcePath -Destination $exeAssetPath -Force
-          Copy-Item -LiteralPath $dllZipSourcePath -Destination $dllZipAssetPath -Force
-          Copy-Item -LiteralPath $fontsSourcePath -Destination $fontsAssetPath -Force
+          Assert-ReleaseAssetSource -Path $exeAssetPath -Description '版本化部署工具程序'
+          Assert-ReleaseAssetSource -Path $dllZipAssetPath -Description '版本化插件 DLL 压缩包'
+          Assert-ReleaseAssetSource -Path $fontsAssetPath -Description '发布用字体压缩包'
 
           "exe_path=$exeAssetPath" >> $env:GITHUB_OUTPUT
           "dll_zip_path=$dllZipAssetPath" >> $env:GITHUB_OUTPUT

@@ -64,12 +64,12 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 4. 执行 `AFRLOG` 查看当前图纸的检测与替换结果。
 5. 如需调试 MText 场景，再在 Debug 构建下执行 `AFRINSERT` / `AFRVIEW` 建立“输入-输出”直觉。
 
-## 7. 生成部署器 EXE
+## 7. 生成发布资产
 
-正式分发默认使用部署器安装，不手动 `NETLOAD`。生成部署器 EXE 时，在仓库根目录运行：
+正式分发默认使用部署器安装，不手动 `NETLOAD`。生成 GitHub Release 发布资产时，在仓库根目录运行：
 
 ```powershell
-./src/AFR.Deployer/Publish-Deployer.ps1
+./tools/Publish-ReleaseAssets.ps1
 ```
 
 脚本会自动：
@@ -77,20 +77,21 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 1. Release 构建所有 `src/AutoCAD/AFR-ACAD20XX/` 插件 DLL；
 2. 校验 `artifacts/bin/AFR-ACAD20XX/release/` 下的插件 DLL 与 `.cad.json` 元数据；
 3. 从标准构建输出直接嵌入插件资源并发布自包含单文件部署器；
-4. 将版本化 EXE 与纯 DLL 压缩包归档到仓库根目录 `Releases/`。
+4. 将版本化 EXE、纯 DLL 压缩包与字体包生成到 `artifacts/ReleaseAssets/`。
 
 最终输出：
 
 ```text
 publish/AFR.Deployer/AFR-Deployer.exe
-Releases/AFR-Deployer_vX.Y.exe
-Releases/AFR-DLL_vX.Y.zip
+artifacts/ReleaseAssets/AFR-Deployer_vX.Y.exe
+artifacts/ReleaseAssets/AFR-DLL_vX.Y.zip
+artifacts/ReleaseAssets/Fonts.zip
 ```
 
 如果只是调试部署器界面或资源嵌入，且插件 DLL 已经构建过，可跳过插件重建：
 
 ```powershell
-./src/AFR.Deployer/Publish-Deployer.ps1 -SkipPluginBuild
+./tools/Publish-ReleaseAssets.ps1 -SkipPluginBuild
 ```
 
 ## 8. 新增命令的正确姿势（最容易漏）
@@ -159,7 +160,7 @@ public void YourCommand() { }
 ## 11. 提交前快速检查
 
 - [ ] `dotnet build` 通过
-- [ ] 发布前已运行 `Publish-Deployer.ps1` 生成 `AFR-Deployer.exe`
+- [ ] 发布前已运行 `Publish-ReleaseAssets.ps1` 生成发布资产
 - [ ] 新命令已注册到 `PluginEntry.cs`
 - [ ] 没有把 AutoCAD 类型放进 `AFR.Core` / `AFR.UI`
 - [ ] Debug 功能已用 `#if DEBUG` 控制

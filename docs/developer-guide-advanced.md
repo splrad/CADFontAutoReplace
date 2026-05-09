@@ -101,9 +101,9 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - `MTextInlineFontReplacer`：看替换前后 `mtext.Contents`；
 - `ExecutionController.Execute` 第三阶段：核对三组修复记录合并结果。
 
-## 8. 部署器发布脚本
+## 8. 发布资产生成脚本
 
-部署器 EXE 由 `src/AFR.Deployer/Publish-Deployer.ps1` 统一生成，不手工复制 DLL 或直接发布 `AFR.Deployer.csproj`。
+发布资产由 `tools/Publish-ReleaseAssets.ps1` 统一生成，不手工复制 DLL 或直接发布 `AFR.Deployer.csproj`。
 
 脚本职责：
 
@@ -111,28 +111,30 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 2. Release 构建每个版本壳；
 3. 校验 `artifacts/bin/AFR-ACAD*/release/` 下的插件 DLL 与 `.cad.json` 元数据；
 4. 发布 `AFR.Deployer` 自包含单文件 EXE，插件资源由项目文件直接从标准构建输出嵌入；
-5. 从 `Version.props` 读取当前版本，将部署器 EXE 复制为 `Releases/AFR-Deployer_vX.Y.exe`，并将 `AFR-ACAD*.dll` 打包为 `Releases/AFR-DLL_vX.Y.zip`。
+5. 从 `Version.props` 读取当前版本，将部署器 EXE 复制为 `artifacts/ReleaseAssets/AFR-Deployer_vX.Y.exe`，将 `AFR-ACAD*.dll` 打包为 `artifacts/ReleaseAssets/AFR-DLL_vX.Y.zip`，并复制字体包为 `artifacts/ReleaseAssets/Fonts.zip`。
 
 常用命令：
 
 ```powershell
-./src/AFR.Deployer/Publish-Deployer.ps1
-./src/AFR.Deployer/Publish-Deployer.ps1 -SkipPluginBuild
+./tools/Publish-ReleaseAssets.ps1
+./tools/Publish-ReleaseAssets.ps1 -SkipPluginBuild
 ```
 
 输出约定：
 
 ```text
 publish/AFR.Deployer/AFR-Deployer.exe
-Releases/AFR-Deployer_vX.Y.exe
-Releases/AFR-DLL_vX.Y.zip
+artifacts/ReleaseAssets/AFR-Deployer_vX.Y.exe
+artifacts/ReleaseAssets/AFR-DLL_vX.Y.zip
+artifacts/ReleaseAssets/Fonts.zip
 ```
 
 注意事项：
 
 - EXE 文件名由 `AFR.Deployer.csproj` 的 `<AssemblyName>AFR-Deployer</AssemblyName>` 决定，不在发布后重命名。
-- `Releases/AFR-Deployer_vX.Y.exe` 是额外归档副本，正式发布输出仍保留在 `publish/AFR.Deployer/`。
-- `Releases/AFR-DLL_vX.Y.zip` 只包含插件主 DLL，不包含 `.cad.json`、`.pdb`、`.xml` 或其它依赖文件。
+- `artifacts/ReleaseAssets/AFR-Deployer_vX.Y.exe` 是 GitHub Release 上传用版本化副本，正式发布输出仍保留在 `publish/AFR.Deployer/`。
+- `artifacts/ReleaseAssets/AFR-DLL_vX.Y.zip` 只包含插件主 DLL，不包含 `.cad.json`、`.pdb`、`.xml` 或其它依赖文件。
+- `artifacts/ReleaseAssets/Fonts.zip` 来自 `chore/Fonts.zip`，保持固定文件名便于用户识别。
 - 新增 CAD 版本时必须确保版本壳 `.csproj` 写入 `CadBrand` / `CadVersion` / `CadRegistryBasePath`，否则 `.cad.json` 元数据不会正确生成。
 - `Version.props` 是部署器与插件 DLL 的统一版本来源，发版只修改该文件。
 

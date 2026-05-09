@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    自动构建所有 AutoCAD 插件 DLL，并发布 AFR.Deployer 单文件 EXE。
+    自动构建所有 AutoCAD 插件 DLL，并生成 GitHub Release 发布资产。
 .DESCRIPTION
     执行步骤：
       1. 以 Release 配置构建所有 AFR-ACAD20XX 项目
@@ -11,16 +11,18 @@
       3. dotnet publish AFR.Deployer -> 自包含 .NET 10 单文件 EXE
          （已内置 .NET 10 运行时；用户仅需额外安装 Windows App Runtime 1.8 (x64)，
            缺失时由 AFR.Deployer 启动期检测并弹原生对话框给出下载链接）
-      4. 额外归档发布文件到仓库根目录 Releases\
-         - AFR-Deployer_vX.Y.exe：仅部署器 EXE 本体
+      4. 生成版本化发布资产到 artifacts\ReleaseAssets\
+         - AFR-Deployer_vX.Y.exe：部署器 EXE 本体
          - AFR-DLL_vX.Y.zip：仅 AFR-ACAD*.dll 插件主 DLL
+         - Fonts.zip：字体资源包
 .OUTPUTS
     <RepoRoot>\publish\AFR.Deployer\AFR.Deployer.exe
-    <RepoRoot>\Releases\AFR-Deployer_vX.Y.exe
-    <RepoRoot>\Releases\AFR-DLL_vX.Y.zip
+    <RepoRoot>\artifacts\ReleaseAssets\AFR-Deployer_vX.Y.exe
+    <RepoRoot>\artifacts\ReleaseAssets\AFR-DLL_vX.Y.zip
+    <RepoRoot>\artifacts\ReleaseAssets\Fonts.zip
 .EXAMPLE
-    .\Publish-Deployer.ps1
-    .\Publish-Deployer.ps1 -SkipPluginBuild   # 跳过插件构建，仅重新发布 EXE
+    .\tools\Publish-ReleaseAssets.ps1
+    .\tools\Publish-ReleaseAssets.ps1 -SkipPluginBuild   # 跳过插件构建，仅重新生成发布资产
 #>
 param(
     [switch]$SkipPluginBuild
@@ -36,14 +38,15 @@ $ErrorActionPreference = 'Stop'
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 
 # ── 路径常量 ──────────────────────────────────────────────────────────────
-$RepoRoot       = (Resolve-Path "$PSScriptRoot\..\..").Path
+$RepoRoot       = (Resolve-Path "$PSScriptRoot\..").Path
 $PluginsRoot    = Join-Path $RepoRoot "src\AutoCAD"
 $PluginOutputRoot = Join-Path $RepoRoot "artifacts\bin"       # 标准构建输出根目录
-$FinalReleasesDir = Join-Path $RepoRoot "Releases"            # 最终对外归档目录，仅放版本化发布产物
-$ArchiveTempDir = Join-Path $RepoRoot "artifacts\ReleaseArchiveTemp"
-$DeployerCsproj = Join-Path $PSScriptRoot "AFR.Deployer.csproj"
+$ReleaseAssetsDir = Join-Path $RepoRoot "artifacts\ReleaseAssets" # GitHub Release 上传资产目录
+$ArchiveTempDir = Join-Path $RepoRoot "artifacts\release-archive-temp"
+$DeployerCsproj = Join-Path $RepoRoot "src\AFR.Deployer\AFR.Deployer.csproj"
 $PublishOutput  = Join-Path $RepoRoot "publish\AFR.Deployer"
 $VersionProps    = Join-Path $RepoRoot "Version.props"
+$FontsSourcePath = Join-Path $RepoRoot "chore\Fonts.zip"
 
 # 自动发现 src\AutoCAD\AFR-ACAD*\*.csproj，避免新增 CAD 版本时手工维护列表。
 # TFM 仅用于控制台日志展示；解析失败时回落为 "(unknown)"，不阻断发布流程。
@@ -181,15 +184,16 @@ if ($LASTEXITCODE -ne 0) {
 $exePath = Join-Path $PublishOutput "AFR-Deployer.exe"
 $sizeMB  = [math]::Round((Get-Item $exePath).Length / 1MB, 1)
 
-# ── Step 4：归档最终发布产物到 Releases\ ────────────────────────────────
-Write-Step "归档发布产物到 Releases\"
-New-Item -ItemType Directory -Force -Path $FinalReleasesDir | Out-Null
+# ── Step 4：生成最终发布资产 ────────────────────────────────────────────
+Write-Step "生成发布资产到 artifacts\ReleaseAssets\"
+New-Item -ItemType Directory -Force -Path $ReleaseAssetsDir | Out-Null
 
-$versionedExe = Join-Path $FinalReleasesDir "AFR-Deployer_$ReleaseTag.exe"
+$versionedExe = Join-Path $ReleaseAssetsDir "AFR-Deployer_$ReleaseTag.exe"
 Copy-Item -LiteralPath $exePath -Destination $versionedExe -Force
 Write-Ok "部署器 EXE → $versionedExe"
 
-$versionedDllZip = Join-Path $FinalReleasesDir "AFR-DLL_$ReleaseTag.zip"
+$versionedDllZip = Join-Path $ReleaseAssetsDir "AFR-DLL_$ReleaseTag.zip"
+$releaseFontsZip = Join-Path $ReleaseAssetsDir "Fonts.zip"
 if (Test-Path -LiteralPath $ArchiveTempDir) {
     Remove-Item -LiteralPath $ArchiveTempDir -Recurse -Force
 }
@@ -218,7 +222,16 @@ try {
     }
 }
 
+if (-not (Test-Path -LiteralPath $FontsSourcePath)) {
+    Write-Fail "$FontsSourcePath 不存在，无法生成字体包发布资产"
+    exit 1
+}
+
+Copy-Item -LiteralPath $FontsSourcePath -Destination $releaseFontsZip -Force
+Write-Ok "字体包 → $releaseFontsZip"
+
 Write-Host "`n✓ 发布完成！" -ForegroundColor Green
 Write-Host "  输出：$exePath ($sizeMB MB)" -ForegroundColor Green
-Write-Host "  归档：$versionedExe" -ForegroundColor Green
-Write-Host "  归档：$versionedDllZip" -ForegroundColor Green
+Write-Host "  发布资产：$versionedExe" -ForegroundColor Green
+Write-Host "  发布资产：$versionedDllZip" -ForegroundColor Green
+Write-Host "  发布资产：$releaseFontsZip" -ForegroundColor Green

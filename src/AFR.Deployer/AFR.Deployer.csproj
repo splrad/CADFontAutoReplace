@@ -75,7 +75,7 @@
   <!--
     嵌入所有插件 DLL 与 CAD 元数据 Sidecar：直接从标准 Release 构建输出读取
     artifacts\bin\AFR-ACAD*\release\AFR-ACAD*.dll 与 *.cad.json。
-    新增 CAD 版本时由 Publish-Deployer.ps1 先构建版本壳，无需复制到 Resources\。
+    新增 CAD 版本时由 tools\Publish-ReleaseAssets.ps1 先构建版本壳，无需复制到 Resources\。
     LogicalName 与 CadDescriptors.EmbeddedResourceKey / SidecarSuffix 约定一致：
         AFR.Deployer.Resources.<FileName>
   -->
