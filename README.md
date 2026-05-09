@@ -84,9 +84,9 @@
 
 ### 部署工具一键安装
 
-1. 在 [Releases](https://github.com/splrad/CADFontAutoReplace/releases) 下载最新发行包，其中包含 `AFR.Deployer.exe` 与对应版本插件文件。
+1. 在 [Releases](https://github.com/splrad/CADFontAutoReplace/releases) 下载最新发行包，其中包含 `AFR-Deployer_vX.Y.exe` 与 `AFR-DLL_vX.Y.zip`。
 2. **先关闭所有 AutoCAD 进程**（部署工具会在检测到 CAD 运行时禁用安装/卸载按钮）。
-3. 双击运行 `AFR.Deployer.exe`，工具会自动扫描本机已安装的 AutoCAD 版本。
+3. 双击运行 `AFR-Deployer_vX.Y.exe`，工具会自动扫描本机已安装的 AutoCAD 版本。
 4. 勾选需要安装的项目，确认"部署路径"（默认会选中首个非系统盘下的 `\CADPlugins\`），点击"安装"。
 5. 工具会自动完成：
    - 将对应版本 DLL 复制到部署路径；
@@ -98,6 +98,17 @@
 > 💡 部署工具会实时监听注册表变化：后续安装/卸载新的 CAD 版本或修改配置文件后，无需手动"刷新"，列表会自动更新。
 >
 > 卸载同样在部署工具中完成：勾选已安装的项目点击"卸载"，工具会同步还原注册表与 `FixedProfile.aws` 中由本插件写入的节点。
+
+### 单 DLL 手动安装
+
+部署工具是推荐方式；如果只需要单 DLL 场景（例如维护、测试、受限环境），可以手动 `NETLOAD`：
+
+1. 在 [Releases](https://github.com/splrad/CADFontAutoReplace/releases) 下载 `AFR-DLL_vX.Y.zip` 并解压。
+2. 按 AutoCAD 版本选择对应 DLL，例如 AutoCAD 2026 使用 `AFR-ACAD2026.dll`。
+3. 在 AutoCAD 命令行输入 `NETLOAD`，选择该 DLL。
+4. 首次 `NETLOAD` 会完成默认字体部署、配置初始化与自动加载注册；按命令行提示重启 AutoCAD 后生效。
+
+单 DLL 卸载时，在 CAD 命令行完整输入 `AFRUNLOAD`。该命令会卸载当前会话中的插件事件/Hook，并清理 AFR 自动加载注册表项和由插件写入的配置节点。`AFRUNLOAD` 是维护入口，不参与自动补全和动态输入建议，必须完整输入命令名。
 
 ### 首次配置与验证
 
@@ -122,7 +133,7 @@
 AFR 缺失字体自动替换 v9.0
 项目地址GitHub(国外)：github.com/splrad/CADFontAutoReplace
 项目地址Gitee(国内)：gitee.com/splrad/CADFontAutoReplace
-命令: AFR(配置) AFRLOG(日志)
+命令: AFR(配置) AFRLOG(日志) AFRUNLOAD(卸载命令)
 ====================================================================================
 [字体修复]已替换缺失字体 3 个(SHX主字体:1,SHX大字体:1,TrueType:1) | MText内联字体映射：0
 ```
@@ -148,6 +159,7 @@ AFR 缺失字体自动替换 v9.0
 |:---:|---|
 | `AFR` | 打开字体配置界面，选择 SHX 主字体、大字体和 TrueType 替换字体 |
 | `AFRLOG` | 打开替换日志，查看检测结果，支持手动调整和批量填充 |
+| `AFRUNLOAD` | 维护用卸载入口；需完整输入，不参与 CAD 自动补全或动态输入建议 |
 
 ---
 
@@ -170,6 +182,8 @@ AFR 缺失字体自动替换 v9.0
 <summary><b>如何卸载插件？</b></summary>
 
 使用 `AFR.Deployer` 执行卸载：勾选已安装项后点击“卸载”，工具会同步清理自动加载配置与由本插件写入的 `FixedProfile.aws` 节点。
+
+单 DLL / `NETLOAD` 场景可在 CAD 命令行完整输入 `AFRUNLOAD` 执行卸载维护。命令不会出现在自动补全列表中，输入 `AFR`、`AFRU` 等前缀不会触发，必须完整输入 `AFRUNLOAD`。
 
 </details>
 
