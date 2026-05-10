@@ -7,8 +7,8 @@ namespace AFR.FontMapping;
 /// DBText code page 追踪报告器。
 /// <para>
 /// 该类型不再维护候选 RVA 的假命中计数；实际证据来自
-/// <see cref="DwgFilerCodePageScopeHook"/>、<see cref="TextEditorDbcsDecodeHook"/>
-/// 与 <see cref="CodePageFamilyHook"/> 的运行时统计。
+/// <see cref="DwgFilerCodePageScopeHook"/>、<see cref="DbTextDwgInFieldsScopeHook"/>、
+/// <see cref="TextEditorDbcsDecodeHook"/> 与 <see cref="CodePageFamilyHook"/> 的运行时统计。
 /// </para>
 /// </summary>
 internal static class DbTextHookTracer
@@ -41,6 +41,8 @@ internal static class DbTextHookTracer
             "说明: 当前报告来自实际 readString/code-page context hook，不再显示未安装探针的候选 RVA 假命中计数。",
             "",
             DwgFilerCodePageScopeHook.GetReport(),
+            "",
+            DbTextDwgInFieldsScopeHook.GetReport(),
             "",
             TextEditorDbcsDecodeHook.GetReport(),
             "",

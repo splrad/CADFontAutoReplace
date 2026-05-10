@@ -16,6 +16,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\TextEntityInspectCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\AutoCadFontHook.cs" Link="FontMapping\AutoCadFontHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\CodePageFamilyHook.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextDwgInFieldsScopeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextHookTracer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DwgFilerCodePageScopeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\LdFileHook.cs" Link="FontMapping\LdFileHook.cs" />

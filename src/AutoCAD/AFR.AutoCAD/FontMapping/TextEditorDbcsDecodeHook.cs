@@ -143,11 +143,13 @@ internal static class TextEditorDbcsDecodeHook
     /// 使用当前运行时已观察到的 native 双字节解码证据，尝试预览乱码字符串的无猜测恢复结果。
     /// </summary>
     /// <param name="text">已进入托管层的字符串。</param>
+    /// <param name="codePageId">native DWG 读入阶段为当前对象记录的 AutoCAD code_page_id。</param>
     /// <param name="decoded">全部双字节均有 native 证据时的恢复结果。</param>
     /// <param name="reason">无法完整恢复时的覆盖原因。</param>
     /// <returns>所有非 ASCII 双字节均有 native 证据时返回 true。</returns>
     public static bool TryDecodeWithObservedEvidence(
         string text,
+        int codePageId,
         out string decoded,
         out string reason,
         bool allowNativeExpansion = true)
@@ -158,8 +160,7 @@ internal static class TextEditorDbcsDecodeHook
         if (string.IsNullOrEmpty(text))
             return false;
 
-        int originalCodePageId = _lastOriginalCodePageId;
-        if (!_installed || originalCodePageId == 0)
+        if (!_installed || codePageId == 0)
         {
             reason = "no-native-codepage-evidence";
             return false;
@@ -207,7 +208,7 @@ internal static class TextEditorDbcsDecodeHook
             }
 
             dbcsCount++;
-            int key = BuildDecodeEvidenceKey(originalCodePageId, bytes[0], bytes[1]);
+            int key = BuildDecodeEvidenceKey(codePageId, bytes[0], bytes[1]);
             if (TryGetDecodeEvidence(key, out char mapped))
             {
                 builder.Append(mapped);
@@ -215,7 +216,7 @@ internal static class TextEditorDbcsDecodeHook
             }
 
             if (allowNativeExpansion
-                && TryDecodeBytesWithNative(originalCodePageId, bytes[0], bytes[1], out mapped))
+                && TryDecodeBytesWithNative(codePageId, bytes[0], bytes[1], out mapped))
             {
                 nativeExpansionCount++;
                 builder.Append(mapped);
@@ -245,6 +246,26 @@ internal static class TextEditorDbcsDecodeHook
             ? $"full dbcs={dbcsCount}"
             : $"full dbcs={dbcsCount}, native-expanded={nativeExpansionCount}";
         return !string.Equals(text, decoded, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 使用最近一次 native code page 证据做只读诊断预览。
+    /// <para>
+    /// 该方法仅供 Inspect 命令显示候选预览；自动写回必须传入对象级 provenance code page。
+    /// </para>
+    /// </summary>
+    public static bool TryPreviewWithLastObservedEvidence(
+        string text,
+        out string decoded,
+        out string reason,
+        bool allowNativeExpansion = true)
+    {
+        return TryDecodeWithObservedEvidence(
+            text,
+            _lastOriginalCodePageId,
+            out decoded,
+            out reason,
+            allowNativeExpansion);
     }
 
     private static bool TryInstallReadDoubleByteHook()
@@ -326,6 +347,7 @@ internal static class TextEditorDbcsDecodeHook
                 ref _readDoubleByteHitCount,
                 out bool hasDbcsScope);
             bool result = trampoline(input, outputChar, patchedCodePageId);
+            TryRecordScopedDbTextDecode(outputChar, hasDbcsScope, result);
             TryLogReadDoubleByteProbe(returnRva, input, outputChar, codePageId, patchedCodePageId, hasDbcsScope, result);
             return result;
         }
@@ -466,6 +488,15 @@ internal static class TextEditorDbcsDecodeHook
         {
             DiagnosticLogger.LogError(Tag + ": read_doublebyte probe 失败", ex);
         }
+    }
+
+    private static void TryRecordScopedDbTextDecode(IntPtr outputChar, bool hasDbcsScope, bool result)
+    {
+        if (!hasDbcsScope || !result || outputChar == IntPtr.Zero || !IsCommittedMemory(outputChar))
+            return;
+
+        char output = (char)Marshal.ReadInt16(outputChar);
+        DbTextDwgInFieldsScopeHook.RecordNativeDecodedDbcsChar(output);
     }
 
     private static void TryLogMultiByteToUnicodeProbe(

@@ -143,6 +143,7 @@ public abstract class PluginEntryBase : IExtensionApplication
             // DEBUG 专用: DBCS Code Page Family 修复 Hook，在 DWG 反序列化时修正 code_page_id 字段。
             // 必须在图纸打开前安装，才能拦截 MText/DBText 的 DBCS 字节解码。
             DwgFilerCodePageScopeHook.Install();
+            DbTextDwgInFieldsScopeHook.Install();
             TextEditorDbcsDecodeHook.Install();
             CodePageFamilyHook.Install();
 #endif
@@ -171,6 +172,7 @@ public abstract class PluginEntryBase : IExtensionApplication
 #if DEBUG
         CodePageFamilyHook.Uninstall();
         TextEditorDbcsDecodeHook.Uninstall();
+        DbTextDwgInFieldsScopeHook.Uninstall();
         DwgFilerCodePageScopeHook.Uninstall();
 #endif
         DiagnosticLogger.Disable();
@@ -214,6 +216,7 @@ public abstract class PluginEntryBase : IExtensionApplication
 #if DEBUG
         CodePageFamilyHook.Uninstall();
         TextEditorDbcsDecodeHook.Uninstall();
+        DbTextDwgInFieldsScopeHook.Uninstall();
         DwgFilerCodePageScopeHook.Uninstall();
 #endif
         DocumentContextManager.Instance.Clear();

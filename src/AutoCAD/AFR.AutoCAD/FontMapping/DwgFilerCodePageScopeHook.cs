@@ -49,6 +49,7 @@ internal static class DwgFilerCodePageScopeHook
     private static int _wideCharPointerHitCount;
     private static int _invalidCodePageCount;
     private static int _dbcsScopeCount;
+    private static int _externalScopeCount;
     private static int _scopeLogCount;
     private static int _stringLogCount;
     private static int _lastCodePageId;
@@ -205,6 +206,7 @@ internal static class DwgFilerCodePageScopeHook
             $"AcStringReadStringHits: {_acStringHitCount}",
             $"WideCharPointerReadStringHits: {_wideCharPointerHitCount}",
             $"DbcsScopeCount: {_dbcsScopeCount}",
+            $"ExternalScopeCount: {_externalScopeCount}",
             $"InvalidCodePageCount: {_invalidCodePageCount}",
             $"LastFiler: 0x{_lastFiler.ToInt64():X}",
             $"LastCodePageId: {FormatCodePageId(_lastCodePageId)}",
@@ -213,6 +215,38 @@ internal static class DwgFilerCodePageScopeHook
             $"LastWideCharPointerReturnRva: 0x{_lastWideCharPointerReturnRva:X}",
             $"LastWideCharStringReturnRva: 0x{_lastWideCharStringReturnRva:X}",
             $"LastWideCharString: {_lastWideCharString}");
+    }
+
+    /// <summary>
+    /// 在非 readString 的 DWG 反序列化窗口中压入当前 filer 的 code page 作用域。
+    /// </summary>
+    /// <param name="filer">AcDbDwgFiler 指针。</param>
+    /// <param name="owner">外层 native 调用点名称。</param>
+    /// <param name="returnRva">外层调用返回 RVA，仅用于诊断。</param>
+    /// <returns>成功压入作用域时返回释放句柄；否则返回 null。</returns>
+    public static IDisposable? EnterExternalScope(IntPtr filer, string owner, uint returnRva)
+    {
+        int codePageId = GetFilerCodePageIdSafe(filer);
+        bool isDoubleByte = IsDoubleByteCodePageId(codePageId);
+        if (!isDoubleByte)
+        {
+            if (codePageId == 0)
+                Interlocked.Increment(ref _invalidCodePageCount);
+
+            return null;
+        }
+
+        PushScope(filer, codePageId, isDoubleByte);
+        Interlocked.Increment(ref _dbcsScopeCount);
+        int externalScopeCount = Interlocked.Increment(ref _externalScopeCount);
+        if (externalScopeCount <= ScopeLogLimit)
+        {
+            DiagnosticLogger.Log(Tag,
+                $"{owner}: external return=0x{returnRva:X}, filer=0x{filer.ToInt64():X}, " +
+                $"codePage={FormatCodePageId(codePageId)}, dbcs={isDoubleByte}");
+        }
+
+        return new ScopeCookie();
     }
 
     /// <summary>
@@ -225,7 +259,7 @@ internal static class DwgFilerCodePageScopeHook
         return codePageId switch
         {
             0x27 => "0x27(GBK/CP936 observed)",
-            0x28 => "0x28(Big5/CP950 candidate)",
+            0x28 => "0x28(Big5/CP950 observed)",
             0 => "0x0(None)",
             _ => $"0x{codePageId:X}"
         };
@@ -493,6 +527,20 @@ internal static class DwgFilerCodePageScopeHook
     private static void PopScope()
     {
         _currentScope = _currentScope?.Previous;
+    }
+
+    private sealed class ScopeCookie : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+
+            _disposed = true;
+            PopScope();
+        }
     }
 
     private static bool IsCommittedMemory(IntPtr address)

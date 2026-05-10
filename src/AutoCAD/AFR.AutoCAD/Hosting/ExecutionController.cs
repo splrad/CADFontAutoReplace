@@ -108,10 +108,10 @@ internal sealed class ExecutionController
 
 #if DEBUG
                 // DBText 单行文字可能已在更早 native 链路中被解码成错误 Unicode。
-                // 只在当前运行时 native DBCS 解码证据全覆盖时写回，不依据乱码外观或文本语义判断。
+                // 仅当 native DWG 读入阶段记录到对象级 provenance 时才写回。
                 DiagnosticLogger.BeginPhase("DBText native证据修复");
                 int repairedDbTextCount = DbTextEncodingRepairService.Repair(doc.Database);
-                DiagnosticLogger.EndPhase($"DBText修复: {repairedDbTextCount}个");
+                DiagnosticLogger.EndPhase($"DBText实际修复: {repairedDbTextCount}个");
                 if (repairedDbTextCount > 0)
                     doc.Editor.Regen();
 #endif

@@ -103,6 +103,7 @@ public sealed class TextEntityInspectCommand
             case DBText dbText:
                 lines.Add($"DBText.TextString: {Escape(dbText.TextString)}");
                 AppendObservedDecodePreview(lines, dbText.TextString);
+                AppendNativeDbTextEvidence(lines, dbText);
                 lines.Add($"TextStyleId: {Safe(() => DescribeTextStyle(dbText.TextStyleId, tr))}");
                 break;
             case MText mText:
@@ -132,7 +133,7 @@ public sealed class TextEntityInspectCommand
         if (string.IsNullOrEmpty(text))
             return;
 
-        if (TextEditorDbcsDecodeHook.TryDecodeWithObservedEvidence(text, out string decoded, out string reason))
+        if (TextEditorDbcsDecodeHook.TryPreviewWithLastObservedEvidence(text, out string decoded, out string reason))
         {
             lines.Add($"ObservedDecodePreview: {Escape(decoded)}");
             lines.Add($"ObservedDecodeCoverage: full");
@@ -140,6 +141,95 @@ public sealed class TextEntityInspectCommand
         else
         {
             lines.Add($"ObservedDecodeCoverage: {reason}");
+        }
+    }
+
+    private static void AppendNativeDbTextEvidence(List<string> lines, DBText dbText)
+    {
+        string text = dbText.TextString ?? string.Empty;
+        if (!DbTextEncodingRepairService.TryGetNativeImpTextPointer(dbText, out IntPtr impText))
+        {
+            lines.Add("NativeImpText: <unavailable>");
+            lines.Add("NativeProvenance: missing");
+            return;
+        }
+
+        lines.Add($"NativeImpText: 0x{impText.ToInt64():X}");
+        if (!DbTextDwgInFieldsScopeHook.TryGetProvenance(impText, out NativeDbTextProvenance provenance))
+        {
+            lines.Add("NativeProvenance: missing");
+            return;
+        }
+
+        bool textMatches = string.Equals(provenance.NativeText, text, StringComparison.Ordinal);
+        lines.Add("NativeProvenance: available");
+        lines.Add($"NativeProvenanceCodePage: {DwgFilerCodePageScopeHook.FormatCodePageId(provenance.CodePageId)}");
+        lines.Add($"NativeProvenanceFiler: 0x{provenance.Filer.ToInt64():X}");
+        lines.Add($"NativeDbcsDecodedChars: {provenance.NativeDbcsDecodedText.Length}");
+        if (!string.IsNullOrEmpty(provenance.NativeDbcsDecodedText))
+            lines.Add($"NativeDbcsDecodedText: {Escape(provenance.NativeDbcsDecodedText)}");
+        lines.Add($"NativeProvenanceTextMatchesCurrent: {textMatches}");
+        if (!textMatches)
+        {
+            lines.Add($"NativeProvenanceText: {Escape(provenance.NativeText)}");
+            lines.Add("NativeRepairDecision: reject native-text-mismatch");
+            return;
+        }
+
+        if (DbTextEncodingRepairService.TryBuildTextFromNativeDbcsSequence(
+                text,
+                provenance.NativeDbcsDecodedText,
+                out string decoded,
+                out string reason))
+        {
+            lines.Add($"NativeExactDecodePreview: {Escape(decoded)}");
+            lines.Add($"NativeExactDecodeCoverage: {reason}");
+            if (string.Equals(text, decoded, StringComparison.Ordinal))
+            {
+                lines.Add("NativeExactRepairDecision: reject already-exact-native-text");
+            }
+            else if (DbTextEncodingRepairService.TryValidateNativeDecodedTextForRepair(
+                         decoded,
+                         out string validReason,
+                         allowPrivateUse: true))
+            {
+                lines.Add("NativeExactRepairDecision: allow");
+            }
+            else
+            {
+                lines.Add($"NativeExactRepairDecision: reject {validReason}");
+            }
+
+            return;
+        }
+
+        lines.Add($"NativeExactDecodeCoverage: {reason}");
+        lines.Add("NativeExactRepairDecision: reject no-full-native-dbcs-sequence");
+
+        if (TextEditorDbcsDecodeHook.TryDecodeWithObservedEvidence(
+                text,
+                provenance.CodePageId,
+                out string observedDecoded,
+                out string observedReason,
+                allowNativeExpansion: true))
+        {
+            lines.Add($"ObservedObjectCodePageDecodePreview: {Escape(observedDecoded)}");
+            lines.Add($"ObservedObjectCodePageDecodeCoverage: {observedReason}");
+            lines.Add($"ObservedFallbackWrongPathCharsCaptured: {provenance.NativeDbcsDecodedText.Length}");
+            if (string.Equals(text, observedDecoded, StringComparison.Ordinal))
+            {
+                lines.Add("ObservedFallbackRepairDecision: reject already-exact-native-text");
+            }
+            else if (DbTextEncodingRepairService.TryValidateNativeDecodedTextForRepair(
+                         observedDecoded,
+                         out string observedValidReason))
+            {
+                lines.Add("ObservedFallbackRepairDecision: allow");
+            }
+            else
+            {
+                lines.Add($"ObservedFallbackRepairDecision: reject {observedValidReason}");
+            }
         }
     }
 
