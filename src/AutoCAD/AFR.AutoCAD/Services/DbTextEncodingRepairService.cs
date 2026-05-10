@@ -1,5 +1,7 @@
 #if DEBUG
+using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text;
 using Autodesk.AutoCAD.DatabaseServices;
 using AFR.FontMapping;
 
@@ -51,6 +53,7 @@ internal static class DbTextEncodingRepairService
         int partialSkipLogCount = 0;
         int exactNativeSequenceCount = 0;
         int observedFallbackCount = 0;
+        int privateUseSymbolPreservedCount = 0;
         int repaired = 0;
 
         using var tr = db.TransactionManager.StartTransaction();
@@ -133,6 +136,16 @@ internal static class DbTextEncodingRepairService
                     {
                         observedFallbackCount++;
                         reason = "observed-fallback " + reason;
+                        if (TryNormalizePrivateUseSymbolsFromOriginal(
+                                original,
+                                decoded,
+                                out string normalizedDecoded,
+                                out string normalizeReason))
+                        {
+                            decoded = normalizedDecoded;
+                            reason += ", " + normalizeReason;
+                            privateUseSymbolPreservedCount++;
+                        }
                     }
                     else
                     {
@@ -198,6 +211,7 @@ internal static class DbTextEncodingRepairService
             "DBText证据修复",
             $"扫描={scanned}, 可预览={eligiblePreview}, 缺少对象证据={missingProvenance}, " +
             $"exact序列={exactNativeSequenceCount}, observed回退={observedFallbackCount}, " +
+            $"PUA符号保留={privateUseSymbolPreservedCount}, " +
             $"证据不一致={provenanceMismatch}, 跳过={skipped}, 无效解码={invalidDecoded}, " +
             $"错误={errors}, 实际修复={repaired}");
         return repaired;
@@ -253,7 +267,7 @@ internal static class DbTextEncodingRepairService
             return false;
         }
 
-        var builder = new System.Text.StringBuilder(currentText.Length);
+        var builder = new StringBuilder(currentText.Length);
         int dbcsIndex = 0;
         for (int i = 0; i < currentText.Length; i++)
         {
@@ -301,6 +315,89 @@ internal static class DbTextEncodingRepairService
 
         reason = "ok";
         return true;
+    }
+
+    internal static bool TryNormalizePrivateUseSymbolsFromOriginal(
+        string original,
+        string decoded,
+        out string normalized,
+        out string reason)
+    {
+        normalized = decoded;
+        reason = "no-private-use";
+
+        if (string.IsNullOrEmpty(original) || string.IsNullOrEmpty(decoded))
+            return false;
+
+        if (!ContainsPrivateUse(decoded))
+            return false;
+
+        if (original.Length != decoded.Length)
+        {
+            reason = $"private-use length mismatch original={original.Length}, decoded={decoded.Length}";
+            return false;
+        }
+
+        var builder = new StringBuilder(decoded.Length);
+        int preserved = 0;
+        for (int i = 0; i < decoded.Length; i++)
+        {
+            char decodedChar = decoded[i];
+            if (!IsPrivateUse(decodedChar))
+            {
+                builder.Append(decodedChar);
+                continue;
+            }
+
+            char originalChar = original[i];
+            if (!IsSymbolOrPunctuation(originalChar))
+            {
+                reason = $"private-use U+{(int)decodedChar:X4} at {i} cannot preserve original U+{(int)originalChar:X4}";
+                return false;
+            }
+
+            builder.Append(originalChar);
+            preserved++;
+        }
+
+        normalized = builder.ToString();
+        reason = $"private-use-symbol-preserved count={preserved}";
+        return preserved > 0;
+    }
+
+    private static bool ContainsPrivateUse(string text)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (IsPrivateUse(text[i]))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsPrivateUse(char ch)
+    {
+        return ch >= '\uE000' && ch <= '\uF8FF';
+    }
+
+    private static bool IsSymbolOrPunctuation(char ch)
+    {
+        if (char.IsLetterOrDigit(ch))
+            return false;
+
+        UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(ch);
+        return category == UnicodeCategory.ConnectorPunctuation
+            || category == UnicodeCategory.DashPunctuation
+            || category == UnicodeCategory.OpenPunctuation
+            || category == UnicodeCategory.ClosePunctuation
+            || category == UnicodeCategory.InitialQuotePunctuation
+            || category == UnicodeCategory.FinalQuotePunctuation
+            || category == UnicodeCategory.OtherPunctuation
+            || category == UnicodeCategory.MathSymbol
+            || category == UnicodeCategory.CurrencySymbol
+            || category == UnicodeCategory.ModifierSymbol
+            || category == UnicodeCategory.OtherSymbol;
     }
 
     private static string EscapeForLog(string text)

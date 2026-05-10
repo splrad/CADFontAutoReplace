@@ -194,17 +194,19 @@ public sealed class TextEntityInspectCommand
                          allowPrivateUse: true))
             {
                 lines.Add("NativeExactRepairDecision: allow");
+                return;
             }
             else
             {
                 lines.Add($"NativeExactRepairDecision: reject {validReason}");
+                return;
             }
-
-            return;
         }
-
-        lines.Add($"NativeExactDecodeCoverage: {reason}");
-        lines.Add("NativeExactRepairDecision: reject no-full-native-dbcs-sequence");
+        else
+        {
+            lines.Add($"NativeExactDecodeCoverage: {reason}");
+            lines.Add("NativeExactRepairDecision: reject no-full-native-dbcs-sequence");
+        }
 
         if (TextEditorDbcsDecodeHook.TryDecodeWithObservedEvidence(
                 text,
@@ -216,12 +218,24 @@ public sealed class TextEntityInspectCommand
             lines.Add($"ObservedObjectCodePageDecodePreview: {Escape(observedDecoded)}");
             lines.Add($"ObservedObjectCodePageDecodeCoverage: {observedReason}");
             lines.Add($"ObservedFallbackWrongPathCharsCaptured: {provenance.NativeDbcsDecodedText.Length}");
-            if (string.Equals(text, observedDecoded, StringComparison.Ordinal))
+            string repairCandidate = observedDecoded;
+            if (DbTextEncodingRepairService.TryNormalizePrivateUseSymbolsFromOriginal(
+                    text,
+                    observedDecoded,
+                    out string normalizedObserved,
+                    out string normalizeReason))
+            {
+                repairCandidate = normalizedObserved;
+                lines.Add($"ObservedFallbackPrivateUseNormalizedPreview: {Escape(normalizedObserved)}");
+                lines.Add($"ObservedFallbackPrivateUseNormalizedCoverage: {normalizeReason}");
+            }
+
+            if (string.Equals(text, repairCandidate, StringComparison.Ordinal))
             {
                 lines.Add("ObservedFallbackRepairDecision: reject already-exact-native-text");
             }
             else if (DbTextEncodingRepairService.TryValidateNativeDecodedTextForRepair(
-                         observedDecoded,
+                         repairCandidate,
                          out string observedValidReason))
             {
                 lines.Add("ObservedFallbackRepairDecision: allow");
