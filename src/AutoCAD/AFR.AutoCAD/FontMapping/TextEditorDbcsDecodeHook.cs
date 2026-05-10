@@ -1,0 +1,768 @@
+#if DEBUG
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using AFR.Platform;
+using AFR.Services;
+
+namespace AFR.FontMapping;
+
+/// <summary>
+/// TextEditor DBCS 字节解码 Hook。
+/// <para>
+/// 单行文字的 DWG 读取路径可能绕过 <see cref="CodePageFamilyHook"/> 覆盖的 context 初始化函数。
+/// 本 Hook 只拦截序言可安全 trampoline 的 TextEditor DBCS 入口，在当前线程处于 DWG filer readString
+/// 作用域时，将传入的 code page 修正为 filer 自身声明的真实 DBCS code page。
+/// </para>
+/// </summary>
+internal static class TextEditorDbcsDecodeHook
+{
+    private const string Tag = "TextEditorDbcs";
+    private const string ReadDoubleByteAnsiExport = "?read_doublebyte@TextEditor@@CA_NPEBDAEA_WW4code_page_id@@@Z";
+    private const string MultiByteToUnicodeAcStringExport = "?MultiByteToUnicode@TextEditor@@SA_NPEBDHW4code_page_id@@AEAVAcString@@@Z";
+    private const uint MemCommit = 0x1000;
+    private const int PatchLogLimit = 40;
+    private const int NoScopeLogLimit = 20;
+    private const int DecodeProbeLogLimit = 80;
+    private const int DecodeEvidenceSampleLimit = 16;
+
+    private static readonly byte[] ReadDoubleByteAnsiPrefix =
+    [
+        0x48, 0x89, 0x5C, 0x24, 0x10,
+        0x48, 0x89, 0x74, 0x24, 0x18,
+        0x57,
+        0x48, 0x83, 0xEC, 0x30
+    ];
+
+    private static readonly byte[] MultiByteToUnicodeAcStringPrefix =
+    [
+        0x48, 0x8B, 0xC4,
+        0x48, 0x89, 0x58, 0x08,
+        0x48, 0x89, 0x68, 0x10,
+        0x48, 0x89, 0x70, 0x18,
+        0x48, 0x89, 0x78, 0x20,
+        0x41, 0x56,
+        0x48, 0x83, 0xEC, 0x30
+    ];
+
+    private static NativeInlineHook<ReadDoubleByteAnsiDelegate>? _readDoubleByteHook;
+    private static NativeInlineHook<MultiByteToUnicodeAcStringDelegate>? _multiByteToUnicodeAcStringHook;
+    private static IntPtr _moduleBase;
+    private static bool _installed;
+    private static int _hitCount;
+    private static int _readDoubleByteHitCount;
+    private static int _multiByteToUnicodeAcStringHitCount;
+    private static int _patchedCount;
+    private static int _noScopeCount;
+    private static int _sameCodePageCount;
+    private static int _noScopeLogCount;
+    private static int _decodeProbeLogCount;
+    private static int _asciiProbeSkipCount;
+    private static int _codePageProviderRegistered;
+    private static readonly object DecodeEvidenceLock = new();
+    private static readonly Dictionary<int, char> DecodeEvidence = new();
+    private static int _lastOriginalCodePageId;
+    private static int _lastFilerCodePageId;
+    private static int _lastPatchedCodePageId;
+    private static uint _lastReturnRva;
+    private static string _lastApiName = string.Empty;
+    [ThreadStatic] private static bool _inHook;
+
+    /// <summary>
+    /// <c>TextEditor::read_doublebyte(char const*, wchar_t&amp;, code_page_id)</c> 委托。
+    /// </summary>
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private delegate bool ReadDoubleByteAnsiDelegate(IntPtr input, IntPtr outputChar, int codePageId);
+
+    /// <summary>
+    /// <c>TextEditor::MultiByteToUnicode(char const*, int, code_page_id, AcString&amp;)</c> 委托。
+    /// </summary>
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private delegate bool MultiByteToUnicodeAcStringDelegate(IntPtr input, int length, int codePageId, IntPtr output);
+
+    /// <summary>安装 TextEditor DBCS 解码 Hook。</summary>
+    public static void Install()
+    {
+        if (_installed) return;
+
+        if (!IsSupportedPlatform())
+            return;
+
+        _moduleBase = GetModuleHandle(PlatformManager.Platform.AcDbDllName);
+        if (_moduleBase == IntPtr.Zero)
+        {
+            DiagnosticLogger.Log(Tag, $"{PlatformManager.Platform.AcDbDllName} 未加载，跳过安装。");
+            return;
+        }
+
+        bool installed = TryInstallReadDoubleByteHook();
+        installed |= TryInstallMultiByteToUnicodeAcStringHook();
+        _installed = installed;
+    }
+
+    /// <summary>卸载 TextEditor DBCS 解码 Hook。</summary>
+    public static void Uninstall()
+    {
+        _readDoubleByteHook?.Uninstall();
+        _multiByteToUnicodeAcStringHook?.Uninstall();
+        _readDoubleByteHook = null;
+        _multiByteToUnicodeAcStringHook = null;
+        _moduleBase = IntPtr.Zero;
+        _installed = false;
+        DiagnosticLogger.Log(Tag,
+            $"已卸载。HitCount={_hitCount}, ReadDoubleByteHits={_readDoubleByteHitCount}, " +
+            $"MultiByteToUnicodeHits={_multiByteToUnicodeAcStringHitCount}, " +
+            $"PatchedCount={_patchedCount}, NoScope={_noScopeCount}");
+    }
+
+    /// <summary>获取诊断报告。</summary>
+    public static string GetReport()
+    {
+        return string.Join(Environment.NewLine,
+            "=== TextEditor DBCS Decode Hook ===",
+            $"Installed: {_installed}",
+            $"HitCount: {_hitCount}",
+            $"ReadDoubleByteHitCount: {_readDoubleByteHitCount}",
+            $"MultiByteToUnicodeAcStringHitCount: {_multiByteToUnicodeAcStringHitCount}",
+            $"PatchedCount: {_patchedCount}",
+            $"NoDbcsScopeCount: {_noScopeCount}",
+            $"SameCodePageCount: {_sameCodePageCount}",
+            $"AsciiProbeSkipCount: {_asciiProbeSkipCount}",
+            $"ObservedDecodeEvidenceCount: {GetDecodeEvidenceCount()}",
+            $"ObservedDecodeEvidenceSamples: {FormatDecodeEvidenceSamples()}",
+            $"LastApiName: {_lastApiName}",
+            $"LastReturnRva: 0x{_lastReturnRva:X}",
+            $"LastOriginalCodePageId: {DwgFilerCodePageScopeHook.FormatCodePageId(_lastOriginalCodePageId)}",
+            $"LastFilerCodePageId: {DwgFilerCodePageScopeHook.FormatCodePageId(_lastFilerCodePageId)}",
+            $"LastPatchedCodePageId: {DwgFilerCodePageScopeHook.FormatCodePageId(_lastPatchedCodePageId)}");
+    }
+
+    /// <summary>
+    /// 使用当前运行时已观察到的 native 双字节解码证据，尝试预览乱码字符串的无猜测恢复结果。
+    /// </summary>
+    /// <param name="text">已进入托管层的字符串。</param>
+    /// <param name="decoded">全部双字节均有 native 证据时的恢复结果。</param>
+    /// <param name="reason">无法完整恢复时的覆盖原因。</param>
+    /// <returns>所有非 ASCII 双字节均有 native 证据时返回 true。</returns>
+    public static bool TryDecodeWithObservedEvidence(
+        string text,
+        out string decoded,
+        out string reason,
+        bool allowNativeExpansion = true)
+    {
+        decoded = string.Empty;
+        reason = "<empty>";
+
+        if (string.IsNullOrEmpty(text))
+            return false;
+
+        int originalCodePageId = _lastOriginalCodePageId;
+        if (!_installed || originalCodePageId == 0)
+        {
+            reason = "no-native-codepage-evidence";
+            return false;
+        }
+
+        EnsureCodePageProviderRegistered();
+        Encoding byteCarrier = Encoding.GetEncoding(
+            950,
+            EncoderFallback.ExceptionFallback,
+            DecoderFallback.ExceptionFallback);
+
+        var builder = new StringBuilder(text.Length);
+        int dbcsCount = 0;
+        int missingCount = 0;
+        int nativeExpansionCount = 0;
+        var missing = new List<string>();
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            char ch = text[i];
+            if (ch <= 0x7F)
+            {
+                builder.Append(ch);
+                continue;
+            }
+
+            byte[] bytes;
+            try
+            {
+                bytes = byteCarrier.GetBytes(new[] { ch });
+            }
+            catch
+            {
+                missingCount++;
+                if (missing.Count < 8)
+                    missing.Add($"U+{(int)ch:X4}");
+                builder.Append(ch);
+                continue;
+            }
+
+            if (bytes.Length != 2 || bytes[0] < 0x80)
+            {
+                builder.Append(ch);
+                continue;
+            }
+
+            dbcsCount++;
+            int key = BuildDecodeEvidenceKey(originalCodePageId, bytes[0], bytes[1]);
+            if (TryGetDecodeEvidence(key, out char mapped))
+            {
+                builder.Append(mapped);
+                continue;
+            }
+
+            if (allowNativeExpansion
+                && TryDecodeBytesWithNative(originalCodePageId, bytes[0], bytes[1], out mapped))
+            {
+                nativeExpansionCount++;
+                builder.Append(mapped);
+                continue;
+            }
+
+            missingCount++;
+            if (missing.Count < 8)
+                missing.Add($"{bytes[0]:X2} {bytes[1]:X2}");
+            builder.Append(ch);
+        }
+
+        decoded = builder.ToString();
+        if (dbcsCount == 0)
+        {
+            reason = "no-dbcs-bytes";
+            return false;
+        }
+
+        if (missingCount != 0)
+        {
+            reason = $"partial dbcs={dbcsCount}, missing={missingCount}, samples={string.Join(",", missing)}";
+            return false;
+        }
+
+        reason = nativeExpansionCount == 0
+            ? $"full dbcs={dbcsCount}"
+            : $"full dbcs={dbcsCount}, native-expanded={nativeExpansionCount}";
+        return !string.Equals(text, decoded, StringComparison.Ordinal);
+    }
+
+    private static bool TryInstallReadDoubleByteHook()
+    {
+        if (!TryGetExportAddress(
+                _moduleBase,
+                ReadDoubleByteAnsiExport,
+                "TextEditor::read_doublebyte(char*)",
+                out IntPtr address,
+                out uint rva))
+            return false;
+
+        _readDoubleByteHook = new NativeInlineHook<ReadDoubleByteAnsiDelegate>(
+            Tag,
+            "TextEditor::read_doublebyte(char*)",
+            rva);
+        return _readDoubleByteHook.InstallAtAddress(
+            address,
+            rva,
+            ReadDoubleByteAnsiHookHandler,
+            ReadDoubleByteAnsiPrefix.Length,
+            64,
+            ReadDoubleByteAnsiPrefix);
+    }
+
+    private static bool TryInstallMultiByteToUnicodeAcStringHook()
+    {
+        if (!TryGetExportAddress(
+                _moduleBase,
+                MultiByteToUnicodeAcStringExport,
+                "TextEditor::MultiByteToUnicode(char*,AcString)",
+                out IntPtr address,
+                out uint rva))
+            return false;
+
+        _multiByteToUnicodeAcStringHook = new NativeInlineHook<MultiByteToUnicodeAcStringDelegate>(
+            Tag,
+            "TextEditor::MultiByteToUnicode(char*,AcString)",
+            rva);
+        return _multiByteToUnicodeAcStringHook.InstallAtAddress(
+            address,
+            rva,
+            MultiByteToUnicodeAcStringHookHandler,
+            MultiByteToUnicodeAcStringPrefix.Length,
+            64,
+            MultiByteToUnicodeAcStringPrefix);
+    }
+
+    private static bool IsSupportedPlatform()
+    {
+        if (!PlatformManager.Platform.AcDbDllName.Equals("acdb25.dll", StringComparison.OrdinalIgnoreCase)
+            || !PlatformManager.Platform.VersionName.Equals("2025", StringComparison.OrdinalIgnoreCase))
+        {
+            DiagnosticLogger.Log(Tag,
+                $"{PlatformManager.Platform.DisplayName} 未验证 TextEditor DBCS 解码导出符号，跳过安装。");
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool ReadDoubleByteAnsiHookHandler(IntPtr input, IntPtr outputChar, int codePageId)
+    {
+        var trampoline = _readDoubleByteHook?.TrampolineDelegate;
+        if (trampoline == null)
+            return false;
+
+        if (_inHook)
+            return trampoline(input, outputChar, codePageId);
+
+        _inHook = true;
+        try
+        {
+            uint returnRva = GetReturnRva(_readDoubleByteHook?.CapturedReturnAddress ?? IntPtr.Zero);
+            int patchedCodePageId = ResolveCodePageForCall(
+                "read_doublebyte",
+                returnRva,
+                codePageId,
+                ref _readDoubleByteHitCount,
+                out bool hasDbcsScope);
+            bool result = trampoline(input, outputChar, patchedCodePageId);
+            TryLogReadDoubleByteProbe(returnRva, input, outputChar, codePageId, patchedCodePageId, hasDbcsScope, result);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.LogError(Tag + ": read_doublebyte HookHandler 异常", ex);
+            return trampoline(input, outputChar, codePageId);
+        }
+        finally
+        {
+            _inHook = false;
+        }
+    }
+
+    private static bool MultiByteToUnicodeAcStringHookHandler(IntPtr input, int length, int codePageId, IntPtr output)
+    {
+        var trampoline = _multiByteToUnicodeAcStringHook?.TrampolineDelegate;
+        if (trampoline == null)
+            return false;
+
+        if (_inHook)
+            return trampoline(input, length, codePageId, output);
+
+        _inHook = true;
+        try
+        {
+            uint returnRva = GetReturnRva(_multiByteToUnicodeAcStringHook?.CapturedReturnAddress ?? IntPtr.Zero);
+            int patchedCodePageId = ResolveCodePageForCall(
+                "MultiByteToUnicode(char*,AcString)",
+                returnRva,
+                codePageId,
+                ref _multiByteToUnicodeAcStringHitCount,
+                out bool hasDbcsScope);
+            bool result = trampoline(input, length, patchedCodePageId, output);
+            TryLogMultiByteToUnicodeProbe(returnRva, input, length, codePageId, patchedCodePageId, hasDbcsScope, result);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.LogError(Tag + ": MultiByteToUnicode HookHandler 异常", ex);
+            return trampoline(input, length, codePageId, output);
+        }
+        finally
+        {
+            _inHook = false;
+        }
+    }
+
+    private static int ResolveCodePageForCall(
+        string apiName,
+        uint returnRva,
+        int codePageId,
+        ref int apiHitCount,
+        out bool hasDbcsScope)
+    {
+        Interlocked.Increment(ref _hitCount);
+        Interlocked.Increment(ref apiHitCount);
+        _lastApiName = apiName;
+        _lastReturnRva = returnRva;
+        _lastOriginalCodePageId = codePageId;
+        hasDbcsScope = false;
+
+        if (!DwgFilerCodePageScopeHook.TryGetCurrentDbcsCodePageId(out int filerCodePageId))
+        {
+            Interlocked.Increment(ref _noScopeCount);
+            if (Interlocked.Increment(ref _noScopeLogCount) <= NoScopeLogLimit)
+            {
+                DiagnosticLogger.Log(Tag,
+                    $"{apiName}: return=0x{returnRva:X}, no readString DBCS scope, " +
+                    $"codePage={DwgFilerCodePageScopeHook.FormatCodePageId(codePageId)}");
+            }
+
+            return codePageId;
+        }
+
+        hasDbcsScope = true;
+        _lastFilerCodePageId = filerCodePageId;
+        if (codePageId == filerCodePageId)
+        {
+            Interlocked.Increment(ref _sameCodePageCount);
+            return codePageId;
+        }
+
+        _lastPatchedCodePageId = filerCodePageId;
+        int patchedCount = Interlocked.Increment(ref _patchedCount);
+        if (patchedCount <= PatchLogLimit)
+        {
+            DiagnosticLogger.Log(Tag,
+                $"已修正 {apiName}: return=0x{returnRva:X}, " +
+                $"{DwgFilerCodePageScopeHook.FormatCodePageId(codePageId)} -> " +
+                $"{DwgFilerCodePageScopeHook.FormatCodePageId(filerCodePageId)}");
+        }
+
+        return filerCodePageId;
+    }
+
+    private static void TryLogReadDoubleByteProbe(
+        uint returnRva,
+        IntPtr input,
+        IntPtr outputChar,
+        int originalCodePageId,
+        int patchedCodePageId,
+        bool hasDbcsScope,
+        bool result)
+    {
+        if (hasDbcsScope)
+            return;
+
+        try
+        {
+            byte b0 = ReadByteSafe(input, 0);
+            byte b1 = ReadByteSafe(input, 1);
+            char output = '\0';
+            if (result && outputChar != IntPtr.Zero && IsCommittedMemory(outputChar))
+            {
+                output = (char)Marshal.ReadInt16(outputChar);
+                RememberDecodeEvidence(originalCodePageId, b0, b1, output);
+            }
+
+            if (!result && b0 < 0x80 && b1 < 0x80)
+            {
+                Interlocked.Increment(ref _asciiProbeSkipCount);
+                return;
+            }
+
+            if (Interlocked.Increment(ref _decodeProbeLogCount) > DecodeProbeLogLimit)
+                return;
+
+            byte[] bytes = b1 == 0 ? [b0] : [b0, b1];
+            DiagnosticLogger.Log(Tag,
+                $"no-scope read_doublebyte probe: return=0x{returnRva:X}, " +
+                $"bytes={FormatBytes(bytes)}, original={DwgFilerCodePageScopeHook.FormatCodePageId(originalCodePageId)}, " +
+                $"patched={DwgFilerCodePageScopeHook.FormatCodePageId(patchedCodePageId)}, " +
+                $"nativeResult={result}, nativeChar={FormatChar(output)}, " +
+                $"cp950={FormatDecoded(bytes, 950)}, cp936={FormatDecoded(bytes, 936)}");
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.LogError(Tag + ": read_doublebyte probe 失败", ex);
+        }
+    }
+
+    private static void TryLogMultiByteToUnicodeProbe(
+        uint returnRva,
+        IntPtr input,
+        int length,
+        int originalCodePageId,
+        int patchedCodePageId,
+        bool hasDbcsScope,
+        bool result)
+    {
+        if (hasDbcsScope)
+            return;
+
+        try
+        {
+            int sampleLength = length < 0 ? 0 : Math.Min(length, 24);
+            byte[] bytes = ReadBytesSafe(input, sampleLength);
+            if (!ContainsHighBit(bytes))
+            {
+                Interlocked.Increment(ref _asciiProbeSkipCount);
+                return;
+            }
+
+            if (Interlocked.Increment(ref _decodeProbeLogCount) > DecodeProbeLogLimit)
+                return;
+
+            DiagnosticLogger.Log(Tag,
+                $"no-scope MultiByteToUnicode probe: return=0x{returnRva:X}, len={length}, " +
+                $"bytes={FormatBytes(bytes)}, original={DwgFilerCodePageScopeHook.FormatCodePageId(originalCodePageId)}, " +
+                $"patched={DwgFilerCodePageScopeHook.FormatCodePageId(patchedCodePageId)}, nativeResult={result}, " +
+                $"cp950={FormatDecoded(bytes, 950)}, cp936={FormatDecoded(bytes, 936)}");
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.LogError(Tag + ": MultiByteToUnicode probe 失败", ex);
+        }
+    }
+
+    private static byte ReadByteSafe(IntPtr address, int offset)
+    {
+        if (address == IntPtr.Zero || !IsCommittedMemory(address + offset))
+            return 0;
+
+        return Marshal.ReadByte(address, offset);
+    }
+
+    private static byte[] ReadBytesSafe(IntPtr address, int length)
+    {
+        if (address == IntPtr.Zero || length <= 0)
+            return [];
+
+        var bytes = new byte[length];
+        int count = 0;
+        for (; count < length; count++)
+        {
+            IntPtr current = address + count;
+            if (!IsCommittedMemory(current))
+                break;
+
+            byte value = Marshal.ReadByte(current);
+            if (value == 0)
+                break;
+
+            bytes[count] = value;
+        }
+
+        if (count == bytes.Length)
+            return bytes;
+
+        Array.Resize(ref bytes, count);
+        return bytes;
+    }
+
+    private static string FormatBytes(byte[] bytes)
+    {
+        return bytes.Length == 0
+            ? "<empty>"
+            : string.Join(" ", bytes.Select(b => b.ToString("X2")));
+    }
+
+    private static bool ContainsHighBit(byte[] bytes)
+    {
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            if (bytes[i] >= 0x80)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static void RememberDecodeEvidence(int codePageId, byte b0, byte b1, char output)
+    {
+        if (output == '\0' || b0 < 0x80)
+            return;
+
+        int key = BuildDecodeEvidenceKey(codePageId, b0, b1);
+        lock (DecodeEvidenceLock)
+        {
+            if (!DecodeEvidence.ContainsKey(key))
+                DecodeEvidence.Add(key, output);
+        }
+    }
+
+    private static int GetDecodeEvidenceCount()
+    {
+        lock (DecodeEvidenceLock)
+        {
+            return DecodeEvidence.Count;
+        }
+    }
+
+    private static bool TryGetDecodeEvidence(int key, out char value)
+    {
+        lock (DecodeEvidenceLock)
+        {
+            return DecodeEvidence.TryGetValue(key, out value);
+        }
+    }
+
+    private static bool TryDecodeBytesWithNative(int originalCodePageId, byte b0, byte b1, out char mapped)
+    {
+        mapped = '\0';
+        var trampoline = _readDoubleByteHook?.TrampolineDelegate;
+        if (trampoline == null || originalCodePageId == 0)
+            return false;
+
+        IntPtr input = IntPtr.Zero;
+        IntPtr output = IntPtr.Zero;
+        bool previousInHook = _inHook;
+        try
+        {
+            input = Marshal.AllocHGlobal(3);
+            output = Marshal.AllocHGlobal(sizeof(char));
+            Marshal.WriteByte(input, 0, b0);
+            Marshal.WriteByte(input, 1, b1);
+            Marshal.WriteByte(input, 2, 0);
+            Marshal.WriteInt16(output, 0);
+
+            _inHook = true;
+            if (!trampoline(input, output, originalCodePageId))
+                return false;
+
+            mapped = (char)Marshal.ReadInt16(output);
+            RememberDecodeEvidence(originalCodePageId, b0, b1, mapped);
+            return mapped != '\0';
+        }
+        catch
+        {
+            mapped = '\0';
+            return false;
+        }
+        finally
+        {
+            _inHook = previousInHook;
+            if (input != IntPtr.Zero)
+                Marshal.FreeHGlobal(input);
+            if (output != IntPtr.Zero)
+                Marshal.FreeHGlobal(output);
+        }
+    }
+
+    private static string FormatDecodeEvidenceSamples()
+    {
+        lock (DecodeEvidenceLock)
+        {
+            if (DecodeEvidence.Count == 0)
+                return "<none>";
+
+            return string.Join(", ",
+                DecodeEvidence
+                    .OrderBy(item => item.Key)
+                    .Take(DecodeEvidenceSampleLimit)
+                    .Select(item =>
+                    {
+                        int codePageId = (item.Key >> 16) & 0xFFFF;
+                        int b0 = (item.Key >> 8) & 0xFF;
+                        int b1 = item.Key & 0xFF;
+                        return $"{DwgFilerCodePageScopeHook.FormatCodePageId(codePageId)}:{b0:X2} {b1:X2}->{FormatChar(item.Value)}";
+                    }));
+        }
+    }
+
+    private static int BuildDecodeEvidenceKey(int codePageId, byte b0, byte b1)
+    {
+        return ((codePageId & 0xFFFF) << 16) | (b0 << 8) | b1;
+    }
+
+    private static string FormatDecoded(byte[] bytes, int windowsCodePage)
+    {
+        if (bytes.Length == 0)
+            return "<empty>";
+
+        try
+        {
+            EnsureCodePageProviderRegistered();
+            string value = Encoding.GetEncoding(
+                windowsCodePage,
+                EncoderFallback.ReplacementFallback,
+                DecoderFallback.ReplacementFallback).GetString(bytes);
+            return EscapeForLog(value);
+        }
+        catch (Exception ex)
+        {
+            return "<decode-failed:" + ex.GetType().Name + ">";
+        }
+    }
+
+    private static string FormatChar(char value)
+    {
+        return value == '\0'
+            ? "<none>"
+            : $"U+{(int)value:X4} '{EscapeForLog(value.ToString())}'";
+    }
+
+    private static void EnsureCodePageProviderRegistered()
+    {
+        if (Interlocked.Exchange(ref _codePageProviderRegistered, 1) == 0)
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    }
+
+    private static string EscapeForLog(string text)
+    {
+        return text
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\r", "\\r", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal)
+            .Replace("'", "\\'", StringComparison.Ordinal);
+    }
+
+    private static bool TryGetExportAddress(
+        IntPtr module,
+        string exportName,
+        string displayName,
+        out IntPtr address,
+        out uint rva)
+    {
+        address = NativeInlineHookInterop.GetProcAddress(module, exportName);
+        rva = 0;
+        if (address == IntPtr.Zero)
+        {
+            DiagnosticLogger.Log(Tag, $"{displayName} 导出符号未找到，跳过。");
+            return false;
+        }
+
+        long delta = address.ToInt64() - module.ToInt64();
+        if (delta <= 0 || delta > uint.MaxValue || !IsCommittedMemory(address))
+        {
+            DiagnosticLogger.Log(Tag, $"{displayName} 导出地址无效，跳过。Address=0x{address.ToInt64():X}");
+            address = IntPtr.Zero;
+            return false;
+        }
+
+        rva = (uint)delta;
+        DiagnosticLogger.Log(Tag, $"{displayName} 导出解析成功。RVA=0x{rva:X}");
+        return true;
+    }
+
+    private static uint GetReturnRva(IntPtr returnAddress)
+    {
+        if (returnAddress == IntPtr.Zero || _moduleBase == IntPtr.Zero)
+            return 0;
+
+        long rva = returnAddress.ToInt64() - _moduleBase.ToInt64();
+        if (rva <= 0 || rva > uint.MaxValue)
+            return 0;
+
+        return (uint)rva;
+    }
+
+    private static bool IsCommittedMemory(IntPtr address)
+    {
+        try
+        {
+            return VirtualQuery(address, out MemoryBasicInformation info, (uint)Marshal.SizeOf<MemoryBasicInformation>()) != IntPtr.Zero
+                && info.State == MemCommit;
+        }
+        catch { return false; }
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandle(string lpModuleName);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr VirtualQuery(IntPtr lpAddress, out MemoryBasicInformation lpBuffer, uint dwLength);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MemoryBasicInformation
+    {
+        public IntPtr BaseAddress;
+        public IntPtr AllocationBase;
+        public uint AllocationProtect;
+        public IntPtr RegionSize;
+        public uint State;
+        public uint Protect;
+        public uint Type;
+    }
+}
+#endif

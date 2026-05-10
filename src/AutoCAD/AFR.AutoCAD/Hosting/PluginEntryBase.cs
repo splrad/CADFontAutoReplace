@@ -142,6 +142,8 @@ public abstract class PluginEntryBase : IExtensionApplication
 #if DEBUG
             // DEBUG 专用: DBCS Code Page Family 修复 Hook，在 DWG 反序列化时修正 code_page_id 字段。
             // 必须在图纸打开前安装，才能拦截 MText/DBText 的 DBCS 字节解码。
+            DwgFilerCodePageScopeHook.Install();
+            TextEditorDbcsDecodeHook.Install();
             CodePageFamilyHook.Install();
 #endif
 
@@ -152,9 +154,6 @@ public abstract class PluginEntryBase : IExtensionApplication
             var docMgr = AcadApp.DocumentManager;
             docMgr.DocumentCreated += OnDocumentCreated;
             docMgr.DocumentToBeDestroyed += OnDocumentToBeDestroyed;
-#if DEBUG
-            docMgr.DocumentCreateStarted += OnDocumentCreateStarted;
-#endif
 
             // 第三阶段: 延迟启动执行 — 对当前已打开的文档安排字体替换
             ScheduleExecution(null, "Startup");
@@ -171,6 +170,8 @@ public abstract class PluginEntryBase : IExtensionApplication
     {
 #if DEBUG
         CodePageFamilyHook.Uninstall();
+        TextEditorDbcsDecodeHook.Uninstall();
+        DwgFilerCodePageScopeHook.Uninstall();
 #endif
         DiagnosticLogger.Disable();
         PlatformManager.FontHook.Uninstall();
@@ -212,6 +213,8 @@ public abstract class PluginEntryBase : IExtensionApplication
         PlatformManager.FontHook.Uninstall();
 #if DEBUG
         CodePageFamilyHook.Uninstall();
+        TextEditorDbcsDecodeHook.Uninstall();
+        DwgFilerCodePageScopeHook.Uninstall();
 #endif
         DocumentContextManager.Instance.Clear();
         DiagnosticLogger.Disable();
@@ -233,9 +236,6 @@ public abstract class PluginEntryBase : IExtensionApplication
             var docMgr = AcadApp.DocumentManager;
             docMgr.DocumentCreated -= OnDocumentCreated;
             docMgr.DocumentToBeDestroyed -= OnDocumentToBeDestroyed;
-#if DEBUG
-            docMgr.DocumentCreateStarted -= OnDocumentCreateStarted;
-#endif
         }
         catch { }
 
@@ -400,35 +400,6 @@ public abstract class PluginEntryBase : IExtensionApplication
             ScheduleExecution(e.Document, "DocumentCreated");
     }
 
-#if DEBUG
-    /// <summary>
-    /// 文档开始打开事件：在 DWG 文件加载开始前，从文件头读取 code page 并预设状态缓存。
-    /// <para>
-    /// 此事件在 AutoCAD 开始读取 DWG 文件之前触发，此时文档对象尚未完全创建。
-    /// 通过直接读取 DWG 二进制头部判断图纸 code page，为随后的 native hook
-    /// 提供正确的 Big5/GBK 判断依据，确保 hook 在 MText/DBText 反序列化期间修正 code_page_id 字段。
-    /// </para>
-    /// </summary>
-    private static void OnDocumentCreateStarted(object sender, DocumentCollectionEventArgs e)
-    {
-        // 先重置：防止上一个 Big5 图纸的缓存状态污染本次文档的反序列化路径。
-        CodePageFamilyHook.SetCurrentDrawingIsBig5(false);
-        try
-        {
-            // DocumentCreateStarted 在文档对象创建、DWG 文件内容尚未读入时触发。
-            // 此时 e.Document.Name 为将要打开的文件路径，不得为新建图纸（没有路径）。
-            // TryIsDwgFileBig5 内部已过滤 UNC 路径，可在主线程安全调用。
-            string filePath = e.Document?.Name ?? string.Empty;
-            bool isBig5 = CodePageFamilyHook.TryIsDwgFileBig5(filePath);
-            CodePageFamilyHook.SetCurrentDrawingIsBig5(isBig5);
-        }
-        catch (System.Exception ex)
-        {
-            DiagnosticLogger.LogError("OnDocumentCreateStarted: 读取 DWG 文件头失败", ex);
-        }
-    }
-#endif
-
     /// <summary>文档即将销毁事件：清理该文档的执行记录和检测结果缓存。</summary>
     private static void OnDocumentToBeDestroyed(object sender, DocumentCollectionEventArgs e)
     {
@@ -438,9 +409,5 @@ public abstract class PluginEntryBase : IExtensionApplication
                 DocumentContextManager.Instance.Remove(e.Document);
         }
         catch { }
-#if DEBUG
-        // 文档销毁后重置缓存，防止旧值影响下一个文档的 hook 修复判断。
-        try { CodePageFamilyHook.SetCurrentDrawingIsBig5(false); } catch { }
-#endif
     }
 }

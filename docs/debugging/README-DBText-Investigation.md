@@ -1,62 +1,36 @@
-# DBText Big5 乱码问题调查工具
+# DBText DBCS Code Page 调查工具
 
-## 问题描述
+## 当前实现
 
-当前 `CodePageFamilyHook` 已成功修复 MText 的 Big5 乱码问题，但 DBText 仍然乱码。需要找到 DBText 专用的 code-page family 写入路径并扩展 Hook 覆盖范围。
+DBText/MText 的 DBCS 修复不再依赖 DWG 文件头猜测或文字外观判断。DEBUG 构建会安装三层原生 Hook：
 
-## 调查工具
+- `DwgFilerCodePageScopeHook`: 通过 `acdb25.dll` 导出符号解析并 hook `AcDbMemoryDwgFiler::readString(AcString&)` 和 `readString(wchar_t**)`，读取当前 DWG filer 的真实 `code_page_id`。
+- `TextEditorDbcsDecodeHook`: 通过导出符号 hook `TextEditor::read_doublebyte(char const*, wchar_t&, code_page_id)`，在当前线程处于 readString scope 时把错误的系统 code page 参数修正为 filer code page。
+- `CodePageFamilyHook`: 在运行时 `.text` 段中用唯一长签名定位文本解码上下文初始化函数，在初始化后把 `[context+0x46C]` 修正为当前 readString scope 中的 DBCS code page。
 
-### 1. AFRDBTEXTPROBE 命令
-在 AutoCAD 中运行此命令来创建测试 DBText 并监控候选 RVA。
+仅 AutoCAD 2025 的 `acdb25.dll` 导出符号和 code-page context 签名已验证。其他版本必须重新确认导出签名、入口字节和 `.pdata` 范围。
+
+## 命令
 
 ```
-命令: AFRDBTEXTPROBE
-功能: 创建包含 Big5 文字的 DBText，监控多个候选 RVA 的命中情况
-输出: 哪些 RVA 被访问，以及 code_page_id 字段的值
+AFRDBTEXTPROBE   输出 readString scope、TextEditor DBCS decode 与 code-page context hook 统计
+AFRTRACERSTART   启用追踪报告标记
+AFRTRACERREPORT  输出同一份真实 hook 统计
+AFRTRACERSTOP    停用追踪报告标记
 ```
 
-### 2. 追踪器命令组
-```
-AFRTRACERSTART  - 启动运行时追踪器
-AFRTRACERREPORT - 查看追踪报告（显示各 RVA 命中次数）
-AFRTRACERSTOP   - 停止追踪器
-```
+`AFRDBTEXTPROBE` 不再创建测试 DBText。新建对象不会经过 DWG readString 反序列化链路，不能证明目标图纸加载时的 code page。
 
-### 3. 调试器断点（进阶）
-如果你有 Visual Studio 或 WinDbg，可以在以下地址设置断点：
-```
-acdb25.dll+0x6CEED4  (核心目标)
-acdb25.dll+0x6AC1A4  (cache loader)
-acdb25.dll+0x6D2388  (orchestrator)
-```
+## 验证流程
 
-## 快速开始
+1. 重新生成 `AFR-ACAD2025` Debug 插件。
+2. 完全关闭并冷启动 AutoCAD 2025，确保 Hook 在打开问题 DWG 前已安装。
+3. 手动打开目标 DWG。
+4. 运行 `AFRDBTEXTPROBE` 或 `AFRTRACERREPORT`。
+5. 检查报告是否包含：
+   - `LastCodePageId: 0x27(Big5/CP950)`
+   - `LastOriginalCodePageId: 0x28(GBK/CP936)`
+   - `LastPatchedCodePageId: 0x27(Big5/CP950)`
+   - `TextEditor DBCS Decode Hook` 或 `Code Page Family Hook` 的 `PatchedCount` 大于 0
 
-1. 加载 AFR 插件（DEBUG 版本）
-2. 在 AutoCAD 中运行：`AFRDBTEXTPROBE`
-3. 查看输出，记录命中的 RVA
-4. 将命中的 RVA 添加到 `CodePageFamilyHook.CandidateRvas`
-
-## 候选 RVA 列表
-
-完整列表见 `DbTextHookTracer.cs` 源码，包括：
-- 高优先级：0x6CEED4, 0x6AC1A4, 0x6D2388
-- 中优先级：0x6D2410, 0x6D2498, 0x6CB79C
-- 扩展扫描：0x6CEEC0, 0x6CEEB0, 0x6CEEA0 等
-
-## 源码位置
-
-- `src/AutoCAD/AFR.AutoCAD/FontMapping/DbTextHookTracer.cs` - 追踪器实现
-- `src/AutoCAD/AFR.AutoCAD/DebugCommands/DbTextCodePageProbeCommand.cs` - 探针命令
-- `src/AutoCAD/AFR.AutoCAD/DebugCommands/DbTextTracerCommand.cs` - 追踪器命令
-- `src/AutoCAD/AFR.AutoCAD/FontMapping/CodePageFamilyHook.cs` - Hook 实现
-
-## 预期结果
-
-成功后，DBText 中的 Big5 文字应该：
-- 特性面板显示正确的繁体字（不是乱码）
-- 图纸显示正常（没有 `?` 字符）
-
-## 参考
-
-详细的逆向分析结果见 `.github/copilot-instructions.md` 中的记忆部分。
+若 `LastCodePageId` 不是 `0x27`，说明 DWG filer 没有提供 Big5 证据；在无误杀约束下不能自动按 Big5 修复。

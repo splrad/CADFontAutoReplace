@@ -106,6 +106,16 @@ internal sealed class ExecutionController
                     doc.Editor.Regen();
                 }
 
+#if DEBUG
+                // DBText 单行文字可能已在更早 native 链路中被解码成错误 Unicode。
+                // 只在当前运行时 native DBCS 解码证据全覆盖时写回，不依据乱码外观或文本语义判断。
+                DiagnosticLogger.BeginPhase("DBText native证据修复");
+                int repairedDbTextCount = DbTextEncodingRepairService.Repair(doc.Database);
+                DiagnosticLogger.EndPhase($"DBText修复: {repairedDbTextCount}个");
+                if (repairedDbTextCount > 0)
+                    doc.Editor.Regen();
+#endif
+
                 // 第三阶段: 扫描 MText 内联字体，交叉比对 Hook 重定向记录
                 // 始终执行：即使文字样式表无缺失，MText 内联字体仍可能引用缺失字体
                 // 正向扫描法: 解析 MText.Contents 中的 \F/\f 格式代码，
