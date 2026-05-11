@@ -25,6 +25,7 @@ internal static class DbTextRepairService
         int scanned = 0;
         int candidates = 0;
         int aiScored = 0;
+        int problems = 0;
         int repaired = 0;
         int blocked = 0;
         int errors = 0;
@@ -72,6 +73,7 @@ internal static class DbTextRepairService
 
                     if (decision.IsBlocked)
                     {
+                        problems++;
                         blocked++;
                         continue;
                     }
@@ -79,6 +81,7 @@ internal static class DbTextRepairService
                     if (!decision.ShouldRepair)
                         continue;
 
+                    problems++;
                     dbText.UpgradeOpen();
                     dbText.TextString = decision.SelectedText;
                     repaired++;
@@ -97,20 +100,23 @@ internal static class DbTextRepairService
         tr.Commit();
         DiagnosticLogger.Log(
             "DBText模型修复",
-            $"扫描={scanned}, 候选={candidates}, AI评分={aiScored}, AI状态={advisor.NeuralRankerStatus}, " +
+            $"扫描={scanned}, 问题={problems}, 候选={candidates}, AI评分={aiScored}, AI状态={advisor.NeuralRankerStatus}, " +
             $"标签={index.LabelCount}, 冲突={index.ConflictCount}, 阻塞={blocked}, 实际修复={repaired}, " +
             $"错误={errors}, 模型={modelReport.ToSummary()}");
-        _lastRunSummary = new DbTextRepairRunSummary(scanned, repaired);
+        _lastRunSummary = new DbTextRepairRunSummary(scanned, problems, repaired);
         return repaired;
     }
 
     public static void WriteCommandLineSummary(DbTextRepairRunSummary summary)
     {
+        if (summary.Problems <= 0)
+            return;
+
         var editor = AcadApp.DocumentManager.MdiActiveDocument?.Editor;
         if (editor == null)
             return;
 
-        string summaryLine = $"扫描={summary.Scanned}, 修复={summary.Repaired}, 未修复={summary.Unrepaired}";
+        string summaryLine = $"扫描={summary.Scanned}, 问题={summary.Problems}, 修复={summary.Repaired}, 未修复={summary.Unrepaired}";
         const string hintLine = "仍有未修复文字，请执行 AFRDBTEXTLABEL 选择剩余文字进行人工确认；确认后会自动记录并同步训练模型。";
 
         DiagnosticLogger.Log("DBText模型修复", summaryLine);
@@ -215,7 +221,7 @@ internal static class DbTextRepairService
         string TypeFace);
 }
 
-internal readonly record struct DbTextRepairRunSummary(int Scanned, int Repaired)
+internal readonly record struct DbTextRepairRunSummary(int Scanned, int Problems, int Repaired)
 {
-    public int Unrepaired => Math.Max(0, Scanned - Repaired);
+    public int Unrepaired => Math.Max(0, Problems - Repaired);
 }
