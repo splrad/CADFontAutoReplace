@@ -37,6 +37,8 @@ internal static class CommandNames
     public const string DumpProfile = "AFRDUMPPROFILE";
     /// <summary>列出候选 .aws 配置文件路径。</summary>
     public const string ShowAwsPath = "AFRSHOWAWSPATH";
+    /// <summary>批量生成 DBText Big5 修复训练标签。</summary>
+    public const string DbTextBatchTrain = "AFRDBTEXTBATCHTRAIN";
     /// <summary>生成 PowerShell 反射探针脚本。</summary>
     public const string GenProbeScripts = "AFRGENPROBESCRIPTS";
     /// <summary>反射转储 CAD 对话框相关 API。</summary>

@@ -76,6 +76,13 @@ internal static class DbTextRepairModelMergeEngine
 
     public static DbTextRepairModelMergeReport AppendRecord(string canonicalPath, DbTextRepairModelRecord record)
     {
+        return AppendRecords(canonicalPath, new[] { record });
+    }
+
+    public static DbTextRepairModelMergeReport AppendRecords(
+        string canonicalPath,
+        IReadOnlyList<DbTextRepairModelRecord> records)
+    {
         var report = new DbTextRepairModelMergeReport
         {
             CanonicalPath = canonicalPath,
@@ -87,6 +94,9 @@ internal static class DbTextRepairModelMergeEngine
             report.Error = "模型文件路径为空。";
             return report;
         }
+
+        if (records.Count == 0)
+            return report;
 
         using var mutex = new Mutex(false, MutexName);
         bool lockTaken = false;
@@ -101,12 +111,16 @@ internal static class DbTextRepairModelMergeEngine
 
             string directory = Path.GetDirectoryName(canonicalPath) ?? Environment.CurrentDirectory;
             Directory.CreateDirectory(directory);
-            DbTextRepairModelJsonl.Normalize(record);
-            File.AppendAllText(
-                canonicalPath,
-                DbTextRepairModelJsonl.Serialize(record) + Environment.NewLine,
-                new UTF8Encoding(false));
-            report.WrittenRecords = 1;
+
+            var builder = new StringBuilder(records.Count * 256);
+            foreach (DbTextRepairModelRecord record in records)
+            {
+                DbTextRepairModelJsonl.Normalize(record);
+                builder.AppendLine(DbTextRepairModelJsonl.Serialize(record));
+            }
+
+            File.AppendAllText(canonicalPath, builder.ToString(), new UTF8Encoding(false));
+            report.WrittenRecords = records.Count;
             return report;
         }
         catch (Exception ex)

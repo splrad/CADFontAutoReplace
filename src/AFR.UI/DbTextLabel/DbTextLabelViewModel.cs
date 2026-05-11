@@ -61,7 +61,7 @@ internal sealed class DbTextLabelViewModel : INotifyPropertyChanged
         get
         {
             string text = SelectedCandidate?.Text ?? string.Empty;
-            return string.IsNullOrEmpty(text) ? "<无候选>" : text;
+            return string.IsNullOrEmpty(text) ? "暂无建议，可直接编辑正确文字。" : text;
         }
     }
 

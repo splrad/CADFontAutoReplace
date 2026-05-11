@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Text;
@@ -58,13 +59,25 @@ internal static class DbTextRepairModelStore
         AppendRecord(record);
     }
 
+    public static void AppendLabels(IReadOnlyList<DbTextRepairModelRecord> records)
+    {
+        AppendRecords(records);
+    }
+
     public static void AppendRecord(DbTextRepairModelRecord record)
     {
+        AppendRecords(new[] { record });
+    }
+
+    public static void AppendRecords(IReadOnlyList<DbTextRepairModelRecord> records)
+    {
         EnsureReady();
+        if (records.Count == 0)
+            return;
 
         lock (Sync)
         {
-            AppendRecordCore(record);
+            AppendRecordsCore(records);
             _ready = false;
         }
 
@@ -108,7 +121,7 @@ internal static class DbTextRepairModelStore
             return $"跳过（{result.Error}）";
         }
 
-        AppendRecordCore(result.Record);
+        AppendRecordsCore(new[] { result.Record });
         _lastMergeReport = DbTextRepairModelMergeEngine.MergeDirectory(
             _activeDirectory,
             embedded,
@@ -123,9 +136,9 @@ internal static class DbTextRepairModelStore
         return status;
     }
 
-    private static void AppendRecordCore(DbTextRepairModelRecord record)
+    private static void AppendRecordsCore(IReadOnlyList<DbTextRepairModelRecord> records)
     {
-        DbTextRepairModelMergeReport report = DbTextRepairModelMergeEngine.AppendRecord(_canonicalPath, record);
+        DbTextRepairModelMergeReport report = DbTextRepairModelMergeEngine.AppendRecords(_canonicalPath, records);
         if (!report.Success)
             throw new IOException("写入 DBText 修复模型失败: " + report.Error);
     }
