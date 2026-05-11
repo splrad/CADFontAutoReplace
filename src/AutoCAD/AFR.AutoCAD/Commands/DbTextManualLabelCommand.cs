@@ -12,6 +12,8 @@ using AFR.Services.DbTextRepair;
 using AFR.UI;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
+[assembly: CommandClass(typeof(AFR.Commands.DbTextManualLabelCommand))]
+
 namespace AFR.Commands;
 
 public sealed class DbTextManualLabelCommand

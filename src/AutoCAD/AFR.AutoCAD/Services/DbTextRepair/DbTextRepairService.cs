@@ -9,6 +9,10 @@ namespace AFR.Services.DbTextRepair;
 
 internal static class DbTextRepairService
 {
+    private static DbTextRepairRunSummary _lastRunSummary;
+
+    public static DbTextRepairRunSummary LastRunSummary => _lastRunSummary;
+
     public static int Repair(Database db)
     {
         if (db == null)
@@ -96,24 +100,27 @@ internal static class DbTextRepairService
             $"扫描={scanned}, 候选={candidates}, AI评分={aiScored}, AI状态={advisor.NeuralRankerStatus}, " +
             $"标签={index.LabelCount}, 冲突={index.ConflictCount}, 阻塞={blocked}, 实际修复={repaired}, " +
             $"错误={errors}, 模型={modelReport.ToSummary()}");
-        WriteCommandLineSummary(scanned, repaired);
+        _lastRunSummary = new DbTextRepairRunSummary(scanned, repaired);
         return repaired;
     }
 
-    private static void WriteCommandLineSummary(int scanned, int repaired)
+    public static void WriteCommandLineSummary(DbTextRepairRunSummary summary)
     {
         var editor = AcadApp.DocumentManager.MdiActiveDocument?.Editor;
         if (editor == null)
             return;
 
-        int unrepaired = Math.Max(0, scanned - repaired);
-        editor.WriteMessage($"\n[DBText模型修复] 扫描={scanned}, 修复={repaired}, 未修复={unrepaired}\n");
-        if (repaired < scanned)
-        {
-            editor.WriteMessage(
-                "[DBText模型修复] 仍有未修复文字，请执行 AFRDBTEXTLABEL 选择剩余文字进行人工确认；" +
-                "确认后会自动记录并同步训练模型。\n");
-        }
+        string summaryLine = $"扫描={summary.Scanned}, 修复={summary.Repaired}, 未修复={summary.Unrepaired}";
+        const string hintLine = "仍有未修复文字，请执行 AFRDBTEXTLABEL 选择剩余文字进行人工确认；确认后会自动记录并同步训练模型。";
+
+        DiagnosticLogger.Log("DBText模型修复", summaryLine);
+        if (summary.Repaired < summary.Scanned)
+            DiagnosticLogger.Log("DBText模型修复", hintLine);
+        DiagnosticLogger.Flush();
+
+        editor.WriteMessage($"\n[DBText模型修复] {summaryLine}\n");
+        if (summary.Repaired < summary.Scanned)
+            editor.WriteMessage($"[DBText模型修复] {hintLine}\n");
     }
 
     private static DbTextRepairModelRecord BuildContext(
@@ -206,4 +213,9 @@ internal static class DbTextRepairService
         string FileName,
         string BigFontFileName,
         string TypeFace);
+}
+
+internal readonly record struct DbTextRepairRunSummary(int Scanned, int Repaired)
+{
+    public int Unrepaired => Math.Max(0, Scanned - Repaired);
 }
