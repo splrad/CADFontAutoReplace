@@ -85,7 +85,9 @@ internal static class DbTextRepairModelStore
                 _activeDirectory,
                 embedded,
                 "embedded-" + PluginVersionService.GetBuildId());
-            _lastNeuralTrainingStatus = EnsureFreshNeuralParametersCore(embedded);
+            _lastNeuralTrainingStatus = _lastMergeReport.Success
+                ? EnsureFreshNeuralParametersCore(embedded)
+                : "跳过（模型合并失败）";
             _ready = true;
         }
     }
@@ -123,12 +125,9 @@ internal static class DbTextRepairModelStore
 
     private static void AppendRecordCore(DbTextRepairModelRecord record)
     {
-        DbTextRepairModelJsonl.Normalize(record);
-        Directory.CreateDirectory(_activeDirectory);
-        File.AppendAllText(
-            _canonicalPath,
-            DbTextRepairModelJsonl.Serialize(record) + Environment.NewLine,
-            new UTF8Encoding(false));
+        DbTextRepairModelMergeReport report = DbTextRepairModelMergeEngine.AppendRecord(_canonicalPath, record);
+        if (!report.Success)
+            throw new IOException("写入 DBText 修复模型失败: " + report.Error);
     }
 
     private static string BuildNeuralSourceSetId()

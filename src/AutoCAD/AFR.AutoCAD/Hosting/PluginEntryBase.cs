@@ -4,7 +4,6 @@ using System.Reflection;
 using AFR.Abstractions;
 using AFR.Commands;
 using AFR.Constants;
-using AFR.FontMapping;
 using AFR.Platform;
 using AFR.Services;
 using AFR.Services.DbTextRepair;
@@ -154,16 +153,6 @@ public abstract class PluginEntryBase : IExtensionApplication
             if (PlatformManager.Platform.SupportsLdFileHook)
                 PlatformManager.FontHook.Install();
 
-#if DEBUG
-            // DEBUG 专用: DBCS Code Page Family 修复 Hook，在 DWG 反序列化时修正 code_page_id 字段。
-            // 必须在图纸打开前安装，才能拦截 MText/DBText 的 DBCS 字节解码。
-            DwgFilerCodePageScopeHook.Install();
-            DbTextDwgInFieldsScopeHook.Install();
-            DbTextUpstreamDecodeProbeHook.Install();
-            TextEditorDbcsDecodeHook.Install();
-            CodePageFamilyHook.Install();
-#endif
-
             // 第零阶段 B: 预热系统字体索引 — 提前扫描可用字体，加速后续检测
             FontDetector.PrewarmSystemFonts();
 
@@ -185,13 +174,6 @@ public abstract class PluginEntryBase : IExtensionApplication
     /// <summary>AutoCAD 卸载插件时调用（通常在 CAD 退出时）。</summary>
     public void Terminate()
     {
-#if DEBUG
-        CodePageFamilyHook.Uninstall();
-        TextEditorDbcsDecodeHook.Uninstall();
-        DbTextUpstreamDecodeProbeHook.Uninstall();
-        DbTextDwgInFieldsScopeHook.Uninstall();
-        DwgFilerCodePageScopeHook.Uninstall();
-#endif
         DiagnosticLogger.Disable();
         PlatformManager.FontHook.Uninstall();
         UnregisterEvents();
@@ -232,13 +214,6 @@ public abstract class PluginEntryBase : IExtensionApplication
         try { Diagnostics.AwsHideableDialogPatcher.Cleanup(); } catch { }
 
         PlatformManager.FontHook.Uninstall();
-#if DEBUG
-        CodePageFamilyHook.Uninstall();
-        TextEditorDbcsDecodeHook.Uninstall();
-        DbTextUpstreamDecodeProbeHook.Uninstall();
-        DbTextDwgInFieldsScopeHook.Uninstall();
-        DwgFilerCodePageScopeHook.Uninstall();
-#endif
         DocumentContextManager.Instance.Clear();
         DiagnosticLogger.Disable();
 

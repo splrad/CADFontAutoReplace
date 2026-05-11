@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Autodesk.AutoCAD.DatabaseServices;
 using AFR.DbTextRepairModel;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
@@ -62,7 +63,7 @@ internal static class DbTextRepairService
                     DbTextRepairDecision decision = advisor.Evaluate(
                         context,
                         generatedCandidates);
-                    if (generatedCandidates.Count > 0 && generatedCandidates[0].HasNeuralScore)
+                    if (generatedCandidates.Any(c => c.HasNeuralScore))
                         aiScored++;
 
                     if (decision.IsBlocked)

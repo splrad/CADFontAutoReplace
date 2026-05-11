@@ -74,6 +74,56 @@ internal static class DbTextRepairModelMergeEngine
         return new DbTextRepairModelIndex(records);
     }
 
+    public static DbTextRepairModelMergeReport AppendRecord(string canonicalPath, DbTextRepairModelRecord record)
+    {
+        var report = new DbTextRepairModelMergeReport
+        {
+            CanonicalPath = canonicalPath,
+            DirectoryPath = Path.GetDirectoryName(canonicalPath) ?? string.Empty
+        };
+
+        if (string.IsNullOrWhiteSpace(canonicalPath))
+        {
+            report.Error = "模型文件路径为空。";
+            return report;
+        }
+
+        using var mutex = new Mutex(false, MutexName);
+        bool lockTaken = false;
+        try
+        {
+            lockTaken = mutex.WaitOne(TimeSpan.FromSeconds(10));
+            if (!lockTaken)
+            {
+                report.Error = "等待模型文件锁超时。";
+                return report;
+            }
+
+            string directory = Path.GetDirectoryName(canonicalPath) ?? Environment.CurrentDirectory;
+            Directory.CreateDirectory(directory);
+            DbTextRepairModelJsonl.Normalize(record);
+            File.AppendAllText(
+                canonicalPath,
+                DbTextRepairModelJsonl.Serialize(record) + Environment.NewLine,
+                new UTF8Encoding(false));
+            report.WrittenRecords = 1;
+            return report;
+        }
+        catch (Exception ex)
+        {
+            report.Error = $"{ex.GetType().Name}: {ex.Message}";
+            return report;
+        }
+        finally
+        {
+            if (lockTaken)
+            {
+                try { mutex.ReleaseMutex(); }
+                catch { }
+            }
+        }
+    }
+
     private static void MergeDirectoryCore(
         string directoryPath,
         string embeddedJsonl,
@@ -263,7 +313,27 @@ internal static class DbTextRepairModelMergeEngine
             }
             catch
             {
-                File.Delete(canonicalPath);
+                if (File.Exists(backupPath))
+                    File.Delete(backupPath);
+
+                try
+                {
+                    File.Move(canonicalPath, backupPath);
+                    File.Move(tempPath, canonicalPath);
+                    if (File.Exists(backupPath))
+                        File.Delete(backupPath);
+                    return;
+                }
+                catch
+                {
+                    if (!File.Exists(canonicalPath) && File.Exists(backupPath))
+                    {
+                        try { File.Move(backupPath, canonicalPath); }
+                        catch { }
+                    }
+
+                    throw;
+                }
             }
         }
 
@@ -274,9 +344,7 @@ internal static class DbTextRepairModelMergeEngine
     {
         try
         {
-            string corruptPath = path + ".corrupt." + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".jsonl";
-            if (File.Exists(corruptPath))
-                File.Delete(corruptPath);
+            string corruptPath = path + ".corrupt." + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + "." + Guid.NewGuid().ToString("N")[..8] + ".jsonl";
             File.Move(path, corruptPath);
         }
         catch

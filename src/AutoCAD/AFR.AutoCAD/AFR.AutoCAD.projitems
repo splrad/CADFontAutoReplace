@@ -11,24 +11,12 @@
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrCommands.cs" Link="Commands\AfrCommands.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Commands\DbTextManualLabelCommand.cs" Link="Commands\DbTextManualLabelCommand.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Commands\DbTextModelCommand.cs" Link="Commands\DbTextModelCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrUnloadCommand.cs" Link="Commands\AfrUnloadCommand.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DbTextCodePageProbeCommand.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DbTextTracerCommand.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\TextEntityInspectCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\AutoCadFontHook.cs" Link="FontMapping\AutoCadFontHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\CodePageFamilyHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextDwgInFieldsScopeHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextHookTracer.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextUpstreamDecodeProbeHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DwgFilerCodePageScopeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\LdFileHook.cs" Link="FontMapping\LdFileHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextFontParser.cs" Link="FontMapping\MTextFontParser.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontReplacer.cs" Link="FontMapping\MTextInlineFontReplacer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontScanner.cs" Link="FontMapping\MTextInlineFontScanner.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeImpTextIndependentSourceProbe.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeInlineHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\TextEditorDbcsDecodeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AppInitializer.cs" Link="Hosting\AppInitializer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AutoCadHost.cs" Link="Hosting\AutoCadHost.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\DocumentContextManager.cs" Link="Hosting\DocumentContextManager.cs" />
@@ -45,22 +33,16 @@
     <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairModelStore.cs" Link="Services\DbTextRepair\DbTextRepairModelStore.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairPolicy.cs" Link="Services\DbTextRepair\DbTextRepairPolicy.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairService.cs" Link="Services\DbTextRepair\DbTextRepairService.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextEncodingRepairService.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextAiTrainingSampleService.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextManualLabelService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\LogService.cs" Link="Services\LogService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\EmbeddedFontDeployer.cs" Link="Hosting\EmbeddedFontDeployer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AssemblyRegistryDefaults.cs" Link="Hosting\AssemblyRegistryDefaults.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\ExternalRegistryDefaultsApplier.cs" Link="Hosting\ExternalRegistryDefaultsApplier.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Diagnostics\AwsHideableDialogPatcher.cs" Link="Diagnostics\AwsHideableDialogPatcher.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DumpDialogApiCommand.cs" Link="DebugCommands\DumpDialogApiCommand.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\GenProbeScriptsCommand.cs" Link="DebugCommands\GenProbeScriptsCommand.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextEditorCommand.cs" Link="DebugCommands\MTextEditorCommand.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextInsertCommand.cs" Link="DebugCommands\MTextInsertCommand.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\ProfileDumpCommand.cs" Link="DebugCommands\ProfileDumpCommand.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\ShowAwsPathCommand.cs" Link="DebugCommands\ShowAwsPathCommand.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="$(MSBuildThisFileDirectory)Diagnostics\AwsHideableDialogPatcher.cs.new" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DumpDialogApiCommand.cs" Link="DebugCommands\DumpDialogApiCommand.cs" Condition="'$(Configuration)'=='Debug'" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\GenProbeScriptsCommand.cs" Link="DebugCommands\GenProbeScriptsCommand.cs" Condition="'$(Configuration)'=='Debug'" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextEditorCommand.cs" Link="DebugCommands\MTextEditorCommand.cs" Condition="'$(Configuration)'=='Debug'" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextInsertCommand.cs" Link="DebugCommands\MTextInsertCommand.cs" Condition="'$(Configuration)'=='Debug'" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\ProfileDumpCommand.cs" Link="DebugCommands\ProfileDumpCommand.cs" Condition="'$(Configuration)'=='Debug'" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\ShowAwsPathCommand.cs" Link="DebugCommands\ShowAwsPathCommand.cs" Condition="'$(Configuration)'=='Debug'" />
   </ItemGroup>
 </Project>

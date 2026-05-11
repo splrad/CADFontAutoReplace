@@ -23,9 +23,6 @@ namespace AFR.FontMapping;
 /// </summary>
 internal static class LdFileHook
 {
-    // Big5 Hook 调查期间临时关闭已稳定的 ldfile 高频诊断日志，避免淹没 Big5 探针输出。
-    private const bool EnableVerboseHookDiagnostics = false;
-
     // 从平台常量获取目标 DLL 名、导出函数名和序言长度
     private static string AcDbDll => PlatformManager.Platform.AcDbDllName;
     private static string LdFileExport => PlatformManager.Platform.LdFileExport;
@@ -256,9 +253,6 @@ internal static class LdFileHook
                 string normalizedName = isShxFont ? EnsureShx(baseName) : baseName;
                 _redirectLog.TryAdd(normalizedName, (resolved, param2));
 
-                if (EnableVerboseHookDiagnostics)
-                    DiagnosticLogger.Log("Hook", $"重定向: '{fontName}' param2={param2} → '{resolved}'");
-
                 // 获取或创建原生字符串指针并缓存，不能释放
                 IntPtr resolvedPtr = _nativeStringCache.GetOrAdd(resolved,
                     static name => Marshal.StringToHGlobalUni(name));
@@ -266,8 +260,6 @@ internal static class LdFileHook
                 return _trampolineDelegate(resolvedPtr, param2, db, desc);
             }
 
-            if (EnableVerboseHookDiagnostics)
-                DiagnosticLogger.Log("Hook", $"未解析: '{fontName}' param2={param2} isShx={isShxRequest}");
             return _trampolineDelegate(fileName, param2, db, desc);
         }
         catch

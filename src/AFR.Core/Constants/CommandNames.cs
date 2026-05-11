@@ -29,18 +29,10 @@ internal static class CommandNames
     public const string Unload = "AFRUNLOAD";
 
     // ── DEBUG 诊断命令（仅在 DEBUG 构建中由实现层注册）─────────────────
-    /// <summary>查看 DBText 修复模型状态与评估。</summary>
-    public const string DbTextModel = "AFRDBTEXTMODEL";
     /// <summary>查看 MText / MLeader 格式与样式诊断。</summary>
     public const string ViewMText = "AFRVIEW";
     /// <summary>插入测试用 MText。</summary>
     public const string InsertMText = "AFRINSERT";
-    /// <summary>Big5/GBK 编码诊断。</summary>
-    public const string Big5Diagnose = "AFRBIG5DIAG";
-    /// <summary>Big5 自动修复后的残留诊断。</summary>
-    public const string Big5Residual = "AFRBIG5LEFT";
-    /// <summary>Big5 候选转换诊断。</summary>
-    public const string Big5Candidates = "AFRBIG5CAND";
     /// <summary>转储当前 CAD 配置文件与注册表状态。</summary>
     public const string DumpProfile = "AFRDUMPPROFILE";
     /// <summary>列出候选 .aws 配置文件路径。</summary>
