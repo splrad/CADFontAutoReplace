@@ -108,13 +108,14 @@ public sealed class DbTextManualLabelCommand
             }
 
             DbTextRepairModelStore.AppendLabel(record);
+            string trainStatus = DbTextRepairModelStore.LastNeuralTrainingStatus;
             if (changed)
                 ed.Regen();
 
             ed.WriteMessage(
                 action == DbTextRepairModelConstants.ActionRepair
-                    ? $"\n已记录并写回: {selection.CurrentText} -> {selectedText}\n模型: {DbTextRepairModelStore.CanonicalPath}\n"
-                    : $"\n已记录: {ActionDisplayName(action)}\n模型: {DbTextRepairModelStore.CanonicalPath}\n");
+                    ? $"\n已记录并写回: {selection.CurrentText} -> {selectedText}\n模型: {DbTextRepairModelStore.CanonicalPath}\n模型训练: {trainStatus}\n"
+                    : $"\n已记录: {ActionDisplayName(action)}\n模型: {DbTextRepairModelStore.CanonicalPath}\n模型训练: {trainStatus}\n");
         }
         catch (System.Exception ex)
         {

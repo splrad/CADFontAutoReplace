@@ -14,6 +14,7 @@ internal static class DbTextRepairModelStore
     private static string _activeDirectory = string.Empty;
     private static string _canonicalPath = string.Empty;
     private static DbTextRepairModelMergeReport _lastMergeReport = new();
+    private static string _lastNeuralTrainingStatus = string.Empty;
 
     public static string ActiveDirectory
     {
@@ -28,6 +29,11 @@ internal static class DbTextRepairModelStore
     public static DbTextRepairModelMergeReport LastMergeReport
     {
         get { EnsureReady(); return _lastMergeReport; }
+    }
+
+    public static string LastNeuralTrainingStatus
+    {
+        get { EnsureReady(); return _lastNeuralTrainingStatus; }
     }
 
     public static DbTextRepairModelIndex LoadIndex(out DbTextRepairModelMergeReport report)
@@ -55,15 +61,10 @@ internal static class DbTextRepairModelStore
     public static void AppendRecord(DbTextRepairModelRecord record)
     {
         EnsureReady();
-        DbTextRepairModelJsonl.Normalize(record);
-        Directory.CreateDirectory(_activeDirectory);
 
         lock (Sync)
         {
-            File.AppendAllText(
-                _canonicalPath,
-                DbTextRepairModelJsonl.Serialize(record) + Environment.NewLine,
-                new UTF8Encoding(false));
+            AppendRecordCore(record);
             _ready = false;
         }
 
@@ -84,8 +85,58 @@ internal static class DbTextRepairModelStore
                 _activeDirectory,
                 embedded,
                 "embedded-" + PluginVersionService.GetBuildId());
+            _lastNeuralTrainingStatus = EnsureFreshNeuralParametersCore(embedded);
             _ready = true;
         }
+    }
+
+    private static string EnsureFreshNeuralParametersCore(string embedded)
+    {
+        DbTextRepairModelIndex index = DbTextRepairModelMergeEngine.LoadIndex(_canonicalPath, out _);
+        if (index.RawLabelRecordCount == 0)
+            return "跳过（无人工标签）";
+
+        if (index.HasActiveNeuralParameters)
+            return "已是最新";
+
+        DbTextNeuralTrainingResult result = DbTextNeuralTrainer.Train(index.Labels, BuildNeuralSourceSetId());
+        if (!result.Success || result.Record == null)
+        {
+            DiagnosticLogger.Log("DBText模型", $"自动训练跳过: {result.Error}");
+            return $"跳过（{result.Error}）";
+        }
+
+        AppendRecordCore(result.Record);
+        _lastMergeReport = DbTextRepairModelMergeEngine.MergeDirectory(
+            _activeDirectory,
+            embedded,
+            "embedded-" + PluginVersionService.GetBuildId());
+
+        DbTextRepairModelIndex updatedIndex = DbTextRepairModelMergeEngine.LoadIndex(_canonicalPath, out _);
+        string status = updatedIndex.HasActiveNeuralParameters ? "完成" : "已写入但未激活";
+        DiagnosticLogger.Log(
+            "DBText模型",
+            $"自动训练{status}: TrainingDataHash={result.Record.TrainingDataHash}, " +
+            $"TrainingRecordCount={result.Record.TrainingRecordCount}, Summary={result.Summary}");
+        return status;
+    }
+
+    private static void AppendRecordCore(DbTextRepairModelRecord record)
+    {
+        DbTextRepairModelJsonl.Normalize(record);
+        Directory.CreateDirectory(_activeDirectory);
+        File.AppendAllText(
+            _canonicalPath,
+            DbTextRepairModelJsonl.Serialize(record) + Environment.NewLine,
+            new UTF8Encoding(false));
+    }
+
+    private static string BuildNeuralSourceSetId()
+    {
+        string machine = Environment.MachineName ?? "MACHINE";
+        string user = Environment.UserName ?? "USER";
+        string basis = machine + "\u001F" + user;
+        return "nn-auto-" + DbTextRepairModelJsonl.ComputeTextHash(basis).Substring(0, 10);
     }
 
     private static string ResolveActiveDirectory()

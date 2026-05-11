@@ -11,7 +11,7 @@
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrCommands.cs" Link="Commands\AfrCommands.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Commands\DbTextManualLabelCommand.cs" Link="Commands\DbTextManualLabelCommand.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Commands\DbTextModelCommand.cs" Link="Commands\DbTextModelCommand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Commands\DbTextModelCommand.cs" Link="Commands\DbTextModelCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrUnloadCommand.cs" Link="Commands\AfrUnloadCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DbTextCodePageProbeCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DbTextTracerCommand.cs" />

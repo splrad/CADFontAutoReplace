@@ -23,14 +23,14 @@ internal static class CommandNames
     public const string Log = "AFRLOG";
     /// <summary>人工确认 DBText 单行文字修复标签。</summary>
     public const string DbTextLabel = "AFRDBTEXTLABEL";
-    /// <summary>查看并合并 DBText 修复模型数据集。</summary>
-    public const string DbTextModel = "AFRDBTEXTMODEL";
 
     // ── 隐藏维护命令（不通过 CommandMethod 注册，不进入 CAD 补全/建议列表）────
     /// <summary>卸载插件并清理注册表。仅完整输入时由 UnknownCommand 路由触发。</summary>
     public const string Unload = "AFRUNLOAD";
 
     // ── DEBUG 诊断命令（仅在 DEBUG 构建中由实现层注册）─────────────────
+    /// <summary>查看 DBText 修复模型状态与评估。</summary>
+    public const string DbTextModel = "AFRDBTEXTMODEL";
     /// <summary>查看 MText / MLeader 格式与样式诊断。</summary>
     public const string ViewMText = "AFRVIEW";
     /// <summary>插入测试用 MText。</summary>
