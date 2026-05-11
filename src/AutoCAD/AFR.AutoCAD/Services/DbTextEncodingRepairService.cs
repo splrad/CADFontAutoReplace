@@ -21,6 +21,10 @@ internal static class DbTextEncodingRepairService
     private const int SkipLogLimit = 40;
     private const int InvalidDecodedLogLimit = 40;
     private const int MaxLoggedTextChars = 80;
+    private const int ProfileRepeatThreshold = 3;
+    private const string ExplicitAllowedEngineeringSymbols =
+        "　、。，．·；：？！“”‘’（）《》〈〉【】〔〕「」『』—－…～￥" +
+        "¨〃ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ℃㎡㎜㎝㎞㎏μΩΦφ×÷±°‰′″≤≥≈≠∠∅Ø";
     private static readonly bool EnableNativeImpTextIndependentSourceProbe = false;
     private static readonly bool EnableSimplifiedChineseEngineeringPolicyRepair = true;
     private static readonly Lazy<HashSet<char>> Gb2312CommonCharSet = new(BuildGb2312CommonCharSet);
@@ -68,8 +72,10 @@ internal static class DbTextEncodingRepairService
         int simplifiedPolicyRepairedCount = 0;
         int repaired = 0;
 
+        DbTextAiTrainingSampleService.BeginSession(db);
         using var tr = db.TransactionManager.StartTransaction();
         var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+        ObservedFallbackRepairProfile observedProfile = BuildObservedFallbackRepairProfile(tr, blockTable);
 
         foreach (ObjectId blockId in blockTable)
         {
@@ -129,6 +135,7 @@ internal static class DbTextEncodingRepairService
 
                     bool allowPrivateUse = false;
                     bool repairBySimplifiedPolicy = false;
+                    DbTextPolicyContext policyContext = GetPolicyContext(tr, dbText);
                     string decoded;
                     string reason;
                     if (TryBuildTextFromNativeDbcsSequence(
@@ -165,6 +172,8 @@ internal static class DbTextEncodingRepairService
                                 && TryAcceptSimplifiedChineseEngineeringPolicyCandidate(
                                     original,
                                     observedCandidate,
+                                    policyContext,
+                                    observedProfile,
                                     out string policyReason))
                             {
                                 decoded = observedCandidate;
@@ -174,13 +183,37 @@ internal static class DbTextEncodingRepairService
                                 allowPrivateUse = false;
                                 repairBySimplifiedPolicy = true;
                                 simplifiedPolicyAcceptedCount++;
+                                DbTextAiTrainingSampleService.RecordCandidate(
+                                    db,
+                                    tr,
+                                    dbText,
+                                    provenance,
+                                    observedCandidate,
+                                    observedCandidateReason,
+                                    nativeReason,
+                                    "repair",
+                                    policyReason);
                             }
                             else
                             {
                                 string policyRejectReason = EnableSimplifiedChineseEngineeringPolicyRepair
-                                    ? GetSimplifiedChineseEngineeringPolicyRejectReason(original, observedCandidate)
+                                    ? GetSimplifiedChineseEngineeringPolicyRejectReason(
+                                        original,
+                                        observedCandidate,
+                                        policyContext,
+                                        observedProfile)
                                     : "policy-disabled";
                                 simplifiedPolicyRejectedCount++;
+                                DbTextAiTrainingSampleService.RecordCandidate(
+                                    db,
+                                    tr,
+                                    dbText,
+                                    provenance,
+                                    observedCandidate,
+                                    observedCandidateReason,
+                                    nativeReason,
+                                    "abstain",
+                                    policyRejectReason);
                                 observedDiagnosticOnlyCount++;
                                 if (observedDiagnosticLogCount++ < SkipLogLimit)
                                 {
@@ -240,23 +273,50 @@ internal static class DbTextEncodingRepairService
                                 && TryAcceptSimplifiedChineseEngineeringPolicyCandidate(
                                     original,
                                     observedCandidate,
+                                    policyContext,
+                                    observedProfile,
                                     out string policyReason))
                             {
+                                string exactReason = reason;
                                 decoded = observedCandidate;
                                 reason =
-                                    $"simplified-cn-engineering-policy, Exact={reason}, " +
+                                    $"simplified-cn-engineering-policy, Exact={exactReason}, " +
                                     $"ObservedCoverage={observedCandidateReason}, {policyReason}";
                                 allowPrivateUse = false;
                                 repairBySimplifiedPolicy = true;
                                 promotedBySimplifiedPolicy = true;
                                 simplifiedPolicyAcceptedCount++;
+                                DbTextAiTrainingSampleService.RecordCandidate(
+                                    db,
+                                    tr,
+                                    dbText,
+                                    provenance,
+                                    observedCandidate,
+                                    observedCandidateReason,
+                                    exactReason,
+                                    "repair",
+                                    policyReason);
                             }
                             else
                             {
                                 string policyRejectReason = EnableSimplifiedChineseEngineeringPolicyRepair
-                                    ? GetSimplifiedChineseEngineeringPolicyRejectReason(original, observedCandidate)
+                                    ? GetSimplifiedChineseEngineeringPolicyRejectReason(
+                                        original,
+                                        observedCandidate,
+                                        policyContext,
+                                        observedProfile)
                                     : "policy-disabled";
                                 simplifiedPolicyRejectedCount++;
+                                DbTextAiTrainingSampleService.RecordCandidate(
+                                    db,
+                                    tr,
+                                    dbText,
+                                    provenance,
+                                    observedCandidate,
+                                    observedCandidateReason,
+                                    reason,
+                                    "abstain",
+                                    policyRejectReason);
                                 observedBlockedByNativeExactCount++;
                                 if (observedBlockedLogCount++ < SkipLogLimit)
                                 {
@@ -334,6 +394,7 @@ internal static class DbTextEncodingRepairService
             $"independentCarrier诊断={independentCarrierSourceDiagnosticCount}, " +
             $"证据不一致={provenanceMismatch}, 跳过={skipped}, 无效解码={invalidDecoded}, " +
             $"错误={errors}, 实际修复={repaired}");
+        DbTextAiTrainingSampleService.EndSession();
         return repaired;
     }
 
@@ -398,6 +459,104 @@ internal static class DbTextEncodingRepairService
         decoded = builder.ToString();
         reason = $"native-exact dbcs={nonAsciiCount}";
         return true;
+    }
+
+    private static ObservedFallbackRepairProfile BuildObservedFallbackRepairProfile(
+        Transaction tr,
+        BlockTable blockTable)
+    {
+        var profile = new ObservedFallbackRepairProfile();
+
+        foreach (ObjectId blockId in blockTable)
+        {
+            BlockTableRecord block;
+            try
+            {
+                block = (BlockTableRecord)tr.GetObject(blockId, OpenMode.ForRead);
+                if (block.IsFromExternalReference || block.IsDependent)
+                    continue;
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (ObjectId entityId in block)
+            {
+                try
+                {
+                    if (tr.GetObject(entityId, OpenMode.ForRead, false, true) is not DBText dbText)
+                        continue;
+
+                    string current = dbText.TextString ?? string.Empty;
+                    if (string.IsNullOrEmpty(current))
+                        continue;
+
+                    if (!TryGetNativeImpTextPointer(dbText, out IntPtr impText)
+                        || !DbTextDwgInFieldsScopeHook.TryGetProvenance(impText, out NativeDbTextProvenance provenance))
+                    {
+                        continue;
+                    }
+
+                    if (!string.Equals(provenance.NativeText, current, StringComparison.Ordinal))
+                        continue;
+
+                    if (!TryGetObservedFallbackDiagnosticCandidate(
+                            current,
+                            provenance.CodePageId,
+                            out string candidate,
+                            out _))
+                    {
+                        continue;
+                    }
+
+                    profile.Add(current, candidate, GetPolicyContext(tr, dbText));
+                }
+                catch
+                {
+                    // Profile building is advisory; individual failures must not affect repair.
+                }
+            }
+        }
+
+        return profile;
+    }
+
+    private static DbTextPolicyContext GetPolicyContext(Transaction tr, DBText dbText)
+    {
+        string textStyleName = string.Empty;
+        try
+        {
+            if (tr.GetObject(dbText.TextStyleId, OpenMode.ForRead, false, true) is TextStyleTableRecord style)
+                textStyleName = style.Name;
+        }
+        catch
+        {
+            textStyleName = string.Empty;
+        }
+
+        string ownerBlockName = string.Empty;
+        try
+        {
+            if (tr.GetObject(dbText.OwnerId, OpenMode.ForRead, false, true) is BlockTableRecord owner)
+                ownerBlockName = owner.Name;
+        }
+        catch
+        {
+            ownerBlockName = string.Empty;
+        }
+
+        string layer = string.Empty;
+        try
+        {
+            layer = dbText.Layer ?? string.Empty;
+        }
+        catch
+        {
+            layer = string.Empty;
+        }
+
+        return new DbTextPolicyContext(layer, ownerBlockName, textStyleName);
     }
 
     private static NativeImpTextIndependentSourceReport InspectNativeIndependentSource(
@@ -891,13 +1050,41 @@ internal static class DbTextEncodingRepairService
         string candidate,
         out string reason)
     {
-        reason = GetSimplifiedChineseEngineeringPolicyRejectReason(currentText, candidate);
+        return TryAcceptSimplifiedChineseEngineeringPolicyCandidate(
+            currentText,
+            candidate,
+            DbTextPolicyContext.Empty,
+            ObservedFallbackRepairProfile.Empty,
+            out reason);
+    }
+
+    private static bool TryAcceptSimplifiedChineseEngineeringPolicyCandidate(
+        string currentText,
+        string candidate,
+        DbTextPolicyContext context,
+        ObservedFallbackRepairProfile profile,
+        out string reason)
+    {
+        reason = GetSimplifiedChineseEngineeringPolicyRejectReason(currentText, candidate, context, profile);
         return reason.StartsWith("accepted ", StringComparison.Ordinal);
     }
 
     private static string GetSimplifiedChineseEngineeringPolicyRejectReason(
         string currentText,
         string candidate)
+    {
+        return GetSimplifiedChineseEngineeringPolicyRejectReason(
+            currentText,
+            candidate,
+            DbTextPolicyContext.Empty,
+            ObservedFallbackRepairProfile.Empty);
+    }
+
+    private static string GetSimplifiedChineseEngineeringPolicyRejectReason(
+        string currentText,
+        string candidate,
+        DbTextPolicyContext context,
+        ObservedFallbackRepairProfile profile)
     {
         if (string.IsNullOrEmpty(currentText) || string.IsNullOrEmpty(candidate))
             return "empty-current-or-candidate";
@@ -929,6 +1116,20 @@ internal static class DbTextEncodingRepairService
 
         if (currentDisallowed == 0)
         {
+            if (TryAcceptEngineeringSymbolOnlyCandidate(currentText, candidate, out string symbolOnlyReason))
+            {
+                return
+                    $"accepted domain=simplified-cn-engineering-symbol-only, english-ascii-stable, " +
+                    "current-valid-known-garbled-symbol, " + symbolOnlyReason;
+            }
+
+            if (profile.TryAcceptCurrentValidCandidate(currentText, candidate, context, out string profileReason))
+            {
+                return
+                    $"accepted domain=simplified-cn-engineering-profile, english-ascii-stable, " +
+                    profileReason;
+            }
+
             return
                 $"current-already-valid-simplified-english cjk={currentSimplifiedCjk}, " +
                 "english-ascii-preserved";
@@ -945,7 +1146,17 @@ internal static class DbTextEncodingRepairService
             return $"candidate-private-use count={candidatePrivateUse}";
 
         if (candidateSimplifiedCjk == 0)
+        {
+            if (TryAcceptEngineeringSymbolOnlyCandidate(currentText, candidate, out string symbolOnlyReason))
+            {
+                return
+                    $"accepted domain=simplified-cn-engineering-symbol-only, english-ascii-stable, " +
+                    $"currentDisallowed={currentDisallowed}, currentFirst={currentFirstDisallowed}, " +
+                    symbolOnlyReason;
+            }
+
             return "candidate-has-no-simplified-cjk";
+        }
 
         return
             $"accepted domain=simplified-cn-engineering, english-ascii-stable, " +
@@ -1107,16 +1318,274 @@ internal static class DbTextEncodingRepairService
 
     private static bool IsAllowedEngineeringSymbolOrPunctuation(char ch)
     {
-        const string allowed =
-            "　、。，．·；：？！“”‘’（）《》〈〉【】〔〕「」『』—－…～￥" +
-            "℃㎡㎜㎝㎞㎏μΩΦφ×÷±°‰′″≤≥≈≠∠∅Ø";
-        if (allowed.IndexOf(ch) >= 0)
+        if (IsExplicitAllowedEngineeringSymbol(ch))
             return true;
 
         UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(ch);
         return category == UnicodeCategory.DecimalDigitNumber
             || category == UnicodeCategory.MathSymbol
             || category == UnicodeCategory.CurrencySymbol;
+    }
+
+    private static bool TryAcceptEngineeringSymbolOnlyCandidate(
+        string currentText,
+        string candidate,
+        out string reason)
+    {
+        reason = "not-symbol-only";
+
+        if (ContainsCjkUnifiedIdeograph(currentText) || ContainsCjkUnifiedIdeograph(candidate))
+            return false;
+
+        if (!ContainsNonAsciiSymbolOrPunctuation(candidate))
+            return false;
+
+        if (!ContainsBopomofoOrKnownGarbledPunctuation(currentText))
+            return false;
+
+        reason = "candidateSymbolOnly=true";
+        return true;
+    }
+
+    private static bool ContainsCjkUnifiedIdeograph(string text)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (IsCjkUnifiedIdeograph(text[i]))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsNonAsciiSymbolOrPunctuation(string text)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            char ch = text[i];
+            if (ch > 0x7F && IsExplicitAllowedEngineeringSymbol(ch))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsBopomofoOrKnownGarbledPunctuation(string text)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            char ch = text[i];
+            if (IsBopomofo(ch)
+                || ch == '\u02D9'
+                || ch == '\u22A5'
+                || ch == '\uFE5D'
+                || ch == '\uFE5C'
+                || ch == '\u2252'
+                || ch == '\u2251'
+                || ch == '\u2261')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsExplicitAllowedEngineeringSymbol(char ch)
+    {
+        return ExplicitAllowedEngineeringSymbols.IndexOf(ch) >= 0;
+    }
+
+    private static bool CanUseCurrentValidProfileCandidate(string currentText, string candidate)
+    {
+        if (string.IsNullOrEmpty(currentText) || string.IsNullOrEmpty(candidate))
+            return false;
+
+        if (string.Equals(currentText, candidate, StringComparison.Ordinal))
+            return false;
+
+        if (!string.Equals(ExtractAsciiSkeleton(currentText), ExtractAsciiSkeleton(candidate), StringComparison.Ordinal))
+            return false;
+
+        AnalyzeSimplifiedChineseEngineeringText(
+            currentText,
+            out int currentDisallowed,
+            out _,
+            out _,
+            out _);
+        if (currentDisallowed != 0)
+            return false;
+
+        AnalyzeSimplifiedChineseEngineeringText(
+            candidate,
+            out int candidateDisallowed,
+            out int candidateSimplifiedCjk,
+            out int candidatePrivateUse,
+            out _);
+        if (candidateDisallowed != 0 || candidatePrivateUse != 0 || candidateSimplifiedCjk == 0)
+            return false;
+
+        return ContainsOnlyProfileSafeCandidateChars(candidate);
+    }
+
+    private static bool ContainsOnlyProfileSafeCandidateChars(string text)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            char ch = text[i];
+            if (ch <= 0x7F || char.IsWhiteSpace(ch))
+                continue;
+
+            if (IsCjkUnifiedIdeograph(ch) && Gb2312CommonCharSet.Value.Contains(ch))
+                continue;
+
+            if (IsFullwidthAscii(ch) || IsExplicitAllowedEngineeringSymbol(ch))
+                continue;
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string NormalizeForShortTermProfile(string text)
+    {
+        var builder = new StringBuilder(text.Length);
+        for (int i = 0; i < text.Length; i++)
+        {
+            char ch = text[i];
+            if (ch == ' ' || ch == '\t')
+                continue;
+
+            builder.Append(ch);
+        }
+
+        return builder.ToString();
+    }
+
+    private readonly record struct DbTextPolicyContext(
+        string Layer,
+        string OwnerBlockName,
+        string TextStyleName)
+    {
+        public static DbTextPolicyContext Empty { get; } = new(string.Empty, string.Empty, string.Empty);
+    }
+
+    private sealed class ObservedFallbackRepairProfile
+    {
+        public static ObservedFallbackRepairProfile Empty { get; } = new();
+
+        private readonly Dictionary<string, int> _mappingCounts = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, HashSet<string>> _candidatesByCurrentLayer = new(StringComparer.Ordinal);
+
+        public void Add(string currentText, string candidate, DbTextPolicyContext context)
+        {
+            if (!CanUseCurrentValidProfileCandidate(currentText, candidate))
+                return;
+
+            string key = MakeMappingKey(currentText, candidate, context.Layer);
+            _mappingCounts.TryGetValue(key, out int count);
+            _mappingCounts[key] = count + 1;
+
+            string currentLayerKey = MakeCurrentLayerKey(currentText, context.Layer);
+            if (!_candidatesByCurrentLayer.TryGetValue(currentLayerKey, out HashSet<string>? candidates))
+            {
+                candidates = new HashSet<string>(StringComparer.Ordinal);
+                _candidatesByCurrentLayer[currentLayerKey] = candidates;
+            }
+
+            candidates.Add(candidate);
+        }
+
+        public bool TryAcceptCurrentValidCandidate(
+            string currentText,
+            string candidate,
+            DbTextPolicyContext context,
+            out string reason)
+        {
+            reason = "profile-not-applicable";
+            if (!CanUseCurrentValidProfileCandidate(currentText, candidate))
+                return false;
+
+            string currentLayerKey = MakeCurrentLayerKey(currentText, context.Layer);
+            if (_candidatesByCurrentLayer.TryGetValue(currentLayerKey, out HashSet<string>? candidates)
+                && candidates.Count != 1)
+            {
+                reason = $"profile-conflicting-candidates count={candidates.Count}";
+                return false;
+            }
+
+            string mappingKey = MakeMappingKey(currentText, candidate, context.Layer);
+            _mappingCounts.TryGetValue(mappingKey, out int count);
+            if (count >= ProfileRepeatThreshold)
+            {
+                reason =
+                    $"profile-repeat count={count}, threshold={ProfileRepeatThreshold}, " +
+                    $"layer='{EscapeForLog(context.Layer)}', style='{EscapeForLog(context.TextStyleName)}'";
+                return true;
+            }
+
+            if (TryAcceptKnownContextTerm(currentText, candidate, context, out string contextReason))
+            {
+                reason = contextReason;
+                return true;
+            }
+
+            reason = $"profile-repeat-too-low count={count}, threshold={ProfileRepeatThreshold}";
+            return false;
+        }
+
+        private static bool TryAcceptKnownContextTerm(
+            string currentText,
+            string candidate,
+            DbTextPolicyContext context,
+            out string reason)
+        {
+            reason = "known-context-not-matched";
+            string normalizedCandidate = NormalizeForShortTermProfile(candidate);
+            string normalizedCurrent = NormalizeForShortTermProfile(currentText);
+
+            if (string.Equals(context.Layer, "图框", StringComparison.Ordinal)
+                && string.Equals(context.TextStyleName, "TKZ", StringComparison.Ordinal)
+                && (normalizedCandidate == "审定"
+                    || normalizedCandidate == "审核"
+                    || normalizedCandidate == "版"))
+            {
+                reason =
+                    $"known-title-block-term term='{EscapeForLog(normalizedCandidate)}', " +
+                    $"current='{EscapeForLog(normalizedCurrent)}'";
+                return true;
+            }
+
+            if ((string.Equals(context.TextStyleName, "KHZ", StringComparison.Ordinal)
+                    || string.Equals(context.Layer, "0", StringComparison.Ordinal))
+                && normalizedCandidate == "材料表")
+            {
+                reason =
+                    $"known-material-table-term current='{EscapeForLog(normalizedCurrent)}'";
+                return true;
+            }
+
+            if (candidate.Contains("GB", StringComparison.Ordinal)
+                && candidate.Contains('版')
+                && currentText.Contains('唳'))
+            {
+                reason = "known-code-edition-term";
+                return true;
+            }
+
+            return false;
+        }
+
+        private static string MakeMappingKey(string currentText, string candidate, string layer)
+        {
+            return layer + "\u001F" + currentText + "\u001F" + candidate;
+        }
+
+        private static string MakeCurrentLayerKey(string currentText, string layer)
+        {
+            return layer + "\u001F" + currentText;
+        }
     }
 
     private static string EscapeForLog(string text)

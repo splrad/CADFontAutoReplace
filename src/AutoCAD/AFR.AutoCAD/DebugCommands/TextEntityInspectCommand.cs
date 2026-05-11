@@ -378,6 +378,7 @@ public sealed class TextEntityInspectCommand
                 AppendObservedDecodePreview(lines, dbText.TextString);
                 AppendNativeDbTextEvidence(lines, dbText, drawingFilePath);
                 lines.Add($"TextStyleId: {Safe(() => DescribeTextStyle(dbText.TextStyleId, tr))}");
+                AppendCjkShxDisplayBoundary(lines, dbText.TextString ?? string.Empty, dbText.TextStyleId, tr);
                 break;
             case MText mText:
                 lines.Add($"MText.Contents: {Escape(mText.Contents)}");
@@ -1977,6 +1978,54 @@ public sealed class TextEntityInspectCommand
 
         var style = (TextStyleTableRecord)tr.GetObject(styleId, OpenMode.ForRead, false, true);
         return $"Name='{style.Name}', FileName='{style.FileName}', BigFont='{style.BigFontFileName}', TypeFace='{style.Font.TypeFace}'";
+    }
+
+    private static void AppendCjkShxDisplayBoundary(
+        List<string> lines,
+        string text,
+        ObjectId styleId,
+        Transaction tr)
+    {
+        if (string.IsNullOrEmpty(text) || !ContainsCjkUnifiedIdeograph(text))
+            return;
+
+        if (styleId.IsNull || styleId.IsErased)
+            return;
+
+        var style = (TextStyleTableRecord)tr.GetObject(styleId, OpenMode.ForRead, false, true);
+        string fileName = style.FileName ?? string.Empty;
+        string bigFont = style.BigFontFileName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(bigFont))
+            return;
+
+        bool shxMain = IsShxStyleFont(fileName);
+        bool shxBig = IsShxStyleFont(bigFont);
+        if (!shxMain && !shxBig)
+            return;
+
+        lines.Add(
+            "DisplayGlyphBoundary: cjk-text-uses-shx-bigfont; " +
+            "if TextString is already correct but glyph shape is wrong, handle as font/style replacement, not DBText encoding repair");
+    }
+
+    private static bool ContainsCjkUnifiedIdeograph(string text)
+    {
+        foreach (char ch in text)
+        {
+            if (ch >= '\u4E00' && ch <= '\u9FFF')
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsShxStyleFont(string fontName)
+    {
+        if (string.IsNullOrWhiteSpace(fontName))
+            return false;
+
+        return fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase)
+            || !System.IO.Path.HasExtension(fontName);
     }
 
     private sealed class MetadataObjectReference
