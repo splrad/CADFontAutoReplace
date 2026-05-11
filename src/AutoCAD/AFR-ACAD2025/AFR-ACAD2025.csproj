@@ -26,9 +26,6 @@
     <PackageReference Include="AutoCAD.NET" Version="25.0.1">
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-
-    <!-- GBK/Big5 编码支持 (.NET 5+ 需要) -->
-    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
   </ItemGroup>
 
 

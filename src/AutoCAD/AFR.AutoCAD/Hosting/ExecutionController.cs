@@ -3,6 +3,7 @@ using Autodesk.AutoCAD.DatabaseServices;
 using AFR.FontMapping;
 using AFR.Models;
 using AFR.Services;
+using AFR.Services.DbTextRepair;
 
 namespace AFR.Hosting;
 
@@ -106,15 +107,12 @@ internal sealed class ExecutionController
                     doc.Editor.Regen();
                 }
 
-#if DEBUG
-                // DBText 单行文字可能已在更早 native 链路中被解码成错误 Unicode。
-                // 仅当 native DWG 读入阶段记录到对象级 provenance 时才写回。
-                DiagnosticLogger.BeginPhase("DBText native证据修复");
-                int repairedDbTextCount = DbTextEncodingRepairService.Repair(doc.Database);
+                // DBText 单行文字修复使用 Release-safe 的模型数据集。
+                DiagnosticLogger.BeginPhase("DBText模型修复");
+                int repairedDbTextCount = DbTextRepairService.Repair(doc.Database);
                 DiagnosticLogger.EndPhase($"DBText实际修复: {repairedDbTextCount}个");
                 if (repairedDbTextCount > 0)
                     doc.Editor.Regen();
-#endif
 
                 // 第三阶段: 扫描 MText 内联字体，交叉比对 Hook 重定向记录
                 // 始终执行：即使文字样式表无缺失，MText 内联字体仍可能引用缺失字体

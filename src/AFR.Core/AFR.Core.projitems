@@ -16,6 +16,9 @@
     <Compile Include="$(MSBuildThisFileDirectory)Abstractions\ILogService.cs" Link="Abstractions\ILogService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Abstractions\RegistryDefaultAttribute.cs" Link="Abstractions\RegistryDefaultAttribute.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Constants\CommandNames.cs" Link="Constants\CommandNames.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextRepairModelJsonl.cs" Link="DbTextRepairModel\DbTextRepairModelJsonl.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextRepairModelMergeEngine.cs" Link="DbTextRepairModel\DbTextRepairModelMergeEngine.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextRepairModelRecords.cs" Link="DbTextRepairModel\DbTextRepairModelRecords.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\FontCheckResult.cs" Link="Models\FontCheckResult.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\InlineFontFixRecord.cs" Link="Models\InlineFontFixRecord.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\StyleFontReplacement.cs" Link="Models\StyleFontReplacement.cs" />

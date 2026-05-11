@@ -70,6 +70,16 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="WPF-UI" Version="4.2.1" />
     <PackageReference Include="System.Management" Version="10.0.7" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\AFR.Core\DbTextRepairModel\DbTextRepairModelJsonl.cs" Link="DbTextRepairModel\DbTextRepairModelJsonl.cs" />
+    <Compile Include="..\AFR.Core\DbTextRepairModel\DbTextRepairModelMergeEngine.cs" Link="DbTextRepairModel\DbTextRepairModelMergeEngine.cs" />
+    <Compile Include="..\AFR.Core\DbTextRepairModel\DbTextRepairModelRecords.cs" Link="DbTextRepairModel\DbTextRepairModelRecords.cs" />
+    <EmbeddedResource Include="..\..\data\DbTextRepairModel.jsonl" Condition="Exists('..\..\data\DbTextRepairModel.jsonl')">
+      <LogicalName>AFR.DbTextRepairModel.jsonl</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <!--

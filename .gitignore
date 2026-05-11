@@ -63,6 +63,11 @@ project.lock.json
 project.fragment.lock.json
 artifacts/
 
+# DBText repair model: canonical dataset is tracked; transient imports/corrupt files are not.
+/data/DbTextRepairModel.import.*.jsonl
+/data/DbTextRepairModel.*.tmp
+/data/DbTextRepairModel*.corrupt.*.jsonl
+
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
 

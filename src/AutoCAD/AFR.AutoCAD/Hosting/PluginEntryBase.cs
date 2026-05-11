@@ -7,6 +7,7 @@ using AFR.Constants;
 using AFR.FontMapping;
 using AFR.Platform;
 using AFR.Services;
+using AFR.Services.DbTextRepair;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
 namespace AFR.Hosting;
@@ -34,8 +35,8 @@ public abstract class PluginEntryBase : IExtensionApplication
     private static bool _hiddenUnloadRegistered;
     private static bool _hiddenUnloadInProgress;
 
-    // 嵌入程序集缓存：HandyControl 等第三方依赖以嵌入资源形式打包在插件 DLL 中
-    private static Assembly? _resolvedHandyControl;
+    // 嵌入程序集缓存：第三方托管依赖以嵌入资源形式打包在插件 DLL 中
+    private static readonly Dictionary<string, Assembly> ResolvedEmbeddedAssemblies = new(StringComparer.OrdinalIgnoreCase);
 
     // ── 子类必须实现：提供版本特定的平台服务 ──
 
@@ -57,7 +58,7 @@ public abstract class PluginEntryBase : IExtensionApplication
     // ── 嵌入程序集解析 ──
 
     /// <summary>
-    /// 从插件主程序集的嵌入资源中加载第三方依赖（如 HandyControl）。
+    /// 从插件主程序集的嵌入资源中加载第三方托管依赖。
     /// <para>
     /// 当 .NET 运行时找不到某个程序集时会触发此回调。
     /// 使用 typeof(PluginEntryBase).Assembly 定位插件 DLL，
@@ -67,10 +68,11 @@ public abstract class PluginEntryBase : IExtensionApplication
     private static Assembly? OnResolveEmbeddedAssembly(object? sender, ResolveEventArgs args)
     {
         var name = new AssemblyName(args.Name).Name;
-        if (name == null || !string.Equals(name, "HandyControl", StringComparison.OrdinalIgnoreCase))
+        if (name == null || !IsEmbeddedDependency(name))
             return null;
 
-        if (_resolvedHandyControl != null) return _resolvedHandyControl;
+        if (ResolvedEmbeddedAssemblies.TryGetValue(name, out Assembly? cached))
+            return cached;
 
         using var stream = typeof(PluginEntryBase).Assembly.GetManifestResourceStream(name + ".dll");
         if (stream == null) return null;
@@ -83,8 +85,16 @@ public abstract class PluginEntryBase : IExtensionApplication
             if (read == 0) break;
             totalRead += read;
         }
-        _resolvedHandyControl = Assembly.Load(data);
-        return _resolvedHandyControl;
+        Assembly assembly = Assembly.Load(data);
+        ResolvedEmbeddedAssemblies[name] = assembly;
+        return assembly;
+    }
+
+    private static bool IsEmbeddedDependency(string name)
+    {
+        return string.Equals(name, "HandyControl", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(name, "Newtonsoft.Json", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(name, "System.Text.Encoding.CodePages", StringComparison.OrdinalIgnoreCase);
     }
 
     // ── IExtensionApplication 实现 ──
@@ -108,6 +118,11 @@ public abstract class PluginEntryBase : IExtensionApplication
 
         // 注册嵌入程序集解析回调，使 HandyControl 等打包在 DLL 资源中的依赖可被加载
         AppDomain.CurrentDomain.AssemblyResolve += OnResolveEmbeddedAssembly;
+
+        // 准备 DBText 修复模型数据集。部署器安装会提前合并 AppData；
+        // 手动 NETLOAD 或 DLL 升级时由插件自身在启动早期补齐。
+        try { DbTextRepairModelStore.EnsureReady(); }
+        catch (System.Exception ex) { DiagnosticLogger.LogError("DBText 修复模型初始化失败", ex); }
 
         // 隐藏卸载入口必须在首次 NETLOAD、自动加载和部署加载场景下都可用。
         // 它不进入 CommandMethod/命令栈，只由 UnknownCommand 的完整名称匹配触发。
@@ -180,6 +195,8 @@ public abstract class PluginEntryBase : IExtensionApplication
         DiagnosticLogger.Disable();
         PlatformManager.FontHook.Uninstall();
         UnregisterEvents();
+        AppDomain.CurrentDomain.AssemblyResolve -= OnResolveEmbeddedAssembly;
+        ResolvedEmbeddedAssemblies.Clear();
     }
 
     /// <summary>
@@ -225,11 +242,11 @@ public abstract class PluginEntryBase : IExtensionApplication
         DocumentContextManager.Instance.Clear();
         DiagnosticLogger.Disable();
 
-        // 注销嵌入程序集解析回调并释放缓存的 HandyControl 程序集。
+        // 注销嵌入程序集解析回调并释放缓存的嵌入程序集。
         // 否则 NETLOAD → AFRUNLOAD → NETLOAD 的反复加载会在 AppDomain.AssemblyResolve
         // 上累加多份回调；同时静态字段持有旧 HandyControl 实例的引用会阻止旧 DLL 卸载。
         AppDomain.CurrentDomain.AssemblyResolve -= OnResolveEmbeddedAssembly;
-        _resolvedHandyControl = null;
+        ResolvedEmbeddedAssemblies.Clear();
     }
 
     // ── 事件处理与延迟调度 ──

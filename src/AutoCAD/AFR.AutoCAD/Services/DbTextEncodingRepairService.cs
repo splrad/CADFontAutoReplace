@@ -67,6 +67,9 @@ internal static class DbTextEncodingRepairService
         int independentWideSourceDiagnosticCount = 0;
         int independentCarrierSourceDiagnosticCount = 0;
         int privateUseSymbolPreservedCount = 0;
+        int manualLabelAcceptedCount = 0;
+        int manualLabelBlockedCount = 0;
+        int manualLabelRepairedCount = 0;
         int simplifiedPolicyAcceptedCount = 0;
         int simplifiedPolicyRejectedCount = 0;
         int simplifiedPolicyRepairedCount = 0;
@@ -76,6 +79,13 @@ internal static class DbTextEncodingRepairService
         using var tr = db.TransactionManager.StartTransaction();
         var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
         ObservedFallbackRepairProfile observedProfile = BuildObservedFallbackRepairProfile(tr, blockTable);
+        DbTextManualLabelIndex manualLabelIndex = DbTextManualLabelService.LoadIndex(db);
+        if (manualLabelIndex.Count > 0)
+        {
+            DiagnosticLogger.Log(
+                "DBText证据修复",
+                $"已加载人工标签: Count={manualLabelIndex.Count}, DrawingSha256={manualLabelIndex.DrawingSha256}");
+        }
 
         foreach (ObjectId blockId in blockTable)
         {
@@ -134,11 +144,43 @@ internal static class DbTextEncodingRepairService
                     }
 
                     bool allowPrivateUse = false;
+                    bool repairByManualLabel = false;
                     bool repairBySimplifiedPolicy = false;
                     DbTextPolicyContext policyContext = GetPolicyContext(tr, dbText);
                     string decoded;
                     string reason;
-                    if (TryBuildTextFromNativeDbcsSequence(
+                    if (manualLabelIndex.TryFindCurrent(
+                            dbText,
+                            original,
+                            out DbTextManualLabelRecord currentManualLabel))
+                    {
+                        if (string.Equals(currentManualLabel.Action, DbTextManualLabelService.ActionRepair, StringComparison.Ordinal)
+                            && !string.IsNullOrEmpty(currentManualLabel.SelectedText)
+                            && !string.Equals(original, currentManualLabel.SelectedText, StringComparison.Ordinal))
+                        {
+                            decoded = currentManualLabel.SelectedText;
+                            reason = $"manual-label-direct, LabelUtc={currentManualLabel.TimestampUtc}";
+                            allowPrivateUse = true;
+                            repairByManualLabel = true;
+                            manualLabelAcceptedCount++;
+                        }
+                        else
+                        {
+                            manualLabelBlockedCount++;
+                            skipped++;
+                            if (observedDiagnosticLogCount++ < SkipLogLimit)
+                            {
+                                DiagnosticLogger.Log(
+                                    "DBText证据修复",
+                                    $"人工标签阻塞 Handle={dbText.Handle}: direct-current, Action={currentManualLabel.Action}, " +
+                                    $"Current='{EscapeForLog(TrimForLog(original))}', " +
+                                    $"Selected='{EscapeForLog(TrimForLog(currentManualLabel.SelectedText))}'");
+                            }
+
+                            continue;
+                        }
+                    }
+                    else if (TryBuildTextFromNativeDbcsSequence(
                             original,
                             provenance.NativeDbcsDecodedText,
                             out decoded,
@@ -168,7 +210,58 @@ internal static class DbTextEncodingRepairService
                                 independentSourceSummary = FormatIndependentSourceSummary(independentReport);
                             }
 
-                            if (EnableSimplifiedChineseEngineeringPolicyRepair
+                            if (manualLabelIndex.TryFind(
+                                    dbText,
+                                    original,
+                                    observedCandidate,
+                                    out DbTextManualLabelRecord manualLabel))
+                            {
+                                if (string.Equals(manualLabel.Action, DbTextManualLabelService.ActionRepair, StringComparison.Ordinal)
+                                    && !string.IsNullOrEmpty(manualLabel.SelectedText))
+                                {
+                                    decoded = manualLabel.SelectedText;
+                                    reason =
+                                        $"manual-label, NativeEvidence={nativeReason}, " +
+                                        $"ObservedCoverage={observedCandidateReason}, LabelUtc={manualLabel.TimestampUtc}";
+                                    allowPrivateUse = true;
+                                    repairByManualLabel = true;
+                                    manualLabelAcceptedCount++;
+                                    DbTextAiTrainingSampleService.RecordCandidate(
+                                        db,
+                                        tr,
+                                        dbText,
+                                        provenance,
+                                        observedCandidate,
+                                        observedCandidateReason,
+                                        nativeReason,
+                                        "repair",
+                                        "manual-label");
+                                }
+                                else
+                                {
+                                    manualLabelBlockedCount++;
+                                    DbTextAiTrainingSampleService.RecordCandidate(
+                                        db,
+                                        tr,
+                                        dbText,
+                                        provenance,
+                                        observedCandidate,
+                                        observedCandidateReason,
+                                        nativeReason,
+                                        "abstain",
+                                        $"manual-label-action={manualLabel.Action}");
+                                    observedDiagnosticOnlyCount++;
+                                    if (observedDiagnosticLogCount++ < SkipLogLimit)
+                                    {
+                                        DiagnosticLogger.Log(
+                                            "DBText证据修复",
+                                            $"人工标签阻塞 Handle={dbText.Handle}: Action={manualLabel.Action}, " +
+                                            $"Current='{EscapeForLog(TrimForLog(original))}', " +
+                                            $"Observed='{EscapeForLog(TrimForLog(observedCandidate))}'");
+                                    }
+                                }
+                            }
+                            else if (EnableSimplifiedChineseEngineeringPolicyRepair
                                 && TryAcceptSimplifiedChineseEngineeringPolicyCandidate(
                                     original,
                                     observedCandidate,
@@ -232,7 +325,7 @@ internal static class DbTextEncodingRepairService
                             }
                         }
 
-                        if (!repairBySimplifiedPolicy)
+                        if (!repairByManualLabel && !repairBySimplifiedPolicy)
                         {
                             skipped++;
                             if (partialSkipLogCount++ < SkipLogLimit && nativeReason.StartsWith("partial", StringComparison.Ordinal))
@@ -261,6 +354,7 @@ internal static class DbTextEncodingRepairService
 
                     if (string.Equals(original, decoded, StringComparison.Ordinal))
                     {
+                        bool promotedByManualLabel = false;
                         bool promotedBySimplifiedPolicy = false;
                         if (allowPrivateUse
                             && TryGetObservedFallbackDiagnosticCandidate(
@@ -269,7 +363,60 @@ internal static class DbTextEncodingRepairService
                                 out string observedCandidate,
                                 out string observedCandidateReason))
                         {
-                            if (EnableSimplifiedChineseEngineeringPolicyRepair
+                            if (manualLabelIndex.TryFind(
+                                    dbText,
+                                    original,
+                                    observedCandidate,
+                                    out DbTextManualLabelRecord manualLabel))
+                            {
+                                if (string.Equals(manualLabel.Action, DbTextManualLabelService.ActionRepair, StringComparison.Ordinal)
+                                    && !string.IsNullOrEmpty(manualLabel.SelectedText))
+                                {
+                                    string exactReason = reason;
+                                    decoded = manualLabel.SelectedText;
+                                    reason =
+                                        $"manual-label, Exact={exactReason}, " +
+                                        $"ObservedCoverage={observedCandidateReason}, LabelUtc={manualLabel.TimestampUtc}";
+                                    allowPrivateUse = true;
+                                    repairByManualLabel = true;
+                                    promotedByManualLabel = true;
+                                    manualLabelAcceptedCount++;
+                                    DbTextAiTrainingSampleService.RecordCandidate(
+                                        db,
+                                        tr,
+                                        dbText,
+                                        provenance,
+                                        observedCandidate,
+                                        observedCandidateReason,
+                                        exactReason,
+                                        "repair",
+                                        "manual-label");
+                                }
+                                else
+                                {
+                                    manualLabelBlockedCount++;
+                                    DbTextAiTrainingSampleService.RecordCandidate(
+                                        db,
+                                        tr,
+                                        dbText,
+                                        provenance,
+                                        observedCandidate,
+                                        observedCandidateReason,
+                                        reason,
+                                        "abstain",
+                                        $"manual-label-action={manualLabel.Action}");
+                                    observedBlockedByNativeExactCount++;
+                                    if (observedBlockedLogCount++ < SkipLogLimit)
+                                    {
+                                        DiagnosticLogger.Log(
+                                            "DBText证据修复",
+                                            $"人工标签阻塞 Handle={dbText.Handle}: exact-current, Action={manualLabel.Action}, " +
+                                            $"Current='{EscapeForLog(TrimForLog(original))}', " +
+                                            $"Observed='{EscapeForLog(TrimForLog(observedCandidate))}'");
+                                    }
+                                }
+                            }
+                            else if (EnableSimplifiedChineseEngineeringPolicyRepair
                                 && TryAcceptSimplifiedChineseEngineeringPolicyCandidate(
                                     original,
                                     observedCandidate,
@@ -334,7 +481,7 @@ internal static class DbTextEncodingRepairService
                             }
                         }
 
-                        if (!promotedBySimplifiedPolicy)
+                        if (!promotedByManualLabel && !promotedBySimplifiedPolicy)
                         {
                             skipped++;
                             continue;
@@ -360,6 +507,8 @@ internal static class DbTextEncodingRepairService
                     dbText.UpgradeOpen();
                     dbText.TextString = decoded;
                     repaired++;
+                    if (repairByManualLabel)
+                        manualLabelRepairedCount++;
                     if (repairBySimplifiedPolicy)
                         simplifiedPolicyRepairedCount++;
 
@@ -388,6 +537,8 @@ internal static class DbTextEncodingRepairService
             $"扫描={scanned}, 可预览={eligiblePreview}, 缺少对象证据={missingProvenance}, " +
             $"exact序列={exactNativeSequenceCount}, observed诊断={observedDiagnosticOnlyCount}, " +
             $"observed阻塞={observedBlockedByNativeExactCount}, PUA符号保留={privateUseSymbolPreservedCount}, " +
+            $"人工标签接受={manualLabelAcceptedCount}, 人工标签阻塞={manualLabelBlockedCount}, " +
+            $"人工标签修复={manualLabelRepairedCount}, " +
             $"简体策略接受={simplifiedPolicyAcceptedCount}, 简体策略拒绝={simplifiedPolicyRejectedCount}, " +
             $"简体策略修复={simplifiedPolicyRepairedCount}, " +
             $"independentWide诊断={independentWideSourceDiagnosticCount}, " +

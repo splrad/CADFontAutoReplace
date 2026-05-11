@@ -10,6 +10,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrCommands.cs" Link="Commands\AfrCommands.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Commands\DbTextManualLabelCommand.cs" Link="Commands\DbTextManualLabelCommand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Commands\DbTextModelCommand.cs" Link="Commands\DbTextModelCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrUnloadCommand.cs" Link="Commands\AfrUnloadCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DbTextCodePageProbeCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DbTextTracerCommand.cs" />
@@ -37,8 +39,15 @@
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetectionContext.cs" Link="Services\FontDetectionContext.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetector.cs" Link="Services\FontDetector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontReplacer.cs" Link="Services\FontReplacer.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextDrawingIdentity.cs" Link="Services\DbTextRepair\DbTextDrawingIdentity.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairAdvisor.cs" Link="Services\DbTextRepair\DbTextRepairAdvisor.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairCandidateGenerator.cs" Link="Services\DbTextRepair\DbTextRepairCandidateGenerator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairModelStore.cs" Link="Services\DbTextRepair\DbTextRepairModelStore.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairPolicy.cs" Link="Services\DbTextRepair\DbTextRepairPolicy.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairService.cs" Link="Services\DbTextRepair\DbTextRepairService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextEncodingRepairService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextAiTrainingSampleService.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextManualLabelService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\LogService.cs" Link="Services\LogService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\EmbeddedFontDeployer.cs" Link="Hosting\EmbeddedFontDeployer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AssemblyRegistryDefaults.cs" Link="Hosting\AssemblyRegistryDefaults.cs" />
