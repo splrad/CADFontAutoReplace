@@ -120,12 +120,12 @@ internal static class DbTextRepairService
         const string hintLine = "仍有未修复文字，请执行 AFRDBTEXTLABEL 选择剩余文字进行人工确认；确认后会自动记录并同步训练模型。";
 
         DiagnosticLogger.Log("DBText模型修复", summaryLine);
-        if (summary.Repaired < summary.Scanned)
+        if (summary.Unrepaired > 0)
             DiagnosticLogger.Log("DBText模型修复", hintLine);
         DiagnosticLogger.Flush();
 
         editor.WriteMessage($"\n[DBText模型修复] {summaryLine}\n");
-        if (summary.Repaired < summary.Scanned)
+        if (summary.Unrepaired > 0)
             editor.WriteMessage($"[DBText模型修复] {hintLine}\n");
     }
 

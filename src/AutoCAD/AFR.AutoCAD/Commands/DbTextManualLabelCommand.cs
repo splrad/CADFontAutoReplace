@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
@@ -26,22 +27,35 @@ public sealed class DbTextManualLabelCommand
         if (doc == null || ed == null)
             return;
 
-        var options = new PromptNestedEntityOptions("\n选择要人工确认的单行文字对象: ");
-        PromptNestedEntityResult result = ed.GetNestedEntity(options);
-        if (result.Status != PromptStatus.OK)
-            return;
-
         try
         {
+            LogStep("命令启动");
+
+            var options = new PromptEntityOptions("\n选择要人工确认的单行文字对象: ");
+            options.SetRejectMessage("\n只能选择 DBText 单行文字。");
+            options.AddAllowedClass(typeof(DBText), exactMatch: false);
+
+            LogStep("开始选择 DBText");
+            PromptEntityResult result = ed.GetEntity(options);
+            LogStep($"选择结果: Status={result.Status}, ObjectId={SafeObjectId(result.ObjectId)}");
+            if (result.Status != PromptStatus.OK)
+                return;
+
+            LogStep("准备加载模型");
             DbTextRepairModelStore.EnsureReady();
             DbTextRepairModelIndex index = DbTextRepairModelStore.LoadIndex(out _);
             var advisor = new DbTextRepairAdvisor(index);
+            LogStep($"模型已加载: Labels={index.LabelCount}, Conflicts={index.ConflictCount}");
+
+            LogStep("准备读取所选对象");
             if (!TryReadSelection(doc.Database, result.ObjectId, index, advisor, out DbTextManualSelection selection, out string error))
             {
                 ed.WriteMessage($"\n{error}\n");
+                LogStep($"读取所选对象失败: {error}");
                 return;
             }
 
+            LogStep($"所选对象: Handle={selection.Handle}, Current='{Trim(selection.CurrentText)}', Candidate='{Trim(selection.CandidateText)}'");
             var window = new DbTextLabelWindow(new DbTextLabelDialogData
             {
                 Metadata = selection.Metadata,
@@ -60,7 +74,9 @@ public sealed class DbTextManualLabelCommand
                 Evidence = selection.Evidence
             });
 
+            LogStep("准备显示人工确认窗口");
             PlatformManager.Host.ShowModalWindow(window);
+            LogStep($"人工确认窗口关闭: DialogResult={window.DialogResult}, Action={window.SelectedAction}");
             if (window.DialogResult != true || window.SelectedAction == DbTextLabelDialogAction.None)
                 return;
 
@@ -109,8 +125,10 @@ public sealed class DbTextManualLabelCommand
                 tr.Commit();
             }
 
+            LogStep($"准备写入标签: Action={action}, Selected='{Trim(selectedText)}'");
             DbTextRepairModelStore.AppendLabel(record);
             string trainStatus = DbTextRepairModelStore.LastNeuralTrainingStatus;
+            LogStep($"标签已写入: Changed={changed}, TrainStatus={trainStatus}");
             if (changed)
                 ed.Regen();
 
@@ -123,6 +141,7 @@ public sealed class DbTextManualLabelCommand
         {
             ed.WriteMessage($"\nDBText 人工确认失败: {ex.Message}\n");
             DiagnosticLogger.LogError("DBText 人工确认失败", ex);
+            DiagnosticLogger.Flush();
         }
     }
 
@@ -248,6 +267,18 @@ public sealed class DbTextManualLabelCommand
         return candidates.Any(c => string.Equals(c.Text, selectedText, StringComparison.Ordinal))
             ? selectedText
             : string.Empty;
+    }
+
+    [Conditional("DEBUG")]
+    private static void LogStep(string message)
+    {
+        DiagnosticLogger.Log("DBText人工确认", message);
+        DiagnosticLogger.Flush();
+    }
+
+    private static string Trim(string text)
+    {
+        return text.Length <= 80 ? text : text.Substring(0, 80) + "...";
     }
 
     private static string DescribeCandidate(DbTextRepairCandidate candidate)

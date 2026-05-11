@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Windows;
+using System.Windows.Input;
 
 namespace AFR.UI;
 
@@ -89,5 +90,11 @@ public partial class DbTextLabelWindow : Window
             Width = maxWidth;
         if (Height > maxHeight)
             Height = maxHeight;
+    }
+
+    private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.LeftButton == MouseButtonState.Pressed)
+            DragMove();
     }
 }

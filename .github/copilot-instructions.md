@@ -37,6 +37,9 @@ Release 命令：
 
 Debug 命令：
 
+- `AFRDBTEXTMODEL`：查看 DBText 修复模型状态与神经参数评估。
+- `AFRINSPECTTEXT`：检查单个文字对象、DBText 模型候选、AI 分数和自动决策；这是当前模型链路的托管诊断命令，不依赖旧 native hook。
+- `AFRDBTEXTBATCHTRAIN`：批量生成保守 DBText 训练标签，仅 Debug 构建可用。
 - `AFRVIEW`：查看 MText / MLeader 格式与样式诊断。
 - `AFRINSERT`：插入测试 MText。
 - `AFRDUMPPROFILE`、`AFRSHOWAWSPATH`、`AFRGENPROBESCRIPTS`、`AFRDUMPDIALOGAPI`：调试/反射辅助命令。

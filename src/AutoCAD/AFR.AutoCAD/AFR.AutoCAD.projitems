@@ -11,6 +11,7 @@
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrCommands.cs" Link="Commands\AfrCommands.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Commands\DbTextManualLabelCommand.cs" Link="Commands\DbTextManualLabelCommand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Commands\DbTextModelCommand.cs" Link="Commands\DbTextModelCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrUnloadCommand.cs" Link="Commands\AfrUnloadCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\AutoCadFontHook.cs" Link="FontMapping\AutoCadFontHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\LdFileHook.cs" Link="FontMapping\LdFileHook.cs" />
@@ -46,5 +47,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextInsertCommand.cs" Link="DebugCommands\MTextInsertCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\ProfileDumpCommand.cs" Link="DebugCommands\ProfileDumpCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\ShowAwsPathCommand.cs" Link="DebugCommands\ShowAwsPathCommand.cs" Condition="'$(Configuration)'=='Debug'" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\TextEntityInspectCommand.cs" Link="DebugCommands\TextEntityInspectCommand.cs" Condition="'$(Configuration)'=='Debug'" />
   </ItemGroup>
 </Project>

@@ -8,10 +8,11 @@
         MinWidth="480"
         MinHeight="460"
         WindowStartupLocation="Manual"
-        ResizeMode="CanResizeWithGrip"
+        ResizeMode="NoResize"
         ShowInTaskbar="False"
-        Background="{DynamicResource RegionBrush}"
-        TextElement.FontFamily="鸿蒙黑体, 微软雅黑, 黑体"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display">
@@ -39,6 +40,10 @@
         </ResourceDictionary>
     </Window.Resources>
 
+    <Border CornerRadius="10"
+            Background="{DynamicResource RegionBrush}"
+            TextElement.FontFamily="鸿蒙黑体, 微软雅黑, 黑体"
+            MouseLeftButtonDown="Window_MouseLeftButtonDown">
     <Grid Margin="22,20,22,18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -69,7 +74,7 @@
                          MinHeight="72"
                          MaxHeight="120"
                          IsReadOnly="True"
-                         Text="{Binding CurrentText}"
+                         Text="{Binding CurrentText, Mode=OneWay}"
                          TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto"/>
 
@@ -99,7 +104,7 @@
                              MinHeight="56"
                              MaxHeight="100"
                              IsReadOnly="True"
-                             Text="{Binding CandidatePreview}"
+                             Text="{Binding CandidatePreview, Mode=OneWay}"
                              TextWrapping="Wrap"
                              VerticalScrollBarVisibility="Auto"/>
 
@@ -148,7 +153,7 @@
                                  MinHeight="56"
                                  MaxHeight="120"
                                  IsReadOnly="True"
-                                 Text="{Binding EvidenceText}"
+                                 Text="{Binding EvidenceText, Mode=OneWay}"
                                  TextWrapping="Wrap"
                                  VerticalScrollBarVisibility="Auto"/>
                     </StackPanel>
@@ -190,4 +195,5 @@
             </StackPanel>
         </DockPanel>
     </Grid>
+    </Border>
 </Window>
