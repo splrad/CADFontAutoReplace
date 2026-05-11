@@ -109,6 +109,7 @@ public abstract class PluginEntryBase : IExtensionApplication
     public void Initialize()
     {
         _unloaded = false;
+        using var dialogSystemVariables = CadDialogSystemVariableScope.Capture();
 
         // 诊断日志仅在 Debug 构建时自动启用，用于开发调试
 #if DEBUG

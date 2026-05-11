@@ -222,6 +222,8 @@ internal static class LdFileHook
 
             // 去掉目录，仅保留文件名或字族名，便于与 _availableFonts 对齐
             fontName = Path.GetFileName(fontName);
+            if (!IsCandidateFontName(fontName))
+                return _trampolineDelegate(fileName, param2, db, desc);
 
             // 形文件请求直接放行，由 AutoCAD 自行处理
             if (param2 == FontTypeShape)
@@ -421,6 +423,19 @@ internal static class LdFileHook
         name.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) ||
         name.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase) ||
         name.EndsWith(".otf", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>仅处理字体形态的文件名；普通图纸等非字体文件必须原样放行。</summary>
+    private static bool IsCandidateFontName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+
+        string ext = Path.GetExtension(name);
+        return string.IsNullOrEmpty(ext)
+               || ext.Equals(".shx", StringComparison.OrdinalIgnoreCase)
+               || ext.Equals(".ttf", StringComparison.OrdinalIgnoreCase)
+               || ext.Equals(".ttc", StringComparison.OrdinalIgnoreCase)
+               || ext.Equals(".otf", StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// 在指定内存地址写入 14 字节的 64 位绝对跳转指令

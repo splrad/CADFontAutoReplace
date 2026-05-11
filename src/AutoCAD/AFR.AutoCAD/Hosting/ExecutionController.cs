@@ -35,6 +35,7 @@ internal sealed class ExecutionController
     {
         if (doc == null || doc.IsDisposed) return;
 
+        using var dialogSystemVariables = CadDialogSystemVariableScope.Capture();
         var log = LogService.Instance;
         var config = ConfigService.Instance;
         bool summarized = false;

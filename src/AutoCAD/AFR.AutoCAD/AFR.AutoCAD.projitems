@@ -19,6 +19,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontScanner.cs" Link="FontMapping\MTextInlineFontScanner.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AppInitializer.cs" Link="Hosting\AppInitializer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AutoCadHost.cs" Link="Hosting\AutoCadHost.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Hosting\CadDialogSystemVariableScope.cs" Link="Hosting\CadDialogSystemVariableScope.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\DocumentContextManager.cs" Link="Hosting\DocumentContextManager.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\ExecutionController.cs" Link="Hosting\ExecutionController.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\PluginEntryBase.cs" Link="Hosting\PluginEntryBase.cs" />
