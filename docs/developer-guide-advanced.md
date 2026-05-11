@@ -20,6 +20,7 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - 命令类位于 `AFR.AutoCAD/Commands`。
 - 壳工程 `PluginEntry.cs` 通过 `CommandClass` 声明进行注册。
 - `AFRUNLOAD` 是例外：它是隐藏维护入口，不使用 `CommandMethod`/`CommandClass` 注册，避免进入 CAD 自动补全与动态输入建议；插件入口只在 `UnknownCommand` 完整匹配时调用卸载逻辑。
+- `AFRDBTEXTLABEL` 是 Release 命令，用于 DBText 单行文字人工确认和模型标签写入。
 - Debug-only 命令必须双层控制：
   - 命令类文件 `#if DEBUG`
   - `PluginEntry.cs` 注册处 `#if DEBUG`
@@ -76,7 +77,27 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - `LdFileExport`
 - `PrologueSize`
 
-## 6. 性能与稳定性建议
+## 6. DBText 模型修复
+
+DBText 单行文字修复不再依赖旧的原生 code page Hook 调查链路。当前实现使用内置 JSONL 模型、确定性候选、人工标签和神经排序参数组合完成。
+
+关键文件：
+
+- `src/AutoCAD/AFR.AutoCAD/Services/DbTextRepair/DbTextRepairService.cs`
+- `src/AutoCAD/AFR.AutoCAD/Commands/DbTextManualLabelCommand.cs`
+- `src/AutoCAD/AFR.AutoCAD/Services/DbTextRepair/DbTextRepairModelStore.cs`
+- `src/AFR.Core/DbTextRepairModel/`
+- `data/DbTextRepairModel.jsonl`
+
+维护原则：
+
+- 自动写回必须受精确人工标签约束。
+- 神经模型只做候选排序和辅助判断，不单独作为写回证据。
+- `glyph-issue` 表示字体/字形问题，不应继续走 DBText 文本写回。
+- 模型字段变化时同步部署器嵌入资源、插件嵌入资源、README 和 `docs/debugging/DBText-Repair-Model.md`。
+- 不要恢复 `AFRDBTEXTPROBE` / `AFRTRACER*` 等旧探针命令作为当前文档流程。
+
+## 7. 性能与稳定性建议
 
 - 避免在热路径引入高频分配。
 - 解析器优先流式处理（`MTextFontParser` 思路）。
@@ -88,7 +109,7 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - 字体名归一化规则保持唯一来源（后缀、路径、`@` 前缀处理一致）；
 - 字典 key 统一 `OrdinalIgnoreCase`，避免大小写回归。
 
-## 7. 调试建议
+## 8. 调试建议
 
 - 先看 `AFR_Diag_*.log`，再下断点。
 - 针对 MText 场景，优先组合命令：
@@ -101,7 +122,7 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - `MTextInlineFontReplacer`：看替换前后 `mtext.Contents`；
 - `ExecutionController.Execute` 第三阶段：核对三组修复记录合并结果。
 
-## 8. 发布资产生成脚本
+## 9. 发布资产生成脚本
 
 发布资产由 `tools/Publish-ReleaseAssets.ps1` 统一生成，不手工复制 DLL 或直接发布 `AFR.Deployer.csproj`。
 
@@ -138,15 +159,16 @@ artifacts/ReleaseAssets/Fonts.zip
 - 新增 CAD 版本时必须确保版本壳 `.csproj` 写入 `CadBrand` / `CadVersion` / `CadRegistryBasePath`，否则 `.cad.json` 元数据不会正确生成。
 - `Version.props` 是部署器与插件 DLL 的统一版本来源，发版只修改该文件。
 
-## 9. 回归清单（进阶）
+## 10. 回归清单（进阶）
 
 - [ ] 不同触发源（Startup / Command / DocumentCreated）都验证
 - [ ] Hook on/off 两条路径验证
 - [ ] SHX 主字体 / 大字体 / TrueType 三类都验证
 - [ ] MText `\F` / `\f` / 参数段 / 路径残留 / `@` 前缀都覆盖
+- [ ] DBText 模型修复、`AFRDBTEXTLABEL` 与 `glyph-issue` 标签路径已验证
 - [ ] Release 构建下 Debug 功能完全排除
 
-## 10. 代码评审关注点（建议）
+## 11. 代码评审关注点（建议）
 
 - 是否破坏层级依赖方向；
 - 是否引入无必要抽象；

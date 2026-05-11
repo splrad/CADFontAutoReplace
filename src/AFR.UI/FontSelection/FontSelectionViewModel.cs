@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Windows.Input;
 using AFR.Platform;
 using AFR.Services;
 
@@ -13,6 +14,7 @@ namespace AFR.UI;
 /// </summary>
 internal sealed class FontSelectionViewModel : INotifyPropertyChanged
 {
+    private readonly UiRelayCommand _confirmCommand;
     private string _selectedMainFont = string.Empty;
     private string _selectedBigFont = string.Empty;
     private string _selectedTrueTypeFont = string.Empty;
@@ -35,6 +37,7 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
             _selectedMainFont = value ?? string.Empty;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsConfirmEnabled));
+            _confirmCommand?.RaiseCanExecuteChanged();
         }
     }
 
@@ -63,8 +66,17 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
     /// <summary>主字体已选择时启用确认按钮。</summary>
     public bool IsConfirmEnabled => !string.IsNullOrWhiteSpace(SelectedMainFont);
 
+    public ICommand ConfirmCommand => _confirmCommand;
+
+    public ICommand CancelCommand { get; }
+
+    public event EventHandler<UiDialogCloseRequestedEventArgs>? CloseRequested;
+
     public FontSelectionViewModel()
     {
+        _confirmCommand = new UiRelayCommand(() => RequestClose(true), () => IsConfirmEnabled);
+        CancelCommand = new UiRelayCommand(() => RequestClose(false));
+
         // 触发扫描（首次调用时同步填充 FontCache，后续调用返回缓存）
         EnsureFontCachePopulated();
         AvailableMainFonts = new ObservableCollection<string>(FontManager.GetMainFontSnapshot());
@@ -101,6 +113,11 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
             SelectedBigFont = config.BigFont;
         if (!string.IsNullOrEmpty(config.TrueTypeFont))
             SelectedTrueTypeFont = config.TrueTypeFont;
+    }
+
+    private void RequestClose(bool? dialogResult)
+    {
+        CloseRequested?.Invoke(this, new UiDialogCloseRequestedEventArgs(dialogResult));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

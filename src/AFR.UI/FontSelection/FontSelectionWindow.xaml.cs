@@ -23,19 +23,15 @@ public partial class FontSelectionWindow : Window
     public FontSelectionWindow()
     {
         ViewModel = new FontSelectionViewModel();
+        ViewModel.CloseRequested += OnCloseRequested;
         DataContext = ViewModel;
         InitializeComponent();
         WindowPositionHelper.SetupCenterOnParent(this);
     }
 
-    private void OnConfirm(object sender, RoutedEventArgs e)
+    private void OnCloseRequested(object? sender, UiDialogCloseRequestedEventArgs e)
     {
-        DialogResult = true;
-    }
-
-    private void OnCancel(object sender, RoutedEventArgs e)
-    {
-        DialogResult = false;
+        DialogResult = e.DialogResult;
     }
 
     private void OnComboBoxLoaded(object sender, RoutedEventArgs e)

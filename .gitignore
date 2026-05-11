@@ -372,9 +372,7 @@ FodyWeavers.xsd
 /chore/inspect-types.ps1
 /tools/diff-procmon.ps1
 /chore/inspect-types.ps1
-/.github/copilot-instructions.md
 /chore/acdb25_disasm.txt
 /chore/acdb25_exports.txt
 /chore/acdb25_imports.txt
-/docs/Big5HookInvestigationMemory.md
 *.png

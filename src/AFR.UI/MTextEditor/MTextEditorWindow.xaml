@@ -60,7 +60,8 @@
             <DockPanel Grid.Row="4">
                 <Button DockPanel.Dock="Right" Content="关闭" Height="32" MinWidth="80" FontSize="12"
                         hc:BorderElement.CornerRadius="6"
-                        IsCancel="True" Click="OnClose"/>
+                        IsCancel="True"
+                        Command="{Binding CloseCommand}"/>
             </DockPanel>
         </Grid>
     </Border>

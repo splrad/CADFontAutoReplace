@@ -417,12 +417,11 @@
 							Margin="0,0,10,0"
 							Style="{StaticResource ButtonPrimary}"
 							hc:BorderElement.CornerRadius="6"
-							IsEnabled="{Binding HasUserChanges}"
-							Click="OnApply"/>
+							Command="{Binding ApplyCommand}"/>
                     <Button Content="关闭"
                             MinWidth="80" Height="32" FontSize="12"
                             hc:BorderElement.CornerRadius="6"
-                            Click="OnClose"/>
+                            Command="{Binding CloseCommand}"/>
                 </StackPanel>
 				<StackPanel Orientation="Horizontal" VerticalAlignment="Center"
 							IsEnabled="{Binding HasItems}"
@@ -454,7 +453,7 @@
                     <Button Content="填充" Height="28" FontSize="11"
                             Margin="5,0,0,0" Padding="6,0"
                             hc:BorderElement.CornerRadius="4"
-                            Click="OnBatchApply"/>
+                            Command="{Binding ApplyBatchCommand}"/>
                 </StackPanel>
             </DockPanel>
         </Grid>

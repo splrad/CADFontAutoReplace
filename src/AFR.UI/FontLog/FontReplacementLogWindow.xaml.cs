@@ -3,8 +3,6 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using AFR.Models;
-using AFR.Platform;
-using AFR.Services;
 
 namespace AFR.UI;
 
@@ -16,32 +14,50 @@ namespace AFR.UI;
 public partial class FontReplacementLogWindow : Window
 {
     private bool _comboBoxDropDownOpen;
+    private Func<IReadOnlyList<StyleFontReplacement>, int>? _applyReplacementsHandler;
+    private Func<FontReplacementLogViewModel>? _refreshHandler;
 
-    public FontReplacementLogViewModel ViewModel { get; }
+    public FontReplacementLogViewModel ViewModel { get; private set; }
 
     /// <summary>累计成功替换的样式数量。</summary>
-    public int AppliedCount { get; private set; }
+    public int AppliedCount => ViewModel.AppliedCount;
 
     /// <summary>最近一次应用替换时的替换指令列表，供调用方生成统计日志。</summary>
-    public IReadOnlyList<StyleFontReplacement>? LastAppliedReplacements { get; private set; }
+    public IReadOnlyList<StyleFontReplacement>? LastAppliedReplacements => ViewModel.LastAppliedReplacements;
 
     /// <summary>
     /// 替换操作回调。接收替换列表，返回成功替换的数量。
     /// 由调用方提供平台特定的实现（如 AutoCAD 的文档锁定与字体替换）。
     /// </summary>
-    public Func<IReadOnlyList<StyleFontReplacement>, int>? ApplyReplacementsHandler { get; set; }
+    public Func<IReadOnlyList<StyleFontReplacement>, int>? ApplyReplacementsHandler
+    {
+        get => _applyReplacementsHandler;
+        set
+        {
+            _applyReplacementsHandler = value;
+            ViewModel.ApplyReplacementsHandler = value;
+        }
+    }
 
     /// <summary>
     /// 刷新回调。应用替换成功后调用，返回新的 ViewModel 以刷新界面。
     /// 由调用方提供平台特定的实现（如重新检测缺失字体并构建新 ViewModel）。
     /// </summary>
-    public Func<FontReplacementLogViewModel>? RefreshHandler { get; set; }
+    public Func<FontReplacementLogViewModel>? RefreshHandler
+    {
+        get => _refreshHandler;
+        set
+        {
+            _refreshHandler = value;
+            ViewModel.RefreshHandler = value;
+        }
+    }
 
     public FontReplacementLogWindow(FontReplacementLogViewModel vm)
     {
-        ViewModel = vm;
-        DataContext = vm;
         InitializeComponent();
+        ViewModel = vm;
+        AttachViewModel(vm);
         WindowPositionHelper.SetupCenterOnParent(this);
 
         // 确保窗口不超过屏幕可用高度
@@ -50,72 +66,34 @@ public partial class FontReplacementLogWindow : Window
             Height = workArea;
     }
 
-    private void OnApply(object sender, RoutedEventArgs e)
+    private void AttachViewModel(FontReplacementLogViewModel viewModel)
     {
-        if (ApplyReplacementsHandler == null) return;
+        if (!ReferenceEquals(ViewModel, viewModel))
+            DetachViewModel(ViewModel);
 
-        try
-        {
-            // 按样式名称分组，将主字体行和大字体行合并为一条替换指令
-            var map = new Dictionary<string, StyleFontReplacement>(StringComparer.OrdinalIgnoreCase);
-            foreach (var row in ViewModel.Items)
-            {
-                string font = row.SelectedReplacement?.Trim() ?? string.Empty;
-                if (string.IsNullOrEmpty(font)) continue;
-
-                // 已替换行仅在用户修改了选择时才纳入（避免重复提交未变更的替换）
-                if (row.IsReplaced && string.Equals(font, row.OriginalReplacement?.Trim(),
-                    StringComparison.OrdinalIgnoreCase)) continue;
-
-                if (!map.TryGetValue(row.StyleName, out var existing))
-                    existing = new StyleFontReplacement(row.StyleName, false, string.Empty, string.Empty);
-
-                map[row.StyleName] = row.IsBigFont
-                    ? existing with { BigFontReplacement = font }
-                    : existing with { MainFontReplacement = font, IsTrueType = row.IsTrueType };
-            }
-
-            DiagnosticLogger.Info("UI", $"应用替换: 从 {ViewModel.Items.Count} 行构建 {map.Count} 条替换指令");
-            foreach (var (name, rep) in map)
-            {
-                DiagnosticLogger.Info("UI",
-                    $"  样式='{name}' Main='{rep.MainFontReplacement}' Big='{rep.BigFontReplacement}' IsTT={rep.IsTrueType}");
-            }
-
-            if (map.Count > 0)
-            {
-                var list = map.Values.ToList();
-                int count = ApplyReplacementsHandler(list);
-                AppliedCount += count;
-                LastAppliedReplacements = list;
-                DiagnosticLogger.Info("UI", $"Handler 返回: {count}, 累计 AppliedCount={AppliedCount}");
-
-                // 替换成功后刷新界面（重新检测并重建 ViewModel）
-                if (count > 0 && RefreshHandler != null)
-                {
-                    try
-                    {
-                        var newVm = RefreshHandler();
-                        DataContext = newVm;
-                        DiagnosticLogger.Info("UI", $"刷新完成: Items={newVm.Items.Count} 未替换={newVm.FailedCount}");
-                    }
-                    catch (Exception refreshEx)
-                    {
-                        DiagnosticLogger.LogError("UI 刷新失败", refreshEx);
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            DiagnosticLogger.LogError("UI 应用替换失败", ex);
-            PlatformManager.Logger?.Error("手动替换字体失败", ex);
-        }
+        ViewModel = viewModel;
+        ViewModel.ApplyReplacementsHandler = _applyReplacementsHandler;
+        ViewModel.RefreshHandler = _refreshHandler;
+        ViewModel.ViewModelRefreshed += OnViewModelRefreshed;
+        ViewModel.CloseRequested += OnCloseRequested;
+        DataContext = ViewModel;
     }
 
-    private void OnBatchApply(object sender, RoutedEventArgs e)
+    private void DetachViewModel(FontReplacementLogViewModel viewModel)
     {
-        ViewModel.ApplyBatch();
+        viewModel.ViewModelRefreshed -= OnViewModelRefreshed;
+        viewModel.CloseRequested -= OnCloseRequested;
+    }
+
+    private void OnViewModelRefreshed(object? sender, FontReplacementLogViewModel viewModel)
+    {
+        AttachViewModel(viewModel);
+        Dispatcher.BeginInvoke(new Action(UpdateStickyHeader), System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    private void OnCloseRequested(object? sender, EventArgs e)
+    {
+        Close();
     }
 
     private void OnComboBoxLoaded(object sender, RoutedEventArgs e)
@@ -252,11 +230,6 @@ public partial class FontReplacementLogWindow : Window
             StickyStyleHeader.Visibility = Visibility.Visible;
             StickyMTextHeader.Visibility = Visibility.Collapsed;
         }
-    }
-
-    private void OnClose(object sender, RoutedEventArgs e)
-    {
-        Close();
     }
 
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

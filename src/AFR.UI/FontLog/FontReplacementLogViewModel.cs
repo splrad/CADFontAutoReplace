@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Windows.Input;
 using AFR.Models;
+using AFR.Platform;
 using AFR.Services;
 
 namespace AFR.UI;
@@ -78,6 +80,7 @@ public sealed class FontReplacementRow : INotifyPropertyChanged
 /// </summary>
 public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
 {
+    private readonly UiRelayCommand _applyCommand;
     private string _batchShxFont = string.Empty;
     private string _batchBigFont = string.Empty;
     private string _batchTrueTypeFont = string.Empty;
@@ -108,11 +111,42 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
     public bool HasNoItems => !HasItems && !HasInlineFix;
     public bool HasAnyContent => HasItems || HasInlineFix;
 
+    public ICommand ApplyCommand => _applyCommand;
+
+    public ICommand ApplyBatchCommand { get; }
+
+    public ICommand CloseCommand { get; }
+
+    /// <summary>
+    /// 替换操作回调。接收替换列表，返回成功替换的数量。
+    /// 由调用方提供平台特定的实现（如 AutoCAD 的文档锁定与字体替换）。
+    /// </summary>
+    public Func<IReadOnlyList<StyleFontReplacement>, int>? ApplyReplacementsHandler { get; set; }
+
+    /// <summary>
+    /// 刷新回调。应用替换成功后调用，返回新的 ViewModel 以刷新界面。
+    /// 由调用方提供平台特定的实现（如重新检测缺失字体并构建新 ViewModel）。
+    /// </summary>
+    public Func<FontReplacementLogViewModel>? RefreshHandler { get; set; }
+
+    /// <summary>累计成功替换的样式数量。</summary>
+    public int AppliedCount { get; private set; }
+
+    /// <summary>最近一次应用替换时的替换指令列表，供调用方生成统计日志。</summary>
+    public IReadOnlyList<StyleFontReplacement>? LastAppliedReplacements { get; private set; }
+
     /// <summary>是否有任何行的替换字体被用户修改过（与初始值不同）。</summary>
     public bool HasUserChanges
     {
         get => _hasUserChanges;
-        private set { if (_hasUserChanges != value) { _hasUserChanges = value; OnPropertyChanged(); } }
+        private set
+        {
+            if (_hasUserChanges == value) return;
+
+            _hasUserChanges = value;
+            OnPropertyChanged();
+            _applyCommand?.RaiseCanExecuteChanged();
+        }
     }
 
     /// <summary>批量操作可选的 SHX 主字体列表（常规字体）。</summary>
@@ -159,6 +193,78 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         }
     }
 
+    private void ApplyReplacements()
+    {
+        if (ApplyReplacementsHandler == null) return;
+
+        try
+        {
+            var replacements = BuildReplacementRequests();
+            DiagnosticLogger.Info("UI", $"应用替换: 从 {Items.Count} 行构建 {replacements.Count} 条替换指令");
+            foreach (var replacement in replacements)
+            {
+                DiagnosticLogger.Info("UI",
+                    $"  样式='{replacement.StyleName}' Main='{replacement.MainFontReplacement}' Big='{replacement.BigFontReplacement}' IsTT={replacement.IsTrueType}");
+            }
+
+            if (replacements.Count == 0)
+                return;
+
+            int count = ApplyReplacementsHandler(replacements);
+            AppliedCount += count;
+            LastAppliedReplacements = replacements;
+            DiagnosticLogger.Info("UI", $"Handler 返回: {count}, 累计 AppliedCount={AppliedCount}");
+            OnPropertyChanged(nameof(AppliedCount));
+            OnPropertyChanged(nameof(LastAppliedReplacements));
+
+            if (count <= 0 || RefreshHandler == null)
+                return;
+
+            try
+            {
+                var newViewModel = RefreshHandler();
+                newViewModel.ApplyReplacementsHandler = ApplyReplacementsHandler;
+                newViewModel.RefreshHandler = RefreshHandler;
+                newViewModel.AppliedCount = AppliedCount;
+                newViewModel.LastAppliedReplacements = LastAppliedReplacements;
+                DiagnosticLogger.Info("UI", $"刷新完成: Items={newViewModel.Items.Count} 未替换={newViewModel.FailedCount}");
+                ViewModelRefreshed?.Invoke(this, newViewModel);
+            }
+            catch (Exception refreshEx)
+            {
+                DiagnosticLogger.LogError("UI 刷新失败", refreshEx);
+            }
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.LogError("UI 应用替换失败", ex);
+            PlatformManager.Logger?.Error("手动替换字体失败", ex);
+        }
+    }
+
+    private IReadOnlyList<StyleFontReplacement> BuildReplacementRequests()
+    {
+        var map = new Dictionary<string, StyleFontReplacement>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in Items)
+        {
+            string font = row.SelectedReplacement?.Trim() ?? string.Empty;
+            if (string.IsNullOrEmpty(font)) continue;
+
+            // 已替换行仅在用户修改了选择时才纳入，避免重复提交未变更的替换。
+            if (row.IsReplaced && string.Equals(font, row.OriginalReplacement?.Trim(),
+                StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (!map.TryGetValue(row.StyleName, out var existing))
+                existing = new StyleFontReplacement(row.StyleName, false, string.Empty, string.Empty);
+
+            map[row.StyleName] = row.IsBigFont
+                ? existing with { BigFontReplacement = font }
+                : existing with { MainFontReplacement = font, IsTrueType = row.IsTrueType };
+        }
+
+        return map.Values.ToList();
+    }
+
     public FontReplacementLogViewModel(
         IReadOnlyList<FontCheckResult>? detectionResults,
         string globalMainFont,
@@ -168,6 +274,10 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         IReadOnlyList<InlineFontFixRecord>? inlineFixResults = null,
         HashSet<string>? stillMissingStyleNames = null)
     {
+        _applyCommand = new UiRelayCommand(ApplyReplacements, () => HasUserChanges);
+        ApplyBatchCommand = new UiRelayCommand(ApplyBatch);
+        CloseCommand = new UiRelayCommand(() => CloseRequested?.Invoke(this, EventArgs.Empty));
+
         // 触发扫描（确保 FontCache 已填充）
         FontSelectionViewModel.EnsureFontCachePopulated();
         var mainFonts = new ObservableCollection<string>(FontManager.GetMainFontSnapshot());
@@ -323,6 +433,10 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    public event EventHandler<FontReplacementLogViewModel>? ViewModelRefreshed;
+
+    public event EventHandler? CloseRequested;
 
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));

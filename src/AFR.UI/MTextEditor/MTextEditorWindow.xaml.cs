@@ -9,16 +9,21 @@ namespace AFR.UI;
 /// </summary>
 public partial class MTextEditorWindow : Window
 {
+    private readonly MTextEditorViewModel _viewModel;
+
     public MTextEditorWindow(string rawContents)
     {
         InitializeComponent();
-        WindowPositionHelper.SetupCenterOnParent(this);
 
-        string displayText = MTextEditorViewModel.ToDisplayFormat(rawContents);
-        RawViewer.Document = MTextSyntaxHighlighter.CreateHighlightedRawDocument(displayText);
+        _viewModel = new MTextEditorViewModel(rawContents);
+        _viewModel.CloseRequested += OnCloseRequested;
+        DataContext = _viewModel;
+        RawViewer.Document = _viewModel.Document;
+
+        WindowPositionHelper.SetupCenterOnParent(this);
     }
 
-    private void OnClose(object sender, RoutedEventArgs e) => Close();
+    private void OnCloseRequested(object? sender, EventArgs e) => Close();
 
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {

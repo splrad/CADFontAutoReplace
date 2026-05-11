@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Windows;
-using System.Windows.Controls;
 
 namespace AFR.UI;
 
@@ -36,110 +34,60 @@ public sealed class DbTextLabelCandidateData
         get
         {
             string score = HasNeuralScore ? $"AI {NeuralScore:0.000} · " : string.Empty;
-            return $"{score}{Source} · {Text}";
+            return $"{score}{SourceDisplay} · {Text}";
         }
     }
+
+    public string SourceDisplay => string.IsNullOrWhiteSpace(Source) ? "candidate" : Source;
+
+    public string ReasonDisplay => string.IsNullOrWhiteSpace(Reason) ? "无说明" : Reason;
+
+    public string ScoreText => HasNeuralScore ? $"AI {NeuralScore:0.000}" : string.Empty;
 }
 
 public partial class DbTextLabelWindow : Window
 {
-    private readonly string _candidateText;
+    private readonly DbTextLabelViewModel _viewModel;
 
-    public DbTextLabelDialogAction SelectedAction { get; private set; }
+    public DbTextLabelDialogAction SelectedAction => _viewModel.SelectedAction;
 
-    public string SelectedText => SelectedTextBox.Text.Trim();
+    public string SelectedText => _viewModel.SelectedText.Trim();
 
-    public string Note => NoteTextBox.Text.Trim();
+    public string Note => _viewModel.Note.Trim();
 
     public DbTextLabelWindow(DbTextLabelDialogData data)
     {
         InitializeComponent();
+
+        _viewModel = new DbTextLabelViewModel(data);
+        _viewModel.CloseRequested += OnCloseRequested;
+        DataContext = _viewModel;
+
+        Loaded += OnLoaded;
         WindowPositionHelper.SetupCenterOnParent(this);
-
-        IReadOnlyList<DbTextLabelCandidateData> candidates = data.Candidates.Count > 0
-            ? data.Candidates
-            : BuildSingleCandidate(data.CandidateText);
-
-        _candidateText = candidates.FirstOrDefault(c => !string.IsNullOrEmpty(c.Text))?.Text ?? string.Empty;
-        MetadataText.Text = data.Metadata;
-        CurrentTextBox.Text = data.CurrentText;
-        CandidateListBox.ItemsSource = candidates;
-        CandidateListBox.DisplayMemberPath = nameof(DbTextLabelCandidateData.DisplayText);
-        CandidateListBox.SelectedIndex = candidates.Count > 0 ? 0 : -1;
-        CandidateTextBox.Text = string.IsNullOrEmpty(_candidateText) ? "<无候选>" : _candidateText;
-        EvidenceText.Text = string.IsNullOrEmpty(data.Evidence) ? "<无>" : data.Evidence;
-        SelectedTextBox.Text = string.IsNullOrEmpty(_candidateText) ? data.CurrentText : _candidateText;
-        UseCandidateButton.IsEnabled = !string.IsNullOrEmpty(_candidateText);
     }
 
-    private void OnUseCandidate(object sender, RoutedEventArgs e)
+    private void OnCloseRequested(object? sender, UiDialogCloseRequestedEventArgs e)
     {
-        if (CandidateListBox.SelectedItem is DbTextLabelCandidateData candidate
-            && !string.IsNullOrEmpty(candidate.Text))
-            SelectedTextBox.Text = candidate.Text;
-        else
-            SelectedTextBox.Text = _candidateText;
-
-        SelectedTextBox.Focus();
-        SelectedTextBox.SelectAll();
+        DialogResult = e.DialogResult;
     }
 
-    private void OnCandidateSelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        if (CandidateListBox.SelectedItem is not DbTextLabelCandidateData candidate)
-            return;
-
-        CandidateTextBox.Text = string.IsNullOrEmpty(candidate.Text) ? "<无候选>" : candidate.Text;
-        UseCandidateButton.IsEnabled = !string.IsNullOrEmpty(candidate.Text);
+        ApplyDpiAwareBounds();
     }
 
-    private void OnRepair(object sender, RoutedEventArgs e)
+    private void ApplyDpiAwareBounds()
     {
-        if (string.IsNullOrWhiteSpace(SelectedTextBox.Text))
-        {
-            MessageBox.Show(
-                "正确文本不能为空。",
-                "AFR — DBText 人工确认",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-            return;
-        }
+        double maxWidth = Math.Max(MinWidth, SystemParameters.WorkArea.Width * 0.92);
+        double maxHeight = Math.Max(MinHeight, SystemParameters.WorkArea.Height * 0.90);
 
-        SelectedAction = DbTextLabelDialogAction.Repair;
-        DialogResult = true;
-    }
+        MaxWidth = maxWidth;
+        MaxHeight = maxHeight;
 
-    private void OnKeep(object sender, RoutedEventArgs e)
-    {
-        SelectedAction = DbTextLabelDialogAction.Keep;
-        DialogResult = true;
-    }
-
-    private void OnGlyphIssue(object sender, RoutedEventArgs e)
-    {
-        SelectedAction = DbTextLabelDialogAction.GlyphIssue;
-        DialogResult = true;
-    }
-
-    private void OnCancel(object sender, RoutedEventArgs e)
-    {
-        SelectedAction = DbTextLabelDialogAction.None;
-        DialogResult = false;
-    }
-
-    private static IReadOnlyList<DbTextLabelCandidateData> BuildSingleCandidate(string candidateText)
-    {
-        if (string.IsNullOrEmpty(candidateText))
-            return Array.Empty<DbTextLabelCandidateData>();
-
-        return new[]
-        {
-            new DbTextLabelCandidateData
-            {
-                Text = candidateText,
-                Source = "candidate",
-                Reason = string.Empty
-            }
-        };
+        if (Width > maxWidth)
+            Width = maxWidth;
+        if (Height > maxHeight)
+            Height = maxHeight;
     }
 }

@@ -17,6 +17,7 @@
                 <ResourceDictionary Source="pack://application:,,,/HandyControl;component/Themes/SkinDefault.xaml"/>
                 <ResourceDictionary Source="pack://application:,,,/HandyControl;component/Themes/Theme.xaml"/>
             </ResourceDictionary.MergedDictionaries>
+            <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         </ResourceDictionary>
     </Window.Resources>
 
@@ -46,32 +47,36 @@
 
             <!-- 模式选择 -->
             <StackPanel Grid.Row="2" Orientation="Horizontal">
-                <RadioButton x:Name="RbTemplate" Content="预设模板" IsChecked="True"
+                <RadioButton Content="预设模板"
+                             IsChecked="{Binding IsTemplateMode, Mode=TwoWay}"
                              FontSize="13" Margin="0,0,20,0"
-                             Checked="OnModeChanged"/>
-                <RadioButton x:Name="RbCustom" Content="自定义输入"
+                             GroupName="InputMode"/>
+                <RadioButton Content="自定义输入"
+                             IsChecked="{Binding IsCustomMode, Mode=TwoWay}"
                              FontSize="13"
-                             Checked="OnModeChanged"/>
+                             GroupName="InputMode"/>
             </StackPanel>
 
             <!-- 内容区：模板选择 / 自定义输入 -->
             <Grid Grid.Row="4">
                 <!-- 模板选择面板 -->
-                <Grid x:Name="TemplatePanel">
+                <Grid Visibility="{Binding IsTemplateMode, Converter={StaticResource BoolToVis}}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="8"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <ComboBox x:Name="CbTemplates" Grid.Row="0"
+                    <ComboBox Grid.Row="0"
                               FontSize="13" Height="34"
                               hc:BorderElement.CornerRadius="6"
-                              SelectionChanged="OnTemplateChanged"/>
+                              ItemsSource="{Binding Templates}"
+                              SelectedItem="{Binding SelectedTemplate, Mode=TwoWay}"
+                              DisplayMemberPath="Name"/>
 
                     <Border Grid.Row="2" CornerRadius="6" ClipToBounds="True"
                             BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                        <TextBox x:Name="TbTemplatePreview"
+                        <TextBox Text="{Binding TemplatePreview}"
                                  IsReadOnly="True"
                                  AcceptsReturn="True"
                                  TextWrapping="Wrap"
@@ -85,7 +90,7 @@
                 </Grid>
 
                 <!-- 自定义输入面板 -->
-                <Grid x:Name="CustomPanel" Visibility="Collapsed">
+                <Grid Visibility="{Binding IsCustomMode, Converter={StaticResource BoolToVis}}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="8"/>
@@ -99,12 +104,12 @@
                         <Button Content="从剪贴板粘贴" Height="26" MinWidth="90" FontSize="11"
                                 Margin="12,0,0,0"
                                 hc:BorderElement.CornerRadius="4"
-                                Click="OnPasteFromClipboard"/>
+                                Command="{Binding PasteFromClipboardCommand}"/>
                     </StackPanel>
 
                     <Border Grid.Row="2" CornerRadius="6" ClipToBounds="True"
                             BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
-                        <TextBox x:Name="TbCustomInput"
+                        <TextBox Text="{Binding CustomInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                  AcceptsReturn="True"
                                  TextWrapping="Wrap"
                                  VerticalScrollBarVisibility="Auto"
@@ -121,11 +126,13 @@
             <DockPanel Grid.Row="6">
                 <Button DockPanel.Dock="Right" Content="取消" Height="32" MinWidth="80" FontSize="12"
                         hc:BorderElement.CornerRadius="6"
-                        IsCancel="True" Click="OnCancel" Margin="10,0,0,0"/>
+                        IsCancel="True"
+                        Command="{Binding CancelCommand}"
+                        Margin="10,0,0,0"/>
                 <Button DockPanel.Dock="Right" Content="插入" Height="32" MinWidth="80" FontSize="12"
                         hc:BorderElement.CornerRadius="6"
                         Style="{DynamicResource ButtonPrimary}"
-                        Click="OnInsert"/>
+                        Command="{Binding InsertCommand}"/>
                 <StackPanel/><!-- 占位 -->
             </DockPanel>
         </Grid>
