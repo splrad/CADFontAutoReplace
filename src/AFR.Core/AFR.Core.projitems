@@ -19,6 +19,9 @@
     <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextRepairModelJsonl.cs" Link="DbTextRepairModel\DbTextRepairModelJsonl.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextRepairModelMergeEngine.cs" Link="DbTextRepairModel\DbTextRepairModelMergeEngine.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextRepairModelRecords.cs" Link="DbTextRepairModel\DbTextRepairModelRecords.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextNeuralFeatureExtractor.cs" Link="DbTextRepairModel\DbTextNeuralFeatureExtractor.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextNeuralRanker.cs" Link="DbTextRepairModel\DbTextNeuralRanker.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextNeuralTrainer.cs" Link="DbTextRepairModel\DbTextNeuralTrainer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\FontCheckResult.cs" Link="Models\FontCheckResult.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\InlineFontFixRecord.cs" Link="Models\InlineFontFixRecord.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\StyleFontReplacement.cs" Link="Models\StyleFontReplacement.cs" />

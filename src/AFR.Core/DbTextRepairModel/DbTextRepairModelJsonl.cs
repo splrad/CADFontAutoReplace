@@ -123,13 +123,20 @@ internal static class DbTextRepairModelJsonl
         if (string.IsNullOrEmpty(record.SchemaVersion))
             record.SchemaVersion = DbTextRepairModelConstants.SchemaVersion;
         if (string.IsNullOrEmpty(record.RecordType))
-            record.RecordType = "label";
+            record.RecordType = DbTextRepairModelConstants.RecordTypeLabel;
         if (string.IsNullOrEmpty(record.TimestampUtc))
             record.TimestampUtc = DateTime.UtcNow.ToString("O");
         if (record.IsLabel && string.IsNullOrEmpty(record.RepairKey))
             record.RepairKey = GetRepairKey(record);
         if (record.IsConflict && string.IsNullOrEmpty(record.ConflictKey))
             record.ConflictKey = record.RepairKey;
+        if (record.IsNeuralParameters)
+        {
+            if (string.IsNullOrEmpty(record.ModelKind))
+                record.ModelKind = DbTextRepairModelConstants.NeuralModelKind;
+            if (string.IsNullOrEmpty(record.FeatureSchemaVersion))
+                record.FeatureSchemaVersion = DbTextRepairModelConstants.NeuralFeatureSchemaVersion;
+        }
         if (string.IsNullOrEmpty(record.RecordId))
             record.RecordId = ComputeRecordId(record);
     }
@@ -155,9 +162,39 @@ internal static class DbTextRepairModelJsonl
             record.Action,
             record.ConflictKey,
             record.EmbeddedDatasetHash,
+            record.TrainingDataHash,
+            record.ModelKind,
+            record.FeatureSchemaVersion,
+            record.ArchitectureJson,
+            record.WeightsBase64,
+            record.BiasBase64,
+            record.TrainingRecordCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            record.ValidationSummaryJson,
             record.Note);
 
         return record.RecordType + "-" + ComputeTextHash(basis).Substring(0, 24);
+    }
+
+    public static string ComputeTrainingDataHash(IEnumerable<DbTextRepairModelRecord> labels)
+    {
+        var builder = new StringBuilder();
+        foreach (DbTextRepairModelRecord label in labels
+                     .Where(r => r.IsLabel)
+                     .OrderBy(GetRepairKey, StringComparer.Ordinal)
+                     .ThenBy(GetDecisionSignature, StringComparer.Ordinal)
+                     .ThenBy(r => r.RecordId, StringComparer.Ordinal))
+        {
+            builder.Append(GetRepairKey(label)).Append('\u001E')
+                .Append(GetDecisionSignature(label)).Append('\u001E')
+                .Append(label.Layer ?? string.Empty).Append('\u001E')
+                .Append(label.OwnerBlockName ?? string.Empty).Append('\u001E')
+                .Append(label.TextStyleName ?? string.Empty).Append('\u001E')
+                .Append(label.TextStyleFileName ?? string.Empty).Append('\u001E')
+                .Append(label.TextStyleBigFontFileName ?? string.Empty).Append('\u001E')
+                .Append(label.RecordId ?? string.Empty).Append('\n');
+        }
+
+        return ComputeTextHash(builder.ToString());
     }
 
     private static DbTextRepairModelRecord ParseLine(string line, string source)
@@ -179,7 +216,7 @@ internal static class DbTextRepairModelJsonl
     private static DbTextRepairModelRecord ConvertLegacyManualLabel(DbTextRepairModelRecord legacy)
     {
         legacy.SchemaVersion = DbTextRepairModelConstants.SchemaVersion;
-        legacy.RecordType = "label";
+        legacy.RecordType = DbTextRepairModelConstants.RecordTypeLabel;
         legacy.SourceSetId = string.IsNullOrEmpty(legacy.SourceSetId) ? "legacy-manual-label" : legacy.SourceSetId;
         legacy.RecordId = string.Empty;
         legacy.RepairKey = string.Empty;

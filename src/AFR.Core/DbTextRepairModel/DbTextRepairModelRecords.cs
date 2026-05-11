@@ -11,6 +11,11 @@ internal static class DbTextRepairModelConstants
     public const string CanonicalFileName = "DbTextRepairModel.jsonl";
     public const string ImportSearchPattern = "DbTextRepairModel*.jsonl";
     public const string ResourceName = "AFR.DbTextRepairModel.jsonl";
+    public const string RecordTypeLabel = "label";
+    public const string RecordTypeConflict = "conflict";
+    public const string RecordTypeNeuralParameters = "nn-params";
+    public const string NeuralModelKind = "dbtext-mlp-v1";
+    public const string NeuralFeatureSchemaVersion = "dbtext-neural-features-v1";
     public const string ActionRepair = "repair";
     public const string ActionKeep = "keep";
     public const string ActionGlyphIssue = "glyph-issue";
@@ -45,10 +50,18 @@ internal sealed class DbTextRepairModelRecord
     public string ConflictKey { get; set; } = string.Empty;
     public string EmbeddedDatasetHash { get; set; } = string.Empty;
     public string TrainingDataHash { get; set; } = string.Empty;
+    public string ModelKind { get; set; } = string.Empty;
+    public string FeatureSchemaVersion { get; set; } = string.Empty;
+    public string ArchitectureJson { get; set; } = string.Empty;
+    public string WeightsBase64 { get; set; } = string.Empty;
+    public string BiasBase64 { get; set; } = string.Empty;
+    public int TrainingRecordCount { get; set; }
+    public string ValidationSummaryJson { get; set; } = string.Empty;
     public string Note { get; set; } = string.Empty;
 
-    public bool IsLabel => string.Equals(RecordType, "label", StringComparison.OrdinalIgnoreCase);
-    public bool IsConflict => string.Equals(RecordType, "conflict", StringComparison.OrdinalIgnoreCase);
+    public bool IsLabel => string.Equals(RecordType, DbTextRepairModelConstants.RecordTypeLabel, StringComparison.OrdinalIgnoreCase);
+    public bool IsConflict => string.Equals(RecordType, DbTextRepairModelConstants.RecordTypeConflict, StringComparison.OrdinalIgnoreCase);
+    public bool IsNeuralParameters => string.Equals(RecordType, DbTextRepairModelConstants.RecordTypeNeuralParameters, StringComparison.OrdinalIgnoreCase);
 }
 
 internal sealed class DbTextRepairModelMergeReport
@@ -83,13 +96,19 @@ internal sealed class DbTextRepairModelMergeReport
 internal sealed class DbTextRepairModelIndex
 {
     private readonly Dictionary<string, DbTextRepairModelRecord> _latestByExactKey = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<string>> _historicalSelectedByCurrent = new(StringComparer.Ordinal);
     private readonly HashSet<string> _conflictKeys = new(StringComparer.Ordinal);
+    private readonly List<DbTextRepairModelRecord> _labels = new();
+    private readonly List<DbTextRepairModelRecord> _neuralParameterRecords = new();
+    private readonly string _trainingDataHash;
+    private readonly DbTextRepairModelRecord? _activeNeuralParameterRecord;
 
     public DbTextRepairModelIndex(IEnumerable<DbTextRepairModelRecord> records)
     {
         var labelGroups = new Dictionary<string, List<DbTextRepairModelRecord>>(StringComparer.Ordinal);
+        var allRecords = records.ToList();
 
-        foreach (DbTextRepairModelRecord record in records)
+        foreach (DbTextRepairModelRecord record in allRecords)
         {
             if (record.IsConflict)
             {
@@ -99,9 +118,16 @@ internal sealed class DbTextRepairModelIndex
                 continue;
             }
 
+            if (record.IsNeuralParameters)
+            {
+                _neuralParameterRecords.Add(record);
+                continue;
+            }
+
             if (!record.IsLabel)
                 continue;
 
+            _labels.Add(record);
             string key = DbTextRepairModelJsonl.GetRepairKey(record);
             if (string.IsNullOrEmpty(key))
                 continue;
@@ -113,7 +139,28 @@ internal sealed class DbTextRepairModelIndex
             }
 
             group.Add(record);
+
+            if (!string.IsNullOrEmpty(record.CurrentText)
+                && !string.IsNullOrEmpty(record.SelectedText))
+            {
+                if (!_historicalSelectedByCurrent.TryGetValue(record.CurrentText, out List<string>? selectedTexts))
+                {
+                    selectedTexts = new List<string>();
+                    _historicalSelectedByCurrent[record.CurrentText] = selectedTexts;
+                }
+
+                if (!selectedTexts.Contains(record.SelectedText, StringComparer.Ordinal))
+                    selectedTexts.Add(record.SelectedText);
+            }
         }
+
+        _trainingDataHash = DbTextRepairModelJsonl.ComputeTrainingDataHash(_labels);
+        _activeNeuralParameterRecord = _neuralParameterRecords
+            .Where(r => string.Equals(r.ModelKind, DbTextRepairModelConstants.NeuralModelKind, StringComparison.Ordinal)
+                        && string.Equals(r.FeatureSchemaVersion, DbTextRepairModelConstants.NeuralFeatureSchemaVersion, StringComparison.Ordinal)
+                        && string.Equals(r.TrainingDataHash, _trainingDataHash, StringComparison.Ordinal))
+            .OrderBy(r => r.TimestampUtc, StringComparer.Ordinal)
+            .LastOrDefault();
 
         foreach (var pair in labelGroups)
         {
@@ -136,6 +183,34 @@ internal sealed class DbTextRepairModelIndex
 
     public int LabelCount => _latestByExactKey.Count;
     public int ConflictCount => _conflictKeys.Count;
+    public int RawLabelRecordCount => _labels.Count;
+    public int NeuralParameterRecordCount => _neuralParameterRecords.Count;
+    public string TrainingDataHash => _trainingDataHash;
+    public bool HasActiveNeuralParameters => _activeNeuralParameterRecord != null;
+    public IReadOnlyList<DbTextRepairModelRecord> Labels => _labels;
+
+    public bool TryGetActiveNeuralParameters(out DbTextRepairModelRecord record)
+    {
+        if (_activeNeuralParameterRecord != null)
+        {
+            record = _activeNeuralParameterRecord;
+            return true;
+        }
+
+        record = new DbTextRepairModelRecord();
+        return false;
+    }
+
+    public IReadOnlyList<string> GetHistoricalCandidates(string currentText)
+    {
+        if (string.IsNullOrEmpty(currentText)
+            || !_historicalSelectedByCurrent.TryGetValue(currentText, out List<string>? candidates))
+            return Array.Empty<string>();
+
+        return candidates
+            .OrderBy(t => t, StringComparer.Ordinal)
+            .ToList();
+    }
 
     public bool TryFindExact(
         string drawingSha256,

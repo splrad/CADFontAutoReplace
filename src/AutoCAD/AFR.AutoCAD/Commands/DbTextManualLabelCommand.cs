@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Runtime;
@@ -30,7 +32,9 @@ public sealed class DbTextManualLabelCommand
         try
         {
             DbTextRepairModelStore.EnsureReady();
-            if (!TryReadSelection(doc.Database, result.ObjectId, out DbTextManualSelection selection, out string error))
+            DbTextRepairModelIndex index = DbTextRepairModelStore.LoadIndex(out _);
+            var advisor = new DbTextRepairAdvisor(index);
+            if (!TryReadSelection(doc.Database, result.ObjectId, index, advisor, out DbTextManualSelection selection, out string error))
             {
                 ed.WriteMessage($"\n{error}\n");
                 return;
@@ -41,6 +45,16 @@ public sealed class DbTextManualLabelCommand
                 Metadata = selection.Metadata,
                 CurrentText = selection.CurrentText,
                 CandidateText = selection.CandidateText,
+                Candidates = selection.Candidates
+                    .Select(c => new DbTextLabelCandidateData
+                    {
+                        Text = c.Text,
+                        Source = c.Source,
+                        Reason = c.Reason,
+                        HasNeuralScore = c.HasNeuralScore,
+                        NeuralScore = c.NeuralScore
+                    })
+                    .ToList(),
                 Evidence = selection.Evidence
             });
 
@@ -52,6 +66,7 @@ public sealed class DbTextManualLabelCommand
             string selectedText = action == DbTextRepairModelConstants.ActionRepair
                 ? window.SelectedText
                 : selection.CurrentText;
+            string candidateText = FindMatchingCandidateText(selection.Candidates, selectedText);
 
             DbTextRepairModelRecord record;
             bool changed = false;
@@ -76,7 +91,7 @@ public sealed class DbTextManualLabelCommand
                     doc.Database,
                     tr,
                     dbText,
-                    selection.CandidateText,
+                    candidateText,
                     selectedText,
                     action,
                     window.Note);
@@ -111,6 +126,8 @@ public sealed class DbTextManualLabelCommand
     private static bool TryReadSelection(
         Database db,
         ObjectId objectId,
+        DbTextRepairModelIndex index,
+        DbTextRepairAdvisor advisor,
         out DbTextManualSelection selection,
         out string error)
     {
@@ -125,10 +142,21 @@ public sealed class DbTextManualLabelCommand
         }
 
         string current = dbText.TextString ?? string.Empty;
-        DbTextRepairCandidateGenerator.TryGenerateBig5CarrierToGbkCandidate(
-            current,
-            out string candidate,
-            out string candidateReason);
+        DbTextRepairModelRecord context = BuildContext(db, tr, dbText);
+        IReadOnlyList<DbTextRepairCandidate> candidates =
+            DbTextRepairCandidateGenerator.BuildCandidates(current, index);
+        advisor.ScoreCandidates(context, candidates);
+        List<DbTextRepairCandidate> rankedCandidates = candidates
+            .OrderByDescending(c => c.HasNeuralScore ? c.NeuralScore : -1)
+            .ThenBy(c => string.Equals(c.Text, current, StringComparison.Ordinal) ? 1 : 0)
+            .ThenBy(c => c.Text, StringComparer.Ordinal)
+            .ToList();
+        string candidate = rankedCandidates.FirstOrDefault(c => !string.Equals(c.Text, current, StringComparison.Ordinal))?.Text
+                           ?? rankedCandidates.FirstOrDefault()?.Text
+                           ?? string.Empty;
+        string candidateReason = string.Join(
+            "; ",
+            rankedCandidates.Select(DescribeCandidate));
 
         string style = DescribeTextStyle(dbText.TextStyleId, tr);
         string ownerBlock = DescribeOwnerBlock(dbText, tr);
@@ -137,8 +165,9 @@ public sealed class DbTextManualLabelCommand
             dbText.Handle.ToString(),
             current,
             candidate,
+            rankedCandidates,
             $"Handle={dbText.Handle}, Layer='{dbText.Layer}', Block='{ownerBlock}', Style={style}",
-            $"Candidate={candidateReason}; Model={DbTextRepairModelStore.CanonicalPath}");
+            $"Candidates={candidateReason}; AI={advisor.NeuralRankerStatus}; Model={DbTextRepairModelStore.CanonicalPath}");
         tr.Commit();
         return true;
     }
@@ -153,13 +182,43 @@ public sealed class DbTextManualLabelCommand
         string note)
     {
         DbTextDrawingIdentity drawing = DbTextDrawingIdentity.FromDatabase(db);
+        DbTextRepairModelRecord context = BuildContext(db, tr, dbText);
+
+        return new DbTextRepairModelRecord
+        {
+            RecordType = DbTextRepairModelConstants.RecordTypeLabel,
+            SourceSetId = BuildSourceSetId(),
+            TimestampUtc = DateTime.UtcNow.ToString("O"),
+            DrawingPath = drawing.Path,
+            DrawingFileName = drawing.FileName,
+            DrawingLength = drawing.Length,
+            DrawingLastWriteUtc = drawing.LastWriteUtc,
+            DrawingSha256 = drawing.Sha256,
+            EntityType = context.EntityType,
+            ObjectId = context.ObjectId,
+            Handle = context.Handle,
+            Layer = context.Layer,
+            OwnerBlockName = context.OwnerBlockName,
+            TextStyleName = context.TextStyleName,
+            TextStyleFileName = context.TextStyleFileName,
+            TextStyleBigFontFileName = context.TextStyleBigFontFileName,
+            TextStyleTypeFace = context.TextStyleTypeFace,
+            CurrentText = context.CurrentText,
+            CandidateText = candidateText,
+            SelectedText = selectedText,
+            Action = action,
+            Note = note
+        };
+    }
+
+    private static DbTextRepairModelRecord BuildContext(Database db, Transaction tr, DBText dbText)
+    {
+        DbTextDrawingIdentity drawing = DbTextDrawingIdentity.FromDatabase(db);
         TextStyleIdentity style = GetTextStyleIdentity(tr, dbText);
 
         return new DbTextRepairModelRecord
         {
-            RecordType = "label",
-            SourceSetId = BuildSourceSetId(),
-            TimestampUtc = DateTime.UtcNow.ToString("O"),
+            RecordType = DbTextRepairModelConstants.RecordTypeLabel,
             DrawingPath = drawing.Path,
             DrawingFileName = drawing.FileName,
             DrawingLength = drawing.Length,
@@ -174,12 +233,26 @@ public sealed class DbTextManualLabelCommand
             TextStyleFileName = style.FileName,
             TextStyleBigFontFileName = style.BigFontFileName,
             TextStyleTypeFace = style.TypeFace,
-            CurrentText = dbText.TextString ?? string.Empty,
-            CandidateText = candidateText,
-            SelectedText = selectedText,
-            Action = action,
-            Note = note
+            CurrentText = dbText.TextString ?? string.Empty
         };
+    }
+
+    private static string FindMatchingCandidateText(IReadOnlyList<DbTextRepairCandidate> candidates, string selectedText)
+    {
+        if (string.IsNullOrEmpty(selectedText))
+            return string.Empty;
+
+        return candidates.Any(c => string.Equals(c.Text, selectedText, StringComparison.Ordinal))
+            ? selectedText
+            : string.Empty;
+    }
+
+    private static string DescribeCandidate(DbTextRepairCandidate candidate)
+    {
+        string score = candidate.HasNeuralScore
+            ? $", AI={candidate.NeuralScore:0.000}"
+            : string.Empty;
+        return $"{candidate.Source}{score} -> {candidate.Text}";
     }
 
     private static string BuildSourceSetId()
@@ -297,6 +370,7 @@ public sealed class DbTextManualLabelCommand
         string Handle,
         string CurrentText,
         string CandidateText,
+        IReadOnlyList<DbTextRepairCandidate> Candidates,
         string Metadata,
         string Evidence);
 }

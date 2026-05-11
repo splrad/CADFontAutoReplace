@@ -290,9 +290,10 @@ internal static class DbTextRepairModelMergeEngine
         return recordType switch
         {
             "meta" => 0,
+            DbTextRepairModelConstants.RecordTypeNeuralParameters => 1,
             "params" => 1,
-            "label" => 2,
-            "conflict" => 3,
+            DbTextRepairModelConstants.RecordTypeLabel => 2,
+            DbTextRepairModelConstants.RecordTypeConflict => 3,
             _ => 9
         };
     }

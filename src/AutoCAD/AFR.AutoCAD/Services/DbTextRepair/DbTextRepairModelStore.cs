@@ -49,6 +49,11 @@ internal static class DbTextRepairModelStore
 
     public static void AppendLabel(DbTextRepairModelRecord record)
     {
+        AppendRecord(record);
+    }
+
+    public static void AppendRecord(DbTextRepairModelRecord record)
+    {
         EnsureReady();
         DbTextRepairModelJsonl.Normalize(record);
         Directory.CreateDirectory(_activeDirectory);
