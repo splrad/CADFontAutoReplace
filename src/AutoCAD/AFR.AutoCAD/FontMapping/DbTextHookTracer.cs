@@ -44,6 +44,8 @@ internal static class DbTextHookTracer
             "",
             DbTextDwgInFieldsScopeHook.GetReport(),
             "",
+            DbTextUpstreamDecodeProbeHook.GetReport(),
+            "",
             TextEditorDbcsDecodeHook.GetReport(),
             "",
             CodePageFamilyHook.GetReport());

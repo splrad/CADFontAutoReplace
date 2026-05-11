@@ -249,6 +249,83 @@ internal static class TextEditorDbcsDecodeHook
     }
 
     /// <summary>
+    /// Build the byte carrier used by the observed fallback path.
+    /// <para>
+    /// This is diagnostic-only evidence. The bytes are derived from the current managed Unicode
+    /// string by encoding it as CP950, so they are not native/DWG source bytes unless another
+    /// probe independently shows the same full byte sequence.
+    /// </para>
+    /// </summary>
+    public static bool TryBuildObservedCarrierBytes(string text, out byte[] carrierBytes, out string reason)
+    {
+        carrierBytes = [];
+        reason = "<empty>";
+
+        if (string.IsNullOrEmpty(text))
+            return false;
+
+        EnsureCodePageProviderRegistered();
+        Encoding byteCarrier = Encoding.GetEncoding(
+            950,
+            EncoderFallback.ExceptionFallback,
+            DecoderFallback.ExceptionFallback);
+
+        var bytesOut = new List<byte>(text.Length * 2);
+        var missing = new List<string>();
+        int asciiCount = 0;
+        int dbcsCount = 0;
+        int nonDbcsEncodedCount = 0;
+
+        foreach (char ch in text)
+        {
+            if (ch <= 0x7F)
+            {
+                bytesOut.Add((byte)ch);
+                asciiCount++;
+                continue;
+            }
+
+            byte[] bytes;
+            try
+            {
+                bytes = byteCarrier.GetBytes(new[] { ch });
+            }
+            catch
+            {
+                if (missing.Count < 8)
+                    missing.Add($"U+{(int)ch:X4}");
+                continue;
+            }
+
+            bytesOut.AddRange(bytes);
+            if (bytes.Length == 2 && bytes[0] >= 0x80)
+                dbcsCount++;
+            else
+                nonDbcsEncodedCount++;
+        }
+
+        carrierBytes = bytesOut.ToArray();
+        if (missing.Count != 0)
+        {
+            reason =
+                $"partial observed-carrier cp950 ascii={asciiCount}, dbcs={dbcsCount}, " +
+                $"nonDbcs={nonDbcsEncodedCount}, missing={missing.Count}, samples={string.Join(",", missing)}";
+            return false;
+        }
+
+        if (dbcsCount == 0)
+        {
+            reason = $"no-dbcs-carrier-bytes cp950 ascii={asciiCount}, nonDbcs={nonDbcsEncodedCount}";
+            return false;
+        }
+
+        reason =
+            $"observed-carrier cp950 ascii={asciiCount}, dbcs={dbcsCount}, " +
+            $"nonDbcs={nonDbcsEncodedCount}, bytes={carrierBytes.Length}";
+        return true;
+    }
+
+    /// <summary>
     /// 使用最近一次 native code page 证据做只读诊断预览。
     /// <para>
     /// 该方法仅供 Inspect 命令显示候选预览；自动写回必须传入对象级 provenance code page。
@@ -347,7 +424,7 @@ internal static class TextEditorDbcsDecodeHook
                 ref _readDoubleByteHitCount,
                 out bool hasDbcsScope);
             bool result = trampoline(input, outputChar, patchedCodePageId);
-            TryRecordScopedDbTextDecode(outputChar, hasDbcsScope, result);
+            TryRecordScopedDbTextDecode(input, outputChar, hasDbcsScope, result);
             TryLogReadDoubleByteProbe(returnRva, input, outputChar, codePageId, patchedCodePageId, hasDbcsScope, result);
             return result;
         }
@@ -490,13 +567,20 @@ internal static class TextEditorDbcsDecodeHook
         }
     }
 
-    private static void TryRecordScopedDbTextDecode(IntPtr outputChar, bool hasDbcsScope, bool result)
+    internal static bool TryDecodeNativeBytePair(int codePageId, byte firstByte, byte secondByte, out char mapped)
+    {
+        return TryDecodeBytesWithNative(codePageId, firstByte, secondByte, out mapped);
+    }
+
+    private static void TryRecordScopedDbTextDecode(IntPtr input, IntPtr outputChar, bool hasDbcsScope, bool result)
     {
         if (!hasDbcsScope || !result || outputChar == IntPtr.Zero || !IsCommittedMemory(outputChar))
             return;
 
+        byte firstByte = ReadByteSafe(input, 0);
+        byte secondByte = ReadByteSafe(input, 1);
         char output = (char)Marshal.ReadInt16(outputChar);
-        DbTextDwgInFieldsScopeHook.RecordNativeDecodedDbcsChar(output);
+        DbTextDwgInFieldsScopeHook.RecordNativeDecodedDbcsChar(firstByte, secondByte, output);
     }
 
     private static void TryLogMultiByteToUnicodeProbe(

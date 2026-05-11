@@ -144,6 +144,7 @@ public abstract class PluginEntryBase : IExtensionApplication
             // 必须在图纸打开前安装，才能拦截 MText/DBText 的 DBCS 字节解码。
             DwgFilerCodePageScopeHook.Install();
             DbTextDwgInFieldsScopeHook.Install();
+            DbTextUpstreamDecodeProbeHook.Install();
             TextEditorDbcsDecodeHook.Install();
             CodePageFamilyHook.Install();
 #endif
@@ -172,6 +173,7 @@ public abstract class PluginEntryBase : IExtensionApplication
 #if DEBUG
         CodePageFamilyHook.Uninstall();
         TextEditorDbcsDecodeHook.Uninstall();
+        DbTextUpstreamDecodeProbeHook.Uninstall();
         DbTextDwgInFieldsScopeHook.Uninstall();
         DwgFilerCodePageScopeHook.Uninstall();
 #endif
@@ -216,6 +218,7 @@ public abstract class PluginEntryBase : IExtensionApplication
 #if DEBUG
         CodePageFamilyHook.Uninstall();
         TextEditorDbcsDecodeHook.Uninstall();
+        DbTextUpstreamDecodeProbeHook.Uninstall();
         DbTextDwgInFieldsScopeHook.Uninstall();
         DwgFilerCodePageScopeHook.Uninstall();
 #endif

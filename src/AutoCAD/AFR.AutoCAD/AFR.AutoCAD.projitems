@@ -18,11 +18,13 @@
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\CodePageFamilyHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextDwgInFieldsScopeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextHookTracer.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextUpstreamDecodeProbeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DwgFilerCodePageScopeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\LdFileHook.cs" Link="FontMapping\LdFileHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextFontParser.cs" Link="FontMapping\MTextFontParser.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontReplacer.cs" Link="FontMapping\MTextInlineFontReplacer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontScanner.cs" Link="FontMapping\MTextInlineFontScanner.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeImpTextIndependentSourceProbe.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeInlineHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\TextEditorDbcsDecodeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AppInitializer.cs" Link="Hosting\AppInitializer.cs" />

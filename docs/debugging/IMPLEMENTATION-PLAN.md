@@ -10,8 +10,8 @@
 
 ## 验证标准
 
-- 目标 Big5 DWG：`LastCodePageId` 为 `0x27`，`LastOriginalCodePageId` 为 `0x28`，`LastPatchedCodePageId` 为 `0x27`，`TextEditorDbcsDecodeHook` 或 `CodePageFamilyHook` 的 `PatchedCount > 0`。
-- 正常 GBK DWG：`LastCodePageId` 与 `LastOriginalCodePageId` 均为 `0x28`，不得发生 `0x27` patch。
+- 目标 DWG：`LastCodePageId` 为 `0x27(GBK/CP936 observed)`，`LastOriginalCodePageId` 为 `0x28(Big5/CP950 observed)`，`LastPatchedCodePageId` 为 `0x27`，`TextEditorDbcsDecodeHook` 或 `CodePageFamilyHook` 的 `PatchedCount > 0`。
+- 正常同 code page DWG：`LastCodePageId` 与 `LastOriginalCodePageId` 一致，不得发生跨 code page patch。
 - 非 DBCS / 无 readString 作用域：只增加 `NoDbcsScopeCount` 或不 patch。
 
 ## 版本限制

@@ -28,9 +28,9 @@ AFRTRACERSTOP    停用追踪报告标记
 3. 手动打开目标 DWG。
 4. 运行 `AFRDBTEXTPROBE` 或 `AFRTRACERREPORT`。
 5. 检查报告是否包含：
-   - `LastCodePageId: 0x27(Big5/CP950)`
-   - `LastOriginalCodePageId: 0x28(GBK/CP936)`
-   - `LastPatchedCodePageId: 0x27(Big5/CP950)`
+   - `LastCodePageId: 0x27(GBK/CP936 observed)`
+   - `LastOriginalCodePageId: 0x28(Big5/CP950 observed)`
+   - `LastPatchedCodePageId: 0x27(GBK/CP936 observed)`
    - `TextEditor DBCS Decode Hook` 或 `Code Page Family Hook` 的 `PatchedCount` 大于 0
 
-若 `LastCodePageId` 不是 `0x27`，说明 DWG filer 没有提供 Big5 证据；在无误杀约束下不能自动按 Big5 修复。
+若 `LastCodePageId` 不是 `0x27`，说明 DWG filer 没有提供目标图纸所需的 CP936 证据；在无误杀约束下不能自动按 CP936 修复。

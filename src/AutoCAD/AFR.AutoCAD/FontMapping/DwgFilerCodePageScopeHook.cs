@@ -23,7 +23,12 @@ internal static class DwgFilerCodePageScopeHook
     private const uint MemCommit = 0x1000;
     private const int ScopeLogLimit = 40;
     private const int StringLogLimit = 240;
+    private const int DbTextReadStringLogLimit = 120;
     private const int MaxLoggedStringChars = 160;
+    private const int MaxReadStringRawBytes = 96;
+    private const int FilerBitOffsetOffset = 0x10;
+    private const int FilerBufferPointerOffset = 0x30;
+    private const int FilerByteOffsetOffset = 0x50;
 
     private static readonly byte[] ReadStringAcStringPrefix =
     [
@@ -52,6 +57,12 @@ internal static class DwgFilerCodePageScopeHook
     private static int _externalScopeCount;
     private static int _scopeLogCount;
     private static int _stringLogCount;
+    private static int _dbTextReadStringTraceCount;
+    private static int _dbTextReadStringAttemptCount;
+    private static int _dbTextReadStringStatusNonZeroCount;
+    private static int _dbTextReadStringEmptyOutputCount;
+    private static int _dbTextReadStringRecordMissCount;
+    private static int _dbTextReadStringTraceLogCount;
     private static int _lastCodePageId;
     private static bool _lastCodePageIsDoubleByte;
     private static IntPtr _lastFiler;
@@ -173,7 +184,13 @@ internal static class DwgFilerCodePageScopeHook
         }
 
         _installed = false;
-        DiagnosticLogger.Log(Tag, $"已卸载。AcStringHits={_acStringHitCount}, WCharPtrHits={_wideCharPointerHitCount}, DbcsScopes={_dbcsScopeCount}");
+        DiagnosticLogger.Log(Tag,
+            $"已卸载。AcStringHits={_acStringHitCount}, WCharPtrHits={_wideCharPointerHitCount}, " +
+            $"DbcsScopes={_dbcsScopeCount}, DbTextReadStringAttempts={_dbTextReadStringAttemptCount}, " +
+            $"DbTextReadStringTraces={_dbTextReadStringTraceCount}, " +
+            $"DbTextReadStringStatusNonZero={_dbTextReadStringStatusNonZeroCount}, " +
+            $"DbTextReadStringEmptyOutput={_dbTextReadStringEmptyOutputCount}, " +
+            $"DbTextReadStringRecordMiss={_dbTextReadStringRecordMissCount}");
     }
 
     /// <summary>
@@ -207,6 +224,11 @@ internal static class DwgFilerCodePageScopeHook
             $"WideCharPointerReadStringHits: {_wideCharPointerHitCount}",
             $"DbcsScopeCount: {_dbcsScopeCount}",
             $"ExternalScopeCount: {_externalScopeCount}",
+            $"DbTextReadStringAttemptCount: {_dbTextReadStringAttemptCount}",
+            $"DbTextReadStringTraceCount: {_dbTextReadStringTraceCount}",
+            $"DbTextReadStringStatusNonZeroCount: {_dbTextReadStringStatusNonZeroCount}",
+            $"DbTextReadStringEmptyOutputCount: {_dbTextReadStringEmptyOutputCount}",
+            $"DbTextReadStringRecordMissCount: {_dbTextReadStringRecordMissCount}",
             $"InvalidCodePageCount: {_invalidCodePageCount}",
             $"LastFiler: 0x{_lastFiler.ToInt64():X}",
             $"LastCodePageId: {FormatCodePageId(_lastCodePageId)}",
@@ -375,12 +397,34 @@ internal static class DwgFilerCodePageScopeHook
                 $"codePage={FormatCodePageId(codePageId)}, dbcs={isDoubleByte}");
         }
 
+        TryCaptureFilerPosition(filer, out FilerPosition beforePosition);
+
+        bool inDbTextScope = DbTextDwgInFieldsScopeHook.TryGetCurrentDbTextScope(out _, out _);
         try
         {
             int status = trampoline(filer, output);
-            if (status == 0 && isDoubleByte && overloadName.Equals("WCharPtr", StringComparison.Ordinal))
+            if (inDbTextScope)
             {
-                TryLogWideCharOutput(output, returnRva, codePageId);
+                TryCaptureFilerPosition(filer, out FilerPosition afterPosition);
+                byte[] rawBytes = TryReadFilerRawBytes(beforePosition, afterPosition, MaxReadStringRawBytes);
+                string text = isDoubleByte
+                    ? overloadName.Equals("AcString", StringComparison.Ordinal)
+                        ? ReadAcString(output, MaxLoggedStringChars)
+                        : ReadWideCharPointerOutput(output, MaxLoggedStringChars)
+                    : string.Empty;
+                TryRecordDbTextReadStringTrace(
+                    overloadName,
+                    codePageId,
+                    isDoubleByte,
+                    status,
+                    returnRva,
+                    beforePosition,
+                    afterPosition,
+                    rawBytes,
+                    text);
+
+                if (status == 0 && isDoubleByte && overloadName.Equals("WCharPtr", StringComparison.Ordinal))
+                    TryLogWideCharOutput(text, returnRva, codePageId);
             }
             return status;
         }
@@ -425,18 +469,69 @@ internal static class DwgFilerCodePageScopeHook
         }
     }
 
-    private static void TryLogWideCharOutput(IntPtr output, uint returnRva, int codePageId)
+    private static string ReadWideCharPointerOutput(IntPtr output, int maxChars)
     {
         try
         {
             if (output == IntPtr.Zero || !IsCommittedMemory(output))
-                return;
+                return string.Empty;
 
             IntPtr textPtr = Marshal.ReadIntPtr(output);
             if (textPtr == IntPtr.Zero || !IsCommittedMemory(textPtr))
-                return;
+                return string.Empty;
 
-            string text = ReadNullTerminatedWideString(textPtr, MaxLoggedStringChars);
+            return ReadNullTerminatedWideString(textPtr, maxChars);
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string ReadAcString(IntPtr acString, int maxChars)
+    {
+        try
+        {
+            if (acString == IntPtr.Zero
+                || !IsCommittedMemory(acString)
+                || !IsCommittedMemory(acString + 0x18))
+                return string.Empty;
+
+            int lengthMarker = Marshal.ReadInt32(acString, 4);
+            int length = lengthMarker < 0
+                ? lengthMarker & 0x3FFFFFFF
+                : lengthMarker;
+            if (length <= 0 || length > maxChars)
+                return string.Empty;
+
+            IntPtr textPtr = lengthMarker < 0
+                ? Marshal.ReadIntPtr(acString, 8)
+                : acString + 8;
+            if (textPtr == IntPtr.Zero || !IsCommittedMemory(textPtr))
+                return string.Empty;
+
+            var chars = new char[length];
+            for (int i = 0; i < length; i++)
+            {
+                IntPtr current = textPtr + (i * sizeof(char));
+                if (!IsCommittedMemory(current))
+                    return string.Empty;
+
+                chars[i] = (char)Marshal.ReadInt16(current);
+            }
+
+            return new string(chars);
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static void TryLogWideCharOutput(string text, uint returnRva, int codePageId)
+    {
+        try
+        {
             if (string.IsNullOrEmpty(text) || !ContainsNonAscii(text))
                 return;
 
@@ -456,6 +551,112 @@ internal static class DwgFilerCodePageScopeHook
         {
             DiagnosticLogger.LogError(Tag + ": 记录 WCharPtr 输出失败", ex);
         }
+    }
+
+    private static void TryRecordDbTextReadStringTrace(
+        string overloadName,
+        int codePageId,
+        bool isDoubleByte,
+        int status,
+        uint returnRva,
+        FilerPosition beforePosition,
+        FilerPosition afterPosition,
+        byte[] rawBytes,
+        string text)
+    {
+        Interlocked.Increment(ref _dbTextReadStringAttemptCount);
+        if (status != 0)
+            Interlocked.Increment(ref _dbTextReadStringStatusNonZeroCount);
+        if (string.IsNullOrEmpty(text) && rawBytes.Length == 0)
+            Interlocked.Increment(ref _dbTextReadStringEmptyOutputCount);
+
+        var readStringEvent = new NativeReadStringEvent(
+            overloadName,
+            codePageId,
+            isDoubleByte,
+            status,
+            returnRva,
+            beforePosition.ByteOffset,
+            beforePosition.BitOffset,
+            afterPosition.ByteOffset,
+            afterPosition.BitOffset,
+            rawBytes,
+            text);
+        if (!DbTextDwgInFieldsScopeHook.TryRecordReadStringEvent(readStringEvent))
+        {
+            Interlocked.Increment(ref _dbTextReadStringRecordMissCount);
+            return;
+        }
+
+        Interlocked.Increment(ref _dbTextReadStringTraceCount);
+        if (Interlocked.Increment(ref _dbTextReadStringTraceLogCount) > DbTextReadStringLogLimit)
+            return;
+
+        DiagnosticLogger.Log(Tag,
+            $"DBText readString: {overloadName}, return=0x{returnRva:X}, status={status}, " +
+            $"codePage={FormatCodePageId(codePageId)}, dbcs={isDoubleByte}, " +
+            $"pos={FormatPosition(beforePosition)}->{FormatPosition(afterPosition)}, " +
+            $"raw={FormatBytes(rawBytes, 32)}, text='{EscapeForLog(text)}'");
+    }
+
+    private static bool TryCaptureFilerPosition(IntPtr filer, out FilerPosition position)
+    {
+        position = default;
+        try
+        {
+            if (filer == IntPtr.Zero
+                || !IsCommittedMemory(filer + FilerBitOffsetOffset)
+                || !IsCommittedMemory(filer + FilerBufferPointerOffset)
+                || !IsCommittedMemory(filer + FilerByteOffsetOffset))
+                return false;
+
+            IntPtr buffer = Marshal.ReadIntPtr(filer + FilerBufferPointerOffset);
+            int byteOffset = Marshal.ReadInt32(filer + FilerByteOffsetOffset);
+            int bitOffset = Marshal.ReadInt32(filer + FilerBitOffsetOffset);
+            if (buffer == IntPtr.Zero || byteOffset < 0 || bitOffset < 0 || bitOffset > 7)
+                return false;
+
+            position = new FilerPosition(buffer, byteOffset, bitOffset);
+            return true;
+        }
+        catch
+        {
+            position = default;
+            return false;
+        }
+    }
+
+    private static byte[] TryReadFilerRawBytes(FilerPosition before, FilerPosition after, int limit)
+    {
+        if (before.Buffer == IntPtr.Zero
+            || after.Buffer == IntPtr.Zero
+            || before.Buffer != after.Buffer
+            || before.ByteOffset < 0
+            || after.ByteOffset < before.ByteOffset)
+            return [];
+
+        int endExclusive = after.ByteOffset + (after.BitOffset > 0 ? 1 : 0);
+        int length = endExclusive - before.ByteOffset;
+        if (length <= 0)
+            return [];
+
+        length = Math.Min(length, limit);
+        var bytes = new byte[length];
+        int count = 0;
+        for (; count < length; count++)
+        {
+            IntPtr current = before.Buffer + before.ByteOffset + count;
+            if (!IsCommittedMemory(current))
+                break;
+
+            bytes[count] = Marshal.ReadByte(current);
+        }
+
+        if (count == bytes.Length)
+            return bytes;
+
+        Array.Resize(ref bytes, count);
+        return bytes;
     }
 
     private static bool TryRememberWideCharOutput(uint returnRva, int codePageId, string text)
@@ -494,6 +695,28 @@ internal static class DwgFilerCodePageScopeHook
         }
 
         return false;
+    }
+
+    private static string FormatPosition(FilerPosition position)
+    {
+        return position.Buffer == IntPtr.Zero
+            ? "<none>"
+            : $"{position.ByteOffset}:{position.BitOffset}";
+    }
+
+    private static string FormatBytes(byte[] bytes, int limit)
+    {
+        if (bytes.Length == 0)
+            return "<empty>";
+
+        int count = Math.Min(bytes.Length, limit);
+        var parts = new string[count];
+        for (int i = 0; i < count; i++)
+            parts[i] = bytes[i].ToString("X2");
+
+        return bytes.Length <= limit
+            ? string.Join(" ", parts)
+            : string.Join(" ", parts) + " ...";
     }
 
     private static string EscapeForLog(string text)
@@ -588,5 +811,7 @@ internal static class DwgFilerCodePageScopeHook
         public bool IsDoubleByte { get; }
         public int Depth { get; }
     }
+
+    private readonly record struct FilerPosition(IntPtr Buffer, int ByteOffset, int BitOffset);
 }
 #endif

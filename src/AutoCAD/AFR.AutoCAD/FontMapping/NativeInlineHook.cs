@@ -278,6 +278,7 @@ internal sealed class NativeInlineHook<TDelegate> where TDelegate : Delegate
             if (b0 == 0xC3) return 1;
             if (b0 == 0xC2) return 3;
             if (b0 == 0xE8 || b0 == 0xE9) return 5;
+            if (b0 >= 0x70 && b0 <= 0x7F) return 2;
             if (b0 == 0xFF && b1 == 0x25) return 6;
             if (b0 == 0x6A) return 2;
             if (b0 == 0x68) return 5;
