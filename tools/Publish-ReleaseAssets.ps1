@@ -12,13 +12,13 @@
          （已内置 .NET 10 运行时；用户仅需额外安装 Windows App Runtime 1.8 (x64)，
            缺失时由 AFR.Deployer 启动期检测并弹原生对话框给出下载链接）
       4. 生成版本化发布资产到 artifacts\ReleaseAssets\
-         - AFR-Deployer_vX.Y.exe：部署器 EXE 本体
-         - AFR-DLL_vX.Y.zip：仅 AFR-ACAD*.dll 插件主 DLL
+         - AFR-Deployer_vX.Y.Z.exe：部署器 EXE 本体
+         - AFR-DLL_vX.Y.Z.zip：仅 AFR-ACAD*.dll 插件主 DLL
          - Fonts.zip：字体资源包
 .OUTPUTS
     <RepoRoot>\publish\AFR.Deployer\AFR.Deployer.exe
-    <RepoRoot>\artifacts\ReleaseAssets\AFR-Deployer_vX.Y.exe
-    <RepoRoot>\artifacts\ReleaseAssets\AFR-DLL_vX.Y.zip
+    <RepoRoot>\artifacts\ReleaseAssets\AFR-Deployer_vX.Y.Z.exe
+    <RepoRoot>\artifacts\ReleaseAssets\AFR-DLL_vX.Y.Z.zip
     <RepoRoot>\artifacts\ReleaseAssets\Fonts.zip
 .EXAMPLE
     .\tools\Publish-ReleaseAssets.ps1

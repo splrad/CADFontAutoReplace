@@ -145,7 +145,7 @@ internal sealed partial class MainViewModel : ObservableObject
     /// <summary>是否需要显示插件部署副行。</summary>
     public bool HasPluginSummary => !string.IsNullOrEmpty(PluginSummary);
 
-    /// <summary>部署工具自身的版本号，UI 显示用（X.Y 格式）。</summary>
+    /// <summary>部署工具自身的版本号，UI 显示用（X.Y.Z 格式）。</summary>
     /// <remarks>
     /// 保持为实例属性：MainWindow.xaml 通过 <c>{Binding DeployerVersion}</c>
     /// 依赖 DataContext 解析，改成 static 会导致现有绑定失效。
@@ -166,7 +166,7 @@ internal sealed partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>GitHub 最新正式发行版版本号（X.Y）。</summary>
+    /// <summary>GitHub 最新正式发行版版本号（X.Y.Z）。</summary>
     public string LatestVersion
     {
         get => _latestVersion;

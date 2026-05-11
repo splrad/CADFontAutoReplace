@@ -83,8 +83,8 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 
 ```text
 publish/AFR.Deployer/AFR-Deployer.exe
-artifacts/ReleaseAssets/AFR-Deployer_vX.Y.exe
-artifacts/ReleaseAssets/AFR-DLL_vX.Y.zip
+artifacts/ReleaseAssets/AFR-Deployer_vX.Y.Z.exe
+artifacts/ReleaseAssets/AFR-DLL_vX.Y.Z.zip
 artifacts/ReleaseAssets/Fonts.zip
 ```
 

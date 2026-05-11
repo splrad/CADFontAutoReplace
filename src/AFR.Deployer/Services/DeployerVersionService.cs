@@ -5,9 +5,9 @@ namespace AFR.Deployer.Services;
 /// <summary>
 /// 提供部署工具自身的版本号，用于写入注册表 PluginVersion / PluginBuildId 值和比对已安装版本。
 /// <para>
-/// AssemblyInformationalVersion 形如 <c>9.0+20260503.1</c>：
+/// AssemblyInformationalVersion 形如 <c>9.0.0+20260503.1</c>：
 /// <list type="bullet">
-///   <item><see cref="GetDisplayVersion"/>: '+' 之前部分（X.X），用于 UI 与日志头展示。</item>
+///   <item><see cref="GetDisplayVersion"/>: '+' 之前部分（X.Y.Z），用于 UI 与日志头展示。</item>
 ///   <item><see cref="GetBuildId"/>: '+' 之后部分，用于在显示版本不变时区分新旧构建。</item>
 /// </list>
 /// </para>
@@ -27,7 +27,7 @@ internal static class DeployerVersionService
         return _cachedFull;
     }
 
-    /// <summary>显示版本号（X.X），写入注册表 <c>PluginVersion</c> 值。</summary>
+    /// <summary>显示版本号（X.Y.Z），写入注册表 <c>PluginVersion</c> 值。</summary>
     internal static string GetDisplayVersion()
     {
         var full = GetFullVersion();

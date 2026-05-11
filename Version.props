@@ -4,7 +4,7 @@
     ╔═══════════════════════════════════════════════════════════════════════════╗
     ║  插件统一版本号 —— 发版时仅需修改本文件                                   ║
     ╠═══════════════════════════════════════════════════════════════════════════╣
-    ║  • PluginDisplayVersion (X.Y)                                             ║
+    ║  • PluginDisplayVersion (X.Y.Z)                                           ║
     ║      用户可见版本号：日志头、UI、Windows 文件属性「文件版本/产品版本」。  ║
     ║      不含构建日期/序号，避免显示版本未变时产生混乱。                      ║
     ║                                                                           ║
@@ -16,7 +16,7 @@
     ╚═══════════════════════════════════════════════════════════════════════════╝
   -->
   <PropertyGroup>
-    <PluginDisplayVersion>9.1</PluginDisplayVersion>
+    <PluginDisplayVersion>9.1.0</PluginDisplayVersion>
     <PluginBuildId>20260504.1</PluginBuildId>
   </PropertyGroup>
 

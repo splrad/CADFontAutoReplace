@@ -14,7 +14,7 @@ public static class PluginVersionService
     public const int ConfigSchemaVersion = 2;
 
     /// <summary>
-    /// 获取当前插件 DLL 的完整版本号（形如 <c>9.0+20260503.1</c>）。
+    /// 获取当前插件 DLL 的完整版本号（形如 <c>9.0.0+20260503.1</c>）。
     /// <para>
     /// 优先使用程序集信息版本，未设置时回退到程序集版本。
     /// </para>
@@ -32,7 +32,7 @@ public static class PluginVersionService
     }
 
     /// <summary>
-    /// 获取面向用户的显示版本号（形如 <c>9.0</c>），即 InformationalVersion 中 '+' 之前的部分。
+    /// 获取面向用户的显示版本号（形如 <c>9.0.0</c>），即 InformationalVersion 中 '+' 之前的部分。
     /// 用于日志头与 UI 展示，在迭代中不频繁变动。
     /// </summary>
     public static string GetDisplayVersion()

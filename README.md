@@ -84,9 +84,9 @@
 
 ### 部署工具一键安装
 
-1. 在 [Releases](https://github.com/splrad/CADFontAutoReplace/releases) 下载最新发行包，其中包含 `AFR-Deployer_vX.Y.exe` 与 `AFR-DLL_vX.Y.zip`。
+1. 在 [Releases](https://github.com/splrad/CADFontAutoReplace/releases) 下载最新发行包，其中包含 `AFR-Deployer_vX.Y.Z.exe` 与 `AFR-DLL_vX.Y.Z.zip`。
 2. **先关闭所有 AutoCAD 进程**（部署工具会在检测到 CAD 运行时禁用安装/卸载按钮）。
-3. 双击运行 `AFR-Deployer_vX.Y.exe`，工具会自动扫描本机已安装的 AutoCAD 版本。
+3. 双击运行 `AFR-Deployer_vX.Y.Z.exe`，工具会自动扫描本机已安装的 AutoCAD 版本。
 4. 勾选需要安装的项目，确认"部署路径"（默认会选中首个非系统盘下的 `\CADPlugins\`），点击"安装"。
 5. 工具会自动完成：
    - 将对应版本 DLL 复制到部署路径；
@@ -103,7 +103,7 @@
 
 部署工具是推荐方式；如果只需要单 DLL 场景（例如维护、测试、受限环境），可以手动 `NETLOAD`：
 
-1. 在 [Releases](https://github.com/splrad/CADFontAutoReplace/releases) 下载 `AFR-DLL_vX.Y.zip` 并解压。
+1. 在 [Releases](https://github.com/splrad/CADFontAutoReplace/releases) 下载 `AFR-DLL_vX.Y.Z.zip` 并解压。
 2. 按 AutoCAD 版本选择对应 DLL，例如 AutoCAD 2026 使用 `AFR-ACAD2026.dll`。
 3. 在 AutoCAD 命令行输入 `NETLOAD`，选择该 DLL。
 4. 首次 `NETLOAD` 会完成默认字体部署、配置初始化与自动加载注册；按命令行提示重启 AutoCAD 后生效。
@@ -130,7 +130,7 @@
 
 ```
 ====================================================================================
-AFR 缺失字体自动替换 v9.0
+AFR 缺失字体自动替换 v9.1.0
 项目地址GitHub(国外)：github.com/splrad/CADFontAutoReplace
 项目地址Gitee(国内)：gitee.com/splrad/CADFontAutoReplace
 命令: AFR(配置) AFRLOG(日志) AFRUNLOAD(卸载命令)
