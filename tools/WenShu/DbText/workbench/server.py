@@ -41,8 +41,10 @@ class DatasetStore:
         self.export_id = str(self.manifest.get("exportId") or self.package_id)
         self.review_dir = self.dataset_root / "ReviewedLabels"
         self.report_dir = self.dataset_root / "Reports"
+        self.work_dir = self.dataset_root / ".work"
         self.review_dir.mkdir(parents=True, exist_ok=True)
         self.report_dir.mkdir(parents=True, exist_ok=True)
+        self.work_dir.mkdir(parents=True, exist_ok=True)
 
         self.reviewed_path = self.review_dir / f"{self.export_id}_reviewed.jsonl"
         self.audit_path = self.review_dir / f"{self.export_id}_review_audit.tsv"
@@ -226,12 +228,25 @@ class DatasetStore:
             self.reviewed.values(),
             key=lambda item: order.get(str(item.get("groupId")), 10**9),
         )
-        tmp_path = self.reviewed_path.with_suffix(".jsonl.tmp")
-        with tmp_path.open("w", encoding="utf-8", newline="\n") as writer:
-            for record in reviewed_records:
-                writer.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
-                writer.write("\n")
-        tmp_path.replace(self.reviewed_path)
+        last_error: PermissionError | None = None
+        for attempt in range(6):
+            tmp_path = self.work_dir / f"{self.reviewed_path.name}.{uuid.uuid4().hex}.tmp"
+            try:
+                with tmp_path.open("w", encoding="utf-8", newline="\n") as writer:
+                    for record in reviewed_records:
+                        writer.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+                        writer.write("\n")
+                tmp_path.replace(self.reviewed_path)
+                break
+            except PermissionError as exc:
+                last_error = exc
+                time.sleep(0.05 * (attempt + 1))
+            finally:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+        else:
+            if last_error is not None:
+                raise last_error
         self._write_audit(reviewed_records)
 
     def _write_audit(self, records: list[dict]) -> None:
@@ -415,7 +430,7 @@ class WorkbenchState:
     def save_label(self, payload: dict) -> dict:
         store = self.require_store()
         result = store.save_label(payload)
-        return {"ok": True, "label": result, "bootstrap": self.bootstrap_payload()}
+        return {"ok": True, "label": result}
 
     def build_features(self) -> dict:
         store = self.require_store()
@@ -1042,7 +1057,7 @@ INDEX_HTML = r"""<!doctype html>
               <button class="ok" onclick="quickLabel('keep')">保持原文</button>
               <button class="risk" onclick="quickLabel('unsafe')">标为不安全</button>
               <button onclick="nextRecord()">下一条</button>
-              <button class="primary" onclick="saveLabel()">保存标注</button>
+              <button id="saveButton" class="primary" onclick="saveLabel()">保存标注</button>
               <button onclick="goTraining()">去训练</button>
             </div>
           </div>
@@ -1113,6 +1128,7 @@ INDEX_HTML = r"""<!doctype html>
     let activeView = 'packages';
     let pollTimer = null;
     let recordById = new Map();
+    let saveInFlight = false;
 
     async function api(path, options) {
       const res = await fetch(path, options || {});
@@ -1222,13 +1238,17 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function renderReview() {
+      renderReviewStatus();
+      renderRecordList();
+      renderPreview();
+      renderRecordDetails();
+    }
+
+    function renderReviewStatus() {
       const data = getData();
       const summary = data.summary || {};
       document.getElementById('reviewProgress').textContent = `${summary.reviewed || 0}/${summary.total || 0}`;
       document.getElementById('reviewedPath').textContent = `Reviewed: ${(data.paths || {}).reviewed || ''}`;
-      renderRecordList();
-      renderPreview();
-      renderRecordDetails();
     }
 
     function renderRecordList() {
@@ -1360,6 +1380,16 @@ INDEX_HTML = r"""<!doctype html>
       });
     }
 
+    function updateReviewedRow(groupId) {
+      const rows = document.querySelectorAll('#recordList .row');
+      for (const row of rows) {
+        if (row.dataset.groupId === groupId) {
+          row.classList.toggle('reviewed', !!getReviewed()[groupId]);
+          return;
+        }
+      }
+    }
+
     function updatePreviewSelection() {
       document.querySelectorAll('#preview .preview-point').forEach(point => {
         const active = point.dataset.groupId === selectedId;
@@ -1394,29 +1424,53 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function saveLabel() {
+      if (saveInFlight) return;
       const record = currentRecord();
       if (!record) return;
-      const data = await api('/api/label', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          groupId: record.groupId,
-          labelAction: document.getElementById('labelAction').value,
-          candidateIndex: selectedCandidate,
-          labelText: document.getElementById('labelText').value,
-          reviewer: document.getElementById('reviewer').value,
-          note: document.getElementById('note').value
-        })
-      });
-      setApp(data.bootstrap);
-      nextRecord(true);
+      const savedId = record.groupId;
+      const saveButton = document.getElementById('saveButton');
+      saveInFlight = true;
+      if (saveButton) saveButton.disabled = true;
+      try {
+        const res = await fetch('/api/label', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            groupId: record.groupId,
+            labelAction: document.getElementById('labelAction').value,
+            candidateIndex: selectedCandidate,
+            labelText: document.getElementById('labelText').value,
+            reviewer: document.getElementById('reviewer').value,
+            note: document.getElementById('note').value
+          })
+        });
+        const data = await res.json();
+        if (!res.ok || data.ok === false) throw new Error(data.error || '请求失败');
+        const label = data.label || {};
+        const currentData = getData();
+        currentData.reviewed = currentData.reviewed || {};
+        if (label.record) currentData.reviewed[savedId] = label.record;
+        if (label.summary) currentData.summary = label.summary;
+        renderReviewStatus();
+        const filter = document.getElementById('filter')?.value || 'all';
+        if (filter === 'reviewed' || filter === 'unreviewed') {
+          renderRecordList();
+        } else {
+          updateReviewedRow(savedId);
+        }
+        nextRecord(false);
+      } finally {
+        saveInFlight = false;
+        if (saveButton) saveButton.disabled = false;
+      }
     }
 
     function nextRecord(fullRender) {
       const visible = filteredRecords();
       if (!visible.length) return;
-      const currentIndex = Math.max(0, visible.findIndex(r => r.groupId === selectedId));
-      selectedId = visible[(currentIndex + 1) % visible.length].groupId;
+      const currentIndex = visible.findIndex(r => r.groupId === selectedId);
+      const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % visible.length : 0;
+      selectedId = visible[nextIndex].groupId;
       selectedCandidate = null;
       if (fullRender) {
         render();

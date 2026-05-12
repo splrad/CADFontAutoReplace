@@ -73,6 +73,8 @@ artifacts/
 
 # WenShu: raw drawing inputs and local Python environments stay local-only.
 /data/WenShu/DbText/RawDwg/
+/datasets/WenShu/**/.work/
+/datasets/WenShu/**/.work/**
 *.dwg
 *.dxf
 **/.venv/
