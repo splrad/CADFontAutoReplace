@@ -10,8 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrCommands.cs" Link="Commands\AfrCommands.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Commands\DbTextManualLabelCommand.cs" Link="Commands\DbTextManualLabelCommand.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Commands\DbTextModelCommand.cs" Link="Commands\DbTextModelCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrUnloadCommand.cs" Link="Commands\AfrUnloadCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\AutoCadFontHook.cs" Link="FontMapping\AutoCadFontHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\LdFileHook.cs" Link="FontMapping\LdFileHook.cs" />
@@ -31,22 +29,17 @@
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontReplacer.cs" Link="Services\FontReplacer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextDrawingIdentity.cs" Link="Services\DbTextRepair\DbTextDrawingIdentity.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairAdvisor.cs" Link="Services\DbTextRepair\DbTextRepairAdvisor.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairCandidateGenerator.cs" Link="Services\DbTextRepair\DbTextRepairCandidateGenerator.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairModelStore.cs" Link="Services\DbTextRepair\DbTextRepairModelStore.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairPolicy.cs" Link="Services\DbTextRepair\DbTextRepairPolicy.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairService.cs" Link="Services\DbTextRepair\DbTextRepairService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\LogService.cs" Link="Services\LogService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\EmbeddedFontDeployer.cs" Link="Hosting\EmbeddedFontDeployer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AssemblyRegistryDefaults.cs" Link="Hosting\AssemblyRegistryDefaults.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\ExternalRegistryDefaultsApplier.cs" Link="Hosting\ExternalRegistryDefaultsApplier.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Diagnostics\AwsHideableDialogPatcher.cs" Link="Diagnostics\AwsHideableDialogPatcher.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DbTextBatchTrainCommand.cs" Link="DebugCommands\DbTextBatchTrainCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DumpDialogApiCommand.cs" Link="DebugCommands\DumpDialogApiCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\GenProbeScriptsCommand.cs" Link="DebugCommands\GenProbeScriptsCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextEditorCommand.cs" Link="DebugCommands\MTextEditorCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextInsertCommand.cs" Link="DebugCommands\MTextInsertCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\ProfileDumpCommand.cs" Link="DebugCommands\ProfileDumpCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\ShowAwsPathCommand.cs" Link="DebugCommands\ShowAwsPathCommand.cs" Condition="'$(Configuration)'=='Debug'" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\TextEntityInspectCommand.cs" Link="DebugCommands\TextEntityInspectCommand.cs" Condition="'$(Configuration)'=='Debug'" />
   </ItemGroup>
 </Project>

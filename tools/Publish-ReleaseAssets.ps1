@@ -25,7 +25,10 @@
     .\tools\Publish-ReleaseAssets.ps1 -SkipPluginBuild   # 跳过插件构建，仅重新生成发布资产
 #>
 param(
-    [switch]$SkipPluginBuild
+    [switch]$SkipPluginBuild,
+    [string]$DbTextAiModelPath = $env:AFR_DBTEXT_AI_MODEL_PATH,
+    [string]$DbTextAiModelManifestPath = $env:AFR_DBTEXT_AI_MODEL_MANIFEST_PATH,
+    [string]$DbTextAiRuntimeDirectory = $env:AFR_DBTEXT_AI_RUNTIME_DIRECTORY
 )
 
 Set-StrictMode -Version Latest
@@ -86,6 +89,29 @@ if ($Plugins.Count -eq 0) {
 Write-Host "自动发现 $($Plugins.Count) 个插件项目：" -ForegroundColor DarkGray
 $Plugins | ForEach-Object { Write-Host "    • $($_.Name) ($($_.TFM))" -ForegroundColor DarkGray }
 
+$DbTextAiBuildArgs = @()
+if (-not [string]::IsNullOrWhiteSpace($DbTextAiModelPath)) {
+    if (-not (Test-Path -LiteralPath $DbTextAiModelPath)) {
+        Write-Host "DBText AI 模型不存在：$DbTextAiModelPath" -ForegroundColor Red
+        exit 1
+    }
+    $DbTextAiBuildArgs += "/p:DbTextAiModelPath=$DbTextAiModelPath"
+}
+if (-not [string]::IsNullOrWhiteSpace($DbTextAiModelManifestPath)) {
+    if (-not (Test-Path -LiteralPath $DbTextAiModelManifestPath)) {
+        Write-Host "DBText AI 模型清单不存在：$DbTextAiModelManifestPath" -ForegroundColor Red
+        exit 1
+    }
+    $DbTextAiBuildArgs += "/p:DbTextAiModelManifestPath=$DbTextAiModelManifestPath"
+}
+if (-not [string]::IsNullOrWhiteSpace($DbTextAiRuntimeDirectory)) {
+    if (-not (Test-Path -LiteralPath $DbTextAiRuntimeDirectory)) {
+        Write-Host "DBText AI ONNX Runtime 目录不存在：$DbTextAiRuntimeDirectory" -ForegroundColor Red
+        exit 1
+    }
+    $DbTextAiBuildArgs += "/p:DbTextAiRuntimeDirectory=$DbTextAiRuntimeDirectory"
+}
+
 # ── 工具函数 ──────────────────────────────────────────────────────────────
 function Write-Step([string]$msg) { Write-Host "`n── $msg" -ForegroundColor Cyan }
 function Write-Ok([string]$msg)   { Write-Host "  ✓ $msg" -ForegroundColor Green }
@@ -123,7 +149,7 @@ if (-not $SkipPluginBuild) {
         Write-Host "  → 构建 $($p.Name) ($($p.TFM))..." -NoNewline
 
         # 构建单个版本壳项目；构建成功后会在标准输出目录生成 DLL 与 sidecar JSON。
-        $output = dotnet build $csproj -c Release --nologo -v quiet 2>&1
+        $output = dotnet build $csproj -c Release --nologo -v quiet @DbTextAiBuildArgs 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "失败"
             $buildErrors += $p.Name

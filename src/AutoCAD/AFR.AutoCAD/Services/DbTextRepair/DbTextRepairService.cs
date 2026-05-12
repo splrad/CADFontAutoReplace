@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.AutoCAD.DatabaseServices;
-using AFR.DbTextRepairModel;
+using AFR.DbTextAI;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
 namespace AFR.Services.DbTextRepair;
@@ -18,8 +18,7 @@ internal static class DbTextRepairService
         if (db == null)
             return 0;
 
-        DbTextRepairModelIndex index = DbTextRepairModelStore.LoadIndex(out DbTextRepairModelMergeReport modelReport);
-        var advisor = new DbTextRepairAdvisor(index);
+        DbTextRepairAdvisor? advisor = null;
         DbTextDrawingIdentity drawing = DbTextDrawingIdentity.FromDatabase(db);
 
         int scanned = 0;
@@ -29,6 +28,8 @@ internal static class DbTextRepairService
         int repaired = 0;
         int blocked = 0;
         int errors = 0;
+        bool modelUnavailable = false;
+        string aiStatus = "not-invoked";
 
         using var tr = db.TransactionManager.StartTransaction();
         var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
@@ -60,50 +61,72 @@ internal static class DbTextRepairService
                     if (string.IsNullOrEmpty(current))
                         continue;
 
-                    DbTextRepairModelRecord context = BuildContext(db, tr, dbText, drawing);
-                    IReadOnlyList<DbTextRepairCandidate> generatedCandidates =
-                        DbTextRepairCandidateGenerator.BuildCandidates(current, index);
+                    DbTextAiContext context = BuildContext(db, tr, dbText, drawing);
+                    DbTextAiProblemDetection detection = DbTextAiProblemDetector.Detect(context);
+                    if (!detection.HasProblem)
+                        continue;
+
+                    problems++;
+                    IReadOnlyList<DbTextAiCandidate> generatedCandidates = detection.Candidates;
                     candidates += generatedCandidates.Count;
 
-                    DbTextRepairDecision decision = advisor.Evaluate(
+                    advisor ??= new DbTextRepairAdvisor();
+                    aiStatus = advisor.AiStatus;
+                    if (!advisor.IsAiAvailable)
+                    {
+                        modelUnavailable = true;
+                        blocked++;
+                        DiagnosticLogger.Log(
+                            "DBText文枢",
+                            $"Handle={dbText.Handle}: 疑似异常={detection.Reason}, 文枢模型不可用, AI状态={advisor.AiStatus}");
+                        continue;
+                    }
+
+                    DbTextAiDecision decision = advisor.Evaluate(
                         context,
                         generatedCandidates);
-                    if (generatedCandidates.Any(c => c.HasNeuralScore))
+                    if (generatedCandidates.Any(c => c.HasAiScore))
                         aiScored++;
 
                     if (decision.IsBlocked)
                     {
-                        problems++;
                         blocked++;
+                        DiagnosticLogger.Log(
+                            "DBText文枢",
+                            $"Handle={dbText.Handle}: 疑似异常={detection.Reason}, 安全阻断={decision.Reason}, AI={decision.AiSummary}");
                         continue;
                     }
 
                     if (!decision.ShouldRepair)
+                    {
+                        blocked++;
+                        DiagnosticLogger.Log(
+                            "DBText文枢",
+                            $"Handle={dbText.Handle}: 疑似异常={detection.Reason}, 未写回={decision.Reason}, AI={decision.AiSummary}");
                         continue;
+                    }
 
-                    problems++;
                     dbText.UpgradeOpen();
                     dbText.TextString = decision.SelectedText;
                     repaired++;
                     DiagnosticLogger.Log(
-                        "DBText模型修复",
-                        $"Handle={dbText.Handle}: '{Trim(current)}' -> '{Trim(decision.SelectedText)}', Reason={decision.Reason}, AI={decision.NeuralSummary}");
+                        "DBText文枢",
+                        $"Handle={dbText.Handle}: '{Trim(current)}' -> '{Trim(decision.SelectedText)}', 疑似异常={detection.Reason}, Reason={decision.Reason}, AI={decision.AiSummary}");
                 }
                 catch (Exception ex)
                 {
                     errors++;
-                    DiagnosticLogger.Log("DBText模型修复", $"对象处理失败: {ex.GetType().Name}: {ex.Message}");
+                    DiagnosticLogger.Log("DBText文枢", $"对象处理失败: {ex.GetType().Name}: {ex.Message}");
                 }
             }
         }
 
         tr.Commit();
         DiagnosticLogger.Log(
-            "DBText模型修复",
-            $"扫描={scanned}, 问题={problems}, 候选={candidates}, AI评分={aiScored}, AI状态={advisor.NeuralRankerStatus}, " +
-            $"标签={index.LabelCount}, 冲突={index.ConflictCount}, 阻塞={blocked}, 实际修复={repaired}, " +
-            $"错误={errors}, 模型={modelReport.ToSummary()}");
-        _lastRunSummary = new DbTextRepairRunSummary(scanned, problems, repaired);
+            "DBText文枢",
+            $"扫描={scanned}, 疑似异常={problems}, 候选={candidates}, AI评分={aiScored}, AI状态={aiStatus}, " +
+            $"阻塞={blocked}, 实际修复={repaired}, 错误={errors}");
+        _lastRunSummary = new DbTextRepairRunSummary(scanned, problems, repaired, modelUnavailable);
         return repaired;
     }
 
@@ -116,29 +139,32 @@ internal static class DbTextRepairService
         if (editor == null)
             return;
 
-        string summaryLine = $"扫描={summary.Scanned}, 问题={summary.Problems}, 修复={summary.Repaired}, 未修复={summary.Unrepaired}";
-        const string hintLine = "仍有未修复文字，请执行 AFRDBTEXTLABEL 选择剩余文字进行人工确认；确认后会自动记录并同步训练模型。";
+        string message;
+        if (summary.ModelUnavailable)
+            message = "[AFR 文枢] 当前 文枢 决策模型不可用；未执行 DBText 自动修复。";
+        else if (summary.Repaired > 0)
+            message = $"[AFR 文枢] 检测到疑似 DBText 乱码；文枢 已通过安全校验并成功修复 {summary.Repaired} 项。";
+        else
+            message = "[AFR 文枢] 检测到疑似 DBText 异常；当前候选结果未通过 文枢 安全校验，未执行写回。";
 
-        DiagnosticLogger.Log("DBText模型修复", summaryLine);
-        if (summary.Unrepaired > 0)
-            DiagnosticLogger.Log("DBText模型修复", hintLine);
+        string summaryLine = $"扫描={summary.Scanned}, 疑似异常={summary.Problems}, 修复={summary.Repaired}, 未修复={summary.Unrepaired}";
+
+        DiagnosticLogger.Log("DBText文枢", summaryLine);
+        DiagnosticLogger.Log("DBText文枢", message);
         DiagnosticLogger.Flush();
 
-        editor.WriteMessage($"\n[DBText模型修复] {summaryLine}\n");
-        if (summary.Unrepaired > 0)
-            editor.WriteMessage($"[DBText模型修复] {hintLine}\n");
+        editor.WriteMessage($"\n{message}\n");
     }
 
-    private static DbTextRepairModelRecord BuildContext(
+    private static DbTextAiContext BuildContext(
         Database db,
         Transaction tr,
         DBText dbText,
         DbTextDrawingIdentity drawing)
     {
         TextStyleIdentity style = GetTextStyleIdentity(tr, dbText);
-        return new DbTextRepairModelRecord
+        return new DbTextAiContext
         {
-            RecordType = DbTextRepairModelConstants.RecordTypeLabel,
             DrawingPath = drawing.Path,
             DrawingFileName = drawing.FileName,
             DrawingLength = drawing.Length,
@@ -153,8 +179,24 @@ internal static class DbTextRepairService
             TextStyleFileName = style.FileName,
             TextStyleBigFontFileName = style.BigFontFileName,
             TextStyleTypeFace = style.TypeFace,
-            CurrentText = dbText.TextString ?? string.Empty
+            CurrentText = dbText.TextString ?? string.Empty,
+            IsFromExternalReference = IsFromExternalReference(dbText, tr)
         };
+    }
+
+    private static bool IsFromExternalReference(DBText dbText, Transaction tr)
+    {
+        try
+        {
+            if (tr.GetObject(dbText.OwnerId, OpenMode.ForRead, false, true) is BlockTableRecord owner)
+                return owner.IsFromExternalReference || owner.IsDependent;
+        }
+        catch
+        {
+            // ignored
+        }
+
+        return false;
     }
 
     private static TextStyleIdentity GetTextStyleIdentity(Transaction tr, DBText dbText)
@@ -221,7 +263,7 @@ internal static class DbTextRepairService
         string TypeFace);
 }
 
-internal readonly record struct DbTextRepairRunSummary(int Scanned, int Problems, int Repaired)
+internal readonly record struct DbTextRepairRunSummary(int Scanned, int Problems, int Repaired, bool ModelUnavailable)
 {
     public int Unrepaired => Math.Max(0, Problems - Repaired);
 }

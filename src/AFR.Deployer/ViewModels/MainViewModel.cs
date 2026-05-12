@@ -497,10 +497,6 @@ internal sealed partial class MainViewModel : ObservableObject
 
         await Task.Run(() =>
         {
-            var modelReport = DbTextRepairModelDeploymentService.MergeAppDataModel();
-            if (!modelReport.Success)
-                errors.Add($"DBText 修复模型合并失败：{modelReport.Error}");
-
             // 收集安装成功的 CAD 版本，稍后统一处理 FixedProfile.aws。
             var patchedDescriptors = new HashSet<CadDescriptor>();
 

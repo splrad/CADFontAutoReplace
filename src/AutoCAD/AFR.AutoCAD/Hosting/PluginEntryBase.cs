@@ -6,7 +6,6 @@ using AFR.Commands;
 using AFR.Constants;
 using AFR.Platform;
 using AFR.Services;
-using AFR.Services.DbTextRepair;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
 namespace AFR.Hosting;
@@ -93,7 +92,8 @@ public abstract class PluginEntryBase : IExtensionApplication
     {
         return string.Equals(name, "HandyControl", StringComparison.OrdinalIgnoreCase)
                || string.Equals(name, "Newtonsoft.Json", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(name, "System.Text.Encoding.CodePages", StringComparison.OrdinalIgnoreCase);
+               || string.Equals(name, "System.Text.Encoding.CodePages", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(name, "Microsoft.ML.OnnxRuntime", StringComparison.OrdinalIgnoreCase);
     }
 
     // ── IExtensionApplication 实现 ──
@@ -118,11 +118,6 @@ public abstract class PluginEntryBase : IExtensionApplication
 
         // 注册嵌入程序集解析回调，使 HandyControl 等打包在 DLL 资源中的依赖可被加载
         AppDomain.CurrentDomain.AssemblyResolve += OnResolveEmbeddedAssembly;
-
-        // 准备 DBText 修复模型数据集。部署器安装会提前合并 AppData；
-        // 手动 NETLOAD 或 DLL 升级时由插件自身在启动早期补齐。
-        try { DbTextRepairModelStore.EnsureReady(); }
-        catch (System.Exception ex) { DiagnosticLogger.LogError("DBText 修复模型初始化失败", ex); }
 
         // 隐藏卸载入口必须在首次 NETLOAD、自动加载和部署加载场景下都可用。
         // 它不进入 CommandMethod/命令栈，只由 UnknownCommand 的完整名称匹配触发。

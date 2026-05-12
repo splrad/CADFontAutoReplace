@@ -7,10 +7,27 @@
                       Condition="'$(TargetFramework)' == 'net8.0-windows'" />
   </ItemGroup>
 
-  <ItemGroup>
-    <EmbeddedResource Include="$(MSBuildThisFileDirectory)..\..\data\DbTextRepairModel.jsonl"
-                      Condition="Exists('$(MSBuildThisFileDirectory)..\..\data\DbTextRepairModel.jsonl')">
-      <LogicalName>AFR.DbTextRepairModel.jsonl</LogicalName>
+  <ItemGroup Condition="'$(DbTextAiModelPath)' != '' and Exists('$(DbTextAiModelPath)')">
+    <EmbeddedResource Include="$(DbTextAiModelPath)">
+      <LogicalName>AFR.DBTextAI.Model.onnx</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(DbTextAiModelManifestPath)' != '' and Exists('$(DbTextAiModelManifestPath)')">
+    <EmbeddedResource Include="$(DbTextAiModelManifestPath)">
+      <LogicalName>AFR.DBTextAI.ModelManifest.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(DbTextAiRuntimeDirectory)' != '' and Exists('$(DbTextAiRuntimeDirectory)\Microsoft.ML.OnnxRuntime.dll')">
+    <EmbeddedResource Include="$(DbTextAiRuntimeDirectory)\Microsoft.ML.OnnxRuntime.dll">
+      <LogicalName>Microsoft.ML.OnnxRuntime.dll</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(DbTextAiRuntimeDirectory)' != '' and Exists('$(DbTextAiRuntimeDirectory)\onnxruntime.dll')">
+    <EmbeddedResource Include="$(DbTextAiRuntimeDirectory)\onnxruntime.dll">
+      <LogicalName>onnxruntime.dll</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
@@ -18,11 +35,11 @@
   <Target Name="EmbedPluginDependencies" AfterTargets="ResolveAssemblyReferences">
     <ItemGroup>
       <EmbeddedResource Include="@(ReferenceCopyLocalPaths)"
-                        Condition="'%(Filename)' == 'HandyControl' Or '%(Filename)' == 'Newtonsoft.Json' Or '%(Filename)' == 'System.Text.Encoding.CodePages'">
+                        Condition="'%(Filename)' == 'HandyControl' Or '%(Filename)' == 'Newtonsoft.Json' Or '%(Filename)' == 'System.Text.Encoding.CodePages' Or '%(Filename)' == 'Microsoft.ML.OnnxRuntime'">
         <LogicalName>%(Filename)%(Extension)</LogicalName>
       </EmbeddedResource>
       <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)"
-                               Condition="'%(Filename)' == 'HandyControl' Or '%(Filename)' == 'Newtonsoft.Json' Or '%(Filename)' == 'System.Text.Encoding.CodePages'" />
+                               Condition="'%(Filename)' == 'HandyControl' Or '%(Filename)' == 'Newtonsoft.Json' Or '%(Filename)' == 'System.Text.Encoding.CodePages' Or '%(Filename)' == 'Microsoft.ML.OnnxRuntime'" />
     </ItemGroup>
   </Target>
 

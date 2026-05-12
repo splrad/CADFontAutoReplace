@@ -20,7 +20,6 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - 命令类位于 `AFR.AutoCAD/Commands`。
 - 壳工程 `PluginEntry.cs` 通过 `CommandClass` 声明进行注册。
 - `AFRUNLOAD` 是例外：它是隐藏维护入口，不使用 `CommandMethod`/`CommandClass` 注册，避免进入 CAD 自动补全与动态输入建议；插件入口只在 `UnknownCommand` 完整匹配时调用卸载逻辑。
-- `AFRDBTEXTLABEL` 是 Release 命令，用于 DBText 单行文字人工确认和模型标签写入。
 - Debug-only 命令必须双层控制：
   - 命令类文件 `#if DEBUG`
   - `PluginEntry.cs` 注册处 `#if DEBUG`
@@ -77,24 +76,24 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - `LdFileExport`
 - `PrologueSize`
 
-## 6. DBText 模型修复
+## 6. DBText AI 修复
 
-DBText 单行文字修复不再依赖旧的原生 code page Hook 调查链路。当前实现使用内置 JSONL 模型、确定性候选、人工标签和神经排序参数组合完成。
+DBText 单行文字修复不再依赖旧的原生 code page Hook 调查链路，也不再使用公开 JSONL 标签、本地训练或人工标注命令。当前实现使用疑似异常门控、封闭式本地 ONNX AI 模型、确定性候选、特征提取和保守 Decision Engine。
 
 关键文件：
 
 - `src/AutoCAD/AFR.AutoCAD/Services/DbTextRepair/DbTextRepairService.cs`
-- `src/AutoCAD/AFR.AutoCAD/Commands/DbTextManualLabelCommand.cs`
-- `src/AutoCAD/AFR.AutoCAD/Services/DbTextRepair/DbTextRepairModelStore.cs`
-- `src/AFR.Core/DbTextRepairModel/`
-- `data/DbTextRepairModel.jsonl`
+- `src/AutoCAD/AFR.AutoCAD/Services/DbTextRepair/DbTextRepairAdvisor.cs`
+- `src/AFR.Core/DbTextAI/`
+- `docs/debugging/DBText-Repair-Model.md`
 
 维护原则：
 
-- 自动写回必须受精确人工标签约束。
-- 神经模型只做候选排序和辅助判断，不单独作为写回证据。
-- `glyph-issue` 表示字体/字形问题，不应继续走 DBText 文本写回。
-- 模型字段变化时同步部署器嵌入资源、插件嵌入资源、README 和 `docs/debugging/DBText-Repair-Model.md`。
+- 未检测到疑似 DBText 异常时不加载文枢模型、不评分、不提示。
+- 自动写回必须受疑似异常门控、AI 置信度、分差、可逆转换和安全策略共同约束。
+- 普通用户端禁止训练、导入样本、替换模型、修改参数或使用 DBText 纠错 UI。
+- 生产 ONNX 模型、训练数据、用户 DWG 和训练脚本属于开发者私有资产，不提交 GitHub。
+- 模型或特征 schema 变化时同步 ONNX 嵌入配置、README 和 `docs/debugging/DBText-Repair-Model.md`。
 - 不要恢复 `AFRDBTEXTPROBE` / `AFRTRACER*` 等旧探针命令作为当前文档流程。
 
 ## 7. 性能与稳定性建议
@@ -141,6 +140,15 @@ DBText 单行文字修复不再依赖旧的原生 code page Hook 调查链路。
 ./tools/Publish-ReleaseAssets.ps1 -SkipPluginBuild
 ```
 
+官方 DBText AI 模型只在开发者私有环境中注入：
+
+```powershell
+./tools/Publish-ReleaseAssets.ps1 `
+  -DbTextAiModelPath C:\PrivateAFR\Models\AFR.DBTextAI.Model.onnx `
+  -DbTextAiModelManifestPath C:\PrivateAFR\Models\AFR.DBTextAI.ModelManifest.json `
+  -DbTextAiRuntimeDirectory C:\PrivateAFR\OnnxRuntime\win-x64
+```
+
 输出约定：
 
 ```text
@@ -165,7 +173,7 @@ artifacts/ReleaseAssets/Fonts.zip
 - [ ] Hook on/off 两条路径验证
 - [ ] SHX 主字体 / 大字体 / TrueType 三类都验证
 - [ ] MText `\F` / `\f` / 参数段 / 路径残留 / `@` 前缀都覆盖
-- [ ] DBText 模型修复、`AFRDBTEXTLABEL` 与 `glyph-issue` 标签路径已验证
+- [ ] DBText AI 模型缺失、schema 不匹配、低置信度和高置信写回路径已验证
 - [ ] Release 构建下 Debug 功能完全排除
 
 ## 11. 代码评审关注点（建议）

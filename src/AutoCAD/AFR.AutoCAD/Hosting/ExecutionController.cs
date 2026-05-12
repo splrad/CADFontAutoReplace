@@ -108,8 +108,8 @@ internal sealed class ExecutionController
                     doc.Editor.Regen();
                 }
 
-                // DBText 单行文字修复使用 Release-safe 的模型数据集。
-                DiagnosticLogger.BeginPhase("DBText模型修复");
+                // DBText 单行文字先过疑似异常门控，命中后才懒加载文枢模型。
+                DiagnosticLogger.BeginPhase("DBText文枢修复");
                 int repairedDbTextCount = DbTextRepairService.Repair(doc.Database);
                 DbTextRepairRunSummary dbTextRepairSummary = DbTextRepairService.LastRunSummary;
                 DiagnosticLogger.EndPhase($"DBText实际修复: {repairedDbTextCount}个");

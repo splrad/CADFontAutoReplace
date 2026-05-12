@@ -21,16 +21,11 @@ internal static class CommandNames
     public const string Main = "AFR";
     /// <summary>查看插件日志。</summary>
     public const string Log = "AFRLOG";
-    /// <summary>人工确认 DBText 单行文字修复标签。</summary>
-    public const string DbTextLabel = "AFRDBTEXTLABEL";
-
     // ── 隐藏维护命令（不通过 CommandMethod 注册，不进入 CAD 补全/建议列表）────
     /// <summary>卸载插件并清理注册表。仅完整输入时由 UnknownCommand 路由触发。</summary>
     public const string Unload = "AFRUNLOAD";
 
     // ── DEBUG 诊断命令（仅在 DEBUG 构建中由实现层注册）─────────────────
-    /// <summary>查看 DBText 修复模型状态与评估。</summary>
-    public const string DbTextModel = "AFRDBTEXTMODEL";
     /// <summary>查看 MText / MLeader 格式与样式诊断。</summary>
     public const string ViewMText = "AFRVIEW";
     /// <summary>插入测试用 MText。</summary>
@@ -39,10 +34,6 @@ internal static class CommandNames
     public const string DumpProfile = "AFRDUMPPROFILE";
     /// <summary>列出候选 .aws 配置文件路径。</summary>
     public const string ShowAwsPath = "AFRSHOWAWSPATH";
-    /// <summary>批量生成 DBText Big5 修复训练标签。</summary>
-    public const string DbTextBatchTrain = "AFRDBTEXTBATCHTRAIN";
-    /// <summary>检查单个文字对象和 DBText 模型候选。</summary>
-    public const string InspectText = "AFRINSPECTTEXT";
     /// <summary>生成 PowerShell 反射探针脚本。</summary>
     public const string GenProbeScripts = "AFRGENPROBESCRIPTS";
     /// <summary>反射转储 CAD 对话框相关 API。</summary>

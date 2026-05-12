@@ -43,14 +43,6 @@
       <DependentUpon>MTextInsertWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="$(MSBuildThisFileDirectory)MTextInsert\MTextInsertViewModel.cs" Link="MTextInsert\MTextInsertViewModel.cs" Condition="'$(Configuration)'=='Debug'" />
-    <!-- DBTextLabel -->
-    <Page Include="$(MSBuildThisFileDirectory)DbTextLabel\DbTextLabelWindow.xaml" Link="DbTextLabel\DbTextLabelWindow.xaml">
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextLabel\DbTextLabelWindow.xaml.cs" Link="DbTextLabel\DbTextLabelWindow.xaml.cs">
-      <DependentUpon>DbTextLabelWindow.xaml</DependentUpon>
-    </Compile>
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextLabel\DbTextLabelViewModel.cs" Link="DbTextLabel\DbTextLabelViewModel.cs" />
     <!-- Shared -->
     <Compile Include="$(MSBuildThisFileDirectory)WindowPositionHelper.cs" Link="WindowPositionHelper.cs" />
   </ItemGroup>

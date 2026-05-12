@@ -63,10 +63,15 @@ project.lock.json
 project.fragment.lock.json
 artifacts/
 
-# DBText repair model: canonical dataset is tracked; transient imports/corrupt files are not.
-/data/DbTextRepairModel.import.*.jsonl
+# DBText AI: training data, historical JSONL labels, and production ONNX models are private assets.
+/private/
+/data/DbTextRepairModel.jsonl
+/data/DbTextRepairModel*.jsonl
 /data/DbTextRepairModel.*.tmp
 /data/DbTextRepairModel*.corrupt.*.jsonl
+*.onnx
+*.onnx.json
+AFR.DBTextAI.ModelManifest.json
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
@@ -376,3 +381,4 @@ FodyWeavers.xsd
 /chore/acdb25_exports.txt
 /chore/acdb25_imports.txt
 *.png
+/.github/copilot-instructions.md

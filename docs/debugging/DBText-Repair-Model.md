@@ -1,64 +1,104 @@
-# DBText 模型修复与人工确认
+# DBText 封闭式 AI 修复
 
-本文档描述当前代码中的 DBText 单行文字修复链路。旧的 `AFRDBTEXTPROBE`、`AFRTRACER*`、`DwgFilerCodePageScopeHook`、`TextEditorDbcsDecodeHook` 与 `CodePageFamilyHook` 调查文档已删除，因为这些命令和 Hook 类不在当前代码中。
+本文档描述当前 DBText 单行文字修复链路。旧的 JSONL 标签模型、本地合并、本地训练、`AFRDBTEXTLABEL` 人工确认命令和 Debug 批量训练命令已经废弃。
 
 ## 当前实现
 
-当前 DBText 修复是 Release 可用的模型数据集流程，不依赖原生 code page Hook。
+DBText 修复由封闭式本地 AI 决策链路负责，不依赖在线服务，也不允许普通用户训练或替换模型。AI 不扫描所有正常文本；必须先由疑似异常门控命中，文枢模型才会介入。
 
 执行入口位于 `ExecutionController.Execute`：
 
 1. 检测并替换文字样式表中的缺失字体。
 2. 执行 `DbTextRepairService.Repair`，扫描非外参块中的 `DBText`。
-3. 扫描并处理 MText 内联字体。
-4. 输出命令行摘要；若仍有未修复 DBText，会提示执行 `AFRDBTEXTLABEL`。
+3. `DbTextAiProblemDetector` 判断当前 DBText 是否存在疑似异常。
+4. 未命中门控时静默跳过，不加载模型、不评分、不提示。
+5. 命中门控后才生成候选、提取 `dbtext-ai-features-v1` 特征并调用本地 AI 评分器。
+6. 由 Decision Engine 按保守策略决定写回或跳过。
+7. 扫描并处理 MText 内联字体。
 
-## 数据位置
+## 模型部署
 
-- 仓库内置数据集：`data/DbTextRepairModel.jsonl`。
-- 嵌入资源名：`AFR.DbTextRepairModel.jsonl`。
-- 本地开发时，若运行目录可向上找到仓库根目录，活动模型优先使用仓库 `data/`。
-- 正式安装时，部署工具会把嵌入数据集合并到 `%APPDATA%\CADFontAutoReplace\DbTextRepairModel.jsonl`。
-- 临时导入文件使用 `DbTextRepairModel*.jsonl`，合并成功后会删除；损坏文件会重命名为 `.corrupt.*.jsonl`。
+- 官方模型资源名：`AFR.DBTextAI.Model.onnx`。
+- 模型清单资源名：`AFR.DBTextAI.ModelManifest.json`。
+- 模型清单和 ONNX metadata 应包含文枢身份信息：`aiDisplayName=文枢`，以及作者 `splrad 秋夕寻星`。
+- Release 构建通过私有 MSBuild 属性注入模型，不从仓库读取训练数据。
+- 没有嵌入模型、清单缺失或特征 schema 不匹配时，仅在检测到疑似 DBText 异常后提示模型不可用；无疑似异常时保持静默。
+
+示例：
+
+```powershell
+./tools/Publish-ReleaseAssets.ps1 `
+  -DbTextAiModelPath C:\PrivateAFR\Models\AFR.DBTextAI.Model.onnx `
+  -DbTextAiModelManifestPath C:\PrivateAFR\Models\AFR.DBTextAI.ModelManifest.json `
+  -DbTextAiRuntimeDirectory C:\PrivateAFR\OnnxRuntime\win-x64
+```
+
+生产 ONNX 模型、训练数据、用户 DWG 和训练脚本都属于开发者私有资产，不提交 GitHub。
 
 ## 自动修复规则
 
-`DbTextRepairCandidateGenerator` 只生成确定性候选：
+`DbTextAiCandidateGenerator` 生成确定性候选：
 
 - 当前文本自身，用作 no-op 候选。
-- `big5-carrier-to-gbk` 候选。
-- 历史人工标签候选。
+- Big5 / GBK / UTF-8 方向的可逆 carrier 转换候选。
+- 仅保留非空、去重后的候选。
 
-`DbTextRepairAdvisor` 会读取标签、冲突记录和神经排序参数。自动写回仍受标签策略约束：只有对象上下文与历史人工 `repair` 标签精确匹配，且候选文本与当前文本不同，才会写回 `DBText.TextString`。冲突、`keep`、`glyph-issue` 或无精确标签时不自动修改图纸。
+`DbTextAiProblemDetector` 是文枢介入门控：
 
-神经模型用于排序和辅助判断，不单独作为写回证据。
+- 控制字符、替代字符或异常 Unicode 直接视为疑似异常。
+- 典型 mojibake 扩展拉丁字符模式视为疑似异常。
+- 可逆编码候选显著提升中文比例或 CAD 词汇比例时视为疑似异常。
+- 未命中门控时不加载 ONNX 模型、不做 AI 评分、不向命令行输出 DBText 提示。
 
-## 人工确认命令
+`DbTextRepairAdvisor` 只负责编排：
 
-命令：`AFRDBTEXTLABEL`
+1. 提取候选特征。
+2. 调用嵌入 ONNX 评分器。
+3. 把候选分数交给 `DbTextAiDecisionEngine`。
 
-使用流程：
+自动写回必须同时满足：
 
-1. 在 AutoCAD 中完整输入 `AFRDBTEXTLABEL`。
-2. 选择一个 `DBText` 单行文字对象。
-3. 窗口会显示当前文本、候选文本、候选来源、AI 分数和对象上下文。
-4. 选择：
-   - 写回正确文本；
-   - 保持当前文本；
-   - 标记为字体/字形问题。
+- 疑似异常门控已命中；
+- AI 模型可用；
+- 最佳候选不是当前文本；
+- 最佳候选分数不低于默认阈值；
+- 最佳候选与第二名分差足够大；
+- 候选转换可逆；
+- 当前文本和候选文本都没有控制字符、替代字符或异常 Unicode；
+- 对象不来自外参或依赖块。
 
-确认后会追加一条标签记录，并触发模型合并与本地神经参数刷新。若选择写回正确文本，命令会立即修改当前对象并刷新显示。
+命令行提示规则：
+
+- 无疑似异常：不提示。
+- 有疑似异常但模型不可用：`[AFR 文枢] 当前 文枢 决策模型不可用；未执行 DBText 自动修复。`
+- 有疑似异常但未写回：`[AFR 文枢] 检测到疑似 DBText 异常；当前候选结果未通过 文枢 安全校验，未执行写回。`
+- 写回成功：`[AFR 文枢] 检测到疑似 DBText 乱码；文枢 已通过安全校验并成功修复 N 项。`
+
+## 用户反馈
+
+用户端不提供 DBText 标注、反馈包导出、训练、导入样本或模型替换功能。
+
+如果用户发现 DBText 乱码未修复或误修，处理方式是直接联系开发者，并发送：
+
+- 问题 DWG；
+- 必要截图；
+- 现象描述；
+- AutoCAD 版本和 AFR 版本。
+
+开发者在私有环境中提取样本、人工审核、训练 LightGBM / XGBoost / FastTree 模型，并随新版 DLL 发布。
 
 ## 边界
 
-- 不要把字形缺笔、SHX 字体形状问题当作 DBText 编码修复；这类问题应标记为 `glyph-issue` 并走字体/样式诊断。
-- 不要恢复旧的 code page 探针命令作为公开使用文档；当前公开维护入口是 `AFRDBTEXTLABEL`。
-- 不要把 `big5-carrier-to-gbk` 候选扩展成全局字典替换。它只是候选来源，写回必须由精确标签或后续明确策略授权。
-- 更新 DBText 模型字段时，需同步 `DbTextRepairModelRecords`、`DbTextRepairModelJsonl`、部署器嵌入资源和本文档。
+- 不要恢复 `data/DbTextRepairModel.jsonl` 作为运行时输入。
+- 不要恢复 `AFRDBTEXTLABEL`、本地训练、JSONL 合并或用户端模型替换入口。
+- 不要把 DBText 编码修复做成全局字符串替换。
+- 字形缺笔、SHX 字体形状问题仍应走字体/样式诊断，不应强行写回 DBText 文本。
 
 ## 提交前检查
 
-- `AFRDBTEXTLABEL` 能选择 DBText 并写入标签。
-- `data/DbTextRepairModel.jsonl` 可被插件与部署器嵌入。
-- 安装流程能将模型合并到 `%APPDATA%\CADFontAutoReplace`。
-- `AFRLOG` 仍只展示字体替换结果，不作为 DBText 模型日志查看器。
+- Release DLL 不包含 `DbTextRepairModel.jsonl`。
+- Release DLL 不包含 `AFRDBTEXTLABEL` 或 `AFRDBTEXTBATCHTRAIN`。
+- 无官方 ONNX 模型时 DBText 修复安全跳过。
+- 有官方 ONNX 模型时仅高置信候选允许写回。
+- 无疑似异常图纸不应加载文枢模型，也不应输出 DBText 文枢提示。
+- `AFRLOG` 仍只展示字体替换结果，不作为 DBText AI 纠错入口。

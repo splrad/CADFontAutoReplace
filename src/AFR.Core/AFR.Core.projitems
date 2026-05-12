@@ -16,12 +16,13 @@
     <Compile Include="$(MSBuildThisFileDirectory)Abstractions\ILogService.cs" Link="Abstractions\ILogService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Abstractions\RegistryDefaultAttribute.cs" Link="Abstractions\RegistryDefaultAttribute.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Constants\CommandNames.cs" Link="Constants\CommandNames.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextRepairModelJsonl.cs" Link="DbTextRepairModel\DbTextRepairModelJsonl.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextRepairModelMergeEngine.cs" Link="DbTextRepairModel\DbTextRepairModelMergeEngine.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextRepairModelRecords.cs" Link="DbTextRepairModel\DbTextRepairModelRecords.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextNeuralFeatureExtractor.cs" Link="DbTextRepairModel\DbTextNeuralFeatureExtractor.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextNeuralRanker.cs" Link="DbTextRepairModel\DbTextNeuralRanker.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextRepairModel\DbTextNeuralTrainer.cs" Link="DbTextRepairModel\DbTextNeuralTrainer.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DbTextAI\DbTextAiCandidateGenerator.cs" Link="DbTextAI\DbTextAiCandidateGenerator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DbTextAI\DbTextAiDecisionEngine.cs" Link="DbTextAI\DbTextAiDecisionEngine.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DbTextAI\DbTextAiFeatureExtractor.cs" Link="DbTextAI\DbTextAiFeatureExtractor.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DbTextAI\DbTextAiModels.cs" Link="DbTextAI\DbTextAiModels.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DbTextAI\DbTextAiProblemDetector.cs" Link="DbTextAI\DbTextAiProblemDetector.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DbTextAI\DbTextAiScorerFactory.cs" Link="DbTextAI\DbTextAiScorerFactory.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)DbTextAI\DbTextEmbeddedOnnxScorer.cs" Link="DbTextAI\DbTextEmbeddedOnnxScorer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\FontCheckResult.cs" Link="Models\FontCheckResult.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\InlineFontFixRecord.cs" Link="Models\InlineFontFixRecord.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\StyleFontReplacement.cs" Link="Models\StyleFontReplacement.cs" />

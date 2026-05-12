@@ -49,7 +49,6 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 2. AutoCAD 打开后，命令行输入：
    - `AFR`（配置替换字体）
    - `AFRLOG`（查看替换日志）
-   - `AFRDBTEXTLABEL`（人工确认 DBText 单行文字）
    - `AFRVIEW`（仅 Debug：查看 MText 内容）
    - `AFRINSERT`（仅 Debug：插入测试 MText）
 
@@ -63,8 +62,8 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 2. 启动目标版本壳调试，确保 CAD 正常拉起。
 3. 在 CAD 里执行 `AFR`，完成一次字体配置。
 4. 执行 `AFRLOG` 查看当前图纸的检测与替换结果。
-5. 如命令行提示仍有未修复 DBText，执行 `AFRDBTEXTLABEL` 选择文字并确认。
-6. 如需调试 MText 场景，再在 Debug 构建下执行 `AFRINSERT` / `AFRVIEW` 建立“输入-输出”直觉。
+5. 如需调试 MText 场景，再在 Debug 构建下执行 `AFRINSERT` / `AFRVIEW` 建立“输入-输出”直觉。
+6. 如需验证 DBText AI，请使用带官方嵌入 ONNX 模型的 DLL；没有疑似 DBText 异常时应静默跳过，检测到疑似异常但没有模型时应提示模型不可用并跳过写回。
 
 ## 7. 生成发布资产
 
@@ -80,6 +79,15 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 2. 校验 `artifacts/bin/AFR-ACAD20XX/release/` 下的插件 DLL 与 `.cad.json` 元数据；
 3. 从标准构建输出直接嵌入插件资源并发布自包含单文件部署器；
 4. 将版本化 EXE、纯 DLL 压缩包与字体包生成到 `artifacts/ReleaseAssets/`。
+
+如需发布带官方 DBText AI 的 DLL，在开发者私有环境中额外传入模型、清单和 ONNX Runtime 目录：
+
+```powershell
+./tools/Publish-ReleaseAssets.ps1 `
+  -DbTextAiModelPath C:\PrivateAFR\Models\AFR.DBTextAI.Model.onnx `
+  -DbTextAiModelManifestPath C:\PrivateAFR\Models\AFR.DBTextAI.ModelManifest.json `
+  -DbTextAiRuntimeDirectory C:\PrivateAFR\OnnxRuntime\win-x64
+```
 
 最终输出：
 
@@ -158,7 +166,7 @@ public void YourCommand() { }
 - 先定位，再改代码：优先看 `ExecutionController` 调用链。
 - 先加日志，再动逻辑：避免“改完不知道哪里坏”。
 - 每次只改一个小目标：例如“只改 MText 解析，不碰 Hook”。
-- DBText 单行文字修复优先看 `docs/debugging/DBText-Repair-Model.md`，不要参考已删除的旧 code page Hook 调查文档。
+- DBText 单行文字 AI 修复优先看 `docs/debugging/DBText-Repair-Model.md`，不要参考已删除的旧 code page Hook 调查文档。
 
 ## 11. 提交前快速检查
 
@@ -167,7 +175,7 @@ public void YourCommand() { }
 - [ ] 新命令已注册到 `PluginEntry.cs`
 - [ ] 没有把 AutoCAD 类型放进 `AFR.Core` / `AFR.UI`
 - [ ] Debug 功能已用 `#if DEBUG` 控制
-- [ ] DBText 模型变更已同步 `data/DbTextRepairModel.jsonl`、嵌入资源和文档
+- [ ] DBText AI 变更已同步疑似异常门控、ONNX 嵌入配置、安全策略和文档
 - [ ] 新文档/命令在 README 或入口文档可被找到
 
 ---
