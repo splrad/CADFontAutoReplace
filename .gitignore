@@ -63,15 +63,20 @@ project.lock.json
 project.fragment.lock.json
 artifacts/
 
-# DBText AI: training data, historical JSONL labels, and production ONNX models are private assets.
-/private/
-/data/DbTextRepairModel.jsonl
-/data/DbTextRepairModel*.jsonl
-/data/DbTextRepairModel.*.tmp
-/data/DbTextRepairModel*.corrupt.*.jsonl
-*.onnx
-*.onnx.json
-AFR.DBTextAI.ModelManifest.json
+# WenShu tools, datasets, and current models are intentionally trackable.
+!/tools/WenShu/
+!/tools/WenShu/**
+!/datasets/WenShu/
+!/datasets/WenShu/**
+!/models/WenShu/
+!/models/WenShu/**
+
+# WenShu: raw drawing inputs and local Python environments stay local-only.
+/data/WenShu/DbText/RawDwg/
+*.dwg
+*.dxf
+**/.venv/
+**/.venv/**
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt

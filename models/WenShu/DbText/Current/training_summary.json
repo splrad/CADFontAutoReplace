@@ -1,0 +1,13 @@
+{
+  "aiDisplayName": "文枢",
+  "aiInternalName": "AFR DBText WenShu",
+  "author": "splrad 秋夕寻星",
+  "featureRows": 3929,
+  "featureSchemaVersion": "dbtext-ai-features-v1",
+  "groups": 2000,
+  "modelManifest": "models/WenShu/DbText/Current/AFR.DBTextAI.ModelManifest.json",
+  "onnxModel": "models/WenShu/DbText/Current/AFR.DBTextAI.Model.onnx",
+  "testGroups": 300,
+  "trainGroups": 1400,
+  "validGroups": 300
+}

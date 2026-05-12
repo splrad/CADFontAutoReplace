@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 
-namespace AFR.DbTextAI;
+namespace AFR.WenShu.DbText;
 
-internal sealed class DbTextAiProblemDetection
+internal sealed class WenShuDbTextProblemDetection
 {
-    private DbTextAiProblemDetection(bool hasProblem, string reason, IReadOnlyList<DbTextAiCandidate> candidates)
+    private WenShuDbTextProblemDetection(bool hasProblem, string reason, IReadOnlyList<WenShuDbTextCandidate> candidates)
     {
         HasProblem = hasProblem;
         Reason = reason;
@@ -15,35 +15,35 @@ internal sealed class DbTextAiProblemDetection
 
     public bool HasProblem { get; }
     public string Reason { get; }
-    public IReadOnlyList<DbTextAiCandidate> Candidates { get; }
+    public IReadOnlyList<WenShuDbTextCandidate> Candidates { get; }
 
-    public static DbTextAiProblemDetection NoProblem(IReadOnlyList<DbTextAiCandidate> candidates) =>
+    public static WenShuDbTextProblemDetection NoProblem(IReadOnlyList<WenShuDbTextCandidate> candidates) =>
         new(false, "no-suspicious-dbtext", candidates);
 
-    public static DbTextAiProblemDetection Problem(string reason, IReadOnlyList<DbTextAiCandidate> candidates) =>
+    public static WenShuDbTextProblemDetection Problem(string reason, IReadOnlyList<WenShuDbTextCandidate> candidates) =>
         new(true, reason, candidates);
 }
 
-internal static class DbTextAiProblemDetector
+internal static class WenShuDbTextProblemDetector
 {
-    public static DbTextAiProblemDetection Detect(DbTextAiContext context)
+    public static WenShuDbTextProblemDetection Detect(WenShuDbTextContext context)
     {
         string current = context.CurrentText ?? string.Empty;
-        IReadOnlyList<DbTextAiCandidate> candidates = DbTextAiCandidateGenerator.BuildCandidates(current);
+        IReadOnlyList<WenShuDbTextCandidate> candidates = WenShuDbTextCandidateGenerator.BuildCandidates(current);
         if (string.IsNullOrWhiteSpace(current))
-            return DbTextAiProblemDetection.NoProblem(candidates);
+            return WenShuDbTextProblemDetection.NoProblem(candidates);
 
-        if (DbTextAiFeatureExtractor.HasUnsafeText(current))
-            return DbTextAiProblemDetection.Problem("unsafe-current-text", candidates);
+        if (WenShuDbTextFeatureExtractor.HasUnsafeText(current))
+            return WenShuDbTextProblemDetection.Problem("unsafe-current-text", candidates);
 
         TextStats currentStats = Analyze(current);
         if (LooksLikeMojibake(current, currentStats))
-            return DbTextAiProblemDetection.Problem("mojibake-pattern", candidates);
+            return WenShuDbTextProblemDetection.Problem("mojibake-pattern", candidates);
 
         for (int i = 0; i < candidates.Count; i++)
         {
-            DbTextAiCandidate candidate = candidates[i];
-            if (candidate.IsNoOp || !candidate.IsRoundTrip || DbTextAiFeatureExtractor.HasUnsafeText(candidate.Text))
+            WenShuDbTextCandidate candidate = candidates[i];
+            if (candidate.IsNoOp || !candidate.IsRoundTrip || WenShuDbTextFeatureExtractor.HasUnsafeText(candidate.Text))
                 continue;
 
             TextStats candidateStats = Analyze(candidate.Text);
@@ -55,10 +55,10 @@ internal static class DbTextAiProblemDetector
                                        || ContainsSource(candidate.Source, "utf8");
 
             if (sourceLooksRelevant && (cjkImproved || cadTermsImproved))
-                return DbTextAiProblemDetection.Problem("roundtrip-candidate-improved", candidates);
+                return WenShuDbTextProblemDetection.Problem("roundtrip-candidate-improved", candidates);
         }
 
-        return DbTextAiProblemDetection.NoProblem(candidates);
+        return WenShuDbTextProblemDetection.NoProblem(candidates);
     }
 
     private static bool LooksLikeMojibake(string text, TextStats stats)
@@ -163,3 +163,4 @@ internal static class DbTextAiProblemDetector
         public float ExtendedLatinRatio;
     }
 }
+

@@ -2,24 +2,24 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.AutoCAD.DatabaseServices;
-using AFR.DbTextAI;
+using AFR.WenShu.DbText;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
-namespace AFR.Services.DbTextRepair;
+namespace AFR.Services.WenShu.DbText;
 
-internal static class DbTextRepairService
+internal static class WenShuDbTextRepairService
 {
-    private static DbTextRepairRunSummary _lastRunSummary;
+    private static WenShuDbTextRepairRunSummary _lastRunSummary;
 
-    public static DbTextRepairRunSummary LastRunSummary => _lastRunSummary;
+    public static WenShuDbTextRepairRunSummary LastRunSummary => _lastRunSummary;
 
     public static int Repair(Database db)
     {
         if (db == null)
             return 0;
 
-        DbTextRepairAdvisor? advisor = null;
-        DbTextDrawingIdentity drawing = DbTextDrawingIdentity.FromDatabase(db);
+        WenShuDbTextAdvisor? advisor = null;
+        WenShuDrawingIdentity drawing = WenShuDrawingIdentity.FromDatabase(db);
 
         int scanned = 0;
         int candidates = 0;
@@ -61,16 +61,16 @@ internal static class DbTextRepairService
                     if (string.IsNullOrEmpty(current))
                         continue;
 
-                    DbTextAiContext context = BuildContext(db, tr, dbText, drawing);
-                    DbTextAiProblemDetection detection = DbTextAiProblemDetector.Detect(context);
+                    WenShuDbTextContext context = WenShuDbTextEntitySnapshotBuilder.BuildContext(db, tr, dbText, drawing);
+                    WenShuDbTextProblemDetection detection = WenShuDbTextProblemDetector.Detect(context);
                     if (!detection.HasProblem)
                         continue;
 
                     problems++;
-                    IReadOnlyList<DbTextAiCandidate> generatedCandidates = detection.Candidates;
+                    IReadOnlyList<WenShuDbTextCandidate> generatedCandidates = detection.Candidates;
                     candidates += generatedCandidates.Count;
 
-                    advisor ??= new DbTextRepairAdvisor();
+                    advisor ??= new WenShuDbTextAdvisor();
                     aiStatus = advisor.AiStatus;
                     if (!advisor.IsAiAvailable)
                     {
@@ -82,7 +82,7 @@ internal static class DbTextRepairService
                         continue;
                     }
 
-                    DbTextAiDecision decision = advisor.Evaluate(
+                    WenShuDbTextDecision decision = advisor.Evaluate(
                         context,
                         generatedCandidates);
                     if (generatedCandidates.Any(c => c.HasAiScore))
@@ -126,11 +126,11 @@ internal static class DbTextRepairService
             "DBText文枢",
             $"扫描={scanned}, 疑似异常={problems}, 候选={candidates}, AI评分={aiScored}, AI状态={aiStatus}, " +
             $"阻塞={blocked}, 实际修复={repaired}, 错误={errors}");
-        _lastRunSummary = new DbTextRepairRunSummary(scanned, problems, repaired, modelUnavailable);
+        _lastRunSummary = new WenShuDbTextRepairRunSummary(scanned, problems, repaired, modelUnavailable);
         return repaired;
     }
 
-    public static void WriteCommandLineSummary(DbTextRepairRunSummary summary)
+    public static void WriteCommandLineSummary(WenShuDbTextRepairRunSummary summary)
     {
         if (summary.Problems <= 0)
             return;
@@ -156,114 +156,14 @@ internal static class DbTextRepairService
         editor.WriteMessage($"\n{message}\n");
     }
 
-    private static DbTextAiContext BuildContext(
-        Database db,
-        Transaction tr,
-        DBText dbText,
-        DbTextDrawingIdentity drawing)
-    {
-        TextStyleIdentity style = GetTextStyleIdentity(tr, dbText);
-        return new DbTextAiContext
-        {
-            DrawingPath = drawing.Path,
-            DrawingFileName = drawing.FileName,
-            DrawingLength = drawing.Length,
-            DrawingLastWriteUtc = drawing.LastWriteUtc,
-            DrawingSha256 = drawing.Sha256,
-            EntityType = "DBText",
-            ObjectId = SafeObjectId(dbText.ObjectId),
-            Handle = dbText.Handle.ToString(),
-            Layer = Safe(() => dbText.Layer, string.Empty),
-            OwnerBlockName = DescribeOwnerBlock(dbText, tr),
-            TextStyleName = style.Name,
-            TextStyleFileName = style.FileName,
-            TextStyleBigFontFileName = style.BigFontFileName,
-            TextStyleTypeFace = style.TypeFace,
-            CurrentText = dbText.TextString ?? string.Empty,
-            IsFromExternalReference = IsFromExternalReference(dbText, tr)
-        };
-    }
-
-    private static bool IsFromExternalReference(DBText dbText, Transaction tr)
-    {
-        try
-        {
-            if (tr.GetObject(dbText.OwnerId, OpenMode.ForRead, false, true) is BlockTableRecord owner)
-                return owner.IsFromExternalReference || owner.IsDependent;
-        }
-        catch
-        {
-            // ignored
-        }
-
-        return false;
-    }
-
-    private static TextStyleIdentity GetTextStyleIdentity(Transaction tr, DBText dbText)
-    {
-        try
-        {
-            if (tr.GetObject(dbText.TextStyleId, OpenMode.ForRead, false, true) is TextStyleTableRecord style)
-            {
-                string typeFace = string.Empty;
-                try { typeFace = style.Font.TypeFace ?? string.Empty; }
-                catch { typeFace = string.Empty; }
-
-                return new TextStyleIdentity(
-                    style.Name,
-                    style.FileName ?? string.Empty,
-                    style.BigFontFileName ?? string.Empty,
-                    typeFace);
-            }
-        }
-        catch
-        {
-            // ignored
-        }
-
-        return new TextStyleIdentity(string.Empty, string.Empty, string.Empty, string.Empty);
-    }
-
-    private static string DescribeOwnerBlock(DBText dbText, Transaction tr)
-    {
-        try
-        {
-            if (tr.GetObject(dbText.OwnerId, OpenMode.ForRead, false, true) is BlockTableRecord owner)
-                return owner.Name;
-        }
-        catch
-        {
-            // ignored
-        }
-
-        return string.Empty;
-    }
-
-    private static string SafeObjectId(ObjectId id)
-    {
-        try { return id.ToString(); }
-        catch { return string.Empty; }
-    }
-
-    private static T Safe<T>(Func<T> read, T fallback)
-    {
-        try { return read(); }
-        catch { return fallback; }
-    }
-
     private static string Trim(string text)
     {
         return text.Length <= 60 ? text : text.Substring(0, 60) + "...";
     }
-
-    private readonly record struct TextStyleIdentity(
-        string Name,
-        string FileName,
-        string BigFontFileName,
-        string TypeFace);
 }
 
-internal readonly record struct DbTextRepairRunSummary(int Scanned, int Problems, int Repaired, bool ModelUnavailable)
+internal readonly record struct WenShuDbTextRepairRunSummary(int Scanned, int Problems, int Repaired, bool ModelUnavailable)
 {
     public int Unrepaired => Math.Max(0, Problems - Repaired);
 }
+

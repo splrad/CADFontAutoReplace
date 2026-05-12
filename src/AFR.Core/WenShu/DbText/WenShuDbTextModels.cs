@@ -1,8 +1,8 @@
 using System;
 
-namespace AFR.DbTextAI;
+namespace AFR.WenShu.DbText;
 
-internal static class DbTextAiConstants
+internal static class WenShuDbTextConstants
 {
     public const string FeatureSchemaVersion = "dbtext-ai-features-v1";
     public const string ModelResourceName = "AFR.DBTextAI.Model.onnx";
@@ -13,7 +13,7 @@ internal static class DbTextAiConstants
     public const float MinimumScoreMargin = 0.18f;
 }
 
-internal sealed class DbTextAiContext
+internal sealed class WenShuDbTextContext
 {
     public string DrawingPath { get; set; } = string.Empty;
     public string DrawingFileName { get; set; } = string.Empty;
@@ -33,9 +33,9 @@ internal sealed class DbTextAiContext
     public bool IsFromExternalReference { get; set; }
 }
 
-internal sealed class DbTextAiCandidate
+internal sealed class WenShuDbTextCandidate
 {
-    public DbTextAiCandidate(string text, string source, string reason, bool isRoundTrip)
+    public WenShuDbTextCandidate(string text, string source, string reason, bool isRoundTrip)
     {
         Text = text ?? string.Empty;
         Source = source ?? string.Empty;
@@ -68,16 +68,16 @@ internal sealed class DbTextAiCandidate
     }
 }
 
-internal interface IDbTextAiScorer
+internal interface IWenShuDbTextScorer
 {
     bool IsAvailable { get; }
     string Status { get; }
-    bool TryScore(DbTextAiContext context, DbTextAiCandidate candidate, float[] features, out float score, out string error);
+    bool TryScore(WenShuDbTextContext context, WenShuDbTextCandidate candidate, float[] features, out float score, out string error);
 }
 
-internal sealed class DbTextUnavailableAiScorer : IDbTextAiScorer
+internal sealed class WenShuDbTextUnavailableScorer : IWenShuDbTextScorer
 {
-    public DbTextUnavailableAiScorer(string status)
+    public WenShuDbTextUnavailableScorer(string status)
     {
         Status = string.IsNullOrWhiteSpace(status) ? "unavailable" : status;
     }
@@ -85,7 +85,7 @@ internal sealed class DbTextUnavailableAiScorer : IDbTextAiScorer
     public bool IsAvailable => false;
     public string Status { get; }
 
-    public bool TryScore(DbTextAiContext context, DbTextAiCandidate candidate, float[] features, out float score, out string error)
+    public bool TryScore(WenShuDbTextContext context, WenShuDbTextCandidate candidate, float[] features, out float score, out string error)
     {
         score = 0;
         error = Status;
@@ -93,9 +93,9 @@ internal sealed class DbTextUnavailableAiScorer : IDbTextAiScorer
     }
 }
 
-internal sealed class DbTextAiDecision
+internal sealed class WenShuDbTextDecision
 {
-    private DbTextAiDecision(string action, string selectedText, string reason, string aiSummary)
+    private WenShuDbTextDecision(string action, string selectedText, string reason, string aiSummary)
     {
         Action = action;
         SelectedText = selectedText;
@@ -111,12 +111,13 @@ internal sealed class DbTextAiDecision
     public bool ShouldRepair => string.Equals(Action, "repair", StringComparison.Ordinal);
     public bool IsBlocked => string.Equals(Action, "unsafe", StringComparison.Ordinal);
 
-    public static DbTextAiDecision Repair(string selectedText, string reason, string aiSummary) =>
+    public static WenShuDbTextDecision Repair(string selectedText, string reason, string aiSummary) =>
         new("repair", selectedText, reason, aiSummary);
 
-    public static DbTextAiDecision Unsafe(string reason, string aiSummary) =>
+    public static WenShuDbTextDecision Unsafe(string reason, string aiSummary) =>
         new("unsafe", string.Empty, reason, aiSummary);
 
-    public static DbTextAiDecision Skip(string reason, string aiSummary) =>
+    public static WenShuDbTextDecision Skip(string reason, string aiSummary) =>
         new("skip", string.Empty, reason, aiSummary);
 }
+

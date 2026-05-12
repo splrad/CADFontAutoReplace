@@ -1,0 +1,6 @@
+numpy>=1.26
+pandas>=2.2
+lightgbm>=4.3
+onnx>=1.15
+onnxmltools>=1.12
+packaging>=24.0

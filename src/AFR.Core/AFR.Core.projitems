@@ -16,13 +16,13 @@
     <Compile Include="$(MSBuildThisFileDirectory)Abstractions\ILogService.cs" Link="Abstractions\ILogService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Abstractions\RegistryDefaultAttribute.cs" Link="Abstractions\RegistryDefaultAttribute.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Constants\CommandNames.cs" Link="Constants\CommandNames.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextAI\DbTextAiCandidateGenerator.cs" Link="DbTextAI\DbTextAiCandidateGenerator.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextAI\DbTextAiDecisionEngine.cs" Link="DbTextAI\DbTextAiDecisionEngine.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextAI\DbTextAiFeatureExtractor.cs" Link="DbTextAI\DbTextAiFeatureExtractor.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextAI\DbTextAiModels.cs" Link="DbTextAI\DbTextAiModels.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextAI\DbTextAiProblemDetector.cs" Link="DbTextAI\DbTextAiProblemDetector.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextAI\DbTextAiScorerFactory.cs" Link="DbTextAI\DbTextAiScorerFactory.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DbTextAI\DbTextEmbeddedOnnxScorer.cs" Link="DbTextAI\DbTextEmbeddedOnnxScorer.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)WenShu\DbText\WenShuDbTextCandidateGenerator.cs" Link="WenShu\DbText\WenShuDbTextCandidateGenerator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)WenShu\DbText\WenShuDbTextDecisionEngine.cs" Link="WenShu\DbText\WenShuDbTextDecisionEngine.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)WenShu\DbText\WenShuDbTextFeatureExtractor.cs" Link="WenShu\DbText\WenShuDbTextFeatureExtractor.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)WenShu\DbText\WenShuDbTextModels.cs" Link="WenShu\DbText\WenShuDbTextModels.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)WenShu\DbText\WenShuDbTextProblemDetector.cs" Link="WenShu\DbText\WenShuDbTextProblemDetector.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)WenShu\DbText\WenShuDbTextScorerFactory.cs" Link="WenShu\DbText\WenShuDbTextScorerFactory.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)WenShu\DbText\WenShuDbTextEmbeddedOnnxScorer.cs" Link="WenShu\DbText\WenShuDbTextEmbeddedOnnxScorer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\FontCheckResult.cs" Link="Models\FontCheckResult.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\InlineFontFixRecord.cs" Link="Models\InlineFontFixRecord.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\StyleFontReplacement.cs" Link="Models\StyleFontReplacement.cs" />

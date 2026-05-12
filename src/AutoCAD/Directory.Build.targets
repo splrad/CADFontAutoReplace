@@ -7,26 +7,37 @@
                       Condition="'$(TargetFramework)' == 'net8.0-windows'" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(DbTextAiModelPath)' != '' and Exists('$(DbTextAiModelPath)')">
-    <EmbeddedResource Include="$(DbTextAiModelPath)">
+  <PropertyGroup>
+    <_WenShuRepoRoot>$([MSBuild]::GetDirectoryNameOfFileAbove('$(MSBuildThisFileDirectory)', 'CADFontAutoReplace.slnx'))</_WenShuRepoRoot>
+    <_WenShuDefaultModelPath>$(_WenShuRepoRoot)\models\WenShu\DbText\Current\AFR.DBTextAI.Model.onnx</_WenShuDefaultModelPath>
+    <_WenShuDefaultManifestPath>$(_WenShuRepoRoot)\models\WenShu\DbText\Current\AFR.DBTextAI.ModelManifest.json</_WenShuDefaultManifestPath>
+    <WenShuDbTextModelPath Condition="'$(WenShuDbTextModelPath)' == '' and '$(DbTextAiModelPath)' != ''">$(DbTextAiModelPath)</WenShuDbTextModelPath>
+    <WenShuDbTextModelManifestPath Condition="'$(WenShuDbTextModelManifestPath)' == '' and '$(DbTextAiModelManifestPath)' != ''">$(DbTextAiModelManifestPath)</WenShuDbTextModelManifestPath>
+    <WenShuDbTextRuntimeDirectory Condition="'$(WenShuDbTextRuntimeDirectory)' == '' and '$(DbTextAiRuntimeDirectory)' != ''">$(DbTextAiRuntimeDirectory)</WenShuDbTextRuntimeDirectory>
+    <WenShuDbTextModelPath Condition="'$(WenShuDbTextModelPath)' == '' and '$(_WenShuRepoRoot)' != '' and Exists('$(_WenShuDefaultModelPath)')">$(_WenShuDefaultModelPath)</WenShuDbTextModelPath>
+    <WenShuDbTextModelManifestPath Condition="'$(WenShuDbTextModelManifestPath)' == '' and '$(_WenShuRepoRoot)' != '' and Exists('$(_WenShuDefaultManifestPath)')">$(_WenShuDefaultManifestPath)</WenShuDbTextModelManifestPath>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(WenShuDbTextModelPath)' != '' and Exists('$(WenShuDbTextModelPath)')">
+    <EmbeddedResource Include="$(WenShuDbTextModelPath)">
       <LogicalName>AFR.DBTextAI.Model.onnx</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
-  <ItemGroup Condition="'$(DbTextAiModelManifestPath)' != '' and Exists('$(DbTextAiModelManifestPath)')">
-    <EmbeddedResource Include="$(DbTextAiModelManifestPath)">
+  <ItemGroup Condition="'$(WenShuDbTextModelManifestPath)' != '' and Exists('$(WenShuDbTextModelManifestPath)')">
+    <EmbeddedResource Include="$(WenShuDbTextModelManifestPath)">
       <LogicalName>AFR.DBTextAI.ModelManifest.json</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
-  <ItemGroup Condition="'$(DbTextAiRuntimeDirectory)' != '' and Exists('$(DbTextAiRuntimeDirectory)\Microsoft.ML.OnnxRuntime.dll')">
-    <EmbeddedResource Include="$(DbTextAiRuntimeDirectory)\Microsoft.ML.OnnxRuntime.dll">
+  <ItemGroup Condition="'$(WenShuDbTextRuntimeDirectory)' != '' and Exists('$(WenShuDbTextRuntimeDirectory)\Microsoft.ML.OnnxRuntime.dll')">
+    <EmbeddedResource Include="$(WenShuDbTextRuntimeDirectory)\Microsoft.ML.OnnxRuntime.dll">
       <LogicalName>Microsoft.ML.OnnxRuntime.dll</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
-  <ItemGroup Condition="'$(DbTextAiRuntimeDirectory)' != '' and Exists('$(DbTextAiRuntimeDirectory)\onnxruntime.dll')">
-    <EmbeddedResource Include="$(DbTextAiRuntimeDirectory)\onnxruntime.dll">
+  <ItemGroup Condition="'$(WenShuDbTextRuntimeDirectory)' != '' and Exists('$(WenShuDbTextRuntimeDirectory)\onnxruntime.dll')">
+    <EmbeddedResource Include="$(WenShuDbTextRuntimeDirectory)\onnxruntime.dll">
       <LogicalName>onnxruntime.dll</LogicalName>
     </EmbeddedResource>
   </ItemGroup>

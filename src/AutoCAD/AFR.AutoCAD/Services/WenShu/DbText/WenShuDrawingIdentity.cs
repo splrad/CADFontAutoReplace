@@ -3,9 +3,9 @@ using System.Security.Cryptography;
 using System.Text;
 using Autodesk.AutoCAD.DatabaseServices;
 
-namespace AFR.Services.DbTextRepair;
+namespace AFR.Services.WenShu.DbText;
 
-internal sealed class DbTextDrawingIdentity
+internal sealed class WenShuDrawingIdentity
 {
     public string Path { get; init; } = string.Empty;
     public string FileName { get; init; } = string.Empty;
@@ -13,16 +13,16 @@ internal sealed class DbTextDrawingIdentity
     public string LastWriteUtc { get; init; } = string.Empty;
     public string Sha256 { get; init; } = string.Empty;
 
-    public static DbTextDrawingIdentity FromDatabase(Database db)
+    public static WenShuDrawingIdentity FromDatabase(Database db)
     {
         string path = db.Filename ?? string.Empty;
         if (string.IsNullOrWhiteSpace(path))
-            return new DbTextDrawingIdentity();
+            return new WenShuDrawingIdentity();
 
         try
         {
             var info = new FileInfo(path);
-            return new DbTextDrawingIdentity
+            return new WenShuDrawingIdentity
             {
                 Path = path,
                 FileName = info.Name,
@@ -33,7 +33,7 @@ internal sealed class DbTextDrawingIdentity
         }
         catch
         {
-            return new DbTextDrawingIdentity
+            return new WenShuDrawingIdentity
             {
                 Path = path,
                 FileName = SafeFileName(path)
@@ -65,3 +65,4 @@ internal sealed class DbTextDrawingIdentity
         catch { return string.Empty; }
     }
 }
+

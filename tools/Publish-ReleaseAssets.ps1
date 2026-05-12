@@ -26,9 +26,9 @@
 #>
 param(
     [switch]$SkipPluginBuild,
-    [string]$DbTextAiModelPath = $env:AFR_DBTEXT_AI_MODEL_PATH,
-    [string]$DbTextAiModelManifestPath = $env:AFR_DBTEXT_AI_MODEL_MANIFEST_PATH,
-    [string]$DbTextAiRuntimeDirectory = $env:AFR_DBTEXT_AI_RUNTIME_DIRECTORY
+    [string]$WenShuDbTextModelPath = $env:AFR_WENSHU_DBTEXT_MODEL_PATH,
+    [string]$WenShuDbTextModelManifestPath = $env:AFR_WENSHU_DBTEXT_MODEL_MANIFEST_PATH,
+    [string]$WenShuDbTextRuntimeDirectory = $env:AFR_WENSHU_DBTEXT_RUNTIME_DIRECTORY
 )
 
 Set-StrictMode -Version Latest
@@ -50,6 +50,24 @@ $DeployerCsproj = Join-Path $RepoRoot "src\AFR.Deployer\AFR.Deployer.csproj"
 $PublishOutput  = Join-Path $RepoRoot "publish\AFR.Deployer"
 $VersionProps    = Join-Path $RepoRoot "Version.props"
 $FontsSourcePath = Join-Path $RepoRoot "chore\Fonts.zip"
+$DefaultWenShuDbTextModelPath = Join-Path $RepoRoot "models\WenShu\DbText\Current\AFR.DBTextAI.Model.onnx"
+$DefaultWenShuDbTextModelManifestPath = Join-Path $RepoRoot "models\WenShu\DbText\Current\AFR.DBTextAI.ModelManifest.json"
+
+if ([string]::IsNullOrWhiteSpace($WenShuDbTextModelPath) -and -not [string]::IsNullOrWhiteSpace($env:AFR_DBTEXT_AI_MODEL_PATH)) {
+    $WenShuDbTextModelPath = $env:AFR_DBTEXT_AI_MODEL_PATH
+}
+if ([string]::IsNullOrWhiteSpace($WenShuDbTextModelManifestPath) -and -not [string]::IsNullOrWhiteSpace($env:AFR_DBTEXT_AI_MODEL_MANIFEST_PATH)) {
+    $WenShuDbTextModelManifestPath = $env:AFR_DBTEXT_AI_MODEL_MANIFEST_PATH
+}
+if ([string]::IsNullOrWhiteSpace($WenShuDbTextRuntimeDirectory) -and -not [string]::IsNullOrWhiteSpace($env:AFR_DBTEXT_AI_RUNTIME_DIRECTORY)) {
+    $WenShuDbTextRuntimeDirectory = $env:AFR_DBTEXT_AI_RUNTIME_DIRECTORY
+}
+if ([string]::IsNullOrWhiteSpace($WenShuDbTextModelPath) -and (Test-Path -LiteralPath $DefaultWenShuDbTextModelPath)) {
+    $WenShuDbTextModelPath = $DefaultWenShuDbTextModelPath
+}
+if ([string]::IsNullOrWhiteSpace($WenShuDbTextModelManifestPath) -and (Test-Path -LiteralPath $DefaultWenShuDbTextModelManifestPath)) {
+    $WenShuDbTextModelManifestPath = $DefaultWenShuDbTextModelManifestPath
+}
 
 # 自动发现 src\AutoCAD\AFR-ACAD*\*.csproj，避免新增 CAD 版本时手工维护列表。
 # TFM 仅用于控制台日志展示；解析失败时回落为 "(unknown)"，不阻断发布流程。
@@ -89,27 +107,27 @@ if ($Plugins.Count -eq 0) {
 Write-Host "自动发现 $($Plugins.Count) 个插件项目：" -ForegroundColor DarkGray
 $Plugins | ForEach-Object { Write-Host "    • $($_.Name) ($($_.TFM))" -ForegroundColor DarkGray }
 
-$DbTextAiBuildArgs = @()
-if (-not [string]::IsNullOrWhiteSpace($DbTextAiModelPath)) {
-    if (-not (Test-Path -LiteralPath $DbTextAiModelPath)) {
-        Write-Host "DBText AI 模型不存在：$DbTextAiModelPath" -ForegroundColor Red
+$WenShuDbTextBuildArgs = @()
+if (-not [string]::IsNullOrWhiteSpace($WenShuDbTextModelPath)) {
+    if (-not (Test-Path -LiteralPath $WenShuDbTextModelPath)) {
+        Write-Host "文枢 DBText 模型不存在：$WenShuDbTextModelPath" -ForegroundColor Red
         exit 1
     }
-    $DbTextAiBuildArgs += "/p:DbTextAiModelPath=$DbTextAiModelPath"
+    $WenShuDbTextBuildArgs += "/p:WenShuDbTextModelPath=$WenShuDbTextModelPath"
 }
-if (-not [string]::IsNullOrWhiteSpace($DbTextAiModelManifestPath)) {
-    if (-not (Test-Path -LiteralPath $DbTextAiModelManifestPath)) {
-        Write-Host "DBText AI 模型清单不存在：$DbTextAiModelManifestPath" -ForegroundColor Red
+if (-not [string]::IsNullOrWhiteSpace($WenShuDbTextModelManifestPath)) {
+    if (-not (Test-Path -LiteralPath $WenShuDbTextModelManifestPath)) {
+        Write-Host "文枢 DBText 模型清单不存在：$WenShuDbTextModelManifestPath" -ForegroundColor Red
         exit 1
     }
-    $DbTextAiBuildArgs += "/p:DbTextAiModelManifestPath=$DbTextAiModelManifestPath"
+    $WenShuDbTextBuildArgs += "/p:WenShuDbTextModelManifestPath=$WenShuDbTextModelManifestPath"
 }
-if (-not [string]::IsNullOrWhiteSpace($DbTextAiRuntimeDirectory)) {
-    if (-not (Test-Path -LiteralPath $DbTextAiRuntimeDirectory)) {
-        Write-Host "DBText AI ONNX Runtime 目录不存在：$DbTextAiRuntimeDirectory" -ForegroundColor Red
+if (-not [string]::IsNullOrWhiteSpace($WenShuDbTextRuntimeDirectory)) {
+    if (-not (Test-Path -LiteralPath $WenShuDbTextRuntimeDirectory)) {
+        Write-Host "文枢 DBText ONNX Runtime 目录不存在：$WenShuDbTextRuntimeDirectory" -ForegroundColor Red
         exit 1
     }
-    $DbTextAiBuildArgs += "/p:DbTextAiRuntimeDirectory=$DbTextAiRuntimeDirectory"
+    $WenShuDbTextBuildArgs += "/p:WenShuDbTextRuntimeDirectory=$WenShuDbTextRuntimeDirectory"
 }
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────
@@ -149,7 +167,7 @@ if (-not $SkipPluginBuild) {
         Write-Host "  → 构建 $($p.Name) ($($p.TFM))..." -NoNewline
 
         # 构建单个版本壳项目；构建成功后会在标准输出目录生成 DLL 与 sidecar JSON。
-        $output = dotnet build $csproj -c Release --nologo -v quiet @DbTextAiBuildArgs 2>&1
+        $output = dotnet build $csproj -c Release --nologo -v quiet @WenShuDbTextBuildArgs 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "失败"
             $buildErrors += $p.Name

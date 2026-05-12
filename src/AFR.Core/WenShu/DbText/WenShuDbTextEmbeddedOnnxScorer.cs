@@ -5,15 +5,15 @@ using System.Linq;
 using System.Reflection;
 using AFR.Services;
 
-namespace AFR.DbTextAI;
+namespace AFR.WenShu.DbText;
 
-internal sealed class DbTextEmbeddedOnnxScorer : IDbTextAiScorer
+internal sealed class WenShuDbTextEmbeddedOnnxScorer : IWenShuDbTextScorer
 {
     private readonly object _session;
     private readonly MethodInfo _runMethod;
     private readonly string _inputName;
 
-    private DbTextEmbeddedOnnxScorer(object session, MethodInfo runMethod, string inputName)
+    private WenShuDbTextEmbeddedOnnxScorer(object session, MethodInfo runMethod, string inputName)
     {
         _session = session;
         _runMethod = runMethod;
@@ -23,7 +23,7 @@ internal sealed class DbTextEmbeddedOnnxScorer : IDbTextAiScorer
     public bool IsAvailable => true;
     public string Status => "onnx-loaded";
 
-    public bool TryScore(DbTextAiContext context, DbTextAiCandidate candidate, float[] features, out float score, out string error)
+    public bool TryScore(WenShuDbTextContext context, WenShuDbTextCandidate candidate, float[] features, out float score, out string error)
     {
         score = 0;
         error = string.Empty;
@@ -91,22 +91,22 @@ internal sealed class DbTextEmbeddedOnnxScorer : IDbTextAiScorer
         }
     }
 
-    public static bool TryCreate(out IDbTextAiScorer scorer, out string error)
+    public static bool TryCreate(out IWenShuDbTextScorer scorer, out string error)
     {
-        scorer = new DbTextUnavailableAiScorer("not-created");
+        scorer = new WenShuDbTextUnavailableScorer("not-created");
         error = string.Empty;
 
         try
         {
-            Assembly owner = typeof(DbTextEmbeddedOnnxScorer).Assembly;
-            byte[]? modelBytes = ReadResource(owner, DbTextAiConstants.ModelResourceName);
+            Assembly owner = typeof(WenShuDbTextEmbeddedOnnxScorer).Assembly;
+            byte[]? modelBytes = ReadResource(owner, WenShuDbTextConstants.ModelResourceName);
             if (modelBytes == null || modelBytes.Length == 0)
             {
                 error = "onnx-model-resource-missing";
                 return false;
             }
 
-            string manifestText = ReadTextResource(owner, DbTextAiConstants.ModelManifestResourceName) ?? string.Empty;
+            string manifestText = ReadTextResource(owner, WenShuDbTextConstants.ModelManifestResourceName) ?? string.Empty;
             if (string.IsNullOrWhiteSpace(manifestText))
             {
                 error = "onnx-model-manifest-missing";
@@ -114,7 +114,7 @@ internal sealed class DbTextEmbeddedOnnxScorer : IDbTextAiScorer
             }
 
             string featureSchema = ReadManifestValue(manifestText, "featureSchemaVersion");
-            if (!string.Equals(featureSchema, DbTextAiConstants.FeatureSchemaVersion, StringComparison.Ordinal))
+            if (!string.Equals(featureSchema, WenShuDbTextConstants.FeatureSchemaVersion, StringComparison.Ordinal))
             {
                 error = "onnx-feature-schema-mismatch";
                 return false;
@@ -123,15 +123,16 @@ internal sealed class DbTextEmbeddedOnnxScorer : IDbTextAiScorer
             string cacheDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "CADFontAutoReplace",
-                "DbTextAI",
+                "WenShu",
+                "DbText",
                 PluginVersionService.GetBuildId());
             Directory.CreateDirectory(cacheDir);
 
-            ExtractOptionalResource(owner, DbTextAiConstants.RuntimeNativeResourceName, Path.Combine(cacheDir, DbTextAiConstants.RuntimeNativeResourceName));
-            ExtractOptionalResource(owner, DbTextAiConstants.RuntimeManagedResourceName, Path.Combine(cacheDir, DbTextAiConstants.RuntimeManagedResourceName));
+            ExtractOptionalResource(owner, WenShuDbTextConstants.RuntimeNativeResourceName, Path.Combine(cacheDir, WenShuDbTextConstants.RuntimeNativeResourceName));
+            ExtractOptionalResource(owner, WenShuDbTextConstants.RuntimeManagedResourceName, Path.Combine(cacheDir, WenShuDbTextConstants.RuntimeManagedResourceName));
             PrependPath(cacheDir);
 
-            string modelPath = Path.Combine(cacheDir, DbTextAiConstants.ModelResourceName);
+            string modelPath = Path.Combine(cacheDir, WenShuDbTextConstants.ModelResourceName);
             WriteIfChanged(modelPath, modelBytes);
 
             Assembly runtimeAssembly = LoadOnnxRuntime(owner, cacheDir);
@@ -163,7 +164,7 @@ internal sealed class DbTextEmbeddedOnnxScorer : IDbTextAiScorer
             if (string.IsNullOrWhiteSpace(inputName))
                 inputName = "features";
 
-            scorer = new DbTextEmbeddedOnnxScorer(session, runMethod, inputName);
+            scorer = new WenShuDbTextEmbeddedOnnxScorer(session, runMethod, inputName);
             return true;
         }
         catch (Exception ex)
@@ -175,11 +176,11 @@ internal sealed class DbTextEmbeddedOnnxScorer : IDbTextAiScorer
 
     private static Assembly LoadOnnxRuntime(Assembly owner, string cacheDir)
     {
-        string managedPath = Path.Combine(cacheDir, DbTextAiConstants.RuntimeManagedResourceName);
+        string managedPath = Path.Combine(cacheDir, WenShuDbTextConstants.RuntimeManagedResourceName);
         if (File.Exists(managedPath))
             return Assembly.LoadFrom(managedPath);
 
-        byte[]? embedded = ReadResource(owner, DbTextAiConstants.RuntimeManagedResourceName);
+        byte[]? embedded = ReadResource(owner, WenShuDbTextConstants.RuntimeManagedResourceName);
         if (embedded != null && embedded.Length > 0)
             return Assembly.Load(embedded);
 
@@ -310,3 +311,4 @@ internal sealed class DbTextEmbeddedOnnxScorer : IDbTextAiScorer
         return json.Substring(firstQuote + 1, secondQuote - firstQuote - 1);
     }
 }
+

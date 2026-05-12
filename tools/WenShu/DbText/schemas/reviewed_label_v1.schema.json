@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://afr.local/schemas/dbtext-ai-reviewed-label-v1.json",
+  "title": "AFR WenShu DBText AI reviewed label v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "featureSchema",
+    "groupId",
+    "labelAction",
+    "labelText",
+    "context",
+    "currentText",
+    "candidates"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dbtext-ai-reviewed-label-v1"
+    },
+    "featureSchema": {
+      "const": "dbtext-ai-features-v1"
+    },
+    "groupId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "labelAction": {
+      "enum": [
+        "repair",
+        "keep",
+        "unsafe",
+        "unknown",
+        "glyph-issue"
+      ]
+    },
+    "labelText": {
+      "type": "string"
+    },
+    "reviewer": {
+      "type": "string"
+    },
+    "reviewedUtc": {
+      "type": "string"
+    },
+    "context": {
+      "type": "object"
+    },
+    "currentText": {
+      "type": "string"
+    },
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "text",
+          "source",
+          "reason",
+          "isRoundTrip",
+          "targetScore"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "isRoundTrip": {
+            "type": "boolean"
+          },
+          "targetScore": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    }
+  }
+}

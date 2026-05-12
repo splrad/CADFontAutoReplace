@@ -4,17 +4,17 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 
-namespace AFR.DbTextAI;
+namespace AFR.WenShu.DbText;
 
-internal static class DbTextAiCandidateGenerator
+internal static class WenShuDbTextCandidateGenerator
 {
 #if !NETFRAMEWORK
     private static int _providerRegistered;
 #endif
 
-    public static IReadOnlyList<DbTextAiCandidate> BuildCandidates(string currentText)
+    public static IReadOnlyList<WenShuDbTextCandidate> BuildCandidates(string currentText)
     {
-        var candidates = new List<DbTextAiCandidate>();
+        var candidates = new List<WenShuDbTextCandidate>();
         AddCandidate(candidates, currentText, "current-noop", "当前文本", isRoundTrip: true);
 
         TryAddConversion(candidates, currentText, 950, 936, "big5-carrier-to-gbk");
@@ -29,7 +29,7 @@ internal static class DbTextAiCandidateGenerator
     }
 
     private static void TryAddConversion(
-        List<DbTextAiCandidate> candidates,
+        List<WenShuDbTextCandidate> candidates,
         string currentText,
         int carrierCodePage,
         int targetCodePage,
@@ -104,7 +104,7 @@ internal static class DbTextAiCandidateGenerator
     }
 
     private static void AddCandidate(
-        List<DbTextAiCandidate> candidates,
+        List<WenShuDbTextCandidate> candidates,
         string text,
         string source,
         string reason,
@@ -113,13 +113,14 @@ internal static class DbTextAiCandidateGenerator
         if (string.IsNullOrEmpty(text))
             return;
 
-        DbTextAiCandidate? existing = candidates.FirstOrDefault(c => string.Equals(c.Text, text, StringComparison.Ordinal));
+        WenShuDbTextCandidate? existing = candidates.FirstOrDefault(c => string.Equals(c.Text, text, StringComparison.Ordinal));
         if (existing != null)
         {
             existing.AddSource(source, reason, isRoundTrip);
             return;
         }
 
-        candidates.Add(new DbTextAiCandidate(text, source, reason, isRoundTrip));
+        candidates.Add(new WenShuDbTextCandidate(text, source, reason, isRoundTrip));
     }
 }
+

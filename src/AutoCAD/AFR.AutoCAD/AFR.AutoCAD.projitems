@@ -27,15 +27,17 @@
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetectionContext.cs" Link="Services\FontDetectionContext.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetector.cs" Link="Services\FontDetector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontReplacer.cs" Link="Services\FontReplacer.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextDrawingIdentity.cs" Link="Services\DbTextRepair\DbTextDrawingIdentity.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairAdvisor.cs" Link="Services\DbTextRepair\DbTextRepairAdvisor.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\DbTextRepair\DbTextRepairService.cs" Link="Services\DbTextRepair\DbTextRepairService.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\WenShu\DbText\WenShuDrawingIdentity.cs" Link="Services\WenShu\DbText\WenShuDrawingIdentity.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\WenShu\DbText\WenShuDbTextEntitySnapshotBuilder.cs" Link="Services\WenShu\DbText\WenShuDbTextEntitySnapshotBuilder.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\WenShu\DbText\WenShuDbTextAdvisor.cs" Link="Services\WenShu\DbText\WenShuDbTextAdvisor.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\WenShu\DbText\WenShuDbTextRepairService.cs" Link="Services\WenShu\DbText\WenShuDbTextRepairService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\LogService.cs" Link="Services\LogService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\EmbeddedFontDeployer.cs" Link="Hosting\EmbeddedFontDeployer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AssemblyRegistryDefaults.cs" Link="Hosting\AssemblyRegistryDefaults.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\ExternalRegistryDefaultsApplier.cs" Link="Hosting\ExternalRegistryDefaultsApplier.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Diagnostics\AwsHideableDialogPatcher.cs" Link="Diagnostics\AwsHideableDialogPatcher.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DumpDialogApiCommand.cs" Link="DebugCommands\DumpDialogApiCommand.cs" Condition="'$(Configuration)'=='Debug'" />
+    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\WenShuDbTextExportCommand.cs" Link="DebugCommands\WenShuDbTextExportCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\GenProbeScriptsCommand.cs" Link="DebugCommands\GenProbeScriptsCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextEditorCommand.cs" Link="DebugCommands\MTextEditorCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextInsertCommand.cs" Link="DebugCommands\MTextInsertCommand.cs" Condition="'$(Configuration)'=='Debug'" />

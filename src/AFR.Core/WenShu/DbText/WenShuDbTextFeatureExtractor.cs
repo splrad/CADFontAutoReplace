@@ -2,13 +2,13 @@ using System;
 using System.Globalization;
 using System.Text;
 
-namespace AFR.DbTextAI;
+namespace AFR.WenShu.DbText;
 
-internal static class DbTextAiFeatureExtractor
+internal static class WenShuDbTextFeatureExtractor
 {
     public const int FeatureCount = 56;
 
-    public static float[] Extract(DbTextAiContext context, DbTextAiCandidate candidate)
+    public static float[] Extract(WenShuDbTextContext context, WenShuDbTextCandidate candidate)
     {
         string current = context.CurrentText ?? string.Empty;
         string candidateText = candidate.Text ?? string.Empty;
@@ -326,3 +326,4 @@ internal static class DbTextAiFeatureExtractor
         public float BopomofoOrKanaRatio;
     }
 }
+
