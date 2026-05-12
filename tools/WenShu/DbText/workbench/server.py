@@ -1112,6 +1112,7 @@ INDEX_HTML = r"""<!doctype html>
     let selectedCandidate = null;
     let activeView = 'packages';
     let pollTimer = null;
+    let recordById = new Map();
 
     async function api(path, options) {
       const res = await fetch(path, options || {});
@@ -1121,17 +1122,22 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function refresh() {
-      app = await api('/api/bootstrap');
+      setApp(await api('/api/bootstrap'));
       const records = getRecords();
       if (!selectedId && records.length) selectedId = records[0].groupId;
       render();
       schedulePoll();
     }
 
+    function setApp(nextApp) {
+      app = nextApp;
+      recordById = new Map(getRecords().map(record => [record.groupId, record]));
+    }
+
     function getData() { return (app && app.data) || {records: [], reviewed: {}, summary: {}, paths: {}, manifest: {}}; }
     function getRecords() { return getData().records || []; }
     function getReviewed() { return getData().reviewed || {}; }
-    function currentRecord() { return getRecords().find(r => r.groupId === selectedId) || getRecords()[0] || null; }
+    function currentRecord() { return recordById.get(selectedId) || getRecords()[0] || null; }
 
     function render() {
       renderHeader();
@@ -1191,7 +1197,7 @@ INDEX_HTML = r"""<!doctype html>
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({package: id})
       });
-      app = data.bootstrap;
+      setApp(data.bootstrap);
       selectedId = null;
       selectedCandidate = null;
       const records = getRecords();
@@ -1228,17 +1234,21 @@ INDEX_HTML = r"""<!doctype html>
     function renderRecordList() {
       const list = document.getElementById('recordList');
       list.innerHTML = '';
+      const fragment = document.createDocumentFragment();
       for (const record of filteredRecords()) {
         const ctx = record.context || {};
         const reviewed = getReviewed()[record.groupId];
         const div = document.createElement('div');
         div.className = `row ${record.groupId === selectedId ? 'active' : ''} ${reviewed ? 'reviewed' : ''} ${record.problemGate?.hasProblem ? 'problem' : ''}`;
-        div.onclick = () => { selectedId = record.groupId; selectedCandidate = null; renderReview(); };
+        div.dataset.groupId = record.groupId;
+        div.onclick = () => selectRecord(record.groupId);
         div.innerHTML = `
           <div class="row-top"><span>${escapeHtml(ctx.handle || '')}</span><span>${escapeHtml(ctx.layer || '')}</span></div>
           <div class="row-text">${escapeHtml(record.currentText || '')}</div>`;
-        list.appendChild(div);
+        fragment.appendChild(div);
       }
+      list.appendChild(fragment);
+      updateRecordSelection();
     }
 
     function renderPreview() {
@@ -1251,20 +1261,26 @@ INDEX_HTML = r"""<!doctype html>
       const minX = Math.min(...xs), maxX = Math.max(...xs);
       const minY = Math.min(...ys), maxY = Math.max(...ys);
       const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
+      const fragment = document.createDocumentFragment();
       for (const item of points) {
         const px = Number(item.p.x) || Number(item.p.X) || 0;
         const py = Number(item.p.y) || Number(item.p.Y) || 0;
         const x = 5 + ((px - minX) / w) * 90;
         const y = 95 - ((py - minY) / h) * 90;
         const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        c.classList.add('preview-point');
+        c.dataset.groupId = item.r.groupId;
+        c.dataset.problem = item.r.problemGate?.hasProblem ? 'true' : 'false';
         c.setAttribute('cx', x);
         c.setAttribute('cy', y);
         c.setAttribute('r', item.r.groupId === selectedId ? 1.8 : 0.9);
         c.setAttribute('fill', item.r.groupId === selectedId ? '#0b63ce' : (item.r.problemGate?.hasProblem ? '#b54708' : '#98a2b3'));
         c.style.cursor = 'pointer';
-        c.addEventListener('click', () => { selectedId = item.r.groupId; selectedCandidate = null; renderReview(); });
-        svg.appendChild(c);
+        c.addEventListener('click', () => selectRecord(item.r.groupId));
+        fragment.appendChild(c);
       }
+      svg.appendChild(fragment);
+      updatePreviewSelection();
     }
 
     function renderRecordDetails() {
@@ -1312,6 +1328,7 @@ INDEX_HTML = r"""<!doctype html>
       (record.candidates || []).forEach((candidate, index) => {
         const div = document.createElement('div');
         div.className = `candidate ${selectedCandidate === index ? 'selected' : ''}`;
+        div.dataset.index = String(index);
         div.onclick = () => selectCandidate(index);
         const score = candidate.hasAiScore ? `score ${candidate.aiScore}` : 'no score';
         div.innerHTML = `
@@ -1319,6 +1336,41 @@ INDEX_HTML = r"""<!doctype html>
           <div class="candidate-text">${escapeHtml(candidate.text || '')}</div>
           <div class="candidate-head"><span>${escapeHtml(candidate.reason || '')}</span><span>${candidate.isRoundTrip ? 'roundtrip' : 'non-roundtrip'}</span></div>`;
         candidates.appendChild(div);
+      });
+      updateCandidateSelection();
+    }
+
+    function selectRecord(groupId) {
+      if (!groupId || groupId === selectedId) return;
+      selectedId = groupId;
+      selectedCandidate = null;
+      renderRecordDetails();
+      updateSelectionState();
+    }
+
+    function updateSelectionState() {
+      updateRecordSelection();
+      updatePreviewSelection();
+      updateCandidateSelection();
+    }
+
+    function updateRecordSelection() {
+      document.querySelectorAll('#recordList .row').forEach(row => {
+        row.classList.toggle('active', row.dataset.groupId === selectedId);
+      });
+    }
+
+    function updatePreviewSelection() {
+      document.querySelectorAll('#preview .preview-point').forEach(point => {
+        const active = point.dataset.groupId === selectedId;
+        point.setAttribute('r', active ? 1.8 : 0.9);
+        point.setAttribute('fill', active ? '#0b63ce' : (point.dataset.problem === 'true' ? '#b54708' : '#98a2b3'));
+      });
+    }
+
+    function updateCandidateSelection() {
+      document.querySelectorAll('#candidateList .candidate').forEach(item => {
+        item.classList.toggle('selected', Number(item.dataset.index) === selectedCandidate);
       });
     }
 
@@ -1330,7 +1382,7 @@ INDEX_HTML = r"""<!doctype html>
         document.getElementById('labelAction').value = candidate.isNoOp ? 'keep' : 'repair';
         document.getElementById('labelText').value = candidate.text || '';
       }
-      renderRecordDetails();
+      updateCandidateSelection();
     }
 
     function quickLabel(action) {
@@ -1356,18 +1408,22 @@ INDEX_HTML = r"""<!doctype html>
           note: document.getElementById('note').value
         })
       });
-      app = data.bootstrap;
+      setApp(data.bootstrap);
       nextRecord(true);
     }
 
-    function nextRecord(skipRender) {
+    function nextRecord(fullRender) {
       const visible = filteredRecords();
       if (!visible.length) return;
       const currentIndex = Math.max(0, visible.findIndex(r => r.groupId === selectedId));
       selectedId = visible[(currentIndex + 1) % visible.length].groupId;
       selectedCandidate = null;
-      if (!skipRender) render();
-      else render();
+      if (fullRender) {
+        render();
+      } else {
+        renderRecordDetails();
+        updateSelectionState();
+      }
     }
 
     async function buildFeatures() {
@@ -1438,7 +1494,7 @@ INDEX_HTML = r"""<!doctype html>
       app.training = await api('/api/train');
       if (app.training.status !== 'running') {
         const latest = await api('/api/bootstrap');
-        app = latest;
+        setApp(latest);
       }
       renderTraining();
       renderReport();

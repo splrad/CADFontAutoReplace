@@ -1,0 +1,45 @@
+{
+  "schema": "dbtext-ai-export-package-v1",
+  "candidateGroupSchema": "dbtext-ai-candidate-group-v1",
+  "reviewedLabelSchema": "dbtext-ai-reviewed-label-v1",
+  "featureSchema": "dbtext-ai-features-v1",
+  "aiDisplayName": "文枢",
+  "aiInternalName": "AFR DBText WenShu",
+  "exportId": "20260512_092844_09_big5编码乱码问题_5f7e307e",
+  "createdUtc": "2026-05-12T09:28:44.8152106Z",
+  "afrVersion": "1.0.0.0",
+  "commandName": "AFRDBTEXTEXPORTAI",
+  "packageDirectory": "E:\\Software Plugin Project\\CADFontAutoReplace\\datasets\\WenShu\\DbText\\ExtractedCandidates\\20260512_092844_09_big5编码乱码问题_5f7e307e",
+  "files": {
+    "candidateGroups": "candidate_groups.jsonl",
+    "audit": "audit.tsv",
+    "preview": "preview.json"
+  },
+  "drawing": {
+    "path": "E:\\Software Plugin Project\\CADFontAutoReplace\\data\\WenShu\\DbText\\RawDwg\\09_big5编码乱码问题.dwg",
+    "fileName": "09_big5编码乱码问题.dwg",
+    "length": 6788358,
+    "lastWriteUtc": "2026-04-26T05:28:27.3646193Z",
+    "sha256": "5F7E307E451EBE96BD9AD88FCD0AA92E8549CC71B2033089D0578FC73B345AA9"
+  },
+  "ai": {
+    "status": "FileNotFoundException: Could not load file or assembly 'Microsoft.ML.OnnxRuntime, Culture=neutral, PublicKeyToken=null'. 系统找不到指定的文件。",
+    "modelScoringAttempted": true
+  },
+  "counts": {
+    "scanned": 6780,
+    "exported": 6769,
+    "suspectedProblems": 978,
+    "emptySkipped": 11,
+    "xref": 0,
+    "unsafeText": 0,
+    "nonRoundTrip": 0,
+    "errors": 0
+  },
+  "safety": {
+    "readOnlyExport": true,
+    "dwgWriteBack": false,
+    "localOnly": true,
+    "requiresHumanReviewBeforeTraining": true
+  }
+}
