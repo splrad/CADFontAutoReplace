@@ -6,7 +6,7 @@ namespace AFR.GlyphCore.TextRepair;
 
 internal static class GlyphCoreTextRepairFeatureExtractor
 {
-    public const int FeatureCount = 56;
+    public const int FeatureCount = 62;
 
     public static float[] Extract(GlyphCoreTextRepairContext context, GlyphCoreTextRepairCandidate candidate)
     {
@@ -73,6 +73,14 @@ internal static class GlyphCoreTextRepairFeatureExtractor
         features[53] = Bool(candidateStats.AsciiRatio > 0.9f && currentStats.AsciiRatio < 0.5f);
         features[54] = Bool(IsMostlySymbols(candidateStats));
         features[55] = Bool(IsMostlySymbols(currentStats));
+
+        // f56–f61: v2 新增特征
+        features[56] = CandidateLenRatio(current.Length, candidateText.Length);
+        features[57] = Norm(CjkCount(current), 8);
+        features[58] = Norm(CjkCount(candidateText), 8);
+        features[59] = Bool(IsFontGbkFamily(context.TextStyleFileName, context.TextStyleBigFontFileName));
+        features[60] = Bool(IsFontBig5Family(context.TextStyleFileName, context.TextStyleBigFontFileName));
+        features[61] = CandidateSourceConvergence(candidate.Source);
 
         return features;
     }
@@ -283,6 +291,59 @@ internal static class GlyphCoreTextRepairFeatureExtractor
                || text.IndexOf("GB", StringComparison.OrdinalIgnoreCase) >= 0
                || text.IndexOf("tssd", StringComparison.OrdinalIgnoreCase) >= 0
                || text.IndexOf("txt", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static float CandidateLenRatio(int currentLen, int candidateLen)
+    {
+        if (currentLen == 0)
+            return 1f;
+        return Math.Min(1f, (candidateLen / (float)currentLen) / 4f);
+    }
+
+    private static int CjkCount(string text)
+    {
+        int count = 0;
+        foreach (char ch in text ?? string.Empty)
+        {
+            if (IsCjk(ch))
+                count++;
+        }
+        return count;
+    }
+
+    private static bool IsFontGbkFamily(string fontFileName, string bigFontFileName)
+    {
+        return FontNameContains(fontFileName, "gb") || FontNameContains(fontFileName, "hztxt")
+               || FontNameContains(fontFileName, "tssd")
+               || FontNameContains(bigFontFileName, "gb") || FontNameContains(bigFontFileName, "gbcbig")
+               || FontNameContains(bigFontFileName, "hztxt") || FontNameContains(bigFontFileName, "tssd");
+    }
+
+    private static bool IsFontBig5Family(string fontFileName, string bigFontFileName)
+    {
+        return FontNameContains(fontFileName, "big5") || FontNameContains(fontFileName, "hzbig5")
+               || FontNameContains(fontFileName, "cns")
+               || FontNameContains(bigFontFileName, "big5") || FontNameContains(bigFontFileName, "hzbig5")
+               || FontNameContains(bigFontFileName, "cns");
+    }
+
+    private static bool FontNameContains(string fontFileName, string token)
+    {
+        return !string.IsNullOrEmpty(fontFileName)
+               && fontFileName.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static float CandidateSourceConvergence(string source)
+    {
+        if (string.IsNullOrEmpty(source))
+            return 0f;
+        int plusCount = 0;
+        foreach (char ch in source)
+        {
+            if (ch == '+')
+                plusCount++;
+        }
+        return Norm(1 + plusCount, 3);
     }
 
     private static float ContainsSource(string source, string token)

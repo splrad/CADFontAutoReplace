@@ -64,6 +64,13 @@ FEATURE_NAMES = [
     "candidate_becomes_ascii_from_nonascii",
     "candidate_mostly_symbols",
     "current_mostly_symbols",
+    # v2 新增特征
+    "candidate_len_ratio",
+    "current_cjk_count_norm",
+    "candidate_cjk_count_norm",
+    "font_is_gbk_family",
+    "font_is_big5_family",
+    "candidate_source_convergence",
 ]
 
 
@@ -147,7 +154,44 @@ def extract_features(context: dict, candidate: Candidate) -> list[float]:
     features[53] = boolf(candidate_stats.ascii_ratio > 0.9 and current_stats.ascii_ratio < 0.5)
     features[54] = boolf(is_mostly_symbols(candidate_stats))
     features[55] = boolf(is_mostly_symbols(current_stats))
+    # v2 新增特征
+    features[56] = candidate_len_ratio(len(current), len(candidate_text))
+    features[57] = norm(cjk_count(current), 8)
+    features[58] = norm(cjk_count(candidate_text), 8)
+    features[59] = boolf(is_font_gbk_family(str(context.get("textStyleFileName") or ""), str(context.get("textStyleBigFontFileName") or "")))
+    features[60] = boolf(is_font_big5_family(str(context.get("textStyleFileName") or ""), str(context.get("textStyleBigFontFileName") or "")))
+    features[61] = candidate_source_convergence(candidate.source)
     return features
+
+
+def candidate_len_ratio(current_len: int, candidate_len: int) -> float:
+    if current_len == 0:
+        return 1.0
+    return min(1.0, (candidate_len / current_len) / 4.0)
+
+
+def cjk_count(text: str) -> int:
+    return sum(1 for ch in (text or "") if is_cjk(ch))
+
+
+def is_font_gbk_family(font: str, bigfont: str) -> bool:
+    tokens = ("gb", "gbcbig", "hztxt", "tssd")
+    lower_font = font.lower()
+    lower_big = bigfont.lower()
+    return any(t in lower_font or t in lower_big for t in tokens)
+
+
+def is_font_big5_family(font: str, bigfont: str) -> bool:
+    tokens = ("big5", "hzbig5", "cns")
+    lower_font = font.lower()
+    lower_big = bigfont.lower()
+    return any(t in lower_font or t in lower_big for t in tokens)
+
+
+def candidate_source_convergence(source: str) -> float:
+    if not source:
+        return 0.0
+    return norm(1 + source.count("+"), 3)
 
 
 def analyze(text: str) -> TextStats:

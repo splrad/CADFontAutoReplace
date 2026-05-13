@@ -9,7 +9,6 @@
     <File Path="Directory.Build.props" />
     <File Path="Directory.Packages.props" />
     <File Path="global.json" />
-    <File Path="README.md" />
     <File Path="Version.props" />
   </Folder>
 
@@ -55,6 +54,7 @@
   </Folder>
 
   <Folder Name="/Docs/">
+    <File Path="README.md" />
     <File Path="docs/autodesk-fonts.md" />
     <File Path="docs/developer-guide-advanced.md" />
     <File Path="docs/developer-guide-beginner.md" />
