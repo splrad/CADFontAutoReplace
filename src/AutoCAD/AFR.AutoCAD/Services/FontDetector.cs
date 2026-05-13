@@ -107,6 +107,13 @@ internal static class FontDetector
                         DiagnosticLogger.LogFontAvailability(typeFace, "TrueType", true);
                         continue;
                     }
+
+                    if (typeFace.Length > 1 && typeFace[0] == '@')
+                    {
+                        DiagnosticLogger.Log("检测",
+                            $"样式 '{styleName}' 使用竖排 TrueType '{typeFace}'，交由 LdFileHook 运行时映射，跳过样式表替换");
+                        continue;
+                    }
                 }
                 bool isMainMissing = false;
                 bool isBigMissing = false;
@@ -126,6 +133,95 @@ internal static class FontDetector
         }
         tr.Commit();
         return results;
+    }
+
+    /// <summary>
+    /// 收集样式表中由 LdFileHook 运行时兜底显示的字体映射。
+    /// 当前仅记录竖排 TrueType（@xxx）：样式表保持原值，不进入缺失字体替换列表。
+    /// </summary>
+    public static List<RuntimeFontMappingRecord> CollectRuntimeFontMappings(
+        FontDetectionContext context,
+        string configuredTrueTypeFont)
+    {
+        var results = new List<RuntimeFontMappingRecord>();
+        using var tr = context.Db.TransactionManager.StartTransaction();
+        var styleTable = (TextStyleTable)tr.GetObject(context.Db.TextStyleTableId, OpenMode.ForRead);
+
+        foreach (ObjectId id in styleTable)
+        {
+            try
+            {
+                var style = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
+                if (style.IsShapeFile) continue;
+
+                var fileName = Path.GetFileName(style.FileName ?? string.Empty);
+                FontDescriptor? safeFont = null;
+                try { safeFont = style.Font; }
+                catch { }
+
+                if (!safeFont.HasValue) continue;
+
+                string typeFace = safeFont.Value.TypeFace ?? string.Empty;
+                if (typeFace.Length <= 1 || typeFace[0] != '@') continue;
+
+                bool hasFile = !string.IsNullOrWhiteSpace(fileName);
+                bool fileIsTrueType = hasFile && IsTrueTypeFontFile(fileName);
+                bool isTrueType = !string.IsNullOrWhiteSpace(typeFace) && (!hasFile || fileIsTrueType);
+                if (!isTrueType) continue;
+
+                if (IsTrueTypeFontAvailable(typeFace, fileName, context))
+                    continue;
+
+                results.Add(CreateVerticalTrueTypeRuntimeRecord(
+                    style.Name,
+                    typeFace,
+                    configuredTrueTypeFont,
+                    context));
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLogger.Log("检测", $"收集运行时字体映射时出错 {id}: {ex.Message}");
+            }
+        }
+
+        tr.Commit();
+        return results;
+    }
+
+    private static RuntimeFontMappingRecord CreateVerticalTrueTypeRuntimeRecord(
+        string styleName,
+        string originalFont,
+        string configuredTrueTypeFont,
+        FontDetectionContext context)
+    {
+        string baseName = originalFont.TrimStart('@');
+        if (!string.IsNullOrWhiteSpace(baseName) && IsTrueTypeFontAvailable(baseName, context))
+        {
+            return new RuntimeFontMappingRecord(
+                styleName,
+                originalFont,
+                "@" + baseName,
+                "竖排TrueType",
+                "基础字体可用");
+        }
+
+        string configured = (configuredTrueTypeFont ?? string.Empty).TrimStart('@');
+        if (!string.IsNullOrWhiteSpace(configured) && IsTrueTypeFontAvailable(configured, context))
+        {
+            return new RuntimeFontMappingRecord(
+                styleName,
+                originalFont,
+                "@" + configured,
+                "竖排TrueType",
+                "配置字体兜底");
+        }
+
+        return new RuntimeFontMappingRecord(
+            styleName,
+            originalFont,
+            "未找到可用 TrueType",
+            "竖排TrueType",
+            "需重新配置");
     }
 
     /// <summary>

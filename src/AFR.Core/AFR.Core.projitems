@@ -26,6 +26,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)GlyphCore\TextRepair\GlyphCoreTextRepairEmbeddedOnnxScorer.cs" Link="GlyphCore\TextRepair\GlyphCoreTextRepairEmbeddedOnnxScorer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\FontCheckResult.cs" Link="Models\FontCheckResult.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\InlineFontFixRecord.cs" Link="Models\InlineFontFixRecord.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Models\RuntimeFontMappingRecord.cs" Link="Models\RuntimeFontMappingRecord.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\StyleFontReplacement.cs" Link="Models\StyleFontReplacement.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Platform\PlatformManager.cs" Link="Platform\PlatformManager.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\ConfigService.cs" Link="Services\ConfigService.cs" />

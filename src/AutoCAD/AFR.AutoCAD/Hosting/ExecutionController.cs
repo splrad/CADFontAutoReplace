@@ -64,10 +64,12 @@ internal sealed class ExecutionController
                 // 第一阶段: 检测缺失字体（读取样式表原始状态，判断哪些字体在系统中不可用）
                 DiagnosticLogger.BeginPhase("检测缺失字体");
                 var missingFonts = FontDetector.DetectMissingFonts(context);
+                var runtimeFontMappings = FontDetector.CollectRuntimeFontMappings(context, config.TrueTypeFont);
 
                 // 存储检测结果供 AFRLOG 命令使用
                 contextMgr.StoreDetectionResults(doc, missingFonts);
-                DiagnosticLogger.EndPhase($"缺失: {missingFonts.Count}个");
+                contextMgr.StoreRuntimeFontMappingResults(doc, runtimeFontMappings);
+                DiagnosticLogger.EndPhase($"缺失: {missingFonts.Count}个, 运行时映射: {runtimeFontMappings.Count}个");
 
                 int stillMissingSlotCount = 0;
 
@@ -160,6 +162,8 @@ internal sealed class ExecutionController
                 // 统计汇总 — Regen 之后输出，确保统计信息是最后一行实质内容
                 if (missingFonts.Count > 0 || inlineFixResults.Count > 0)
                     log.AddStatistics(missingFonts, stillMissingSlotCount, inlineFixResults.Count);
+                else if (runtimeFontMappings.Count > 0)
+                    log.Info($"竖排 TrueType 运行时映射 {runtimeFontMappings.Count} 项，样式表保持原值。");
                 else
                     log.Info("未检测到缺失字体。");
                 DiagnosticLogger.WriteSummary();

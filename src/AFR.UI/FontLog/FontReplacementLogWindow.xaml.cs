@@ -178,58 +178,93 @@ public partial class FontReplacementLogWindow : Window
     {
         var vm = ViewModel;
         bool hasStyle = vm.HasItems;
+        bool hasRuntime = vm.HasRuntimeMapping;
         bool hasMText = vm.HasInlineFix;
 
-        if (!hasStyle && !hasMText) return;
+        if (!hasStyle && !hasRuntime && !hasMText) return;
 
         // 仅样式表：始终显示样式表标题
-        if (hasStyle && !hasMText)
+        if (hasStyle && !hasRuntime && !hasMText)
         {
-            StickyStyleHeader.Visibility = Visibility.Visible;
-            StickyMTextHeader.Visibility = Visibility.Collapsed;
+            ShowStickyHeader(style: true, runtime: false, mtext: false);
+            return;
+        }
+
+        // 仅运行时映射：始终显示运行时映射标题
+        if (!hasStyle && hasRuntime && !hasMText)
+        {
+            ShowStickyHeader(style: false, runtime: true, mtext: false);
             return;
         }
 
         // 仅 MText：始终显示 MText 标题
-        if (!hasStyle && hasMText)
+        if (!hasStyle && !hasRuntime && hasMText)
         {
-            StickyStyleHeader.Visibility = Visibility.Collapsed;
-            StickyMTextHeader.Visibility = Visibility.Visible;
+            ShowStickyHeader(style: false, runtime: false, mtext: true);
             return;
         }
 
-        // 两者都有：根据 MText 标题位置切换
-        if (!MTextHeaderMarker.IsLoaded || !ContentScroll.IsLoaded)
+        // 多个区块：根据各区块标题位置切换
+        if (!ContentScroll.IsLoaded)
         {
-            StickyStyleHeader.Visibility = Visibility.Visible;
-            StickyMTextHeader.Visibility = Visibility.Collapsed;
+            ShowFirstAvailableHeader(hasStyle, hasRuntime, hasMText);
             return;
         }
 
         try
         {
-            // MText 标题相对于 ScrollViewer 视口顶部的 Y 坐标
-            var mtextPos = MTextHeaderMarker.TransformToAncestor(ContentScroll).Transform(new Point(0, 0));
+            if (hasMText && MTextHeaderMarker.IsLoaded)
+            {
+                var mtextPos = MTextHeaderMarker.TransformToAncestor(ContentScroll).Transform(new Point(0, 0));
+                if (mtextPos.Y <= 0)
+                {
+                    ShowStickyHeader(style: false, runtime: false, mtext: true);
+                    return;
+                }
+            }
 
-            if (mtextPos.Y <= 0)
+            if (hasRuntime && RuntimeMappingHeaderMarker.IsLoaded)
             {
-                // MText 标题已完全滚出视口顶部 → 切换为 MText 粘性标题
-                StickyStyleHeader.Visibility = Visibility.Collapsed;
-                StickyMTextHeader.Visibility = Visibility.Visible;
+                var runtimePos = RuntimeMappingHeaderMarker.TransformToAncestor(ContentScroll).Transform(new Point(0, 0));
+                if (runtimePos.Y <= 0)
+                {
+                    ShowStickyHeader(style: false, runtime: true, mtext: false);
+                    return;
+                }
             }
-            else
-            {
-                // MText 标题仍在视口内或下方 → 显示样式表粘性标题
-                StickyStyleHeader.Visibility = Visibility.Visible;
-                StickyMTextHeader.Visibility = Visibility.Collapsed;
-            }
+
+            ShowFirstAvailableHeader(hasStyle, hasRuntime, hasMText);
         }
         catch (InvalidOperationException)
         {
             // TransformToAncestor 在元素不在可视树中时抛出异常
-            StickyStyleHeader.Visibility = Visibility.Visible;
-            StickyMTextHeader.Visibility = Visibility.Collapsed;
+            ShowFirstAvailableHeader(hasStyle, hasRuntime, hasMText);
         }
+    }
+
+    private void ShowFirstAvailableHeader(bool hasStyle, bool hasRuntime, bool hasMText)
+    {
+        if (hasStyle)
+        {
+            ShowStickyHeader(style: true, runtime: false, mtext: false);
+            return;
+        }
+
+        if (hasRuntime)
+        {
+            ShowStickyHeader(style: false, runtime: true, mtext: false);
+            return;
+        }
+
+        if (hasMText)
+            ShowStickyHeader(style: false, runtime: false, mtext: true);
+    }
+
+    private void ShowStickyHeader(bool style, bool runtime, bool mtext)
+    {
+        StickyStyleHeader.Visibility = style ? Visibility.Visible : Visibility.Collapsed;
+        StickyRuntimeHeader.Visibility = runtime ? Visibility.Visible : Visibility.Collapsed;
+        StickyMTextHeader.Visibility = mtext ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

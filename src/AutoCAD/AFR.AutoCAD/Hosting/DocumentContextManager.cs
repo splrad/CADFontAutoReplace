@@ -11,7 +11,7 @@ namespace AFR.Hosting;
 /// 核心职责：
 /// <list type="bullet">
 ///   <item>防止对同一文档重复执行字体替换（通过 <see cref="HasExecuted"/>/<see cref="MarkExecuted"/> 控制）；</item>
-///   <item>存储每个文档的缺失字体检测结果、替换后仍缺失的结果、MText 内联修复记录，供 AFRLOG 命令查询。</item>
+///   <item>存储每个文档的缺失字体检测结果、替换后仍缺失的结果、MText 内联修复记录和运行时映射记录，供 AFRLOG 命令查询。</item>
 /// </list>
 /// 使用 Database.Filename 作为已保存图纸的唯一标识，未保存图纸回退到 Document.Name。
 /// 线程安全的全局单例，支持文档关闭时清理。
@@ -32,6 +32,8 @@ internal sealed class DocumentContextManager
     private readonly Dictionary<string, List<FontCheckResult>> _stillMissingResults = new(StringComparer.OrdinalIgnoreCase);
     // MText 内联字体修复记录
     private readonly Dictionary<string, List<InlineFontFixRecord>> _inlineFontFixResults = new(StringComparer.OrdinalIgnoreCase);
+    // Hook 运行时字体映射记录
+    private readonly Dictionary<string, List<RuntimeFontMappingRecord>> _runtimeFontMappingResults = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
 
     private DocumentContextManager() { }
@@ -72,6 +74,7 @@ internal sealed class DocumentContextManager
             _detectionResults.Remove(key);
             _stillMissingResults.Remove(key);
             _inlineFontFixResults.Remove(key);
+            _runtimeFontMappingResults.Remove(key);
         }
         LogService.Instance.ResetHeaderForDocument(key);
     }
@@ -85,6 +88,7 @@ internal sealed class DocumentContextManager
             _detectionResults.Clear();
             _stillMissingResults.Clear();
             _inlineFontFixResults.Clear();
+            _runtimeFontMappingResults.Clear();
         }
     }
 
@@ -169,6 +173,34 @@ internal sealed class DocumentContextManager
         lock (_lock)
         {
             return _inlineFontFixResults.TryGetValue(key, out var r) ? r : null;
+        }
+    }
+
+    /// <summary>
+    /// 存储文档的运行时字体映射记录，供 AFRLOG 命令使用。
+    /// </summary>
+    public void StoreRuntimeFontMappingResults(Document doc, List<RuntimeFontMappingRecord> results)
+    {
+        if (doc == null) return;
+        var key = GetDocumentKey(doc);
+        if (key == null) return;
+        lock (_lock)
+        {
+            _runtimeFontMappingResults[key] = results;
+        }
+    }
+
+    /// <summary>
+    /// 获取文档的运行时字体映射记录。
+    /// </summary>
+    public List<RuntimeFontMappingRecord>? GetRuntimeFontMappingResults(Document doc)
+    {
+        if (doc == null) return null;
+        var key = GetDocumentKey(doc);
+        if (key == null) return null;
+        lock (_lock)
+        {
+            return _runtimeFontMappingResults.TryGetValue(key, out var r) ? r : null;
         }
     }
 

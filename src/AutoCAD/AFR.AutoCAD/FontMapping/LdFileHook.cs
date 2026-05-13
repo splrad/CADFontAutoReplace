@@ -229,23 +229,37 @@ internal static class LdFileHook
             if (param2 == FontTypeShape)
                 return _trampolineDelegate(fileName, param2, db, desc);
 
+            bool isShxRequest = fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase);
+            bool isShxFont = param2 == FontTypeRegular || param2 == FontTypeBigFont || isShxRequest;
+            bool hasAtPrefix = fontName[0] == '@';
+            string baseName = hasAtPrefix ? fontName.TrimStart('@') : fontName;
+
             // 先按原名检查；若不是 .shx，再补后缀重试一次
             if (_availableFonts.Contains(fontName))
                 return _trampolineDelegate(fileName, param2, db, desc);
 
-            bool isShxRequest = fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase);
+            if (hasAtPrefix && !isShxFont)
+            {
+                string? verticalResolved = ResolveVerticalTrueTypeFont(fontName);
+                if (verticalResolved != null)
+                {
+                    DiagnosticLogger.Log("FontMapping",
+                        $"竖排 TrueType 映射: '{fontName}' → '{verticalResolved}'");
+                    return InvokeWithResolvedFont(verticalResolved, param2, db, desc);
+                }
+
+                return _trampolineDelegate(fileName, param2, db, desc);
+            }
+
             if (!isShxRequest && _availableFonts.Contains(fontName + ".shx"))
                 return _trampolineDelegate(fileName, param2, db, desc);
 
             // 系统 TrueType 字族名直接放行
-            bool hasAtPrefix = fontName[0] == '@';
-            string baseName = hasAtPrefix ? fontName.TrimStart('@') : fontName;
             if (FontDetector.IsSystemFont(baseName))
                 return _trampolineDelegate(fileName, param2, db, desc);
 
             // 字体缺失后按字体类型选择替换策略
             // SHX 判定条件：param2 为主字体/大字体，或文件名本身以 .shx 结尾
-            bool isShxFont = param2 == FontTypeRegular || param2 == FontTypeBigFont || isShxRequest;
             string? resolved = isShxFont
                 ? ResolveMissingShxFont(fontName, param2)
                 : ResolveMissingTrueTypeFont(fontName);
@@ -255,11 +269,7 @@ internal static class LdFileHook
                 string normalizedName = isShxFont ? EnsureShx(baseName) : baseName;
                 _redirectLog.TryAdd(normalizedName, (resolved, param2));
 
-                // 获取或创建原生字符串指针并缓存，不能释放
-                IntPtr resolvedPtr = _nativeStringCache.GetOrAdd(resolved,
-                    static name => Marshal.StringToHGlobalUni(name));
-
-                return _trampolineDelegate(resolvedPtr, param2, db, desc);
+                return InvokeWithResolvedFont(resolved, param2, db, desc);
             }
 
             return _trampolineDelegate(fileName, param2, db, desc);
@@ -336,6 +346,42 @@ internal static class LdFileHook
             return _repTrueTypeFont;
 
         return null;
+    }
+
+    /// <summary>
+    /// 解析竖排 TrueType 字体名（@xxx）的运行时映射目标。
+    /// 该映射不写入重定向日志，避免被 MText 内联字体统计误认为修复记录。
+    /// </summary>
+    private static string? ResolveVerticalTrueTypeFont(string fontName)
+    {
+        string baseName = fontName.TrimStart('@');
+        if (string.IsNullOrWhiteSpace(baseName))
+            return null;
+
+        if (IsAvailableTrueTypeName(baseName))
+            return "@" + baseName;
+
+        string configuredTrueType = _repTrueTypeFont.TrimStart('@');
+        if (!string.IsNullOrWhiteSpace(configuredTrueType) && IsAvailableTrueTypeName(configuredTrueType))
+            return "@" + configuredTrueType;
+
+        return null;
+    }
+
+    /// <summary>检查运行时扫描结果或系统字体索引中是否存在指定 TrueType 字族名。</summary>
+    private static bool IsAvailableTrueTypeName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        return _availableFonts.Contains(name) || FontDetector.IsSystemFont(name);
+    }
+
+    /// <summary>使用缓存的原生字符串指针调用原始 ldfile，指针必须长期存活。</summary>
+    private static int InvokeWithResolvedFont(string resolved, int param2, IntPtr db, IntPtr desc)
+    {
+        IntPtr resolvedPtr = _nativeStringCache.GetOrAdd(resolved,
+            static name => Marshal.StringToHGlobalUni(name));
+
+        return _trampolineDelegate!(resolvedPtr, param2, db, desc);
     }
 
     #endregion

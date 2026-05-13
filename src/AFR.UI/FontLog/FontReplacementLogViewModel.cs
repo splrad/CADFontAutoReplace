@@ -88,11 +88,13 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
 
     public ObservableCollection<FontReplacementRow> Items { get; } = new();
     public ObservableCollection<InlineFontFixRecord> InlineFixItems { get; } = new();
+    public ObservableCollection<RuntimeFontMappingRecord> RuntimeMappingItems { get; } = new();
     public string SummaryText { get; }
     public int ShxCount { get; }
     public int TrueTypeCount { get; }
     public int BigFontCount { get; }
     public int InlineFixCount { get; }
+    public int RuntimeMappingCount { get; }
     /// <summary>未成功替换的字体数量。</summary>
     public int FailedCount { get; }
     /// <summary>已成功替换的字体数量。</summary>
@@ -101,15 +103,17 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
     public string TrueTypeLabel => $"TrueType  {TrueTypeCount}";
     public string BigFontLabel => $"SHX大字体  {BigFontCount}";
     public string InlineFixLabel => $"MText映射  {InlineFixCount}";
+    public string RuntimeMappingLabel => $"竖排TT  {RuntimeMappingCount}";
     public string FailedLabel => $"未替换  {FailedCount}";
     public bool HasShx => ShxCount > 0;
     public bool HasTrueType => TrueTypeCount > 0;
     public bool HasBigFont => BigFontCount > 0;
     public bool HasInlineFix => InlineFixCount > 0;
+    public bool HasRuntimeMapping => RuntimeMappingCount > 0;
     public bool HasFailed => FailedCount > 0;
     public bool HasItems => Items.Count > 0;
-    public bool HasNoItems => !HasItems && !HasInlineFix;
-    public bool HasAnyContent => HasItems || HasInlineFix;
+    public bool HasNoItems => !HasItems && !HasInlineFix && !HasRuntimeMapping;
+    public bool HasAnyContent => HasItems || HasInlineFix || HasRuntimeMapping;
 
     public ICommand ApplyCommand => _applyCommand;
 
@@ -272,6 +276,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         string globalTrueTypeFont,
         Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? currentFonts = null,
         IReadOnlyList<InlineFontFixRecord>? inlineFixResults = null,
+        IReadOnlyList<RuntimeFontMappingRecord>? runtimeMappingResults = null,
         HashSet<string>? stillMissingStyleNames = null)
     {
         _applyCommand = new UiRelayCommand(ApplyReplacements, () => HasUserChanges);
@@ -395,6 +400,21 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         foreach (var row in Items)
             row.PropertyChanged += OnRowPropertyChanged;
 
+        // 运行时字体映射记录（只读展示，不参与手动替换）
+        if (runtimeMappingResults != null)
+        {
+            foreach (var r in runtimeMappingResults
+                         .OrderBy(r => r.StyleName, StringComparer.OrdinalIgnoreCase)
+                         .ThenBy(r => r.OriginalFont, StringComparer.OrdinalIgnoreCase))
+                RuntimeMappingItems.Add(r);
+            RuntimeMappingCount = runtimeMappingResults.Count;
+
+            if (Items.Count == 0 && RuntimeMappingCount > 0)
+                SummaryText = $"竖排 TrueType 映射 {RuntimeMappingCount} 项";
+            else if (RuntimeMappingCount > 0)
+                SummaryText += $" · 竖排映射 {RuntimeMappingCount} 项";
+        }
+
         // 内联字体修复记录（按类型排序：SHX主字体 → SHX大字体 → TrueType）
         if (inlineFixResults != null)
         {
@@ -407,7 +427,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
                 InlineFixItems.Add(r);
             InlineFixCount = inlineFixResults.Count;
 
-            if (Items.Count == 0 && InlineFixCount > 0)
+            if (Items.Count == 0 && RuntimeMappingCount == 0 && InlineFixCount > 0)
                 SummaryText = $"内联字体修复 {InlineFixCount} 项";
             else if (InlineFixCount > 0)
                 SummaryText += $" · 内联修复 {InlineFixCount} 项";

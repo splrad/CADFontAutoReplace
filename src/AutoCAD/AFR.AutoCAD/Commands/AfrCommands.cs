@@ -123,6 +123,8 @@ public class AfrCommands
             List<FontCheckResult>? results;
             HashSet<string>? stillMissingStyleNames = null;
             Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? currentFonts = null;
+            List<RuntimeFontMappingRecord>? runtimeFontMappings = null;
+            var config = ConfigService.Instance;
 
             using (doc.LockDocument())
             {
@@ -131,6 +133,8 @@ public class AfrCommands
 
                 // 重新检测当前文档中的缺失字体（反映替换或 ST 命令修改后的最新状态）
                 var currentMissing = FontDetector.DetectMissingFonts(context);
+                runtimeFontMappings = FontDetector.CollectRuntimeFontMappings(context, config.TrueTypeFont);
+                DocumentContextManager.Instance.StoreRuntimeFontMappingResults(doc, runtimeFontMappings);
 
                 // 合并策略：以存储的原始检测结果（自动替换时保存的）为基础，
                 // 用当前检测结果标记哪些样式仍然缺失，这样已替换的字体也能在日志中显示
@@ -168,14 +172,14 @@ public class AfrCommands
             }
 
             // 构建 ViewModel 并创建日志窗口
-            var config = ConfigService.Instance;
             var inlineFixResults = DocumentContextManager.Instance.GetInlineFontFixResults(doc);
+            runtimeFontMappings ??= DocumentContextManager.Instance.GetRuntimeFontMappingResults(doc);
             var vm = new FontReplacementLogViewModel(
                 results, config.MainFont, config.BigFont, config.TrueTypeFont,
-                currentFonts, inlineFixResults, stillMissingStyleNames);
+                currentFonts, inlineFixResults, runtimeFontMappings, stillMissingStyleNames);
 
             DiagnosticLogger.Info("AFRLOG",
-                $"ViewModel 构建完成: Items={vm.Items.Count} 未替换={vm.FailedCount} 已替换={vm.ReplacedCount}");
+                $"ViewModel 构建完成: Items={vm.Items.Count} 未替换={vm.FailedCount} 已替换={vm.ReplacedCount} 运行时映射={vm.RuntimeMappingCount}");
 
             // 注册手动替换回调：当用户在日志界面中点击"替换"时执行
             var window = new FontReplacementLogWindow(vm);
@@ -206,11 +210,14 @@ public class AfrCommands
                 List<FontCheckResult> freshResults;
                 HashSet<string>? freshMissing = null;
                 Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? freshFonts = null;
+                List<RuntimeFontMappingRecord>? freshRuntimeMappings = null;
 
                 using (doc.LockDocument())
                 {
                     var freshContext = new FontDetectionContext(doc.Database);
                     var currentMissing = FontDetector.DetectMissingFonts(freshContext);
+                    freshRuntimeMappings = FontDetector.CollectRuntimeFontMappings(freshContext, config.TrueTypeFont);
+                    DocumentContextManager.Instance.StoreRuntimeFontMappingResults(doc, freshRuntimeMappings);
 
                     var stored = DocumentContextManager.Instance.GetDetectionResults(doc);
                     if (stored != null && stored.Count > 0)
@@ -238,7 +245,7 @@ public class AfrCommands
                 var freshInline = DocumentContextManager.Instance.GetInlineFontFixResults(doc);
                 return new FontReplacementLogViewModel(
                     freshResults, config.MainFont, config.BigFont, config.TrueTypeFont,
-                    freshFonts, freshInline, freshMissing);
+                    freshFonts, freshInline, freshRuntimeMappings, freshMissing);
             };
 
             PlatformManager.Host.ShowModalWindow(window);
