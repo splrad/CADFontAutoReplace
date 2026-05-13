@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import mimetypes
+import os
 import subprocess
 import sys
 import threading
@@ -28,6 +29,11 @@ REVIEW_GROUP_RULE_VERSION = REVIEW_CLUSTER_RULE_VERSION
 UI_DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 CAD_SEMANTIC_CHARS = set("水管井泵阀风压流排污喷淋消防电气设备材料表房库层标高详见安装系统屋顶支架压力自动宽高洞梁底施工图纸检修布置内排沟坡")
 MOJIBAKE_MARKER_CHARS = set("囀窒齬阨僱砆獗囥馱芞祧潰韌詢階褽菁滅喀闄潯齬甋漹鎛蠻檥")
+DEFAULT_TRAINING_OPTIONS = {
+    "maxRounds": 650,
+    "earlyStoppingRounds": 60,
+    "seed": 20260512,
+}
 
 
 class DatasetStore:
@@ -1659,6 +1665,7 @@ class ProcessJob:
                     text=True,
                     encoding="utf-8",
                     errors="replace",
+                    env=utf8_subprocess_env(),
                 )
                 assert process.stdout is not None
                 for line in process.stdout:
@@ -1710,6 +1717,7 @@ class WorkbenchState:
 
         self.store: DatasetStore | None = None
         self.training_job: ProcessJob | None = None
+        self.simulation_job: ProcessJob | None = None
         self.training_context: dict = {}
         if package:
             self.select_package(package)
@@ -1886,6 +1894,7 @@ class WorkbenchState:
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=utf8_subprocess_env(),
             capture_output=True,
         )
         if result.returncode != 0:
@@ -2020,6 +2029,7 @@ class WorkbenchState:
             raise ValueError("已有训练任务正在运行。")
 
         payload = payload or {}
+        training_options = normalize_training_options(payload)
         selected_package_ids = payload.get("packageIds")
         explicit_packages = isinstance(selected_package_ids, list) and len(selected_package_ids) > 0
         auto_built_features = False
@@ -2035,6 +2045,7 @@ class WorkbenchState:
                 "selectedPackageCount": selected_build["packageCount"],
                 "trainingRecords": selected_build["trainingRecords"],
                 "featurePath": selected_build["featurePath"],
+                "trainingConfig": training_options,
             }
         else:
             if not store.reviewed and not store.training_dataset:
@@ -2051,6 +2062,7 @@ class WorkbenchState:
                 "selectedPackageCount": 1,
                 "trainingRecords": int(features_payload.get("trainingDatasetRows") or len(store.training_dataset)),
                 "featurePath": str(features_path),
+                "trainingConfig": training_options,
             }
 
         store.model_dir.mkdir(parents=True, exist_ok=True)
@@ -2063,8 +2075,22 @@ class WorkbenchState:
             str(features_path),
             "--output-dir",
             str(store.model_dir),
+            "--max-rounds",
+            str(training_options["maxRounds"]),
+            "--early-stopping-rounds",
+            str(training_options["earlyStoppingRounds"]),
+            "--seed",
+            str(training_options["seed"]),
+            "--defer-simulation",
+            "--simulation-sample-groups",
+            "0",
+            "--simulation-min-groups",
+            "1",
+            "--simulation-mode",
+            "full",
         ]
         self.training_job = ProcessJob(command, self.tool_root, self.reports_root / log_name)
+        self.simulation_job = None
         self.training_context = selected_context
         self.training_job.start()
         return {
@@ -2083,15 +2109,107 @@ class WorkbenchState:
         payload.update(self.training_context)
         return payload
 
+    def start_simulation_test(self, payload: dict | None = None) -> dict:
+        store = self.require_store()
+        if self.training_job and self.training_job.status == "running":
+            raise ValueError("训练任务仍在运行，完成后才能开始模拟测试。")
+        if self.simulation_job and self.simulation_job.status == "running":
+            raise ValueError("已有模拟测试正在运行。")
+
+        payload = payload or {}
+        model_dir = store.model_dir
+        state_path = model_dir / "AFR.GlyphCore.TrainingState.json"
+        state = read_json_or_none(state_path) or {}
+        training_config = state.get("trainingConfig") if isinstance(state.get("trainingConfig"), dict) else {}
+        simulation_config = state.get("simulation") if isinstance(state.get("simulation"), dict) else {}
+        raw_features_path = payload.get("featurePath") or state.get("featuresPath") or self.training_context.get("featurePath") or store.features_path
+        features_path = Path(str(raw_features_path))
+        if not features_path.is_absolute():
+            features_path = (self.tool_root / features_path).resolve()
+        if not features_path.exists():
+            raise FileNotFoundError(f"找不到 Feature 文件：{features_path}")
+        model_path = model_dir / "AFR.GlyphCore.Model.txt"
+        if not model_path.exists():
+            raise FileNotFoundError(f"找不到已训练模型：{model_path}")
+
+        min_groups = clamp_int(
+            payload.get("simulationMinGroups") or simulation_config.get("minimumGroups"),
+            1,
+            1,
+            100000,
+        )
+        sample_groups = clamp_int(
+            payload.get("simulationSampleGroups") or simulation_config.get("sampleGroups"),
+            0,
+            0,
+            100000,
+        )
+        seed = clamp_int(training_config.get("seed"), DEFAULT_TRAINING_OPTIONS["seed"], 1, 2147483647)
+        log_name = f"{store.export_id}_simulate_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        command = [
+            self.python,
+            str(self.tool_root / "training" / "train_lightgbm.py"),
+            "--simulate-only",
+            "--features",
+            str(features_path),
+            "--output-dir",
+            str(model_dir),
+            "--seed",
+            str(seed),
+            "--simulation-sample-groups",
+            str(sample_groups),
+            "--simulation-min-groups",
+            str(min_groups),
+            "--simulation-mode",
+            "full",
+        ]
+        self.simulation_job = ProcessJob(command, self.tool_root, self.reports_root / log_name)
+        self.simulation_job.start()
+        return {"ok": True, "simulation": self.simulation_payload(), "report": self.report_payload()}
+
+    def simulation_payload(self) -> dict:
+        if self.simulation_job:
+            payload = self.simulation_job.payload()
+            status = str(payload.get("status") or "idle")
+            if status != "running":
+                model_dir = self.store.model_dir if self.store else self.model_root
+                manifest = read_json_or_none(model_dir / "AFR.GlyphCore.ModelManifest.json") or {}
+                summary = read_json_or_none(model_dir / "training_summary.json") or {}
+                simulation = first_dict_value("simulation", manifest, summary) or {}
+                merged_status = str(simulation.get("status") or status)
+                payload = {**payload, **simulation, "status": merged_status}
+                status = merged_status
+            payload["statusLabel"] = payload.get("label") or simulation_status_label(status)
+            return payload
+
+        model_dir = self.store.model_dir if self.store else self.model_root
+        manifest = read_json_or_none(model_dir / "AFR.GlyphCore.ModelManifest.json") or {}
+        summary = read_json_or_none(model_dir / "training_summary.json") or {}
+        simulation = first_dict_value("simulation", manifest, summary) or {}
+        status = str(simulation.get("status") or "idle")
+        return {
+            "status": status,
+            "statusLabel": simulation.get("label") or simulation_status_label(status),
+            **simulation,
+        }
+
     def report_payload(self) -> dict:
         model_dir = self.store.model_dir if self.store else self.model_root
         manifest_path = model_dir / "AFR.GlyphCore.ModelManifest.json"
+        blind_report_path = model_dir / "blind_validation_report.json"
         test_report_path = model_dir / "test_validation_report.json"
+        train_report_path = model_dir / "train_validation_report.json"
+        valid_report_path = model_dir / "valid_validation_report.json"
         summary_path = model_dir / "training_summary.json"
+        history_path = model_dir / "training_history.jsonl"
         onnx_path = model_dir / "AFR.GlyphCore.Model.onnx"
         manifest = read_json_or_none(manifest_path)
-        test_report = read_json_or_none(test_report_path)
+        blind_report = read_json_or_none(blind_report_path) or read_json_or_none(test_report_path)
+        test_report = blind_report
+        train_report = read_json_or_none(train_report_path)
+        valid_report = read_json_or_none(valid_report_path)
         summary = read_json_or_none(summary_path)
+        history = read_training_history(history_path)
         model_version = (
             manifest.get("modelVersion")
             if isinstance(manifest, dict)
@@ -2107,6 +2225,12 @@ class WorkbenchState:
             "label": training_status_label(training_status),
             "detail": training_result_detail(training_status, manifest, test_report),
         }
+        acceptance = first_dict_value("acceptance", manifest, summary) or derive_acceptance(test_report)
+        overfitting = first_dict_value("overfitting", manifest, summary) or {}
+        split_summary = first_dict_value("splitSummary", manifest, summary) or {}
+        training_config = first_dict_value("trainingConfig", manifest, summary) or {}
+        simulation = self.simulation_payload()
+        error_samples = validation_error_samples(test_report)
         repo_root = find_repo_root(self.tool_root)
         release_command = (
             f'$env:AFR_GLYPHCORE_MODEL_PATH = "{onnx_path}"\n'
@@ -2120,12 +2244,23 @@ class WorkbenchState:
             "onnxPath": str(onnx_path),
             "manifestPath": str(manifest_path),
             "testReportPath": str(test_report_path),
+            "blindReportPath": str(blind_report_path),
             "modelVersion": model_version,
             "modelCreatedUtc": manifest.get("createdUtc") if isinstance(manifest, dict) else None,
             "trainingResult": training_result,
             "manifest": manifest,
             "testReport": test_report,
+            "blindReport": blind_report,
+            "trainReport": train_report,
+            "validReport": valid_report,
             "summary": summary,
+            "trainingConfig": training_config,
+            "splitSummary": split_summary,
+            "acceptance": acceptance,
+            "overfitting": overfitting,
+            "simulation": simulation,
+            "errorSamples": error_samples,
+            "history": history,
             "releaseCommand": release_command,
         }
 
@@ -2145,6 +2280,44 @@ def training_status_label(status: str) -> str:
     return labels.get(status, status or "未知状态")
 
 
+def simulation_status_label(status: str) -> str:
+    labels = {
+        "idle": "未开始模拟测试",
+        "pending": "等待手动模拟测试",
+        "pending-simulation": "等待手动模拟测试",
+        "running": "模拟测试中",
+        "succeeded": "模拟测试完成",
+        "completed": "模拟测试完成",
+        "failed": "模拟测试失败",
+    }
+    return labels.get(status, status or "未知状态")
+
+
+def utf8_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    return env
+
+
+def normalize_training_options(payload: dict) -> dict:
+    raw = payload.get("trainingOptions") if isinstance(payload.get("trainingOptions"), dict) else payload
+    return {
+        "maxRounds": clamp_int(raw.get("maxRounds"), DEFAULT_TRAINING_OPTIONS["maxRounds"], 1, 5000),
+        "earlyStoppingRounds": clamp_int(raw.get("earlyStoppingRounds"), DEFAULT_TRAINING_OPTIONS["earlyStoppingRounds"], 1, 500),
+        "seed": clamp_int(raw.get("seed"), DEFAULT_TRAINING_OPTIONS["seed"], 1, 2147483647),
+        "autoEarlyStopping": True,
+    }
+
+
+def clamp_int(value: object, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
 def training_result_detail(status: str, manifest: object, test_report: object) -> str:
     if status == "running":
         return "训练进程正在本机运行，日志会持续刷新。"
@@ -2152,10 +2325,71 @@ def training_result_detail(status: str, manifest: object, test_report: object) -
         return "训练进程失败，请查看训练日志中的错误。"
     if not isinstance(manifest, dict):
         return "尚未生成可用模型。"
+    acceptance = manifest.get("acceptance") if isinstance(manifest.get("acceptance"), dict) else {}
+    if str(acceptance.get("status") or "") == "pending-simulation":
+        return "训练完成；需要在模型报告页手动开始全量模拟测试后，才会生成模拟指标。"
     summary = test_report.get("summary") if isinstance(test_report, dict) else {}
     false_repair_rate = float((summary or {}).get("falseRepairRate") or 0)
     recall = float((summary or {}).get("repairRecall") or 0)
     return f"训练完成；验证误修率 {false_repair_rate * 100:.2f}%，修复召回率 {recall * 100:.2f}%。"
+
+
+def first_dict_value(key: str, *sources: object) -> dict | None:
+    for source in sources:
+        if isinstance(source, dict) and isinstance(source.get(key), dict):
+            return source.get(key)
+    return None
+
+
+def derive_acceptance(test_report: object) -> dict:
+    summary = test_report.get("summary") if isinstance(test_report, dict) else {}
+    false_repairs = int((summary or {}).get("falseRepairs") or 0)
+    status = "passed" if false_repairs == 0 and int((summary or {}).get("groups") or 0) > 0 else "failed"
+    return {
+        "status": status,
+        "label": "通过" if status == "passed" else "未通过",
+        "canPublish": status == "passed",
+        "blockers": [] if status == "passed" else ["simulation-false-repairs"],
+        "policy": "simulation-false-repairs-must-be-zero-and-no-severe-overfit",
+    }
+
+
+def validation_error_samples(test_report: object, limit: int = 200) -> list[dict]:
+    if not isinstance(test_report, dict):
+        return []
+    details = test_report.get("details")
+    if not isinstance(details, list):
+        return []
+    severity_rank = {"false-repair": 0, "wrong-repair": 1, "missed-repair": 2}
+    errors = [
+        detail for detail in details
+        if isinstance(detail, dict) and str(detail.get("severity") or "ok") != "ok"
+    ]
+    errors.sort(
+        key=lambda item: (
+            severity_rank.get(str(item.get("severity") or ""), 9),
+            -float(item.get("score") or 0),
+            str(item.get("groupId") or ""),
+        )
+    )
+    return errors[:limit]
+
+
+def read_training_history(path: Path, limit: int = 20) -> list[dict]:
+    if not path.exists():
+        return []
+    rows: list[dict] = []
+    with path.open("r", encoding="utf-8") as reader:
+        for line in reader:
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                rows.append(value)
+    return rows[-limit:][::-1]
 
 
 class WorkbenchHandler(BaseHTTPRequestHandler):
@@ -2246,6 +2480,8 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 self._send_json(self.state.build_features())
             elif path == "/api/train":
                 self._send_json(self.state.start_training(payload))
+            elif path == "/api/simulate-test":
+                self._send_json(self.state.start_simulation_test(payload))
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
         except Exception as exc:  # pragma: no cover - displayed by UI

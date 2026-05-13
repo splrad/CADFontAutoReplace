@@ -15,6 +15,7 @@ import {
   getReport,
   getTrainingStatus,
   selectPackage as selectPackageRequest,
+  startSimulationTest as startSimulationTestRequest,
   startTraining as startTrainingRequest
 } from '@/api/workbench';
 import {
@@ -29,7 +30,8 @@ import type {
   ConfirmReviewRow,
   ReviewClustersPayload,
   ReviewEdit as ApiReviewEdit,
-  TrainingDatasetRecord
+  TrainingDatasetRecord,
+  TrainingOptions
 } from '@/types/api';
 
 // ========== 状态类型 ==========
@@ -80,7 +82,8 @@ export interface WorkbenchState {
   refreshTrainingStatus: () => Promise<void>;
   selectPackage: (id: string) => Promise<void>;
   buildFeatures: () => Promise<void>;
-  startTraining: (packageIds?: string[]) => Promise<void>;
+  startTraining: (packageIds?: string[], trainingOptions?: TrainingOptions) => Promise<void>;
+  startSimulationTest: () => Promise<void>;
   deleteTrainingRecord: (record: TrainingRecord) => Promise<void>;
   saveSelectedReviews: (targetGroupIds?: string[]) => Promise<void>;
   saveAllVisibleReviews: (selectableReviewGroups: ReviewGroup[]) => Promise<void>;
@@ -230,10 +233,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     }
   },
 
-  startTraining: async (packageIds) => {
+  startTraining: async (packageIds, trainingOptions) => {
     set({ busy: true, error: '', message: '正在启动模型训练...' });
     try {
-      const result = await startTrainingRequest(packageIds);
+      const result = await startTrainingRequest(packageIds, trainingOptions);
       const [bootstrap, reviewGroups] = await Promise.all([
         getBootstrap(),
         getReviewClusters()
@@ -251,6 +254,30 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
           : '已开始训练'
       }));
       window.location.hash = 'training';
+    } catch (err: any) {
+      get().showError(err);
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  startSimulationTest: async () => {
+    set({ busy: true, error: '', message: '正在启动全量模拟测试...' });
+    try {
+      const result = await startSimulationTestRequest();
+      const report = result.report || await getReport();
+      set((state) => ({
+        app: {
+          ...state.app,
+          report: {
+            ...report,
+            simulation: result.simulation || report.simulation
+          }
+        },
+        activeTab: 'report',
+        message: '已开始全量模拟测试'
+      }));
+      window.location.hash = 'report';
     } catch (err: any) {
       get().showError(err);
     } finally {

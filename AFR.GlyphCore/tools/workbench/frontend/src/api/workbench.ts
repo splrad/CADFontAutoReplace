@@ -9,8 +9,10 @@ import type {
   FeatureStatus,
   ReportPayload,
   ReviewClustersPayload,
+  StartSimulationTestResult,
   StartTrainingResult,
   TrainingDatasetPayload,
+  TrainingOptions,
   TrainingStatus
 } from '@/types/api';
 
@@ -58,10 +60,15 @@ export function getTrainingStatus() {
   return get<TrainingStatus>('/api/train');
 }
 
-export function startTraining(packageIds?: string[]) {
+export function startTraining(packageIds?: string[], trainingOptions?: TrainingOptions) {
   return post<StartTrainingResult>('/api/train', {
-    packageIds: packageIds || []
+    packageIds: packageIds || [],
+    trainingOptions: trainingOptions || {}
   });
+}
+
+export function startSimulationTest() {
+  return post<StartSimulationTestResult>('/api/simulate-test', {});
 }
 
 export function getReport() {

@@ -180,6 +180,73 @@ export interface TrainingStatus {
   [key: string]: unknown;
 }
 
+export interface SimulationStatus {
+  status?: 'idle' | 'pending' | 'running' | 'succeeded' | 'completed' | 'failed' | string;
+  statusLabel?: string;
+  label?: string;
+  strategy?: string;
+  seed?: number;
+  minimumGroups?: number;
+  sampleGroups?: number;
+  sampledGroups?: number;
+  availableGroups?: number;
+  sampledFeatureRows?: number;
+  mode?: string;
+  lines?: string[];
+  logPath?: string;
+  returnCode?: number;
+  [key: string]: unknown;
+}
+
+export interface TrainingOptions {
+  maxRounds?: number;
+  earlyStoppingRounds?: number;
+  seed?: number;
+  autoEarlyStopping?: boolean;
+  bestIteration?: number;
+  actualIterations?: number;
+  stoppedEarly?: boolean;
+  simulationMode?: string;
+}
+
+export interface ValidationSummary {
+  groups?: number;
+  expectedRepairs?: number;
+  correctRepairs?: number;
+  missedRepairs?: number;
+  falseRepairs?: number;
+  skipped?: number;
+  correctDecisions?: number;
+  repairRecall?: number;
+  falseRepairRate?: number;
+  decisionAccuracy?: number;
+  [key: string]: number | undefined;
+}
+
+export interface ValidationDetail {
+  groupId?: string;
+  packageId?: string;
+  exportId?: string;
+  drawingFileName?: string;
+  labelAction?: string;
+  decision?: string;
+  currentText?: string;
+  bestText?: string;
+  labelText?: string;
+  score?: number;
+  margin?: number;
+  source?: string;
+  severity?: string;
+  [key: string]: unknown;
+}
+
+export interface ValidationReport {
+  split?: string;
+  summary?: ValidationSummary;
+  details?: ValidationDetail[];
+  [key: string]: unknown;
+}
+
 export interface ReportPayload {
   exists?: boolean;
   modelDir?: string;
@@ -195,12 +262,32 @@ export interface ReportPayload {
     [key: string]: unknown;
   };
   manifest?: Record<string, unknown>;
-  testReport?: {
-    summary?: Record<string, number>;
-    details?: unknown[];
+  testReport?: ValidationReport;
+  blindReport?: ValidationReport;
+  trainReport?: ValidationReport;
+  validReport?: ValidationReport;
+  summary?: Record<string, unknown>;
+  trainingConfig?: TrainingOptions;
+  splitSummary?: Record<string, unknown>;
+  acceptance?: {
+    status?: string;
+    label?: string;
+    canPublish?: boolean;
+    blockers?: string[];
     [key: string]: unknown;
   };
-  summary?: Record<string, unknown>;
+  overfitting?: {
+    status?: string;
+    severe?: boolean;
+    warning?: boolean;
+    reasons?: string[];
+    recallGap?: number;
+    accuracyGap?: number;
+    [key: string]: unknown;
+  };
+  simulation?: SimulationStatus;
+  errorSamples?: ValidationDetail[];
+  history?: Record<string, unknown>[];
   releaseCommand?: string;
   [key: string]: unknown;
 }
@@ -298,10 +385,18 @@ export interface StartTrainingResult {
   autoBuiltFeatures?: boolean;
   features?: FeatureStatus;
   training?: TrainingStatus;
+  trainingConfig?: TrainingOptions;
   selectedPackages?: string[];
   selectedPackageCount?: number;
   trainingRecords?: number;
   featurePath?: string;
+  [key: string]: unknown;
+}
+
+export interface StartSimulationTestResult {
+  ok?: boolean;
+  simulation?: SimulationStatus;
+  report?: ReportPayload;
   [key: string]: unknown;
 }
 

@@ -38,8 +38,9 @@ class ReviewClusterTests(unittest.TestCase):
             )
 
             self.assertEqual(1000, result["written"])
-            self.assertEqual(1000, len(store.reviewed))
-            first_reviewed = next(iter(store.reviewed.values()))
+            self.assertEqual(0, len(store.reviewed))
+            self.assertEqual(1000, len(store.training_dataset))
+            first_reviewed = next(iter(store.training_dataset.values()))
             self.assertEqual(cluster["id"], first_reviewed["propagationClusterId"])
             self.assertEqual(cluster["propagationSignature"], first_reviewed["propagationSignature"])
             self.assertEqual("人工修复", first_reviewed["labelText"])
@@ -51,7 +52,7 @@ class ReviewClusterTests(unittest.TestCase):
                     sys.executable,
                     str(Path(__file__).resolve().parents[1] / "training" / "build_features.py"),
                     "--input",
-                    str(store.reviewed_path),
+                    str(store.training_dataset_path),
                     "--output",
                     str(feature_output),
                 ],
@@ -72,6 +73,7 @@ class ReviewClusterTests(unittest.TestCase):
             )
             self.assertEqual(1000, rollback["removed"])
             self.assertEqual(0, len(store.reviewed))
+            self.assertEqual(0, len(store.training_dataset))
 
     def test_normal_text_clusters_require_human_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -107,8 +109,9 @@ class ReviewClusterTests(unittest.TestCase):
             )
 
             self.assertEqual(1000, result["written"])
-            self.assertEqual(1000, len(store.reviewed))
-            for reviewed in store.reviewed.values():
+            self.assertEqual(0, len(store.reviewed))
+            self.assertEqual(1000, len(store.training_dataset))
+            for reviewed in store.training_dataset.values():
                 self.assertEqual("keep", reviewed["labelAction"])
                 self.assertEqual("unit", reviewed["reviewer"])
                 self.assertEqual("cluster-sampled", reviewed["propagationScope"])
@@ -138,8 +141,9 @@ class ReviewClusterTests(unittest.TestCase):
             )
 
             self.assertEqual(5, result["written"])
-            self.assertEqual(5, len(store.reviewed))
-            for reviewed in store.reviewed.values():
+            self.assertEqual(0, len(store.reviewed))
+            self.assertEqual(5, len(store.training_dataset))
+            for reviewed in store.training_dataset.values():
                 self.assertEqual("repair", reviewed["labelAction"])
                 self.assertEqual("12345A", reviewed["labelText"])
                 self.assertEqual("browser-workbench-propagation", reviewed["origin"])
@@ -167,31 +171,10 @@ class ReviewClusterTests(unittest.TestCase):
                 }
             )
             self.assertEqual(3, first["written"])
-            self.assertEqual(3, len(store.reviewed))
-            self.assertTrue(all(item["labelText"] == "第一次修正" for item in store.reviewed.values()))
-
-            reviewed_cluster = store.review_clusters_payload()["clusters"][0]
-            self.assertEqual("complete", reviewed_cluster["reviewStatus"])
-            second = store.confirm_review_table_rows(
-                {
-                    "rows": [
-                        {
-                            "reviewGroupId": reviewed_cluster["id"],
-                            "labelAction": "repair",
-                            "labelText": "第二次修正",
-                            "candidateIndex": 0,
-                        }
-                    ],
-                    "reviewer": "unit",
-                    "note": "table-review-edit",
-                    "overwriteReviewed": True,
-                }
-            )
-
-            self.assertEqual(3, second["written"])
-            self.assertEqual(3, len(store.reviewed))
-            self.assertTrue(all(item["labelText"] == "第二次修正" for item in store.reviewed.values()))
-            self.assertTrue(all(item["origin"] == "browser-workbench-table-review" for item in store.reviewed.values()))
+            self.assertEqual(0, len(store.reviewed))
+            self.assertEqual(3, len(store.training_dataset))
+            self.assertTrue(all(item["labelText"] == "第一次修正" for item in store.training_dataset.values()))
+            self.assertEqual(0, len(store.review_clusters_payload()["clusters"]))
 
     def test_training_dataset_promotes_hides_and_delete_reflows_records(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -214,10 +197,11 @@ class ReviewClusterTests(unittest.TestCase):
                     "note": "training-dataset-test",
                 }
             )
-            self.assertEqual(3, len(store.reviewed))
+            self.assertEqual(0, len(store.reviewed))
+            self.assertEqual(3, len(store.training_dataset))
 
             built = state.build_features()
-            self.assertEqual(3, built["promoted"])
+            self.assertEqual(0, built["promoted"])
             self.assertEqual(0, len(store.reviewed))
             self.assertEqual(3, len(store.training_dataset))
             self.assertEqual(0, len(store.review_clusters_payload()["clusters"]))

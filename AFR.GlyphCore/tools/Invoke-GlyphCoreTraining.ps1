@@ -6,6 +6,9 @@ param(
     [string]$FeaturesOutput = "",
     [string]$DatasetRoot = "",
     [string]$ModelRoot = "",
+    [int]$MaxRounds = 650,
+    [int]$EarlyStoppingRounds = 60,
+    [int]$Seed = 20260512,
     [switch]$InstallDeps,
     [switch]$SkipTraining
 )
@@ -63,7 +66,10 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if (-not $SkipTraining) {
     & $Python (Join-Path $ToolRoot "training\train_lightgbm.py") `
         --features $Features `
-        --output-dir $Models
+        --output-dir $Models `
+        --max-rounds $MaxRounds `
+        --early-stopping-rounds $EarlyStoppingRounds `
+        --seed $Seed
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 

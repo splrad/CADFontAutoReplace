@@ -3,8 +3,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import random
 import re
 import sys
+import uuid
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,12 +18,21 @@ from afr_glyphcore import FEATURE_COUNT, FEATURE_SCHEMA_VERSION  # noqa: E402
 
 MINIMUM_CONFIDENCE = 0.92
 MINIMUM_SCORE_MARGIN = 0.18
+DEFAULT_MAX_ROUNDS = 650
+DEFAULT_EARLY_STOPPING_ROUNDS = 60
+OVERFIT_RECALL_GAP = 0.20
+OVERFIT_ACCURACY_GAP = 0.15
+OVERFIT_WARNING_RECALL_GAP = 0.10
+OVERFIT_WARNING_ACCURACY_GAP = 0.08
 AI_DISPLAY_NAME = "文枢"
 AI_INTERNAL_NAME = "GlyphCore"
 AUTHOR_NAME = "splrad 秋夕寻星"
 AUTHOR_EMAIL = "alearner@splrad.com"
 PROJECT_GITHUB = "https://github.com/splrad/CADFontAutoReplace"
 PROJECT_GITEE = "https://gitee.com/splrad/CADFontAutoReplace"
+TRAINING_STATE_FILE = "AFR.GlyphCore.TrainingState.json"
+DEFAULT_SIMULATION_SAMPLE_GROUPS = 100
+DEFAULT_SIMULATION_MIN_GROUPS = 100
 
 
 def main() -> int:
@@ -29,7 +41,15 @@ def main() -> int:
     parser.add_argument("--output-dir", required=True, help="Model output directory.")
     parser.add_argument("--seed", type=int, default=20260512)
     parser.add_argument("--opset", type=int, default=12)
+    parser.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS)
+    parser.add_argument("--early-stopping-rounds", type=int, default=DEFAULT_EARLY_STOPPING_ROUNDS)
     parser.add_argument("--max-false-repair-rate", type=float, default=0.001)
+    parser.add_argument("--defer-simulation", action="store_true", help="Train the model and wait for a separate manual simulation-test run.")
+    parser.add_argument("--simulate-only", action="store_true", help="Run the random simulation test against an already trained model.")
+    parser.add_argument("--simulation-sample-groups", type=int, default=DEFAULT_SIMULATION_SAMPLE_GROUPS)
+    parser.add_argument("--simulation-min-groups", type=int, default=DEFAULT_SIMULATION_MIN_GROUPS)
+    parser.add_argument("--simulation-mode", choices=["sample", "full"], default="sample", help="Use a random blind slice or the full feature dataset for simulation.")
+    parser.add_argument("--simulation-seed", type=int, default=0, help="Optional seed for the random simulation slice. 0 means generate a new seed.")
     parser.add_argument("--skip-onnx", action="store_true", help="Train and report without exporting ONNX.")
     args = parser.parse_args()
 
@@ -42,9 +62,13 @@ def main() -> int:
         print("install with: python -m pip install -r AFR.GlyphCore/tools/requirements.txt", file=sys.stderr)
         return 10
 
+    if args.simulate_only:
+        return run_simulation_only(args, pd, lgb)
+
     features_path = Path(args.features)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    clear_stale_reports(output_dir)
     stale_exact_repairs = output_dir / "AFR.GlyphCore.ExactRepairs.json"
     if stale_exact_repairs.exists():
         stale_exact_repairs.unlink()
@@ -54,20 +78,37 @@ def main() -> int:
     if len(feature_cols) != FEATURE_COUNT:
         raise ValueError(f"expected {FEATURE_COUNT} feature columns, got {len(feature_cols)}")
 
-    train_groups, valid_groups, test_groups = split_groups(df["group_id"].drop_duplicates().tolist(), args.seed)
+    split = split_groups_by_text_pattern(df, args.seed)
+    train_groups = split["groupIds"]["train"]
+    valid_groups = split["groupIds"]["valid"]
+    blind_groups = split["groupIds"]["blind"]
+    split_summary = split["summary"]
     train_df = df[df["group_id"].isin(train_groups)].copy()
     valid_df = df[df["group_id"].isin(valid_groups)].copy()
-    test_df = df[df["group_id"].isin(test_groups)].copy()
+    blind_df = df[df["group_id"].isin(blind_groups)].copy()
+    if train_df.empty or valid_df.empty or blind_df.empty:
+        raise ValueError("training, validation, and blind-test splits must all contain records")
 
-    x_train = train_df[feature_cols].to_numpy(dtype=np.float32)
-    y_train = train_df["target_score"].to_numpy(dtype=np.float32)
-    x_valid = valid_df[feature_cols].to_numpy(dtype=np.float32)
-    y_valid = valid_df["target_score"].to_numpy(dtype=np.float32)
+    print(
+        f"训练准备：读取 {len(df)} 行 Feature，{int(df['group_id'].nunique())} 个样本簇；"
+        f"最大轮数 {int(args.max_rounds)}，早停耐心值 {int(args.early_stopping_rounds)}。",
+        flush=True,
+    )
+    print(
+        f"数据切分：训练 {len(train_groups)} 簇，验证 {len(valid_groups)} 簇，"
+        f"盲测候选 {len(blind_groups)} 簇。",
+        flush=True,
+    )
+
+    x_train = train_df[feature_cols].astype(np.float32)
+    y_train = train_df["target_score"].astype(np.float32)
+    x_valid = valid_df[feature_cols].astype(np.float32)
+    y_valid = valid_df["target_score"].astype(np.float32)
 
     weights = make_weights(train_df)
     model = lgb.LGBMRegressor(
         objective="regression",
-        n_estimators=650,
+        n_estimators=max(1, int(args.max_rounds)),
         learning_rate=0.035,
         num_leaves=31,
         max_depth=-1,
@@ -78,38 +119,78 @@ def main() -> int:
         reg_lambda=0.2,
         random_state=args.seed,
         n_jobs=-1,
+        verbosity=-1,
     )
 
+    print("开始 LightGBM 训练；每一轮完成后都会输出中文进度。", flush=True)
     model.fit(
         x_train,
         y_train,
         sample_weight=weights,
         eval_set=[(x_valid, y_valid)],
         eval_metric="l2",
-        callbacks=[lgb.early_stopping(60), lgb.log_evaluation(50)],
+        callbacks=[
+            lgb.early_stopping(max(1, int(args.early_stopping_rounds)), verbose=False),
+            chinese_iteration_logger(max(1, int(args.max_rounds))),
+        ],
     )
 
-    for split_name, split_df in [("train", train_df), ("valid", valid_df), ("test", test_df)]:
-        split_df = split_df.copy()
-        split_df["prediction"] = clip01(model.predict(split_df[feature_cols].to_numpy(dtype=np.float32)))
+    training_config = build_training_config(args, model)
+    print(
+        f"训练结束：实际完成 {training_config['actualIterations']} 轮，"
+        f"最佳轮次 {training_config['bestIteration'] or '未触发早停'}。",
+        flush=True,
+    )
+
+    reports: dict[str, dict] = {}
+    for split_name, split_df in [("train", train_df), ("valid", valid_df)]:
+        split_df = predict_split(split_df, feature_cols, model.predict)
         report = evaluate_groups(split_df)
+        report["split"] = split_name
+        reports[split_name] = report
         write_json(output_dir / f"{split_name}_validation_report.json", report)
         print(f"{split_name}: {json.dumps(report['summary'], ensure_ascii=False, sort_keys=True)}")
-
-    test_report = json.loads((output_dir / "test_validation_report.json").read_text(encoding="utf-8"))
-    false_repair_rate = test_report["summary"]["falseRepairRate"]
-    if false_repair_rate > args.max_false_repair_rate:
-        print(
-            f"false repair rate {false_repair_rate:.6f} exceeds limit {args.max_false_repair_rate:.6f}",
-            file=sys.stderr,
-        )
-        return 20
 
     booster_path = output_dir / "AFR.GlyphCore.Model.txt"
     model.booster_.save_model(str(booster_path))
 
-    manifest = build_manifest(features_path, df, test_report)
+    model_version = f"dbtext-ai-lightgbm-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    if args.defer_simulation:
+        blind_report = pending_blind_report(split_summary, args)
+        overfitting = pending_overfitting()
+        acceptance = pending_acceptance()
+        print("训练已完成：请在模型报告页手动点击“全量模拟测试”，再生成模拟报告。", flush=True)
+    else:
+        simulation_df = df if args.simulation_mode == "full" else blind_df
+        blind_report = run_blind_simulation(simulation_df, feature_cols, model.predict, args)
+        reports["blind"] = blind_report
+        write_json(output_dir / "blind_validation_report.json", blind_report)
+        write_json(output_dir / "test_validation_report.json", blind_report)
+        simulation_name = "full" if args.simulation_mode == "full" else "blind"
+        print(f"{simulation_name}: {json.dumps(blind_report['summary'], ensure_ascii=False, sort_keys=True)}")
+        overfitting = evaluate_overfitting(reports)
+        acceptance = evaluate_acceptance(blind_report, overfitting)
+        false_repair_rate = blind_report["summary"]["falseRepairRate"]
+        if false_repair_rate > args.max_false_repair_rate:
+            print(
+                f"模拟误修率 {false_repair_rate:.6f} 超过上限 {args.max_false_repair_rate:.6f}",
+                file=sys.stderr,
+            )
+        if acceptance["status"] == "overfit":
+            print("模拟报告显示疑似严重过拟合：模型已训练，但不建议发布。", file=sys.stderr)
+
+    manifest = build_manifest(
+        features_path,
+        df,
+        blind_report,
+        model_version,
+        training_config,
+        split_summary,
+        overfitting,
+        acceptance,
+    )
     write_json(output_dir / "AFR.GlyphCore.ModelManifest.json", manifest)
+    write_training_state(output_dir, features_path, training_config, split_summary, model_version, args)
 
     if not args.skip_onnx:
         export_onnx(model, output_dir / "AFR.GlyphCore.Model.onnx", FEATURE_COUNT, args.opset, manifest)
@@ -120,29 +201,440 @@ def main() -> int:
             "aiDisplayName": AI_DISPLAY_NAME,
             "aiInternalName": AI_INTERNAL_NAME,
             "author": AUTHOR_NAME,
+            "modelVersion": model_version,
             "featureRows": int(len(df)),
             "groups": int(df["group_id"].nunique()),
+            "splitSummary": split_summary,
             "trainGroups": len(train_groups),
             "validGroups": len(valid_groups),
-            "testGroups": len(test_groups),
+            "blindGroups": len(blind_groups),
+            "testGroups": 0 if args.defer_simulation else int(blind_report["simulation"]["sampledGroups"]),
             "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
             "modelManifest": portable_path(output_dir / "AFR.GlyphCore.ModelManifest.json"),
             "onnxModel": portable_path(output_dir / "AFR.GlyphCore.Model.onnx"),
+            "trainingConfig": training_config,
+            "acceptance": acceptance,
+            "overfitting": overfitting,
+            "blindSummary": None if args.defer_simulation else blind_report["summary"],
+            "simulation": blind_report.get("simulation") or {},
         },
     )
+    if not args.defer_simulation:
+        append_training_history(output_dir, manifest, reports, training_config, split_summary, overfitting, acceptance)
     return 0
 
 
-def split_groups(groups: list[str], seed: int) -> tuple[set[str], set[str], set[str]]:
+def split_groups_by_text_pattern(df, seed: int) -> dict:
     import random
 
+    buckets_by_pattern: dict[str, set[str]] = defaultdict(set)
+    for group_id, rows in df.groupby("group_id", sort=False):
+        buckets_by_pattern[text_pattern_key(rows)].add(str(group_id))
+
+    if len(buckets_by_pattern) < 3:
+        raise ValueError("at least 3 distinct text patterns are required for train/valid/blind split")
+
     rng = random.Random(seed)
-    groups = list(groups)
-    rng.shuffle(groups)
-    total = len(groups)
-    train_end = max(1, int(total * 0.70))
-    valid_end = max(train_end + 1, int(total * 0.85))
-    return set(groups[:train_end]), set(groups[train_end:valid_end]), set(groups[valid_end:])
+    buckets = [
+        {"pattern": pattern, "groups": sorted(group_ids), "count": len(group_ids)}
+        for pattern, group_ids in buckets_by_pattern.items()
+    ]
+    rng.shuffle(buckets)
+
+    total_groups = sum(bucket["count"] for bucket in buckets)
+    train_limit = max(1, int(total_groups * 0.70))
+    valid_limit = max(train_limit + 1, int(total_groups * 0.85))
+    split_buckets: dict[str, list[dict]] = {"train": [], "valid": [], "blind": []}
+
+    assigned = 0
+    for bucket in buckets:
+        if assigned < train_limit:
+            split_name = "train"
+        elif assigned < valid_limit:
+            split_name = "valid"
+        else:
+            split_name = "blind"
+        split_buckets[split_name].append(bucket)
+        assigned += int(bucket["count"])
+
+    ensure_non_empty_split(split_buckets, "valid")
+    ensure_non_empty_split(split_buckets, "blind")
+
+    group_ids = {
+        name: {group_id for bucket in split_buckets[name] for group_id in bucket["groups"]}
+        for name in split_buckets
+    }
+    group_overlap = count_group_overlap(group_ids)
+    duplicate_patterns = count_pattern_leakage(split_buckets)
+    if group_overlap or duplicate_patterns:
+        raise ValueError("train/valid/blind split leakage detected")
+
+    summary = {
+        "strategy": "text-pattern-v1",
+        "seed": int(seed),
+        "groups": int(total_groups),
+        "patterns": int(len(buckets_by_pattern)),
+        "trainGroups": len(group_ids["train"]),
+        "validGroups": len(group_ids["valid"]),
+        "blindGroups": len(group_ids["blind"]),
+        "testGroups": len(group_ids["blind"]),
+        "trainPatterns": len(split_buckets["train"]),
+        "validPatterns": len(split_buckets["valid"]),
+        "blindPatterns": len(split_buckets["blind"]),
+        "leakageCheck": {
+            "groupOverlap": group_overlap,
+            "duplicatePatternAcrossSplits": duplicate_patterns,
+        },
+    }
+    return {"groupIds": group_ids, "summary": summary}
+
+
+def chinese_iteration_logger(total_rounds: int):
+    def _callback(env) -> None:
+        iteration = int(env.iteration) + 1
+        metrics = []
+        for data_name, metric_name, value, *_ in env.evaluation_result_list or []:
+            metrics.append(f"{data_name} {metric_name}={float(value):.6f}")
+        metric_text = f"；{'，'.join(metrics)}" if metrics else ""
+        if iteration < total_rounds:
+            next_text = f"；准备开始第 {iteration + 1} 轮"
+        else:
+            next_text = "；已达到最大轮数"
+        print(f"第 {iteration}/{total_rounds} 轮训练完成{metric_text}{next_text}", flush=True)
+
+    _callback.order = 20
+    _callback.before_iteration = False
+    return _callback
+
+
+def predict_split(split_df, feature_cols: list[str], predict) -> object:
+    import numpy as np
+
+    scored = split_df.copy()
+    scored["prediction"] = clip01(predict(scored[feature_cols].astype(np.float32)))
+    return scored
+
+
+def run_blind_simulation(blind_df, feature_cols: list[str], predict, args) -> dict:
+    if args.simulation_mode == "full":
+        sampled_df, simulation = full_simulation_slice(
+            blind_df,
+            min_groups=max(1, int(args.simulation_min_groups)),
+        )
+        print(
+            f"全量模拟测试：使用 {simulation['sampledGroups']} 个样本簇、"
+            f"{simulation['sampledFeatureRows']} 行 Feature。",
+            flush=True,
+        )
+    else:
+        sampled_df, simulation = random_simulation_slice(
+            blind_df,
+            sample_groups=max(1, int(args.simulation_sample_groups)),
+            min_groups=max(1, int(args.simulation_min_groups)),
+            seed=int(args.simulation_seed or 0) or None,
+        )
+        print(
+            f"模拟测试：从 {simulation['availableGroups']} 个盲测候选样本簇中随机抽取 "
+            f"{simulation['sampledGroups']} 个，随机种子 {simulation['seed']}。",
+            flush=True,
+        )
+    report = evaluate_groups(predict_split(sampled_df, feature_cols, predict))
+    report["split"] = "full" if args.simulation_mode == "full" else "blind"
+    report["simulation"] = simulation
+    return report
+
+
+def full_simulation_slice(df, min_groups: int) -> tuple[object, dict]:
+    group_ids = [str(group_id) for group_id in df["group_id"].dropna().unique()]
+    available = len(group_ids)
+    if available < min_groups:
+        raise ValueError(f"全量模拟测试样本不足：需要至少 {min_groups} 个样本簇，当前只有 {available} 个。")
+    return df.copy(), {
+        "status": "completed",
+        "label": "全量模拟测试完成",
+        "strategy": "full-dataset-v1",
+        "minimumGroups": min_groups,
+        "sampleGroups": available,
+        "sampledGroups": available,
+        "availableGroups": available,
+        "sampledFeatureRows": int(len(df)),
+    }
+
+
+def random_simulation_slice(df, sample_groups: int, min_groups: int, seed: int | None) -> tuple[object, dict]:
+    group_ids = [str(group_id) for group_id in df["group_id"].dropna().unique()]
+    available = len(group_ids)
+    if available < min_groups:
+        raise ValueError(f"模拟测试候选样本不足：需要至少 {min_groups} 个样本簇，当前只有 {available} 个。")
+
+    actual_seed = int(seed) if seed is not None else random.SystemRandom().randint(1, 2147483647)
+    rng = random.Random(actual_seed)
+    target_count = min(available, max(min_groups, sample_groups))
+    sampled_ids = set(rng.sample(group_ids, target_count))
+    sampled_df = df[df["group_id"].astype(str).isin(sampled_ids)].copy()
+    return sampled_df, {
+        "status": "completed",
+        "label": "模拟测试完成",
+        "strategy": "random-blind-groups-v1",
+        "seed": actual_seed,
+        "minimumGroups": min_groups,
+        "sampledGroups": target_count,
+        "availableGroups": available,
+        "sampledFeatureRows": int(len(sampled_df)),
+    }
+
+
+def pending_blind_report(split_summary: dict, args) -> dict:
+    full_mode = args.simulation_mode == "full"
+    available_groups = int(split_summary.get("groups" if full_mode else "blindGroups") or 0)
+    return {
+        "split": "full" if full_mode else "blind",
+        "summary": empty_validation_summary(),
+        "details": [],
+        "simulation": {
+            "status": "pending",
+            "label": "等待手动全量模拟测试" if full_mode else "等待手动模拟测试",
+            "strategy": "full-dataset-v1" if full_mode else "random-blind-groups-v1",
+            "minimumGroups": max(1, int(args.simulation_min_groups)),
+            "sampleGroups": available_groups if full_mode else max(1, int(args.simulation_sample_groups)),
+            "availableGroups": available_groups,
+        },
+    }
+
+
+def empty_validation_summary() -> dict:
+    return {
+        "groups": 0,
+        "expectedRepairs": 0,
+        "correctRepairs": 0,
+        "missedRepairs": 0,
+        "falseRepairs": 0,
+        "skipped": 0,
+        "correctDecisions": 0,
+        "repairRecall": 0.0,
+        "falseRepairRate": 0.0,
+        "decisionAccuracy": 0.0,
+    }
+
+
+def pending_acceptance() -> dict:
+    return {
+        "status": "pending-simulation",
+        "label": "待模拟测试",
+        "canPublish": False,
+        "blockers": ["manual-simulation-required"],
+        "policy": "blind-false-repairs-must-be-zero-and-no-severe-overfit",
+    }
+
+
+def pending_overfitting() -> dict:
+    return {
+        "status": "pending",
+        "severe": False,
+        "warning": False,
+        "reasons": ["manual-simulation-required"],
+        "recallGap": 0.0,
+        "accuracyGap": 0.0,
+        "validBlindRecallGap": 0.0,
+    }
+
+
+def clear_stale_reports(output_dir: Path) -> None:
+    for name in [
+        "train_validation_report.json",
+        "valid_validation_report.json",
+        "blind_validation_report.json",
+        "test_validation_report.json",
+    ]:
+        path = output_dir / name
+        if path.exists():
+            path.unlink()
+
+
+def write_training_state(
+    output_dir: Path,
+    features_path: Path,
+    training_config: dict,
+    split_summary: dict,
+    model_version: str,
+    args,
+) -> None:
+    write_json(
+        output_dir / TRAINING_STATE_FILE,
+        {
+            "schema": "afr-glyphcore-training-state-v1",
+            "featuresPath": str(features_path.resolve()),
+            "modelVersion": model_version,
+            "trainingConfig": training_config,
+            "splitSummary": split_summary,
+            "simulation": {
+                "status": "pending" if args.defer_simulation else "completed",
+                "minimumGroups": max(1, int(args.simulation_min_groups)),
+                "sampleGroups": max(0, int(args.simulation_sample_groups)),
+                "mode": str(args.simulation_mode),
+            },
+        },
+    )
+
+
+def run_simulation_only(args, pd, lgb) -> int:
+    import numpy as np
+
+    features_path = Path(args.features)
+    output_dir = Path(args.output_dir)
+    df = pd.read_csv(features_path, encoding="utf-8-sig")
+    feature_cols = [col for col in df.columns if re.match(r"^f\d{2}_", col)]
+    if len(feature_cols) != FEATURE_COUNT:
+        raise ValueError(f"expected {FEATURE_COUNT} feature columns, got {len(feature_cols)}")
+
+    state = read_json_or_none(output_dir / TRAINING_STATE_FILE) or {}
+    training_config = state.get("trainingConfig") if isinstance(state.get("trainingConfig"), dict) else {}
+    split_seed = int(training_config.get("seed") or args.seed)
+    split = split_groups_by_text_pattern(df, split_seed)
+    split_summary = split["summary"]
+    train_groups = split["groupIds"]["train"]
+    valid_groups = split["groupIds"]["valid"]
+    blind_groups = split["groupIds"]["blind"]
+    train_df = df[df["group_id"].isin(train_groups)].copy()
+    valid_df = df[df["group_id"].isin(valid_groups)].copy()
+    blind_df = df[df["group_id"].isin(blind_groups)].copy()
+
+    booster_path = output_dir / "AFR.GlyphCore.Model.txt"
+    if not booster_path.exists():
+        raise FileNotFoundError(f"missing trained model: {booster_path}")
+    booster = lgb.Booster(model_file=str(booster_path))
+    predict = lambda frame: booster.predict(frame.astype(np.float32))
+
+    if args.simulation_mode == "full":
+        print("开始手动触发的全量模拟测试。", flush=True)
+    else:
+        print("开始手动触发的模拟测试；本次会重新随机抽取测试切片。", flush=True)
+    train_report = read_json_or_none(output_dir / "train_validation_report.json") or evaluate_groups(
+        predict_split(train_df, feature_cols, predict)
+    )
+    train_report["split"] = "train"
+    valid_report = read_json_or_none(output_dir / "valid_validation_report.json") or evaluate_groups(
+        predict_split(valid_df, feature_cols, predict)
+    )
+    valid_report["split"] = "valid"
+    simulation_df = df if args.simulation_mode == "full" else blind_df
+    blind_report = run_blind_simulation(simulation_df, feature_cols, predict, args)
+    reports = {"train": train_report, "valid": valid_report, "blind": blind_report}
+
+    write_json(output_dir / "train_validation_report.json", train_report)
+    write_json(output_dir / "valid_validation_report.json", valid_report)
+    write_json(output_dir / "blind_validation_report.json", blind_report)
+    write_json(output_dir / "test_validation_report.json", blind_report)
+
+    overfitting = evaluate_overfitting(reports)
+    acceptance = evaluate_acceptance(blind_report, overfitting)
+    manifest = read_json_or_none(output_dir / "AFR.GlyphCore.ModelManifest.json") or {}
+    summary = read_json_or_none(output_dir / "training_summary.json") or {}
+    if not isinstance(training_config, dict) or not training_config:
+        training_config = first_dict_value("trainingConfig", manifest, summary) or {
+            "seed": split_seed,
+            "maxRounds": int(args.max_rounds),
+            "earlyStoppingRounds": int(args.early_stopping_rounds),
+            "autoEarlyStopping": True,
+        }
+
+    manifest.update(
+        {
+            "validationSummary": blind_report["summary"],
+            "blindValidationSummary": blind_report["summary"],
+            "splitSummary": split_summary,
+            "trainingConfig": training_config,
+            "overfitting": overfitting,
+            "acceptance": acceptance,
+            "simulation": blind_report["simulation"],
+        }
+    )
+    if "modelVersion" not in manifest:
+        manifest["modelVersion"] = summary.get("modelVersion") or f"dbtext-ai-lightgbm-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    if "createdUtc" not in manifest:
+        manifest["createdUtc"] = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    write_json(output_dir / "AFR.GlyphCore.ModelManifest.json", manifest)
+
+    summary.update(
+        {
+            "modelVersion": manifest.get("modelVersion"),
+            "featureRows": int(len(df)),
+            "groups": int(df["group_id"].nunique()),
+            "splitSummary": split_summary,
+            "trainGroups": len(train_groups),
+            "validGroups": len(valid_groups),
+            "blindGroups": len(blind_groups),
+            "testGroups": int(blind_report["simulation"]["sampledGroups"]),
+            "trainingConfig": training_config,
+            "acceptance": acceptance,
+            "overfitting": overfitting,
+            "blindSummary": blind_report["summary"],
+            "simulation": blind_report["simulation"],
+        }
+    )
+    write_json(output_dir / "training_summary.json", summary)
+    if isinstance(state, dict):
+        state.update(
+            {
+                "featuresPath": str(features_path.resolve()),
+                "modelVersion": manifest.get("modelVersion"),
+                "trainingConfig": training_config,
+                "splitSummary": split_summary,
+                "simulation": blind_report["simulation"],
+            }
+        )
+        state.setdefault("schema", "afr-glyphcore-training-state-v1")
+        write_json(output_dir / TRAINING_STATE_FILE, state)
+    append_training_history(output_dir, manifest, reports, training_config, split_summary, overfitting, acceptance)
+    simulation_name = "full" if args.simulation_mode == "full" else "blind"
+    print(f"{simulation_name}: {json.dumps(blind_report['summary'], ensure_ascii=False, sort_keys=True)}", flush=True)
+    return 0
+
+
+def text_pattern_key(rows) -> str:
+    first = rows.iloc[0]
+    current_text = str(first.get("current_text") or "")
+    candidates = sorted(
+        {
+            str(row.get("source") or "") + "\u241f" + str(row.get("candidate_text") or "")
+            for _, row in rows.iterrows()
+        }
+    )
+    raw_key = "dbtext-blind-split-v1\0" + current_text + "\0" + "\0".join(candidates)
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+
+
+def ensure_non_empty_split(split_buckets: dict[str, list[dict]], target: str) -> None:
+    if split_buckets[target]:
+        return
+    for source in ["train", "valid", "blind"]:
+        if source == target or len(split_buckets[source]) <= 1:
+            continue
+        split_buckets[target].append(split_buckets[source].pop())
+        return
+
+
+def count_group_overlap(group_ids: dict[str, set[str]]) -> int:
+    seen: set[str] = set()
+    overlap = 0
+    for split_groups in group_ids.values():
+        for group_id in split_groups:
+            if group_id in seen:
+                overlap += 1
+            seen.add(group_id)
+    return overlap
+
+
+def count_pattern_leakage(split_buckets: dict[str, list[dict]]) -> int:
+    owners: dict[str, str] = {}
+    leaked = 0
+    for split_name, buckets in split_buckets.items():
+        for bucket in buckets:
+            pattern = str(bucket["pattern"])
+            owner = owners.setdefault(pattern, split_name)
+            if owner != split_name:
+                leaked += 1
+    return leaked
 
 
 def portable_path(path: Path) -> str:
@@ -178,6 +670,7 @@ def evaluate_groups(df) -> dict:
     correct_repairs = 0
     missed_repairs = 0
     expected_repairs = 0
+    correct_decisions = 0
     skipped = 0
 
     for group_id, group in df.groupby("group_id", sort=False):
@@ -186,7 +679,8 @@ def evaluate_groups(df) -> dict:
         second_score = float(group.iloc[1]["prediction"]) if len(group) > 1 else 0.0
         margin = float(best["prediction"]) - second_score
         decision = decide(best, margin, group)
-        expected_repair = str(best["label_action"]) == "repair"
+        label_action = str(best["label_action"])
+        expected_repair = label_action == "repair"
         if expected_repair:
             expected_repairs += 1
 
@@ -195,10 +689,13 @@ def evaluate_groups(df) -> dict:
             and expected_repair
             and str(best["candidate_text"]) == str(best["label_text"])
         )
+        correct_decision = correct or (not expected_repair and decision != "repair")
         false_repair = decision == "repair" and not correct
 
         if correct:
             correct_repairs += 1
+        if correct_decision:
+            correct_decisions += 1
         elif expected_repair and decision != "repair":
             missed_repairs += 1
         if false_repair:
@@ -209,15 +706,22 @@ def evaluate_groups(df) -> dict:
         details.append(
             {
                 "groupId": group_id,
-                "labelAction": str(best["label_action"]),
+                "packageId": str(best.get("training_package_id") or ""),
+                "exportId": str(best.get("training_export_id") or ""),
+                "drawingFileName": str(best.get("drawing_file_name") or ""),
+                "labelAction": label_action,
                 "decision": decision,
                 "bestText": str(best["candidate_text"]),
                 "labelText": str(best["label_text"]),
+                "currentText": str(best.get("current_text") or ""),
                 "score": float(best["prediction"]),
                 "margin": margin,
                 "source": str(best["source"]),
                 "correct": correct,
+                "correctDecision": correct_decision,
                 "falseRepair": false_repair,
+                "missedRepair": bool(expected_repair and decision != "repair"),
+                "severity": error_severity(expected_repair, decision, correct, false_repair),
             }
         )
 
@@ -230,11 +734,23 @@ def evaluate_groups(df) -> dict:
             "missedRepairs": missed_repairs,
             "falseRepairs": false_repairs,
             "skipped": skipped,
+            "correctDecisions": correct_decisions,
             "repairRecall": safe_div(correct_repairs, expected_repairs),
             "falseRepairRate": safe_div(false_repairs, group_count),
+            "decisionAccuracy": safe_div(correct_decisions, group_count),
         },
         "details": details,
     }
+
+
+def error_severity(expected_repair: bool, decision: str, correct: bool, false_repair: bool) -> str:
+    if false_repair:
+        return "false-repair"
+    if expected_repair and decision != "repair":
+        return "missed-repair"
+    if not correct and expected_repair:
+        return "wrong-repair"
+    return "ok"
 
 
 def decide(best, margin: float, group) -> str:
@@ -269,7 +785,117 @@ def safe_div(numerator: int, denominator: int) -> float:
     return float(numerator) / float(denominator)
 
 
-def build_manifest(features_path: Path, df, test_report: dict) -> dict:
+def evaluate_overfitting(reports: dict[str, dict]) -> dict:
+    train = reports["train"]["summary"]
+    valid = reports["valid"]["summary"]
+    blind = reports["blind"]["summary"]
+    train_recall = float(train.get("repairRecall") or 0)
+    blind_recall = float(blind.get("repairRecall") or 0)
+    valid_recall = float(valid.get("repairRecall") or 0)
+    train_accuracy = float(train.get("decisionAccuracy") or 0)
+    blind_accuracy = float(blind.get("decisionAccuracy") or 0)
+    valid_accuracy = float(valid.get("decisionAccuracy") or 0)
+    recall_gap = train_recall - blind_recall
+    accuracy_gap = train_accuracy - blind_accuracy
+    valid_blind_recall_gap = valid_recall - blind_recall
+    reasons: list[str] = []
+    severity = "none"
+
+    if int(blind.get("expectedRepairs") or 0) < 10:
+        reasons.append("blind-set-has-few-repair-examples")
+    if train_recall >= 0.95 and recall_gap >= OVERFIT_RECALL_GAP:
+        severity = "severe"
+        reasons.append("train-recall-much-higher-than-blind")
+    elif recall_gap >= OVERFIT_WARNING_RECALL_GAP:
+        severity = "warning"
+        reasons.append("train-recall-higher-than-blind")
+
+    if accuracy_gap >= OVERFIT_ACCURACY_GAP:
+        severity = "severe"
+        reasons.append("train-accuracy-much-higher-than-blind")
+    elif severity != "severe" and accuracy_gap >= OVERFIT_WARNING_ACCURACY_GAP:
+        severity = "warning"
+        reasons.append("train-accuracy-higher-than-blind")
+
+    if severity == "none" and valid_blind_recall_gap >= OVERFIT_WARNING_RECALL_GAP:
+        severity = "warning"
+        reasons.append("validation-recall-higher-than-blind")
+
+    return {
+        "status": severity,
+        "severe": severity == "severe",
+        "warning": severity in {"warning", "severe"},
+        "reasons": reasons,
+        "recallGap": recall_gap,
+        "accuracyGap": accuracy_gap,
+        "validBlindRecallGap": valid_blind_recall_gap,
+        "thresholds": {
+            "severeRecallGap": OVERFIT_RECALL_GAP,
+            "severeAccuracyGap": OVERFIT_ACCURACY_GAP,
+            "warningRecallGap": OVERFIT_WARNING_RECALL_GAP,
+            "warningAccuracyGap": OVERFIT_WARNING_ACCURACY_GAP,
+        },
+    }
+
+
+def evaluate_acceptance(blind_report: dict, overfitting: dict) -> dict:
+    summary = blind_report["summary"]
+    blockers: list[str] = []
+    if int(summary.get("groups") or 0) <= 0:
+        blockers.append("blind-test-empty")
+    if int(summary.get("falseRepairs") or 0) > 0:
+        blockers.append("blind-false-repairs")
+    if bool(overfitting.get("severe")):
+        blockers.append("severe-overfitting")
+
+    if "severe-overfitting" in blockers:
+        status = "overfit"
+        label = "疑似过拟合"
+    elif blockers:
+        status = "failed"
+        label = "未通过"
+    else:
+        status = "passed"
+        label = "通过"
+
+    return {
+        "status": status,
+        "label": label,
+        "canPublish": status == "passed",
+        "blockers": blockers,
+        "policy": "simulation-false-repairs-must-be-zero-and-no-severe-overfit",
+    }
+
+
+def build_training_config(args, model) -> dict:
+    best_iteration = int(getattr(model, "best_iteration_", 0) or 0)
+    actual_iterations = int(best_iteration or getattr(model, "n_estimators_", 0) or int(args.max_rounds))
+    return {
+        "seed": int(args.seed),
+        "maxRounds": int(args.max_rounds),
+        "earlyStoppingRounds": int(args.early_stopping_rounds),
+        "autoEarlyStopping": True,
+        "bestIteration": best_iteration,
+        "actualIterations": actual_iterations,
+        "stoppedEarly": bool(best_iteration and best_iteration < int(args.max_rounds)),
+        "minimumConfidence": MINIMUM_CONFIDENCE,
+        "minimumScoreMargin": MINIMUM_SCORE_MARGIN,
+        "simulationSampleGroups": max(0, int(args.simulation_sample_groups)),
+        "simulationMinimumGroups": max(1, int(args.simulation_min_groups)),
+        "simulationMode": str(args.simulation_mode),
+    }
+
+
+def build_manifest(
+    features_path: Path,
+    df,
+    test_report: dict,
+    model_version: str,
+    training_config: dict,
+    split_summary: dict,
+    overfitting: dict,
+    acceptance: dict,
+) -> dict:
     now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return {
         "aiDisplayName": AI_DISPLAY_NAME,
@@ -281,7 +907,7 @@ def build_manifest(features_path: Path, df, test_report: dict) -> dict:
             "github": PROJECT_GITHUB,
             "gitee": PROJECT_GITEE,
         },
-        "modelVersion": f"dbtext-ai-lightgbm-{now}",
+        "modelVersion": model_version,
         "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
         "featureCount": FEATURE_COUNT,
         "inputName": "features",
@@ -294,10 +920,44 @@ def build_manifest(features_path: Path, df, test_report: dict) -> dict:
         "minimumConfidence": MINIMUM_CONFIDENCE,
         "minimumScoreMargin": MINIMUM_SCORE_MARGIN,
         "validationSummary": test_report["summary"],
+        "blindValidationSummary": test_report["summary"],
+        "splitSummary": split_summary,
+        "trainingConfig": training_config,
+        "overfitting": overfitting,
+        "acceptance": acceptance,
+        "simulation": test_report.get("simulation") if isinstance(test_report, dict) else {},
         "createdUtc": now,
         "privateModel": False,
         "distribution": "public-training-artifact",
     }
+
+
+def append_training_history(
+    output_dir: Path,
+    manifest: dict,
+    reports: dict[str, dict],
+    training_config: dict,
+    split_summary: dict,
+    overfitting: dict,
+    acceptance: dict,
+) -> None:
+    entry = {
+        "schema": "dbtext-ai-training-history-v1",
+        "id": uuid.uuid4().hex,
+        "createdUtc": manifest.get("createdUtc"),
+        "modelVersion": manifest.get("modelVersion"),
+        "trainingDataHash": manifest.get("trainingDataHash"),
+        "trainingConfig": training_config,
+        "splitSummary": split_summary,
+        "trainSummary": reports["train"]["summary"],
+        "validSummary": reports["valid"]["summary"],
+        "blindSummary": reports["blind"]["summary"],
+        "overfitting": overfitting,
+        "acceptance": acceptance,
+    }
+    with (output_dir / "training_history.jsonl").open("a", encoding="utf-8", newline="\n") as writer:
+        writer.write(json.dumps(entry, ensure_ascii=False, separators=(",", ":")))
+        writer.write("\n")
 
 
 def export_onnx(model, output_path: Path, feature_count: int, opset: int, manifest: dict) -> None:
@@ -355,6 +1015,22 @@ def sha256_file(path: Path) -> str:
 
 def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def read_json_or_none(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def first_dict_value(key: str, *sources: object) -> dict | None:
+    for source in sources:
+        if isinstance(source, dict) and isinstance(source.get(key), dict):
+            return source.get(key)
+    return None
 
 
 if __name__ == "__main__":

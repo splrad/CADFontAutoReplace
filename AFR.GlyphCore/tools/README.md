@@ -184,6 +184,24 @@ Run the standard pipeline:
     -ReviewedInput ".\AFR.GlyphCore\datasets\ReviewedLabels\<exportId>_reviewed.jsonl"
 ```
 
+Training uses automatic early stopping by default. Advanced runs can cap the
+maximum rounds and early-stopping patience:
+
+```powershell
+.\AFR.GlyphCore\tools\Invoke-GlyphCoreTraining.ps1 `
+    -Python .\AFR.GlyphCore\tools\.venv\Scripts\python.exe `
+    -ReviewedInput ".\AFR.GlyphCore\datasets\ReviewedLabels\<exportId>_reviewed.jsonl" `
+    -MaxRounds 650 `
+    -EarlyStoppingRounds 60 `
+    -Seed 20260512
+```
+
+The trainer splits data by stable text pattern into train, validation, and blind
+test sets. The blind test set is not used for training or early stopping; it is
+used only after training to compare AI decisions with human labels. Model reports
+include the conservative acceptance result, overfitting status, blind-test
+metrics, and error samples.
+
 For smoke testing, omit `-ReviewedInput` to generate synthetic seed labels:
 
 ```powershell

@@ -28,13 +28,15 @@ export function App() {
 
   useEffect(() => {
     const status = app?.training?.status;
-    if (activeTab !== 'training' && status !== 'running') return;
+    const simulationStatus = app?.report?.simulation?.status;
+    const reportNeedsPolling = activeTab === 'report' && simulationStatus === 'running';
+    if (activeTab !== 'training' && status !== 'running' && !reportNeedsPolling) return;
     refreshTrainingStatus();
     const timer = window.setInterval(() => {
       refreshTrainingStatus();
-    }, status === 'running' ? 1500 : 4000);
+    }, status === 'running' || reportNeedsPolling ? 1500 : 4000);
     return () => window.clearInterval(timer);
-  }, [activeTab, app?.training?.status, refreshTrainingStatus]);
+  }, [activeTab, app?.training?.status, app?.report?.simulation?.status, refreshTrainingStatus]);
 
   // 将 error / message 推入 Toast 队列（最多保留 5 条）
   useEffect(() => {
