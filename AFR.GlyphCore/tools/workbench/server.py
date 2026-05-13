@@ -124,6 +124,13 @@ class DatasetStore:
             return training_records
         if self.features_path.exists():
             return self._load_training_dataset_from_features(raw_reviewed)
+        if raw_reviewed:
+            entered_utc = now_utc()
+            build_id = f"reviewed-jsonl-import-{uuid.uuid4().hex}"
+            return {
+                group_id: self._build_training_dataset_entry(record, entered_utc, build_id, "reviewed-jsonl")
+                for group_id, record in raw_reviewed.items()
+            }
         return {}
 
     def _load_training_dataset_from_features(self, raw_reviewed: dict[str, dict]) -> dict[str, dict]:
@@ -266,6 +273,8 @@ class DatasetStore:
 
         with self.lock:
             self.reviewed[group_id] = reviewed
+            self._promote_reviewed_records_to_training_dataset([reviewed], "reviewed-jsonl")
+            self._rewrite_training_dataset_file()
             self._rewrite_reviewed_files()
             self._invalidate_review_groups()
 
@@ -455,6 +464,8 @@ class DatasetStore:
                 written.append(reviewed)
             if not written:
                 raise ValueError("该组没有可自动传播的记录。")
+            self._promote_reviewed_records_to_training_dataset(written, "reviewed-jsonl")
+            self._rewrite_training_dataset_file()
             self._rewrite_reviewed_files()
             self._invalidate_review_groups()
 
@@ -567,6 +578,8 @@ class DatasetStore:
             if not written and errors:
                 raise ValueError("; ".join(str(item["error"]) for item in errors[:3]))
             if written:
+                self._promote_reviewed_records_to_training_dataset(written, "reviewed-jsonl")
+                self._rewrite_training_dataset_file()
                 self._rewrite_reviewed_files()
                 self._invalidate_review_groups()
 
@@ -656,6 +669,8 @@ class DatasetStore:
                     written.append(reviewed)
             if not written:
                 raise ValueError("选中的分组没有未审核记录可批量写入。")
+            self._promote_reviewed_records_to_training_dataset(written, "reviewed-jsonl")
+            self._rewrite_training_dataset_file()
             self._rewrite_reviewed_files()
             self._invalidate_review_groups()
 
@@ -685,8 +700,18 @@ class DatasetStore:
                     continue
                 removed_ids.append(group_id)
                 del self.reviewed[group_id]
+            for group_id, record in list(self.training_dataset.items()):
+                if batch_id and str(record.get("batchId") or "") != batch_id:
+                    continue
+                if cluster_id and str(record.get("propagationClusterId") or record.get("propagationGroupId") or "") != cluster_id:
+                    continue
+                if group_id not in removed_ids:
+                    removed_ids.append(group_id)
+                del self.training_dataset[group_id]
             if not removed_ids:
                 raise ValueError("没有找到可回滚的批量标注记录。")
+            self._rewrite_training_dataset_file()
+            self._rewrite_features_without_group_ids(set(removed_ids))
             self._rewrite_reviewed_files()
             self._invalidate_review_groups()
 
@@ -743,18 +768,26 @@ class DatasetStore:
 
     def commit_training_dataset_build(self, records: list[dict], promoted_ids: list[str], features_tmp_path: Path) -> None:
         with self.lock:
-            self.training_dataset = {
-                str(record.get("groupId") or ""): record
-                for record in records
-                if str(record.get("groupId") or "")
-            }
-            for group_id in promoted_ids:
-                self.reviewed.pop(group_id, None)
-            self._rewrite_training_dataset_file()
-            self._rewrite_reviewed_files()
+            self._commit_training_dataset_records_unlocked(records, promoted_ids)
             self.features_path.parent.mkdir(parents=True, exist_ok=True)
             features_tmp_path.replace(self.features_path)
             self._invalidate_review_groups()
+
+    def commit_training_dataset_records(self, records: list[dict], promoted_ids: list[str]) -> None:
+        with self.lock:
+            self._commit_training_dataset_records_unlocked(records, promoted_ids)
+            self._invalidate_review_groups()
+
+    def _commit_training_dataset_records_unlocked(self, records: list[dict], promoted_ids: list[str]) -> None:
+        self.training_dataset = {
+            str(record.get("groupId") or ""): record
+            for record in records
+            if str(record.get("groupId") or "")
+        }
+        for group_id in promoted_ids:
+            self.reviewed.pop(group_id, None)
+        self._rewrite_training_dataset_file()
+        self._rewrite_reviewed_files()
 
     def delete_training_dataset_records(self, payload: dict) -> dict:
         group_ids = payload.get("groupIds")
@@ -869,6 +902,24 @@ class DatasetStore:
         record["trainingPackageId"] = self.package_id
         record["trainingExportId"] = self.export_id
         return record
+
+    def _promote_reviewed_records_to_training_dataset(self, reviewed_records: list[dict], source: str) -> list[str]:
+        entered_utc = now_utc()
+        build_id = f"pending-feature-{uuid.uuid4().hex}"
+        promoted_ids: list[str] = []
+        for reviewed_record in reviewed_records:
+            group_id = str(reviewed_record.get("groupId") or "")
+            if not group_id:
+                continue
+            self.training_dataset[group_id] = self._build_training_dataset_entry(
+                reviewed_record,
+                entered_utc,
+                build_id,
+                source,
+            )
+            self.reviewed.pop(group_id, None)
+            promoted_ids.append(group_id)
+        return promoted_ids
 
     def _review_group_key(self, record: dict) -> tuple[object, ...]:
         candidate = self._review_candidate(record)
@@ -1659,6 +1710,7 @@ class WorkbenchState:
 
         self.store: DatasetStore | None = None
         self.training_job: ProcessJob | None = None
+        self.training_context: dict = {}
         if package:
             self.select_package(package)
         else:
@@ -1724,6 +1776,27 @@ class WorkbenchState:
         if not path.is_absolute():
             path = self.extract_root / package
         return ensure_under(path, self.extract_root)
+
+    def package_store(self, package: str) -> DatasetStore:
+        package_path = self.resolve_package(package)
+        if self.store and self.store.package_dir == package_path:
+            return self.store
+        return DatasetStore(self.dataset_root, self.model_root, package_path)
+
+    def package_stores(self, package_ids: object) -> list[DatasetStore]:
+        if not isinstance(package_ids, list):
+            raise ValueError("packageIds must be an array")
+        ordered_ids: list[str] = []
+        seen: set[str] = set()
+        for value in package_ids:
+            package_id = str(value or "").strip()
+            if not package_id or package_id in seen:
+                continue
+            seen.add(package_id)
+            ordered_ids.append(package_id)
+        if not ordered_ids:
+            raise ValueError("请选择至少一个训练数据包。")
+        return [self.package_store(package_id) for package_id in ordered_ids]
 
     def bootstrap_payload(self) -> dict:
         data = self.store.data_payload() if self.store else empty_data_payload()
@@ -1798,6 +1871,27 @@ class WorkbenchState:
             "reviewClusters": store.review_clusters_payload(),
         }
 
+    def _run_build_features(self, input_path: Path, output_path: Path) -> subprocess.CompletedProcess[str]:
+        script = self.tool_root / "training" / "build_features.py"
+        result = subprocess.run(
+            [
+                self.python,
+                str(script),
+                "--input",
+                str(input_path),
+                "--output",
+                str(output_path),
+            ],
+            cwd=str(self.tool_root),
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError((result.stdout + "\n" + result.stderr).strip())
+        return result
+
     def build_features(self) -> dict:
         store = self.require_store()
         training_records, promoted_ids, build_id = store.prepare_training_dataset_build()
@@ -1812,25 +1906,8 @@ class WorkbenchState:
                 writer.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
                 writer.write("\n")
 
-        script = self.tool_root / "training" / "build_features.py"
         try:
-            result = subprocess.run(
-                [
-                    self.python,
-                    str(script),
-                    "--input",
-                    str(training_tmp_path),
-                    "--output",
-                    str(features_tmp_path),
-                ],
-                cwd=str(self.tool_root),
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                capture_output=True,
-            )
-            if result.returncode != 0:
-                raise RuntimeError((result.stdout + "\n" + result.stderr).strip())
+            result = self._run_build_features(training_tmp_path, features_tmp_path)
             store.commit_training_dataset_build(training_records, promoted_ids, features_tmp_path)
             store.features_path.touch()
             return {
@@ -1841,6 +1918,66 @@ class WorkbenchState:
                 "features": self.features_payload(),
                 "data": store.data_payload(),
                 "reviewClusters": store.review_clusters_payload(),
+            }
+        finally:
+            if training_tmp_path.exists():
+                training_tmp_path.unlink()
+            if features_tmp_path.exists():
+                features_tmp_path.unlink()
+
+    def build_selected_training_features(self, stores: list[DatasetStore]) -> dict:
+        build_id = uuid.uuid4().hex
+        combined_dir = self.training_sets_root / "Combined"
+        combined_dir.mkdir(parents=True, exist_ok=True)
+        work_dir = self.dataset_root / ".work"
+        work_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        feature_path = combined_dir / f"{stamp}_{len(stores)}packages_features.csv"
+        training_tmp_path = work_dir / f"combined_training_dataset.{build_id}.jsonl"
+        features_tmp_path = work_dir / f"{feature_path.name}.{build_id}.tmp"
+
+        prepared: list[tuple[DatasetStore, list[dict], list[str]]] = []
+        empty_packages: list[str] = []
+        training_records: list[dict] = []
+        for store in stores:
+            records, promoted_ids, _ = store.prepare_training_dataset_build()
+            if not records:
+                empty_packages.append(store.package_id)
+                continue
+            prepared.append((store, records, promoted_ids))
+            training_records.extend(records)
+
+        if empty_packages:
+            raise ValueError("所选数据包没有训练数据：" + ", ".join(empty_packages))
+        if not training_records:
+            raise ValueError("所选数据包没有可训练记录。")
+
+        try:
+            with training_tmp_path.open("w", encoding="utf-8", newline="\n") as writer:
+                for record in training_records:
+                    writer.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+                    writer.write("\n")
+
+            result = self._run_build_features(training_tmp_path, features_tmp_path)
+            for store, records, promoted_ids in prepared:
+                store.commit_training_dataset_records(records, promoted_ids)
+            features_tmp_path.replace(feature_path)
+            feature_path.touch()
+            summary = summarize_features(feature_path)
+            return {
+                "ok": True,
+                "message": result.stdout.strip(),
+                "featurePath": str(feature_path),
+                "packageIds": [store.package_id for store in stores],
+                "packageCount": len(stores),
+                "trainingRecords": len(training_records),
+                "features": {
+                    "exists": True,
+                    "path": str(feature_path),
+                    "trainingDatasetRows": len(training_records),
+                    "selectedPackages": [store.package_id for store in stores],
+                    **summary,
+                },
             }
         finally:
             if training_tmp_path.exists():
@@ -1877,36 +2014,65 @@ class WorkbenchState:
             payload["stale"] = bool(stale_reasons)
         return payload
 
-    def start_training(self) -> dict:
+    def start_training(self, payload: dict | None = None) -> dict:
         store = self.require_store()
         if self.training_job and self.training_job.status == "running":
             raise ValueError("已有训练任务正在运行。")
-        if not store.reviewed and not store.training_dataset:
-            raise ValueError("请先完成至少一条人工审核标注，再开始训练。")
 
-        features = self.features_payload()
+        payload = payload or {}
+        selected_package_ids = payload.get("packageIds")
+        explicit_packages = isinstance(selected_package_ids, list) and len(selected_package_ids) > 0
         auto_built_features = False
-        if not features.get("exists") or features.get("stale"):
-            self.build_features()
+        selected_context: dict
+        if explicit_packages:
+            stores = self.package_stores(selected_package_ids)
+            selected_build = self.build_selected_training_features(stores)
+            features_path = Path(str(selected_build["featurePath"]))
+            features_payload = selected_build["features"]
             auto_built_features = True
+            selected_context = {
+                "selectedPackages": selected_build["packageIds"],
+                "selectedPackageCount": selected_build["packageCount"],
+                "trainingRecords": selected_build["trainingRecords"],
+                "featurePath": selected_build["featurePath"],
+            }
+        else:
+            if not store.reviewed and not store.training_dataset:
+                raise ValueError("请先完成至少一条人工审核标注，再开始训练。")
+
+            features_payload = self.features_payload()
+            if not features_payload.get("exists") or features_payload.get("stale"):
+                self.build_features()
+                auto_built_features = True
+                features_payload = self.features_payload()
+            features_path = store.features_path
+            selected_context = {
+                "selectedPackages": [store.package_id],
+                "selectedPackageCount": 1,
+                "trainingRecords": int(features_payload.get("trainingDatasetRows") or len(store.training_dataset)),
+                "featurePath": str(features_path),
+            }
 
         store.model_dir.mkdir(parents=True, exist_ok=True)
-        log_name = f"{store.export_id}_train_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        log_prefix = "combined" if explicit_packages else store.export_id
+        log_name = f"{log_prefix}_train_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         command = [
             self.python,
             str(self.tool_root / "training" / "train_lightgbm.py"),
             "--features",
-            str(store.features_path),
+            str(features_path),
             "--output-dir",
             str(store.model_dir),
         ]
         self.training_job = ProcessJob(command, self.tool_root, self.reports_root / log_name)
+        self.training_context = selected_context
         self.training_job.start()
         return {
             "ok": True,
             "autoBuiltFeatures": auto_built_features,
-            "features": self.features_payload(),
+            "features": features_payload,
             "training": self.training_payload(),
+            **selected_context,
         }
 
     def training_payload(self) -> dict:
@@ -1914,6 +2080,7 @@ class WorkbenchState:
             return {"status": "idle", "statusLabel": training_status_label("idle"), "lines": []}
         payload = self.training_job.payload()
         payload["statusLabel"] = training_status_label(str(payload.get("status") or "idle"))
+        payload.update(self.training_context)
         return payload
 
     def report_payload(self) -> dict:
@@ -1922,7 +2089,6 @@ class WorkbenchState:
         test_report_path = model_dir / "test_validation_report.json"
         summary_path = model_dir / "training_summary.json"
         onnx_path = model_dir / "AFR.GlyphCore.Model.onnx"
-        exact_repairs_path = model_dir / "AFR.GlyphCore.ExactRepairs.json"
         manifest = read_json_or_none(manifest_path)
         test_report = read_json_or_none(test_report_path)
         summary = read_json_or_none(summary_path)
@@ -1945,7 +2111,6 @@ class WorkbenchState:
         release_command = (
             f'$env:AFR_GLYPHCORE_MODEL_PATH = "{onnx_path}"\n'
             f'$env:AFR_GLYPHCORE_MODEL_MANIFEST_PATH = "{manifest_path}"\n'
-            f'$env:AFR_GLYPHCORE_EXACT_REPAIRS_PATH = "{exact_repairs_path}"\n'
             f'cd "{repo_root}"\n'
             ".\\tools\\Publish-ReleaseAssets.ps1"
         )
@@ -2080,7 +2245,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             elif path == "/api/features":
                 self._send_json(self.state.build_features())
             elif path == "/api/train":
-                self._send_json(self.state.start_training())
+                self._send_json(self.state.start_training(payload))
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
         except Exception as exc:  # pragma: no cover - displayed by UI

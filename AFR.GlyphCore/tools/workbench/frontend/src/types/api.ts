@@ -145,6 +145,7 @@ export interface PackageSummary {
   id: string;
   path?: string;
   drawing?: DrawingSummary;
+  active?: boolean;
   reviewed?: number;
   trainingDataset?: number;
   records?: number;
@@ -297,6 +298,10 @@ export interface StartTrainingResult {
   autoBuiltFeatures?: boolean;
   features?: FeatureStatus;
   training?: TrainingStatus;
+  selectedPackages?: string[];
+  selectedPackageCount?: number;
+  trainingRecords?: number;
+  featurePath?: string;
   [key: string]: unknown;
 }
 

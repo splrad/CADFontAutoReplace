@@ -45,6 +45,9 @@ export function TopBar() {
   const trainedCount = Number(
     summary.trained || data.trainingDataset?.summary?.total || 0
   );
+  const featureRefreshCount = app?.features?.stale
+    ? Number(app.features.trainingDatasetRows || trainedCount)
+    : reviewedCount;
   const packagePath =
     data.paths?.package || data.packageId || app?.packageId || '未选择数据包';
   const drawingName = drawing.fileName || 'DWG 待载入';
@@ -98,7 +101,7 @@ export function TopBar() {
 
         <div className="hidden shrink-0 items-center gap-2 xl:flex">
           <Stat label="待复核" value={remaining} tone="text-[var(--color-warn)]" />
-          <Stat label="待入训练" value={reviewedCount} tone="text-[var(--color-ai)]" />
+          <Stat label="待刷新" value={featureRefreshCount} tone="text-[var(--color-ai)]" />
           <Stat label="训练集" value={trainedCount} tone="text-[var(--color-keep)]" />
           <div className="min-w-24 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 py-2">
             <div className="text-caption text-[var(--color-text-muted)]">训练状态</div>

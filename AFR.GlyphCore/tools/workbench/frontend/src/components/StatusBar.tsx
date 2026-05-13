@@ -33,7 +33,7 @@ export function StatusBar() {
       {activeTab === 'review' && (
         <>
           <span className="shrink-0">显示 {visibleCount} / {clusterCount}</span>
-          <span className="min-w-0 truncate max-[640px]:hidden">保存会按文本簇展开到 reviewed JSONL</span>
+        <span className="min-w-0 truncate max-[640px]:hidden">保存会按文本簇展开并进入训练数据集</span>
         </>
       )}
       {activeTab === 'dataset' && (

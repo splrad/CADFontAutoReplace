@@ -86,7 +86,6 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 ./tools/Publish-ReleaseAssets.ps1 `
   -GlyphCoreModelPath C:\PrivateAFR\Models\AFR.GlyphCore.Model.onnx `
   -GlyphCoreModelManifestPath C:\PrivateAFR\Models\AFR.GlyphCore.ModelManifest.json `
-  -GlyphCoreExactRepairsPath C:\PrivateAFR\Models\AFR.GlyphCore.ExactRepairs.json `
   -GlyphCoreRuntimeDirectory C:\PrivateAFR\OnnxRuntime\win-x64
 ```
 

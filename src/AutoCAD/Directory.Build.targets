@@ -16,12 +16,10 @@
     <_GlyphCoreRepoRoot>$([MSBuild]::GetDirectoryNameOfFileAbove('$(MSBuildThisFileDirectory)', 'CADFontAutoReplace.slnx'))</_GlyphCoreRepoRoot>
     <_GlyphCoreDefaultModelPath>$(_GlyphCoreRepoRoot)\AFR.GlyphCore\models\AFR.GlyphCore.Model.onnx</_GlyphCoreDefaultModelPath>
     <_GlyphCoreDefaultManifestPath>$(_GlyphCoreRepoRoot)\AFR.GlyphCore\models\AFR.GlyphCore.ModelManifest.json</_GlyphCoreDefaultManifestPath>
-    <_GlyphCoreDefaultExactRepairsPath>$(_GlyphCoreRepoRoot)\AFR.GlyphCore\models\AFR.GlyphCore.ExactRepairs.json</_GlyphCoreDefaultExactRepairsPath>
     <_GlyphCoreOnnxRuntimePackageRoot Condition="'$(NuGetPackageRoot)' != ''">$(NuGetPackageRoot)microsoft.ml.onnxruntime\$(GlyphCoreOnnxRuntimeVersion)</_GlyphCoreOnnxRuntimePackageRoot>
     <_GlyphCoreOnnxRuntimePackageRoot Condition="'$(_GlyphCoreOnnxRuntimePackageRoot)' == ''">$([System.Environment]::GetEnvironmentVariable('USERPROFILE'))\.nuget\packages\microsoft.ml.onnxruntime\$(GlyphCoreOnnxRuntimeVersion)</_GlyphCoreOnnxRuntimePackageRoot>
     <GlyphCoreModelPath Condition="'$(GlyphCoreModelPath)' == '' and '$(_GlyphCoreRepoRoot)' != '' and Exists('$(_GlyphCoreDefaultModelPath)')">$(_GlyphCoreDefaultModelPath)</GlyphCoreModelPath>
     <GlyphCoreModelManifestPath Condition="'$(GlyphCoreModelManifestPath)' == '' and '$(_GlyphCoreRepoRoot)' != '' and Exists('$(_GlyphCoreDefaultManifestPath)')">$(_GlyphCoreDefaultManifestPath)</GlyphCoreModelManifestPath>
-    <GlyphCoreExactRepairsPath Condition="'$(GlyphCoreExactRepairsPath)' == '' and '$(_GlyphCoreRepoRoot)' != '' and Exists('$(_GlyphCoreDefaultExactRepairsPath)')">$(_GlyphCoreDefaultExactRepairsPath)</GlyphCoreExactRepairsPath>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(GlyphCoreModelPath)' != '' and Exists('$(GlyphCoreModelPath)')">
@@ -33,12 +31,6 @@
   <ItemGroup Condition="'$(GlyphCoreModelManifestPath)' != '' and Exists('$(GlyphCoreModelManifestPath)')">
     <EmbeddedResource Include="$(GlyphCoreModelManifestPath)">
       <LogicalName>AFR.GlyphCore.ModelManifest.json</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(GlyphCoreExactRepairsPath)' != '' and Exists('$(GlyphCoreExactRepairsPath)')">
-    <EmbeddedResource Include="$(GlyphCoreExactRepairsPath)">
-      <LogicalName>AFR.GlyphCore.ExactRepairs.json</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 

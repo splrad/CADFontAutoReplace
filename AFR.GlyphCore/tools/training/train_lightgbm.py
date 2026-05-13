@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 import re
 import sys
 from datetime import datetime, timezone
@@ -46,6 +45,9 @@ def main() -> int:
     features_path = Path(args.features)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    stale_exact_repairs = output_dir / "AFR.GlyphCore.ExactRepairs.json"
+    if stale_exact_repairs.exists():
+        stale_exact_repairs.unlink()
 
     df = pd.read_csv(features_path, encoding="utf-8-sig")
     feature_cols = [col for col in df.columns if re.match(r"^f\d{2}_", col)]
@@ -106,10 +108,7 @@ def main() -> int:
     booster_path = output_dir / "AFR.GlyphCore.Model.txt"
     model.booster_.save_model(str(booster_path))
 
-    exact_repairs = build_exact_repairs(features_path, df)
-    write_json(output_dir / "AFR.GlyphCore.ExactRepairs.json", exact_repairs)
-
-    manifest = build_manifest(features_path, df, test_report, exact_repairs)
+    manifest = build_manifest(features_path, df, test_report)
     write_json(output_dir / "AFR.GlyphCore.ModelManifest.json", manifest)
 
     if not args.skip_onnx:
@@ -129,9 +128,6 @@ def main() -> int:
             "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
             "modelManifest": portable_path(output_dir / "AFR.GlyphCore.ModelManifest.json"),
             "onnxModel": portable_path(output_dir / "AFR.GlyphCore.Model.onnx"),
-            "exactRepairs": portable_path(output_dir / "AFR.GlyphCore.ExactRepairs.json"),
-            "exactRepairCount": exact_repairs["entryCount"],
-            "exactRepairConflicts": exact_repairs["conflictCount"],
         },
     )
     return 0
@@ -273,7 +269,7 @@ def safe_div(numerator: int, denominator: int) -> float:
     return float(numerator) / float(denominator)
 
 
-def build_manifest(features_path: Path, df, test_report: dict, exact_repairs: dict) -> dict:
+def build_manifest(features_path: Path, df, test_report: dict) -> dict:
     now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return {
         "aiDisplayName": AI_DISPLAY_NAME,
@@ -295,8 +291,6 @@ def build_manifest(features_path: Path, df, test_report: dict, exact_repairs: di
         "trainingDataHash": sha256_file(features_path),
         "trainingRows": int(len(df)),
         "trainingGroups": int(df["group_id"].nunique()),
-        "exactRepairCount": int(exact_repairs["entryCount"]),
-        "exactRepairConflictCount": int(exact_repairs["conflictCount"]),
         "minimumConfidence": MINIMUM_CONFIDENCE,
         "minimumScoreMargin": MINIMUM_SCORE_MARGIN,
         "validationSummary": test_report["summary"],
@@ -304,87 +298,6 @@ def build_manifest(features_path: Path, df, test_report: dict, exact_repairs: di
         "privateModel": False,
         "distribution": "public-training-artifact",
     }
-
-
-def build_exact_repairs(features_path: Path, df) -> dict:
-    rows = df.drop_duplicates("group_id", keep="first").copy()
-    repairs = rows[
-        (rows["label_action"].astype(str) == "repair")
-        & (rows["current_text"].astype(str) != "")
-        & (rows["label_text"].astype(str) != "")
-        & (rows["current_text"].astype(str) != rows["label_text"].astype(str))
-    ]
-
-    grouped: dict[tuple[str, str, str, str, str, str], dict[str, int]] = {}
-    for _, row in repairs.iterrows():
-        key = (
-            clean_cell(row.get("current_text")),
-            clean_cell(row.get("layer")),
-            clean_cell(row.get("text_style_name")),
-            clean_cell(row.get("font")),
-            clean_cell(row.get("bigfont")),
-            clean_cell(row.get("owner_block_name")),
-        )
-        label_text = clean_cell(row.get("label_text"))
-        if not key[0] or not label_text or key[0] == label_text:
-            continue
-        labels = grouped.setdefault(key, {})
-        labels[label_text] = labels.get(label_text, 0) + 1
-
-    entries = []
-    conflicts = []
-    for key, labels in sorted(grouped.items(), key=lambda item: item[0]):
-        current_text, layer, text_style_name, font, bigfont, owner_block_name = key
-        if len(labels) != 1:
-            conflicts.append(
-                {
-                    "currentText": current_text,
-                    "layer": layer,
-                    "textStyleName": text_style_name,
-                    "font": font,
-                    "bigFont": bigfont,
-                    "ownerBlockName": owner_block_name,
-                    "labelTexts": sorted(labels),
-                }
-            )
-            continue
-
-        label_text, source_count = next(iter(labels.items()))
-        entries.append(
-            {
-                "currentText": current_text,
-                "labelText": label_text,
-                "layer": layer,
-                "textStyleName": text_style_name,
-                "font": font,
-                "bigFont": bigfont,
-                "ownerBlockName": owner_block_name,
-                "sourceCount": source_count,
-            }
-        )
-
-    now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return {
-        "schema": "dbtext-ai-exact-repairs-v1",
-        "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
-        "trainingDataHash": sha256_file(features_path),
-        "createdUtc": now,
-        "entryCount": len(entries),
-        "conflictCount": len(conflicts),
-        "entries": entries,
-        "conflicts": conflicts[:50],
-    }
-
-
-def clean_cell(value) -> str:
-    if value is None:
-        return ""
-    try:
-        if isinstance(value, float) and math.isnan(value):
-            return ""
-    except TypeError:
-        pass
-    return str(value)
 
 
 def export_onnx(model, output_path: Path, feature_count: int, opset: int, manifest: dict) -> None:

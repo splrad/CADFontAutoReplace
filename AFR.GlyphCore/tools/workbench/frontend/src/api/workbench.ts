@@ -58,8 +58,10 @@ export function getTrainingStatus() {
   return get<TrainingStatus>('/api/train');
 }
 
-export function startTraining() {
-  return post<StartTrainingResult>('/api/train', {});
+export function startTraining(packageIds?: string[]) {
+  return post<StartTrainingResult>('/api/train', {
+    packageIds: packageIds || []
+  });
 }
 
 export function getReport() {

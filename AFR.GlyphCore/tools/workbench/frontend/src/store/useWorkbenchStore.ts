@@ -10,7 +10,6 @@ import {
   confirmReviewRows,
   deleteTrainingRecords,
   getBootstrap,
-  getData,
   getFeatureStatus,
   getReviewClusters,
   getReport,
@@ -81,7 +80,7 @@ export interface WorkbenchState {
   refreshTrainingStatus: () => Promise<void>;
   selectPackage: (id: string) => Promise<void>;
   buildFeatures: () => Promise<void>;
-  startTraining: () => Promise<void>;
+  startTraining: (packageIds?: string[]) => Promise<void>;
   deleteTrainingRecord: (record: TrainingRecord) => Promise<void>;
   saveSelectedReviews: (targetGroupIds?: string[]) => Promise<void>;
   saveAllVisibleReviews: (selectableReviewGroups: ReviewGroup[]) => Promise<void>;
@@ -222,7 +221,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         message:
           promoted > 0
             ? `已写入训练集 ${promoted} 条，Feature 已刷新`
-            : `没有待入训练数据,已重建 ${trainingRecords} 条训练记录的 Feature`
+            : `没有新增训练数据，已重建 ${trainingRecords} 条训练记录的 Feature`
       });
     } catch (err: any) {
       get().showError(err);
@@ -231,25 +230,24 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     }
   },
 
-  startTraining: async () => {
+  startTraining: async (packageIds) => {
     set({ busy: true, error: '', message: '正在启动模型训练...' });
     try {
-      const result = await startTrainingRequest();
-      const [dataResult, reviewGroups] = await Promise.all([
-        getData(),
+      const result = await startTrainingRequest(packageIds);
+      const [bootstrap, reviewGroups] = await Promise.all([
+        getBootstrap(),
         getReviewClusters()
       ]);
       set((state) => ({
         app: {
-          ...state.app,
-          data: dataResult,
-          features: result.features || state.app?.features,
-          training: result.training
+          ...bootstrap,
+          features: result.features || bootstrap.features || state.app?.features,
+          training: result.training || bootstrap.training
         },
         groups: reviewGroups,
         activeTab: 'training',
         message: result.autoBuiltFeatures
-          ? '已刷新 Feature 并开始训练'
+          ? `已用 ${result.selectedPackageCount || packageIds?.length || 1} 个数据包刷新 Feature 并开始训练`
           : '已开始训练'
       }));
       window.location.hash = 'training';
@@ -386,15 +384,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         overwriteReviewed: true
       });
 
-      const [dataResult, reviewGroups] = await Promise.all([
-        getData(),
+      const [bootstrap, reviewGroups] = await Promise.all([
+        getBootstrap(),
         getReviewClusters()
       ]);
 
       set((prevState) => {
         const targetSet = new Set(targets);
         return {
-          app: { ...prevState.app, data: dataResult },
+          app: bootstrap,
           groups: reviewGroups,
           selectedReviewGroupIds: prevState.selectedReviewGroupIds.filter(
             (id) => !targetSet.has(id)
@@ -404,7 +402,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
               ([id]) => !targetSet.has(id)
             )
           ),
-          message: `已批量保存 ${result.reviewedGroups} 行，写入/更新 ${result.written} 条 reviewed`,
+          message: `已批量保存 ${result.reviewedGroups} 行，写入/更新 ${result.written} 条训练数据`,
           batchProgress: result.errors?.length
             ? `已完成，另有 ${result.errors.length} 行未保存`
             : '批量保存完成'

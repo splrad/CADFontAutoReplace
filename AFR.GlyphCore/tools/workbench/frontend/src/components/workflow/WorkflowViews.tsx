@@ -7,8 +7,9 @@ import {
   RefreshCcw,
   Sparkles
 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/Controls';
 import { Panel, PanelHeader, Metric } from '@/components/ui/Panel';
 import { Progress } from '@/components/ui/progress';
 import { formatDateTime, moduleDescription, pct, tabLabel, cn } from '@/lib/utils';
@@ -78,6 +79,20 @@ export function WorkflowViews() {
     useWorkbenchStore();
 
   const packages = (app as App | null)?.packages || [];
+  const packageSignature = packages
+    .map((item: any) => `${item.id}:${Number(item.trainingDataset || 0)}:${Number(item.reviewed || 0)}:${item.active ? 1 : 0}`)
+    .join('|');
+  const [selectedTrainingPackageIds, setSelectedTrainingPackageIds] = useState<string[]>([]);
+  const packageById = useMemo(
+    () => new Map(packages.map((item: any) => [String(item.id), item])),
+    [packages]
+  );
+  const selectedPackageIds = selectedTrainingPackageIds.filter((id) => packageById.has(id));
+  const selectedPackages = selectedPackageIds.map((id) => packageById.get(id));
+  const selectedTrainingRecords = selectedPackages.reduce(
+    (sum, item: any) => sum + Number(item?.trainingDataset || 0) + Number(item?.reviewed || 0),
+    0
+  );
   const features = app?.features || {};
   const training = app?.training || { status: 'idle', lines: [] };
   const trainingDataset = app?.data?.trainingDataset || { records: [], summary: {} };
@@ -96,17 +111,45 @@ export function WorkflowViews() {
     <span className="block break-all text-body-sm leading-snug">{modelVersion}</span>
   );
   const activeLabel = tabLabel(activeTab);
-  const pendingFeatureRows = Number(features.pendingReviewedRows || 0);
   const featureRows = Number(features.rows || 0);
   const trainingRecords = Number(features.trainingDatasetRows || trainingDataset.summary?.total || 0);
-  const featureButtonLabel =
-    pendingFeatureRows > 0 ? '写入训练集 / 刷新 Feature' : '重建 Feature';
+  const featureRefreshRows = features.exists
+    ? features.stale
+      ? trainingRecords
+      : 0
+    : trainingRecords;
+  const featureButtonLabel = featureRefreshRows > 0 ? '刷新 Feature' : '重建 Feature';
   const featureProgress =
     trainingRecords > 0
       ? Math.min(100, Math.round((featureRows / Math.max(1, trainingRecords)) * 100))
       : 0;
   const falseRepairRate = Number(validation.falseRepairRate || 0);
   const recall = Number(validation.repairRecall || 0);
+
+  useEffect(() => {
+    setSelectedTrainingPackageIds((currentSelection) => {
+      const validIds = new Set(packages.map((item: any) => String(item.id)));
+      const current = currentSelection.filter((id) => validIds.has(id));
+      const preferred = packages
+        .filter((item: any) => Number(item.trainingDataset || 0) + Number(item.reviewed || 0) > 0)
+        .map((item: any) => String(item.id));
+      const active = packages.filter((item: any) => item.active).map((item: any) => String(item.id));
+      const next = current.length > 0 ? current : (preferred.length > 0 ? preferred : active);
+      if (next.length === currentSelection.length && next.every((id, index) => id === currentSelection[index])) {
+        return currentSelection;
+      }
+      return next;
+    });
+  }, [packageSignature, packages]);
+
+  function toggleTrainingPackage(packageId: string, checked: boolean) {
+    setSelectedTrainingPackageIds((current) => {
+      if (checked) {
+        return current.includes(packageId) ? current : [...current, packageId];
+      }
+      return current.filter((id) => id !== packageId);
+    });
+  }
 
   if (activeTab === 'packages') {
     return (
@@ -171,7 +214,7 @@ export function WorkflowViews() {
         <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
           <Panel className="p-5">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <Metric label="待入训练" value={pendingFeatureRows} tone="warn" />
+              <Metric label="待刷新" value={featureRefreshRows} tone="warn" />
               <Metric label="训练集记录" value={trainingRecords} tone="ai" />
               <Metric label="Feature 行" value={featureRows} tone="repair" />
               <Metric label="特征列" value={Number(features.featureColumns || 0)} tone="keep" />
@@ -208,6 +251,7 @@ export function WorkflowViews() {
   if (activeTab === 'training') {
     const running = training.status === 'running';
     const starting = busy && !running;
+    const canStartTraining = selectedPackageIds.length > 0 && selectedTrainingRecords > 0;
     return (
       <WorkflowShell
         eyebrow="Model Training"
@@ -215,7 +259,12 @@ export function WorkflowViews() {
         description={moduleDescription(activeTab)}
         icon={BrainCircuit}
         actions={
-          <Button variant="primary" icon={Play} disabled={busy || running} onClick={startTraining}>
+          <Button
+            variant="primary"
+            icon={Play}
+            disabled={busy || running || !canStartTraining}
+            onClick={() => startTraining(selectedPackageIds)}
+          >
             {running ? '训练中' : starting ? '启动中' : '开始训练'}
           </Button>
         }
@@ -226,11 +275,53 @@ export function WorkflowViews() {
               <Metric label="训练状态" value={trainingStatusLabel(training.status, training.statusLabel)} tone={statusTone(training.status)} />
               <Metric label="模型版本" value={modelVersionValue} tone="ai" />
               <Metric label="训练结果" value={trainingResultLabel} tone={statusTone(trainingResultStatus)} />
-              <Metric label="训练集" value={trainingRecords} tone="keep" />
+              <Metric label="已选数据包" value={selectedPackageIds.length} tone="ai" />
+              <Metric label="训练集" value={selectedTrainingRecords || trainingRecords} tone="keep" />
               <Metric label="Feature 行" value={featureRows} tone="repair" />
             </div>
+            <div className="mt-5 grid gap-2">
+              <div className="text-eyebrow text-[var(--color-text-muted)]">Training Packages</div>
+              <div className="max-h-72 overflow-auto rounded-[var(--radius-lg)] border border-[var(--color-line)] scrollbar-thin">
+                {packages.length === 0 && (
+                  <div className="p-4 text-body-sm text-[var(--color-text-soft)]">没有可用数据包</div>
+                )}
+                {packages.map((item: any) => {
+                  const packageId = String(item.id);
+                  const checked = selectedPackageIds.includes(packageId);
+                  const trainCount = Number(item.trainingDataset || 0);
+                  const reviewedCount = Number(item.reviewed || 0);
+                  return (
+                    <label
+                      key={packageId}
+                      className={cn(
+                        'grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--color-line)] px-3 py-2 last:border-b-0',
+                        checked ? 'bg-[var(--color-ai-soft)]' : 'bg-[var(--color-canvas)] hover:bg-[var(--color-hover)]'
+                      )}
+                    >
+                      <Checkbox
+                        checked={checked}
+                        label={`选择训练数据包 ${packageId}`}
+                        onCheckedChange={(value) => toggleTrainingPackage(packageId, value)}
+                      />
+                      <span className="min-w-0">
+                        <strong className="block truncate text-body-sm text-[var(--color-text)]">
+                          {packageId}
+                        </strong>
+                        <span className="block truncate text-caption text-[var(--color-text-soft)]">
+                          {item.drawing?.fileName || 'DWG'}
+                        </span>
+                      </span>
+                      <span className="grid justify-items-end gap-0.5 text-caption text-[var(--color-text-muted)]">
+                        <span>Train {trainCount}</span>
+                        {reviewedCount > 0 && <span>Reviewed {reviewedCount}</span>}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
             <div className="mt-5 rounded-[var(--radius-lg)] bg-[var(--color-ai-soft)] p-4 text-body-sm text-[var(--color-ai)]">
-              训练会在本机执行，输出模型和验证报告到 AFR.GlyphCore/models。
+              训练会基于已选数据包完整重建模型，输出模型和验证报告到 AFR.GlyphCore/models。
             </div>
           </Panel>
           <Panel className="min-h-[480px] overflow-hidden">

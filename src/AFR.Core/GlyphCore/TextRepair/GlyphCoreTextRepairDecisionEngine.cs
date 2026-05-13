@@ -19,15 +19,6 @@ internal static class GlyphCoreTextRepairDecisionEngine
         if (GlyphCoreTextRepairFeatureExtractor.HasUnsafeText(context.CurrentText))
             return GlyphCoreTextRepairDecision.Unsafe("unsafe-current-text", summary);
 
-        if (GlyphCoreTextRepairExactRepairLookup.TryFind(context, out string exactText, out string exactSummary))
-        {
-            string exactAiSummary = AppendSummary(summary, exactSummary);
-            if (GlyphCoreTextRepairFeatureExtractor.HasUnsafeText(exactText))
-                return GlyphCoreTextRepairDecision.Unsafe("unsafe-exact-repair-text", exactAiSummary);
-
-            return GlyphCoreTextRepairDecision.Repair(exactText, "training-set-exact-match", exactAiSummary);
-        }
-
         if (!scorer.IsAvailable)
             return GlyphCoreTextRepairDecision.Skip("ai-model-unavailable", summary);
 
@@ -78,15 +69,6 @@ internal static class GlyphCoreTextRepairDecisionEngine
         }
 
         return $"{status}, best='{Trim(best.Text)}', score={best.AiScore:0.000}, source={best.Source}";
-    }
-
-    private static string AppendSummary(string summary, string extra)
-    {
-        if (string.IsNullOrWhiteSpace(extra))
-            return summary;
-        if (string.IsNullOrWhiteSpace(summary))
-            return extra;
-        return summary + ", " + extra;
     }
 
     private static string Trim(string text)

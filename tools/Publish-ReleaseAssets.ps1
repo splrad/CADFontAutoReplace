@@ -28,7 +28,6 @@ param(
     [switch]$SkipPluginBuild,
     [string]$GlyphCoreModelPath = $env:AFR_GLYPHCORE_MODEL_PATH,
     [string]$GlyphCoreModelManifestPath = $env:AFR_GLYPHCORE_MODEL_MANIFEST_PATH,
-    [string]$GlyphCoreExactRepairsPath = $env:AFR_GLYPHCORE_EXACT_REPAIRS_PATH,
     [string]$GlyphCoreRuntimeDirectory = $env:AFR_GLYPHCORE_RUNTIME_DIRECTORY
 )
 
@@ -53,16 +52,12 @@ $VersionProps    = Join-Path $RepoRoot "Version.props"
 $FontsSourcePath = Join-Path $RepoRoot "chore\Fonts.zip"
 $DefaultGlyphCoreModelPath = Join-Path $RepoRoot "AFR.GlyphCore\models\AFR.GlyphCore.Model.onnx"
 $DefaultGlyphCoreModelManifestPath = Join-Path $RepoRoot "AFR.GlyphCore\models\AFR.GlyphCore.ModelManifest.json"
-$DefaultGlyphCoreExactRepairsPath = Join-Path $RepoRoot "AFR.GlyphCore\models\AFR.GlyphCore.ExactRepairs.json"
 
 if ([string]::IsNullOrWhiteSpace($GlyphCoreModelPath) -and -not [string]::IsNullOrWhiteSpace($env:AFR_GLYPHCORE_MODEL_PATH)) {
     $GlyphCoreModelPath = $env:AFR_GLYPHCORE_MODEL_PATH
 }
 if ([string]::IsNullOrWhiteSpace($GlyphCoreModelManifestPath) -and -not [string]::IsNullOrWhiteSpace($env:AFR_GLYPHCORE_MODEL_MANIFEST_PATH)) {
     $GlyphCoreModelManifestPath = $env:AFR_GLYPHCORE_MODEL_MANIFEST_PATH
-}
-if ([string]::IsNullOrWhiteSpace($GlyphCoreExactRepairsPath) -and -not [string]::IsNullOrWhiteSpace($env:AFR_GLYPHCORE_EXACT_REPAIRS_PATH)) {
-    $GlyphCoreExactRepairsPath = $env:AFR_GLYPHCORE_EXACT_REPAIRS_PATH
 }
 if ([string]::IsNullOrWhiteSpace($GlyphCoreRuntimeDirectory) -and -not [string]::IsNullOrWhiteSpace($env:AFR_GLYPHCORE_RUNTIME_DIRECTORY)) {
     $GlyphCoreRuntimeDirectory = $env:AFR_GLYPHCORE_RUNTIME_DIRECTORY
@@ -72,9 +67,6 @@ if ([string]::IsNullOrWhiteSpace($GlyphCoreModelPath) -and (Test-Path -LiteralPa
 }
 if ([string]::IsNullOrWhiteSpace($GlyphCoreModelManifestPath) -and (Test-Path -LiteralPath $DefaultGlyphCoreModelManifestPath)) {
     $GlyphCoreModelManifestPath = $DefaultGlyphCoreModelManifestPath
-}
-if ([string]::IsNullOrWhiteSpace($GlyphCoreExactRepairsPath) -and (Test-Path -LiteralPath $DefaultGlyphCoreExactRepairsPath)) {
-    $GlyphCoreExactRepairsPath = $DefaultGlyphCoreExactRepairsPath
 }
 
 # 自动发现 src\AutoCAD\AFR-ACAD*\*.csproj，避免新增 CAD 版本时手工维护列表。
@@ -129,13 +121,6 @@ if (-not [string]::IsNullOrWhiteSpace($GlyphCoreModelManifestPath)) {
         exit 1
     }
     $GlyphCoreBuildArgs += "/p:GlyphCoreModelManifestPath=$GlyphCoreModelManifestPath"
-}
-if (-not [string]::IsNullOrWhiteSpace($GlyphCoreExactRepairsPath)) {
-    if (-not (Test-Path -LiteralPath $GlyphCoreExactRepairsPath)) {
-        Write-Host "文枢 DBText 精确修复表不存在：$GlyphCoreExactRepairsPath" -ForegroundColor Red
-        exit 1
-    }
-    $GlyphCoreBuildArgs += "/p:GlyphCoreExactRepairsPath=$GlyphCoreExactRepairsPath"
 }
 if (-not [string]::IsNullOrWhiteSpace($GlyphCoreRuntimeDirectory)) {
     if (-not (Test-Path -LiteralPath $GlyphCoreRuntimeDirectory)) {

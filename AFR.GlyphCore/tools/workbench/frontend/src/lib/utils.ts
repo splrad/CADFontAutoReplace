@@ -143,10 +143,10 @@ export function tabLabel(id: string): string {
 export function moduleDescription(id: string): string {
   const descriptions: Record<string, string> = {
     packages: '切换候选包并查看 DWG 来源、Reviewed 进度和数据规模。',
-    review: '只处理未审核、已审核待入训练和从训练集删除后回流的数据。',
+    review: '复核保存后直接进入训练数据集；从训练集删除后回流复核。',
     dataset: '查看、追溯和删除已经进入训练数据集的记录。',
-    features: '将 reviewed JSONL 写入训练集并刷新特征表。',
-    training: '基于当前 Feature 表启动本地模型训练并跟踪训练日志。',
+    features: '基于当前训练数据集刷新特征表。',
+    training: '多选数据包后完整重训本地模型并跟踪训练日志。',
     report: '查看模型验证指标、发布命令和当前模型清单。'
   };
   return descriptions[id] || '';

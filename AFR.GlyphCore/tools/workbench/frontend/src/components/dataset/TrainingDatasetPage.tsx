@@ -278,7 +278,7 @@ export function TrainingDatasetPage({ dataset, busy, onDeleteRecord }: TrainingD
           getRowId={(record, index) => record.groupId || `training-${index}`}
           estimateRowHeight={104}
           emptyTitle="当前训练数据集没有匹配记录"
-          emptyDescription="生成 Feature 后，已进入训练集的记录会出现在这里。"
+          emptyDescription="人工复核保存后，已进入训练集的记录会出现在这里。"
         />
       </Panel>
     </div>

@@ -81,9 +81,8 @@ Debug 命令：
 - AutoCAD 侧 AI 适配：`src/AutoCAD/AFR.AutoCAD/Services/GlyphCore/TextRepair/GlyphCoreTextRepairAdvisor.cs`。
 - 疑似异常门控：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairProblemDetector.cs`。
 - 候选生成：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairCandidateGenerator.cs`。
-- 特征提取：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairFeatureExtractor.cs`，schema 为 `dbtext-ai-features-v1`。
+- 特征提取：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairFeatureExtractor.cs`，schema 为 `dbtext-ai-features-v2`。
 - 本地评分：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairEmbeddedOnnxScorer.cs`，只从 DLL 嵌入资源加载 ONNX、模型清单和 ONNX Runtime 资源。
-- 精确修复表：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairExactRepairLookup.cs`，资源名为 `AFR.GlyphCore.ExactRepairs.json`，用于训练集中完全匹配的保守修复。
 - 自动决策：`GlyphCoreTextRepairDecisionEngine`，阈值来自 `GlyphCoreTextRepairConstants.MinimumConfidence = 0.92` 与 `MinimumScoreMargin = 0.18`。
 - 模型接口与数据结构：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairModels.cs`。
 
@@ -91,7 +90,7 @@ Debug 命令：
 
 - 未检测到疑似 DBText 异常时保持静默，不加载文枢模型、不评分、不提示。
 - 检测到疑似异常后，候选来自原文、Big5/GBK/UTF-8 可逆转换、安全回退、已知乱码模式和保守候选。
-- 文枢优先使用精确修复表；没有精确匹配时才使用嵌入 ONNX 模型评分。
+- 文枢只使用嵌入 ONNX 模型评分，不再使用精确修复表或训练集查表短路。
 - 无模型、模型不匹配、低置信度、分差过小、AI 选择原文、候选冲突、不可逆转换、控制字符、异常 Unicode、Xref 或依赖块、高风险文本时，一律跳过写回。
 - 写回只修改通过 `ShouldRepair` 的 `DBText.TextString`；所有跳过、阻断和修复结果写入 DiagnosticLogger 与命令行摘要。
 - 保持“宁可不修，也不能误修”的保守原则；不要添加强制修复所有文本的逻辑。
@@ -121,7 +120,6 @@ AFR.GlyphCore/datasets/
 AFR.GlyphCore/models/
   AFR.GlyphCore.Model.onnx             # local-only
   AFR.GlyphCore.ModelManifest.json     # local-only
-  AFR.GlyphCore.ExactRepairs.json      # local-only
   AFR.GlyphCore.Model.txt              # local-only
   *_validation_report.json            # local-only
 ```
@@ -130,7 +128,7 @@ AFR.GlyphCore/models/
 
 - `AFR.GlyphCore/tools` 下的工具、schema、Python 代码、React/Vite 前端和测试可以进入 Git。
 - `AFR.GlyphCore/datasets`、`AFR.GlyphCore/models`、`AFR.GlyphCore/raw-dwg`、用户 DWG/DXF、训练产物和模型产物必须保持本地私有，不上传 GitHub。
-- 训练数据、Reviewed JSONL、TrainingSets、Reports、ONNX 模型和精确修复表只在本地开发者环境流转。
+- 训练数据、Reviewed JSONL、TrainingSets、Reports 和 ONNX 模型只在本地开发者环境流转。
 - 如果训练资产曾经被加入索引，优先使用 `git rm --cached` 类方式移出索引，不删除本地文件。
 - `.github/copilot-instructions.md` 是真正的仓库记忆文件，不应加入 `.gitignore`。
 
@@ -157,14 +155,14 @@ AFR.GlyphCore/models/
 训练规则：
 
 - `Invoke-GlyphCoreTraining.ps1` 是命令行训练入口。
-- `training/build_features.py` 从 reviewed labels 生成 `dbtext-ai-features-v1` CSV。
-- `training/train_lightgbm.py` 训练当前模型，输出 ONNX、模型清单、精确修复表和验证报告。
+- `training/build_features.py` 从 reviewed labels / training dataset 生成 `dbtext-ai-features-v2` CSV。
+- `training/train_lightgbm.py` 训练当前模型，输出 ONNX、模型清单和验证报告；不会生成 `AFR.GlyphCore.ExactRepairs.json`。
 - `workbench/test_review_clusters.py` 覆盖簇传播、已审核覆盖、training dataset 提升/删除/回流等核心行为。
 - 训练流程可以为效率做批量处理，但必须保留可审计的 reviewed JSONL、audit TSV 和训练摘要。
 
 模型嵌入规则：
 
-- `src/AutoCAD/Directory.Build.targets` 会通过 `GlyphCoreModelPath`、`GlyphCoreModelManifestPath`、`GlyphCoreExactRepairsPath`、`GlyphCoreRuntimeDirectory` 注入私有模型资源。
+- `src/AutoCAD/Directory.Build.targets` 会通过 `GlyphCoreModelPath`、`GlyphCoreModelManifestPath`、`GlyphCoreRuntimeDirectory` 注入私有模型资源。
 - 如果仓库本地存在 `AFR.GlyphCore/models` 下的模型文件，构建也可自动发现并嵌入。
 - GitHub Release 工作流和公开仓库不得包含真实训练数据、用户 DWG、ReviewedLabels、TrainingSets、Reports 或生产模型文件。
 - 普通用户不能训练、导入样本、替换模型、修改参数、人工标注或上传反馈包。

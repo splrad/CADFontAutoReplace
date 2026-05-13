@@ -58,7 +58,7 @@ export function ReviewCommandBar() {
           <span className="text-caption text-[var(--color-text-muted)]">状态</span>
           <NativeSelect value={filter} onChange={(e) => setFilter(e.target.value as any)}>
             <option value="pending">未审核</option>
-            <option value="reviewed">已审核待入训练</option>
+            <option value="reviewed">已保存待刷新</option>
             <option value="all">全部</option>
           </NativeSelect>
         </label>

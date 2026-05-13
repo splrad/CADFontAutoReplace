@@ -147,7 +147,6 @@ DBText 单行文字修复不再依赖旧的原生 code page Hook 调查链路，
 ./tools/Publish-ReleaseAssets.ps1 `
   -GlyphCoreModelPath C:\PrivateAFR\Models\AFR.GlyphCore.Model.onnx `
   -GlyphCoreModelManifestPath C:\PrivateAFR\Models\AFR.GlyphCore.ModelManifest.json `
-  -GlyphCoreExactRepairsPath C:\PrivateAFR\Models\AFR.GlyphCore.ExactRepairs.json `
   -GlyphCoreRuntimeDirectory C:\PrivateAFR\OnnxRuntime\win-x64
 ```
 

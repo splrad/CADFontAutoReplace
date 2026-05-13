@@ -20,7 +20,7 @@ DBText 修复由封闭式本地 AI 决策链路负责，不依赖在线服务，
 
 - 官方模型资源名：`AFR.GlyphCore.Model.onnx`。
 - 模型清单资源名：`AFR.GlyphCore.ModelManifest.json`。
-- 精确修复表资源名：`AFR.GlyphCore.ExactRepairs.json`。
+- 不再发布精确修复表；DBText 修复必须由本地 AI 模型独立评分决策。
 - 模型清单和 ONNX metadata 应包含文枢身份信息：`aiDisplayName=文枢`、`aiInternalName=GlyphCore`，以及作者 `splrad 秋夕寻星`。
 - Release 构建通过私有 MSBuild 属性注入模型，不从仓库读取训练数据。
 - 没有嵌入模型、清单缺失或特征 schema 不匹配时，仅在检测到疑似 DBText 异常后提示模型不可用；无疑似异常时保持静默。
@@ -31,7 +31,6 @@ DBText 修复由封闭式本地 AI 决策链路负责，不依赖在线服务，
 ./tools/Publish-ReleaseAssets.ps1 `
   -GlyphCoreModelPath C:\PrivateAFR\Models\AFR.GlyphCore.Model.onnx `
   -GlyphCoreModelManifestPath C:\PrivateAFR\Models\AFR.GlyphCore.ModelManifest.json `
-  -GlyphCoreExactRepairsPath C:\PrivateAFR\Models\AFR.GlyphCore.ExactRepairs.json `
   -GlyphCoreRuntimeDirectory C:\PrivateAFR\OnnxRuntime\win-x64
 ```
 
