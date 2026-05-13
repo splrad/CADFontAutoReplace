@@ -9,8 +9,8 @@ DBText 修复由封闭式本地 AI 决策链路负责，不依赖在线服务，
 执行入口位于 `ExecutionController.Execute`：
 
 1. 检测并替换文字样式表中的缺失字体。
-2. 执行 `DbTextRepairService.Repair`，扫描非外参块中的 `DBText`。
-3. `DbTextAiProblemDetector` 判断当前 DBText 是否存在疑似异常。
+2. 执行 `GlyphCoreTextRepairService.Repair`，扫描非外参块中的 `DBText`。
+3. `GlyphCoreTextRepairProblemDetector` 判断当前 DBText 是否存在疑似异常。
 4. 未命中门控时静默跳过，不加载模型、不评分、不提示。
 5. 命中门控后才生成候选、提取 `dbtext-ai-features-v1` 特征并调用本地 AI 评分器。
 6. 由 Decision Engine 按保守策略决定写回或跳过。
@@ -18,9 +18,10 @@ DBText 修复由封闭式本地 AI 决策链路负责，不依赖在线服务，
 
 ## 模型部署
 
-- 官方模型资源名：`AFR.DBTextAI.Model.onnx`。
-- 模型清单资源名：`AFR.DBTextAI.ModelManifest.json`。
-- 模型清单和 ONNX metadata 应包含文枢身份信息：`aiDisplayName=文枢`，以及作者 `splrad 秋夕寻星`。
+- 官方模型资源名：`AFR.GlyphCore.Model.onnx`。
+- 模型清单资源名：`AFR.GlyphCore.ModelManifest.json`。
+- 精确修复表资源名：`AFR.GlyphCore.ExactRepairs.json`。
+- 模型清单和 ONNX metadata 应包含文枢身份信息：`aiDisplayName=文枢`、`aiInternalName=GlyphCore`，以及作者 `splrad 秋夕寻星`。
 - Release 构建通过私有 MSBuild 属性注入模型，不从仓库读取训练数据。
 - 没有嵌入模型、清单缺失或特征 schema 不匹配时，仅在检测到疑似 DBText 异常后提示模型不可用；无疑似异常时保持静默。
 
@@ -28,33 +29,34 @@ DBText 修复由封闭式本地 AI 决策链路负责，不依赖在线服务，
 
 ```powershell
 ./tools/Publish-ReleaseAssets.ps1 `
-  -DbTextAiModelPath C:\PrivateAFR\Models\AFR.DBTextAI.Model.onnx `
-  -DbTextAiModelManifestPath C:\PrivateAFR\Models\AFR.DBTextAI.ModelManifest.json `
-  -DbTextAiRuntimeDirectory C:\PrivateAFR\OnnxRuntime\win-x64
+  -GlyphCoreModelPath C:\PrivateAFR\Models\AFR.GlyphCore.Model.onnx `
+  -GlyphCoreModelManifestPath C:\PrivateAFR\Models\AFR.GlyphCore.ModelManifest.json `
+  -GlyphCoreExactRepairsPath C:\PrivateAFR\Models\AFR.GlyphCore.ExactRepairs.json `
+  -GlyphCoreRuntimeDirectory C:\PrivateAFR\OnnxRuntime\win-x64
 ```
 
-生产 ONNX 模型、训练数据、用户 DWG 和训练脚本都属于开发者私有资产，不提交 GitHub。
+生产 ONNX 模型、训练数据和用户 DWG 属于开发者私有资产，不提交 GitHub；训练脚本和工作台源码位于 `AFR.GlyphCore/tools`，可以作为工具链代码进入仓库。
 
 ## 自动修复规则
 
-`DbTextAiCandidateGenerator` 生成确定性候选：
+`GlyphCoreTextRepairCandidateGenerator` 生成确定性候选：
 
 - 当前文本自身，用作 no-op 候选。
 - Big5 / GBK / UTF-8 方向的可逆 carrier 转换候选。
 - 仅保留非空、去重后的候选。
 
-`DbTextAiProblemDetector` 是文枢介入门控：
+`GlyphCoreTextRepairProblemDetector` 是文枢介入门控：
 
 - 控制字符、替代字符或异常 Unicode 直接视为疑似异常。
 - 典型 mojibake 扩展拉丁字符模式视为疑似异常。
 - 可逆编码候选显著提升中文比例或 CAD 词汇比例时视为疑似异常。
 - 未命中门控时不加载 ONNX 模型、不做 AI 评分、不向命令行输出 DBText 提示。
 
-`DbTextRepairAdvisor` 只负责编排：
+`GlyphCoreTextRepairAdvisor` 只负责编排：
 
 1. 提取候选特征。
 2. 调用嵌入 ONNX 评分器。
-3. 把候选分数交给 `DbTextAiDecisionEngine`。
+3. 把候选分数交给 `GlyphCoreTextRepairDecisionEngine`。
 
 自动写回必须同时满足：
 
@@ -97,7 +99,7 @@ DBText 修复由封闭式本地 AI 决策链路负责，不依赖在线服务，
 ## 提交前检查
 
 - Release DLL 不包含 `DbTextRepairModel.jsonl`。
-- Release DLL 不包含 `AFRDBTEXTLABEL` 或 `AFRDBTEXTBATCHTRAIN`。
+- Release DLL 不包含 `AFRDBTEXTLABEL`、`AFRDBTEXTBATCHTRAIN`、`AFRGLYPHCOREEXPORT` 或 `AFRGLYPHCOREEXPORTSELECT`。
 - 无官方 ONNX 模型时 DBText 修复安全跳过。
 - 有官方 ONNX 模型时仅高置信候选允许写回。
 - 无疑似异常图纸不应加载文枢模型，也不应输出 DBText 文枢提示。

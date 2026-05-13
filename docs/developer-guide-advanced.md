@@ -82,9 +82,10 @@ DBText 单行文字修复不再依赖旧的原生 code page Hook 调查链路，
 
 关键文件：
 
-- `src/AutoCAD/AFR.AutoCAD/Services/DbTextRepair/DbTextRepairService.cs`
-- `src/AutoCAD/AFR.AutoCAD/Services/DbTextRepair/DbTextRepairAdvisor.cs`
-- `src/AFR.Core/DbTextAI/`
+- `src/AutoCAD/AFR.AutoCAD/Services/GlyphCore/TextRepair/GlyphCoreTextRepairService.cs`
+- `src/AutoCAD/AFR.AutoCAD/Services/GlyphCore/TextRepair/GlyphCoreTextRepairAdvisor.cs`
+- `src/AFR.Core/GlyphCore/TextRepair/`
+- `AFR.GlyphCore/tools/`
 - `docs/debugging/DBText-Repair-Model.md`
 
 维护原则：
@@ -92,7 +93,7 @@ DBText 单行文字修复不再依赖旧的原生 code page Hook 调查链路，
 - 未检测到疑似 DBText 异常时不加载文枢模型、不评分、不提示。
 - 自动写回必须受疑似异常门控、AI 置信度、分差、可逆转换和安全策略共同约束。
 - 普通用户端禁止训练、导入样本、替换模型、修改参数或使用 DBText 纠错 UI。
-- 生产 ONNX 模型、训练数据、用户 DWG 和训练脚本属于开发者私有资产，不提交 GitHub。
+- 生产 ONNX 模型、训练数据和用户 DWG 属于开发者私有资产，不提交 GitHub；工具、schema、训练脚本和工作台源码位于 `AFR.GlyphCore/tools`。
 - 模型或特征 schema 变化时同步 ONNX 嵌入配置、README 和 `docs/debugging/DBText-Repair-Model.md`。
 - 不要恢复 `AFRDBTEXTPROBE` / `AFRTRACER*` 等旧探针命令作为当前文档流程。
 
@@ -140,13 +141,14 @@ DBText 单行文字修复不再依赖旧的原生 code page Hook 调查链路，
 ./tools/Publish-ReleaseAssets.ps1 -SkipPluginBuild
 ```
 
-官方 DBText AI 模型只在开发者私有环境中注入：
+官方文枢 GlyphCore 模型只在开发者私有环境中注入：
 
 ```powershell
 ./tools/Publish-ReleaseAssets.ps1 `
-  -DbTextAiModelPath C:\PrivateAFR\Models\AFR.DBTextAI.Model.onnx `
-  -DbTextAiModelManifestPath C:\PrivateAFR\Models\AFR.DBTextAI.ModelManifest.json `
-  -DbTextAiRuntimeDirectory C:\PrivateAFR\OnnxRuntime\win-x64
+  -GlyphCoreModelPath C:\PrivateAFR\Models\AFR.GlyphCore.Model.onnx `
+  -GlyphCoreModelManifestPath C:\PrivateAFR\Models\AFR.GlyphCore.ModelManifest.json `
+  -GlyphCoreExactRepairsPath C:\PrivateAFR\Models\AFR.GlyphCore.ExactRepairs.json `
+  -GlyphCoreRuntimeDirectory C:\PrivateAFR\OnnxRuntime\win-x64
 ```
 
 输出约定：

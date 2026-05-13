@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://afr.local/schemas/dbtext-ai-export-package-v1.json",
+  "title": "AFR GlyphCore DBText AI export package v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "candidateGroupSchema",
+    "reviewedLabelSchema",
+    "featureSchema",
+    "exportId",
+    "createdUtc",
+    "commandName",
+    "drawing",
+    "files",
+    "counts",
+    "safety"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dbtext-ai-export-package-v1"
+    },
+    "candidateGroupSchema": {
+      "const": "dbtext-ai-candidate-group-v1"
+    },
+    "reviewedLabelSchema": {
+      "const": "dbtext-ai-reviewed-label-v1"
+    },
+    "featureSchema": {
+      "const": "dbtext-ai-features-v1"
+    },
+    "exportId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "createdUtc": {
+      "type": "string"
+    },
+    "commandName": {
+      "enum": [
+        "AFRGLYPHCOREEXPORT",
+        "AFRGLYPHCOREEXPORTSELECT"
+      ]
+    },
+    "drawing": {
+      "type": "object"
+    },
+    "files": {
+      "type": "object"
+    },
+    "counts": {
+      "type": "object"
+    },
+    "safety": {
+      "type": "object",
+      "properties": {
+        "readOnlyExport": {
+          "const": true
+        },
+        "dwgWriteBack": {
+          "const": false
+        },
+        "localOnly": {
+          "const": true
+        },
+        "requiresHumanReviewBeforeTraining": {
+          "const": true
+        }
+      }
+    }
+  }
+}

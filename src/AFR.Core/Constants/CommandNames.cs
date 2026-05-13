@@ -40,7 +40,9 @@ internal static class CommandNames
     public const string DumpDialogApi = "AFRDUMPDIALOGAPI";
 #if DEBUG
     /// <summary>导出文枢 DBText AI 图纸训练数据包。</summary>
-    public const string ExportWenShuDbTextDataset = "AFRDBTEXTEXPORTAI";
+    public const string ExportGlyphCoreDataset = "AFRGLYPHCOREEXPORT";
+    /// <summary>选择 DBText 后导出文枢 DBText AI 图纸训练数据包。</summary>
+    public const string ExportGlyphCoreSelectedDataset = "AFRGLYPHCOREEXPORTSELECT";
 #endif
 }
 

@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     自动构建所有 AutoCAD 插件 DLL，并生成 GitHub Release 发布资产。
@@ -26,9 +26,10 @@
 #>
 param(
     [switch]$SkipPluginBuild,
-    [string]$WenShuDbTextModelPath = $env:AFR_WENSHU_DBTEXT_MODEL_PATH,
-    [string]$WenShuDbTextModelManifestPath = $env:AFR_WENSHU_DBTEXT_MODEL_MANIFEST_PATH,
-    [string]$WenShuDbTextRuntimeDirectory = $env:AFR_WENSHU_DBTEXT_RUNTIME_DIRECTORY
+    [string]$GlyphCoreModelPath = $env:AFR_GLYPHCORE_MODEL_PATH,
+    [string]$GlyphCoreModelManifestPath = $env:AFR_GLYPHCORE_MODEL_MANIFEST_PATH,
+    [string]$GlyphCoreExactRepairsPath = $env:AFR_GLYPHCORE_EXACT_REPAIRS_PATH,
+    [string]$GlyphCoreRuntimeDirectory = $env:AFR_GLYPHCORE_RUNTIME_DIRECTORY
 )
 
 Set-StrictMode -Version Latest
@@ -50,23 +51,30 @@ $DeployerCsproj = Join-Path $RepoRoot "src\AFR.Deployer\AFR.Deployer.csproj"
 $PublishOutput  = Join-Path $RepoRoot "publish\AFR.Deployer"
 $VersionProps    = Join-Path $RepoRoot "Version.props"
 $FontsSourcePath = Join-Path $RepoRoot "chore\Fonts.zip"
-$DefaultWenShuDbTextModelPath = Join-Path $RepoRoot "models\WenShu\DbText\Current\AFR.DBTextAI.Model.onnx"
-$DefaultWenShuDbTextModelManifestPath = Join-Path $RepoRoot "models\WenShu\DbText\Current\AFR.DBTextAI.ModelManifest.json"
+$DefaultGlyphCoreModelPath = Join-Path $RepoRoot "AFR.GlyphCore\models\AFR.GlyphCore.Model.onnx"
+$DefaultGlyphCoreModelManifestPath = Join-Path $RepoRoot "AFR.GlyphCore\models\AFR.GlyphCore.ModelManifest.json"
+$DefaultGlyphCoreExactRepairsPath = Join-Path $RepoRoot "AFR.GlyphCore\models\AFR.GlyphCore.ExactRepairs.json"
 
-if ([string]::IsNullOrWhiteSpace($WenShuDbTextModelPath) -and -not [string]::IsNullOrWhiteSpace($env:AFR_DBTEXT_AI_MODEL_PATH)) {
-    $WenShuDbTextModelPath = $env:AFR_DBTEXT_AI_MODEL_PATH
+if ([string]::IsNullOrWhiteSpace($GlyphCoreModelPath) -and -not [string]::IsNullOrWhiteSpace($env:AFR_GLYPHCORE_MODEL_PATH)) {
+    $GlyphCoreModelPath = $env:AFR_GLYPHCORE_MODEL_PATH
 }
-if ([string]::IsNullOrWhiteSpace($WenShuDbTextModelManifestPath) -and -not [string]::IsNullOrWhiteSpace($env:AFR_DBTEXT_AI_MODEL_MANIFEST_PATH)) {
-    $WenShuDbTextModelManifestPath = $env:AFR_DBTEXT_AI_MODEL_MANIFEST_PATH
+if ([string]::IsNullOrWhiteSpace($GlyphCoreModelManifestPath) -and -not [string]::IsNullOrWhiteSpace($env:AFR_GLYPHCORE_MODEL_MANIFEST_PATH)) {
+    $GlyphCoreModelManifestPath = $env:AFR_GLYPHCORE_MODEL_MANIFEST_PATH
 }
-if ([string]::IsNullOrWhiteSpace($WenShuDbTextRuntimeDirectory) -and -not [string]::IsNullOrWhiteSpace($env:AFR_DBTEXT_AI_RUNTIME_DIRECTORY)) {
-    $WenShuDbTextRuntimeDirectory = $env:AFR_DBTEXT_AI_RUNTIME_DIRECTORY
+if ([string]::IsNullOrWhiteSpace($GlyphCoreExactRepairsPath) -and -not [string]::IsNullOrWhiteSpace($env:AFR_GLYPHCORE_EXACT_REPAIRS_PATH)) {
+    $GlyphCoreExactRepairsPath = $env:AFR_GLYPHCORE_EXACT_REPAIRS_PATH
 }
-if ([string]::IsNullOrWhiteSpace($WenShuDbTextModelPath) -and (Test-Path -LiteralPath $DefaultWenShuDbTextModelPath)) {
-    $WenShuDbTextModelPath = $DefaultWenShuDbTextModelPath
+if ([string]::IsNullOrWhiteSpace($GlyphCoreRuntimeDirectory) -and -not [string]::IsNullOrWhiteSpace($env:AFR_GLYPHCORE_RUNTIME_DIRECTORY)) {
+    $GlyphCoreRuntimeDirectory = $env:AFR_GLYPHCORE_RUNTIME_DIRECTORY
 }
-if ([string]::IsNullOrWhiteSpace($WenShuDbTextModelManifestPath) -and (Test-Path -LiteralPath $DefaultWenShuDbTextModelManifestPath)) {
-    $WenShuDbTextModelManifestPath = $DefaultWenShuDbTextModelManifestPath
+if ([string]::IsNullOrWhiteSpace($GlyphCoreModelPath) -and (Test-Path -LiteralPath $DefaultGlyphCoreModelPath)) {
+    $GlyphCoreModelPath = $DefaultGlyphCoreModelPath
+}
+if ([string]::IsNullOrWhiteSpace($GlyphCoreModelManifestPath) -and (Test-Path -LiteralPath $DefaultGlyphCoreModelManifestPath)) {
+    $GlyphCoreModelManifestPath = $DefaultGlyphCoreModelManifestPath
+}
+if ([string]::IsNullOrWhiteSpace($GlyphCoreExactRepairsPath) -and (Test-Path -LiteralPath $DefaultGlyphCoreExactRepairsPath)) {
+    $GlyphCoreExactRepairsPath = $DefaultGlyphCoreExactRepairsPath
 }
 
 # 自动发现 src\AutoCAD\AFR-ACAD*\*.csproj，避免新增 CAD 版本时手工维护列表。
@@ -107,27 +115,34 @@ if ($Plugins.Count -eq 0) {
 Write-Host "自动发现 $($Plugins.Count) 个插件项目：" -ForegroundColor DarkGray
 $Plugins | ForEach-Object { Write-Host "    • $($_.Name) ($($_.TFM))" -ForegroundColor DarkGray }
 
-$WenShuDbTextBuildArgs = @()
-if (-not [string]::IsNullOrWhiteSpace($WenShuDbTextModelPath)) {
-    if (-not (Test-Path -LiteralPath $WenShuDbTextModelPath)) {
-        Write-Host "文枢 DBText 模型不存在：$WenShuDbTextModelPath" -ForegroundColor Red
+$GlyphCoreBuildArgs = @()
+if (-not [string]::IsNullOrWhiteSpace($GlyphCoreModelPath)) {
+    if (-not (Test-Path -LiteralPath $GlyphCoreModelPath)) {
+        Write-Host "文枢 DBText 模型不存在：$GlyphCoreModelPath" -ForegroundColor Red
         exit 1
     }
-    $WenShuDbTextBuildArgs += "/p:WenShuDbTextModelPath=$WenShuDbTextModelPath"
+    $GlyphCoreBuildArgs += "/p:GlyphCoreModelPath=$GlyphCoreModelPath"
 }
-if (-not [string]::IsNullOrWhiteSpace($WenShuDbTextModelManifestPath)) {
-    if (-not (Test-Path -LiteralPath $WenShuDbTextModelManifestPath)) {
-        Write-Host "文枢 DBText 模型清单不存在：$WenShuDbTextModelManifestPath" -ForegroundColor Red
+if (-not [string]::IsNullOrWhiteSpace($GlyphCoreModelManifestPath)) {
+    if (-not (Test-Path -LiteralPath $GlyphCoreModelManifestPath)) {
+        Write-Host "文枢 DBText 模型清单不存在：$GlyphCoreModelManifestPath" -ForegroundColor Red
         exit 1
     }
-    $WenShuDbTextBuildArgs += "/p:WenShuDbTextModelManifestPath=$WenShuDbTextModelManifestPath"
+    $GlyphCoreBuildArgs += "/p:GlyphCoreModelManifestPath=$GlyphCoreModelManifestPath"
 }
-if (-not [string]::IsNullOrWhiteSpace($WenShuDbTextRuntimeDirectory)) {
-    if (-not (Test-Path -LiteralPath $WenShuDbTextRuntimeDirectory)) {
-        Write-Host "文枢 DBText ONNX Runtime 目录不存在：$WenShuDbTextRuntimeDirectory" -ForegroundColor Red
+if (-not [string]::IsNullOrWhiteSpace($GlyphCoreExactRepairsPath)) {
+    if (-not (Test-Path -LiteralPath $GlyphCoreExactRepairsPath)) {
+        Write-Host "文枢 DBText 精确修复表不存在：$GlyphCoreExactRepairsPath" -ForegroundColor Red
         exit 1
     }
-    $WenShuDbTextBuildArgs += "/p:WenShuDbTextRuntimeDirectory=$WenShuDbTextRuntimeDirectory"
+    $GlyphCoreBuildArgs += "/p:GlyphCoreExactRepairsPath=$GlyphCoreExactRepairsPath"
+}
+if (-not [string]::IsNullOrWhiteSpace($GlyphCoreRuntimeDirectory)) {
+    if (-not (Test-Path -LiteralPath $GlyphCoreRuntimeDirectory)) {
+        Write-Host "文枢 DBText ONNX Runtime 目录不存在：$GlyphCoreRuntimeDirectory" -ForegroundColor Red
+        exit 1
+    }
+    $GlyphCoreBuildArgs += "/p:GlyphCoreRuntimeDirectory=$GlyphCoreRuntimeDirectory"
 }
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────
@@ -167,7 +182,7 @@ if (-not $SkipPluginBuild) {
         Write-Host "  → 构建 $($p.Name) ($($p.TFM))..." -NoNewline
 
         # 构建单个版本壳项目；构建成功后会在标准输出目录生成 DLL 与 sidecar JSON。
-        $output = dotnet build $csproj -c Release --nologo -v quiet @WenShuDbTextBuildArgs 2>&1
+        $output = dotnet build $csproj -c Release --nologo -v quiet @GlyphCoreBuildArgs 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "失败"
             $buildErrors += $p.Name

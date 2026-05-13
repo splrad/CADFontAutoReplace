@@ -4,8 +4,85 @@
     <Platform Name="x64" />
   </Configurations>
 
-  <Folder Name="/Solution Items/">
+  <Folder Name="/Repository/">
+    <File Path=".gitignore" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="global.json" />
+    <File Path="README.md" />
     <File Path="Version.props" />
+  </Folder>
+
+  <Folder Name="/AFR GlyphCore/">
+    <File Path="AFR.GlyphCore/tools/README.md" />
+    <File Path="AFR.GlyphCore/tools/requirements.txt" />
+    <File Path="AFR.GlyphCore/tools/Start-GlyphCoreWorkbench.ps1" />
+    <File Path="AFR.GlyphCore/tools/Invoke-GlyphCoreTraining.ps1" />
+  </Folder>
+
+  <Folder Name="/AFR GlyphCore/Workbench/">
+    <File Path="AFR.GlyphCore/tools/workbench/server.py" />
+    <File Path="AFR.GlyphCore/tools/workbench/test_review_clusters.py" />
+  </Folder>
+
+  <Folder Name="/AFR GlyphCore/Workbench/Frontend/">
+    <File Path="AFR.GlyphCore/tools/workbench/frontend/.gitignore" />
+    <File Path="AFR.GlyphCore/tools/workbench/frontend/index.html" />
+    <File Path="AFR.GlyphCore/tools/workbench/frontend/package.json" />
+    <File Path="AFR.GlyphCore/tools/workbench/frontend/package-lock.json" />
+    <File Path="AFR.GlyphCore/tools/workbench/frontend/vite.config.js" />
+    <File Path="AFR.GlyphCore/tools/workbench/frontend/src/main.jsx" />
+    <File Path="AFR.GlyphCore/tools/workbench/frontend/src/styles.css" />
+  </Folder>
+
+  <Folder Name="/AFR GlyphCore/Training/">
+    <File Path="AFR.GlyphCore/tools/training/build_features.py" />
+    <File Path="AFR.GlyphCore/tools/training/generate_seed_data.py" />
+    <File Path="AFR.GlyphCore/tools/training/train_lightgbm.py" />
+  </Folder>
+
+  <Folder Name="/AFR GlyphCore/Python Package/">
+    <File Path="AFR.GlyphCore/tools/afr_glyphcore/__init__.py" />
+    <File Path="AFR.GlyphCore/tools/afr_glyphcore/candidates.py" />
+    <File Path="AFR.GlyphCore/tools/afr_glyphcore/features.py" />
+  </Folder>
+
+  <Folder Name="/AFR GlyphCore/Schemas/">
+    <File Path="AFR.GlyphCore/tools/schemas/candidate_group_v1.schema.json" />
+    <File Path="AFR.GlyphCore/tools/schemas/export_package_v1.schema.json" />
+    <File Path="AFR.GlyphCore/tools/schemas/feature_schema_v1.json" />
+    <File Path="AFR.GlyphCore/tools/schemas/reviewed_label_v1.schema.json" />
+  </Folder>
+
+  <Folder Name="/Docs/">
+    <File Path="docs/autodesk-fonts.md" />
+    <File Path="docs/developer-guide-advanced.md" />
+    <File Path="docs/developer-guide-beginner.md" />
+    <File Path="docs/git-branch-guidelines.md" />
+    <File Path="docs/debugging/DBText-Repair-Model.md" />
+  </Folder>
+
+  <Folder Name="/GitHub/">
+    <File Path=".github/copilot-instructions.md" />
+    <File Path=".github/deepseek-model.txt" />
+  </Folder>
+
+  <Folder Name="/GitHub/Workflows/">
+    <File Path=".github/workflows/branch-policy-check.yml" />
+    <File Path=".github/workflows/merge-permission.yml" />
+    <File Path=".github/workflows/orchestrate-pr-close.yml" />
+    <File Path=".github/workflows/orchestrate-pr-events.yml" />
+    <File Path=".github/workflows/orchestrate-push-events.yml" />
+    <File Path=".github/workflows/pr-auto-approve.yml" />
+    <File Path=".github/workflows/pr-auto-main.yml" />
+    <File Path=".github/workflows/pr-auto-test.yml" />
+    <File Path=".github/workflows/pr-close-notify.yml" />
+    <File Path=".github/workflows/release-build.yml" />
+    <File Path=".github/workflows/sync-test-branch.yml" />
+  </Folder>
+
+  <Folder Name="/Tools/">
+    <File Path="tools/Publish-ReleaseAssets.ps1" />
   </Folder>
 
   <Project Path="src/AFR.Core/AFR.Core.shproj" Id="3eed6822-3b82-4bbd-9842-3f32258af0f0" />

@@ -1,0 +1,329 @@
+using System;
+using System.Globalization;
+using System.Text;
+
+namespace AFR.GlyphCore.TextRepair;
+
+internal static class GlyphCoreTextRepairFeatureExtractor
+{
+    public const int FeatureCount = 56;
+
+    public static float[] Extract(GlyphCoreTextRepairContext context, GlyphCoreTextRepairCandidate candidate)
+    {
+        string current = context.CurrentText ?? string.Empty;
+        string candidateText = candidate.Text ?? string.Empty;
+        var features = new float[FeatureCount];
+
+        TextStats currentStats = Analyze(current);
+        TextStats candidateStats = Analyze(candidateText);
+
+        features[0] = Norm(current.Length, 64);
+        features[1] = Norm(candidateText.Length, 64);
+        features[2] = Norm(Math.Abs(current.Length - candidateText.Length), 32);
+        features[3] = Bool(string.Equals(current, candidateText, StringComparison.Ordinal));
+        features[4] = Bool(string.IsNullOrEmpty(candidateText));
+        features[5] = currentStats.CjkRatio;
+        features[6] = candidateStats.CjkRatio;
+        features[7] = currentStats.AsciiRatio;
+        features[8] = candidateStats.AsciiRatio;
+        features[9] = currentStats.ControlRatio;
+        features[10] = candidateStats.ControlRatio;
+        features[11] = currentStats.ReplacementRatio;
+        features[12] = candidateStats.ReplacementRatio;
+        features[13] = currentStats.PrivateUseRatio;
+        features[14] = candidateStats.PrivateUseRatio;
+        features[15] = currentStats.DigitRatio;
+        features[16] = candidateStats.DigitRatio;
+        features[17] = currentStats.PunctuationRatio;
+        features[18] = candidateStats.PunctuationRatio;
+        features[19] = currentStats.SymbolRatio;
+        features[20] = candidateStats.SymbolRatio;
+        features[21] = currentStats.BopomofoOrKanaRatio;
+        features[22] = candidateStats.BopomofoOrKanaRatio;
+        features[23] = NormalizedEditDistance(current, candidateText);
+        features[24] = CharacterOverlap(current, candidateText);
+        features[25] = Bool(candidate.IsRoundTrip);
+        features[26] = ContainsSource(candidate.Source, "big5");
+        features[27] = ContainsSource(candidate.Source, "gbk");
+        features[28] = ContainsSource(candidate.Source, "utf8");
+        features[29] = ContainsSource(candidate.Source, "current");
+        features[30] = ContainsSource(candidate.Source, "safe");
+        features[31] = CadKeywordRatio(current);
+        features[32] = CadKeywordRatio(candidateText);
+        features[33] = Bool(candidateStats.CjkRatio > currentStats.CjkRatio);
+        features[34] = Bool(candidateStats.ControlRatio > 0);
+        features[35] = Bool(candidateStats.ReplacementRatio > 0);
+        features[36] = Bool(candidateStats.PrivateUseRatio > 0);
+        features[37] = Bool(HasSuspiciousUnicode(candidateText));
+        features[38] = Bool(HasSuspiciousUnicode(current));
+        features[39] = Bool(context.IsFromExternalReference);
+        features[40] = StableHash01(context.Layer);
+        features[41] = StableHash01(context.OwnerBlockName);
+        features[42] = StableHash01(context.TextStyleName);
+        features[43] = StableHash01(context.TextStyleFileName);
+        features[44] = StableHash01(context.TextStyleBigFontFileName);
+        features[45] = StableHash01(context.TextStyleTypeFace);
+        features[46] = Bool(IsKnownCadTextStyle(context.TextStyleName));
+        features[47] = Bool(IsKnownCadFont(context.TextStyleFileName));
+        features[48] = Bool(IsKnownCadFont(context.TextStyleBigFontFileName));
+        features[49] = Bool(candidateText.Length <= 1);
+        features[50] = Bool(current.Length <= 1);
+        features[51] = Bool(LengthRisk(current, candidateText));
+        features[52] = Bool(candidateStats.CjkRatio < currentStats.CjkRatio && currentStats.CjkRatio > 0.2f);
+        features[53] = Bool(candidateStats.AsciiRatio > 0.9f && currentStats.AsciiRatio < 0.5f);
+        features[54] = Bool(IsMostlySymbols(candidateStats));
+        features[55] = Bool(IsMostlySymbols(currentStats));
+
+        return features;
+    }
+
+    public static bool HasUnsafeText(string text)
+    {
+        TextStats stats = Analyze(text);
+        return stats.ControlRatio > 0
+               || stats.ReplacementRatio > 0
+               || HasSuspiciousUnicode(text);
+    }
+
+    private static TextStats Analyze(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return new TextStats();
+
+        int cjk = 0;
+        int ascii = 0;
+        int control = 0;
+        int replacement = 0;
+        int privateUse = 0;
+        int digit = 0;
+        int punctuation = 0;
+        int symbol = 0;
+        int bopomofoOrKana = 0;
+
+        foreach (char ch in text)
+        {
+            if (ch <= 0x7F)
+                ascii++;
+            if (char.IsControl(ch))
+                control++;
+            if (ch == '\uFFFD')
+                replacement++;
+            if (char.IsDigit(ch))
+                digit++;
+            if (IsCjk(ch))
+                cjk++;
+            if (IsPrivateUse(ch))
+                privateUse++;
+            if (IsBopomofoOrKana(ch))
+                bopomofoOrKana++;
+
+            UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(ch);
+            if (category == UnicodeCategory.OtherPunctuation
+                || category == UnicodeCategory.ConnectorPunctuation
+                || category == UnicodeCategory.DashPunctuation
+                || category == UnicodeCategory.OpenPunctuation
+                || category == UnicodeCategory.ClosePunctuation
+                || category == UnicodeCategory.InitialQuotePunctuation
+                || category == UnicodeCategory.FinalQuotePunctuation)
+                punctuation++;
+            if (category == UnicodeCategory.MathSymbol
+                || category == UnicodeCategory.CurrencySymbol
+                || category == UnicodeCategory.ModifierSymbol
+                || category == UnicodeCategory.OtherSymbol)
+                symbol++;
+        }
+
+        float length = Math.Max(1, text.Length);
+        return new TextStats
+        {
+            CjkRatio = cjk / length,
+            AsciiRatio = ascii / length,
+            ControlRatio = control / length,
+            ReplacementRatio = replacement / length,
+            PrivateUseRatio = privateUse / length,
+            DigitRatio = digit / length,
+            PunctuationRatio = punctuation / length,
+            SymbolRatio = symbol / length,
+            BopomofoOrKanaRatio = bopomofoOrKana / length
+        };
+    }
+
+    private static float CadKeywordRatio(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return 0;
+
+        const string keywords = "水管井泵阀风压流排污喷淋消防电气设备材料表房库层标高详见安装系统屋顶支架压力自动";
+        int count = 0;
+        foreach (char ch in text)
+        {
+            if (keywords.IndexOf(ch) >= 0)
+                count++;
+        }
+
+        return count / (float)Math.Max(1, text.Length);
+    }
+
+    private static float NormalizedEditDistance(string left, string right)
+    {
+        int max = Math.Max(left?.Length ?? 0, right?.Length ?? 0);
+        if (max == 0)
+            return 0;
+
+        return Math.Min(1f, Levenshtein(left ?? string.Empty, right ?? string.Empty) / (float)max);
+    }
+
+    private static int Levenshtein(string left, string right)
+    {
+        int n = left.Length;
+        int m = right.Length;
+        var previous = new int[m + 1];
+        var current = new int[m + 1];
+
+        for (int j = 0; j <= m; j++)
+            previous[j] = j;
+
+        for (int i = 1; i <= n; i++)
+        {
+            current[0] = i;
+            for (int j = 1; j <= m; j++)
+            {
+                int cost = left[i - 1] == right[j - 1] ? 0 : 1;
+                current[j] = Math.Min(
+                    Math.Min(current[j - 1] + 1, previous[j] + 1),
+                    previous[j - 1] + cost);
+            }
+
+            int[] temp = previous;
+            previous = current;
+            current = temp;
+        }
+
+        return previous[m];
+    }
+
+    private static float CharacterOverlap(string left, string right)
+    {
+        if (string.IsNullOrEmpty(left) || string.IsNullOrEmpty(right))
+            return 0;
+
+        int intersection = 0;
+        foreach (char ch in left)
+        {
+            if (right.IndexOf(ch) >= 0)
+                intersection++;
+        }
+
+        return intersection / (float)Math.Max(1, Math.Max(left.Length, right.Length));
+    }
+
+    private static float StableHash01(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return 0;
+
+        unchecked
+        {
+            uint hash = 2166136261;
+            byte[] bytes = Encoding.UTF8.GetBytes(text);
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                hash ^= bytes[i];
+                hash *= 16777619;
+            }
+
+            return (hash & 0xFFFF) / 65535f;
+        }
+    }
+
+    private static bool HasSuspiciousUnicode(string text)
+    {
+        foreach (char ch in text ?? string.Empty)
+        {
+            UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(ch);
+            if (category == UnicodeCategory.Surrogate
+                || category == UnicodeCategory.OtherNotAssigned)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool LengthRisk(string current, string candidate)
+    {
+        int currentLength = current?.Length ?? 0;
+        int candidateLength = candidate?.Length ?? 0;
+        if (currentLength == 0 || candidateLength == 0)
+            return true;
+
+        return candidateLength > currentLength * 4 || currentLength > candidateLength * 4;
+    }
+
+    private static bool IsMostlySymbols(TextStats stats)
+    {
+        return stats.SymbolRatio + stats.PunctuationRatio > 0.75f;
+    }
+
+    private static bool IsKnownCadTextStyle(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return false;
+
+        return text.IndexOf("HZTXT", StringComparison.OrdinalIgnoreCase) >= 0
+               || text.IndexOf("TXT", StringComparison.OrdinalIgnoreCase) >= 0
+               || text.IndexOf("TEXT", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool IsKnownCadFont(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return false;
+
+        return text.EndsWith(".shx", StringComparison.OrdinalIgnoreCase)
+               || text.IndexOf("GB", StringComparison.OrdinalIgnoreCase) >= 0
+               || text.IndexOf("tssd", StringComparison.OrdinalIgnoreCase) >= 0
+               || text.IndexOf("txt", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static float ContainsSource(string source, string token)
+    {
+        return Bool(!string.IsNullOrEmpty(source)
+                    && source.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    private static float Bool(bool value) => value ? 1f : 0f;
+
+    private static float Norm(int value, int scale) => Math.Min(1f, value / (float)Math.Max(1, scale));
+
+    private static bool IsCjk(char ch)
+    {
+        return (ch >= '\u3400' && ch <= '\u4DBF')
+               || (ch >= '\u4E00' && ch <= '\u9FFF')
+               || (ch >= '\uF900' && ch <= '\uFAFF');
+    }
+
+    private static bool IsPrivateUse(char ch)
+    {
+        return ch >= '\uE000' && ch <= '\uF8FF';
+    }
+
+    private static bool IsBopomofoOrKana(char ch)
+    {
+        return (ch >= '\u3040' && ch <= '\u30FF')
+               || (ch >= '\u3100' && ch <= '\u312F');
+    }
+
+    private struct TextStats
+    {
+        public float CjkRatio;
+        public float AsciiRatio;
+        public float ControlRatio;
+        public float ReplacementRatio;
+        public float PrivateUseRatio;
+        public float DigitRatio;
+        public float PunctuationRatio;
+        public float SymbolRatio;
+        public float BopomofoOrKanaRatio;
+    }
+}
+

@@ -3,7 +3,7 @@ using Autodesk.AutoCAD.DatabaseServices;
 using AFR.FontMapping;
 using AFR.Models;
 using AFR.Services;
-using AFR.Services.WenShu.DbText;
+using AFR.Services.GlyphCore.TextRepair;
 
 namespace AFR.Hosting;
 
@@ -110,8 +110,8 @@ internal sealed class ExecutionController
 
                 // DBText 单行文字先过疑似异常门控，命中后才懒加载文枢模型。
                 DiagnosticLogger.BeginPhase("DBText文枢修复");
-                int repairedDbTextCount = WenShuDbTextRepairService.Repair(doc.Database);
-                WenShuDbTextRepairRunSummary dbTextRepairSummary = WenShuDbTextRepairService.LastRunSummary;
+                int repairedDbTextCount = GlyphCoreTextRepairService.Repair(doc.Database);
+                GlyphCoreTextRepairRunSummary dbTextRepairSummary = GlyphCoreTextRepairService.LastRunSummary;
                 DiagnosticLogger.EndPhase($"DBText实际修复: {repairedDbTextCount}个");
                 if (repairedDbTextCount > 0)
                     doc.Editor.Regen();
@@ -165,7 +165,7 @@ internal sealed class ExecutionController
                 DiagnosticLogger.WriteSummary();
                 summarized = true;
                 log.Flush();
-                WenShuDbTextRepairService.WriteCommandLineSummary(dbTextRepairSummary);
+                GlyphCoreTextRepairService.WriteCommandLineSummary(dbTextRepairSummary);
             }
 
             contextMgr.MarkExecuted(doc);

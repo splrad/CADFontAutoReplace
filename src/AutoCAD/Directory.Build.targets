@@ -1,48 +1,54 @@
 <Project>
+  <PropertyGroup>
+    <GlyphCoreOnnxRuntimeVersion Condition="'$(GlyphCoreOnnxRuntimeVersion)' == ''">1.18.0</GlyphCoreOnnxRuntimeVersion>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- UI 控件库 — 嵌入为程序集资源，不复制到输出 -->
     <PackageReference Include="HandyControl" Version="3.5.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="$(GlyphCoreOnnxRuntimeVersion)" />
     <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0"
                       Condition="'$(TargetFramework)' == 'net8.0-windows'" />
   </ItemGroup>
 
   <PropertyGroup>
-    <_WenShuRepoRoot>$([MSBuild]::GetDirectoryNameOfFileAbove('$(MSBuildThisFileDirectory)', 'CADFontAutoReplace.slnx'))</_WenShuRepoRoot>
-    <_WenShuDefaultModelPath>$(_WenShuRepoRoot)\models\WenShu\DbText\Current\AFR.DBTextAI.Model.onnx</_WenShuDefaultModelPath>
-    <_WenShuDefaultManifestPath>$(_WenShuRepoRoot)\models\WenShu\DbText\Current\AFR.DBTextAI.ModelManifest.json</_WenShuDefaultManifestPath>
-    <WenShuDbTextModelPath Condition="'$(WenShuDbTextModelPath)' == '' and '$(DbTextAiModelPath)' != ''">$(DbTextAiModelPath)</WenShuDbTextModelPath>
-    <WenShuDbTextModelManifestPath Condition="'$(WenShuDbTextModelManifestPath)' == '' and '$(DbTextAiModelManifestPath)' != ''">$(DbTextAiModelManifestPath)</WenShuDbTextModelManifestPath>
-    <WenShuDbTextRuntimeDirectory Condition="'$(WenShuDbTextRuntimeDirectory)' == '' and '$(DbTextAiRuntimeDirectory)' != ''">$(DbTextAiRuntimeDirectory)</WenShuDbTextRuntimeDirectory>
-    <WenShuDbTextModelPath Condition="'$(WenShuDbTextModelPath)' == '' and '$(_WenShuRepoRoot)' != '' and Exists('$(_WenShuDefaultModelPath)')">$(_WenShuDefaultModelPath)</WenShuDbTextModelPath>
-    <WenShuDbTextModelManifestPath Condition="'$(WenShuDbTextModelManifestPath)' == '' and '$(_WenShuRepoRoot)' != '' and Exists('$(_WenShuDefaultManifestPath)')">$(_WenShuDefaultManifestPath)</WenShuDbTextModelManifestPath>
+    <_GlyphCoreRepoRoot>$([MSBuild]::GetDirectoryNameOfFileAbove('$(MSBuildThisFileDirectory)', 'CADFontAutoReplace.slnx'))</_GlyphCoreRepoRoot>
+    <_GlyphCoreDefaultModelPath>$(_GlyphCoreRepoRoot)\AFR.GlyphCore\models\AFR.GlyphCore.Model.onnx</_GlyphCoreDefaultModelPath>
+    <_GlyphCoreDefaultManifestPath>$(_GlyphCoreRepoRoot)\AFR.GlyphCore\models\AFR.GlyphCore.ModelManifest.json</_GlyphCoreDefaultManifestPath>
+    <_GlyphCoreDefaultExactRepairsPath>$(_GlyphCoreRepoRoot)\AFR.GlyphCore\models\AFR.GlyphCore.ExactRepairs.json</_GlyphCoreDefaultExactRepairsPath>
+    <_GlyphCoreOnnxRuntimePackageRoot Condition="'$(NuGetPackageRoot)' != ''">$(NuGetPackageRoot)microsoft.ml.onnxruntime\$(GlyphCoreOnnxRuntimeVersion)</_GlyphCoreOnnxRuntimePackageRoot>
+    <_GlyphCoreOnnxRuntimePackageRoot Condition="'$(_GlyphCoreOnnxRuntimePackageRoot)' == ''">$([System.Environment]::GetEnvironmentVariable('USERPROFILE'))\.nuget\packages\microsoft.ml.onnxruntime\$(GlyphCoreOnnxRuntimeVersion)</_GlyphCoreOnnxRuntimePackageRoot>
+    <GlyphCoreModelPath Condition="'$(GlyphCoreModelPath)' == '' and '$(_GlyphCoreRepoRoot)' != '' and Exists('$(_GlyphCoreDefaultModelPath)')">$(_GlyphCoreDefaultModelPath)</GlyphCoreModelPath>
+    <GlyphCoreModelManifestPath Condition="'$(GlyphCoreModelManifestPath)' == '' and '$(_GlyphCoreRepoRoot)' != '' and Exists('$(_GlyphCoreDefaultManifestPath)')">$(_GlyphCoreDefaultManifestPath)</GlyphCoreModelManifestPath>
+    <GlyphCoreExactRepairsPath Condition="'$(GlyphCoreExactRepairsPath)' == '' and '$(_GlyphCoreRepoRoot)' != '' and Exists('$(_GlyphCoreDefaultExactRepairsPath)')">$(_GlyphCoreDefaultExactRepairsPath)</GlyphCoreExactRepairsPath>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(WenShuDbTextModelPath)' != '' and Exists('$(WenShuDbTextModelPath)')">
-    <EmbeddedResource Include="$(WenShuDbTextModelPath)">
-      <LogicalName>AFR.DBTextAI.Model.onnx</LogicalName>
+  <ItemGroup Condition="'$(GlyphCoreModelPath)' != '' and Exists('$(GlyphCoreModelPath)')">
+    <EmbeddedResource Include="$(GlyphCoreModelPath)">
+      <LogicalName>AFR.GlyphCore.Model.onnx</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
-  <ItemGroup Condition="'$(WenShuDbTextModelManifestPath)' != '' and Exists('$(WenShuDbTextModelManifestPath)')">
-    <EmbeddedResource Include="$(WenShuDbTextModelManifestPath)">
-      <LogicalName>AFR.DBTextAI.ModelManifest.json</LogicalName>
+  <ItemGroup Condition="'$(GlyphCoreModelManifestPath)' != '' and Exists('$(GlyphCoreModelManifestPath)')">
+    <EmbeddedResource Include="$(GlyphCoreModelManifestPath)">
+      <LogicalName>AFR.GlyphCore.ModelManifest.json</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
-  <ItemGroup Condition="'$(WenShuDbTextRuntimeDirectory)' != '' and Exists('$(WenShuDbTextRuntimeDirectory)\Microsoft.ML.OnnxRuntime.dll')">
-    <EmbeddedResource Include="$(WenShuDbTextRuntimeDirectory)\Microsoft.ML.OnnxRuntime.dll">
+  <ItemGroup Condition="'$(GlyphCoreExactRepairsPath)' != '' and Exists('$(GlyphCoreExactRepairsPath)')">
+    <EmbeddedResource Include="$(GlyphCoreExactRepairsPath)">
+      <LogicalName>AFR.GlyphCore.ExactRepairs.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(GlyphCoreRuntimeDirectory)' != '' and Exists('$(GlyphCoreRuntimeDirectory)\Microsoft.ML.OnnxRuntime.dll')">
+    <EmbeddedResource Include="$(GlyphCoreRuntimeDirectory)\Microsoft.ML.OnnxRuntime.dll">
       <LogicalName>Microsoft.ML.OnnxRuntime.dll</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
-  <ItemGroup Condition="'$(WenShuDbTextRuntimeDirectory)' != '' and Exists('$(WenShuDbTextRuntimeDirectory)\onnxruntime.dll')">
-    <EmbeddedResource Include="$(WenShuDbTextRuntimeDirectory)\onnxruntime.dll">
-      <LogicalName>onnxruntime.dll</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
-
-  <!-- 将第三方托管依赖嵌入为程序集资源，实现单 DLL 分发 -->
+  <!-- 将第三方托管依赖和文枢 GlyphCore ONNX 原生运行库嵌入为程序集资源 -->
   <Target Name="EmbedPluginDependencies" AfterTargets="ResolveAssemblyReferences">
     <ItemGroup>
       <EmbeddedResource Include="@(ReferenceCopyLocalPaths)"
@@ -51,6 +57,14 @@
       </EmbeddedResource>
       <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)"
                                Condition="'%(Filename)' == 'HandyControl' Or '%(Filename)' == 'Newtonsoft.Json' Or '%(Filename)' == 'System.Text.Encoding.CodePages' Or '%(Filename)' == 'Microsoft.ML.OnnxRuntime'" />
+      <EmbeddedResource Include="$(_GlyphCoreOnnxRuntimePackageRoot)\runtimes\win-x64\native\onnxruntime.dll"
+                        Condition="Exists('$(_GlyphCoreOnnxRuntimePackageRoot)\runtimes\win-x64\native\onnxruntime.dll')">
+        <LogicalName>onnxruntime.dll</LogicalName>
+      </EmbeddedResource>
+      <EmbeddedResource Include="$(_GlyphCoreOnnxRuntimePackageRoot)\runtimes\win-x64\native\onnxruntime_providers_shared.dll"
+                        Condition="Exists('$(_GlyphCoreOnnxRuntimePackageRoot)\runtimes\win-x64\native\onnxruntime_providers_shared.dll')">
+        <LogicalName>onnxruntime_providers_shared.dll</LogicalName>
+      </EmbeddedResource>
     </ItemGroup>
   </Target>
 
