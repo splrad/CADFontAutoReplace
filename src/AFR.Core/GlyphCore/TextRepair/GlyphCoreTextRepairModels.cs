@@ -80,7 +80,7 @@ internal sealed class GlyphCoreTextRepairCandidate
     }
 }
 
-internal interface IGlyphCoreTextRepairScorer
+internal interface IGlyphCoreTextRepairScorer : IDisposable
 {
     bool IsAvailable { get; }
     string Status { get; }
@@ -96,6 +96,7 @@ internal sealed class GlyphCoreTextRepairUnavailableScorer : IGlyphCoreTextRepai
 
     public bool IsAvailable => false;
     public string Status { get; }
+    public void Dispose() { }
 
     public bool TryScore(GlyphCoreTextRepairContext context, GlyphCoreTextRepairCandidate candidate, float[] features, out float score, out string error)
     {

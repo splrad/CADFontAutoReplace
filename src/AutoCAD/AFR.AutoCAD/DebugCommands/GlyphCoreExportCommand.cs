@@ -127,7 +127,7 @@ internal sealed class GlyphCoreExportCommand
     private static void WriteExportResult(Editor editor, GlyphCoreExportResult result)
     {
         editor.WriteMessage(
-            "\n[AFR 文枢] 已导出文枢 DBText 数据包：{0}\n扫描={1}, 导出={2}, 疑似异常={3}, 空文本跳过={4}, 错误={5}\n下一步：运行 AFR.GlyphCore\\tools\\Start-GlyphCoreWorkbench.ps1 -Package \"{0}\"\n",
+            "\n[AFR 文枢] 已导出文枢 DBText 数据包：{0}\n扫描={1}, 导出={2}, 疑似异常={3}, 空文本跳过={4}, 错误={5}\n下一步：运行 AFR.GlyphCore\\tools\\Start-GlyphCoreWorkbench.cmd -Package \"{0}\"\n",
             result.PackageDirectory,
             result.Scanned,
             result.Exported,

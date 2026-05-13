@@ -19,5 +19,14 @@ internal static class GlyphCoreTextRepairScorerFactory
         }
     }
 
+    public static void DisposeAndReset()
+    {
+        lock (Sync)
+        {
+            _cached?.Dispose();
+            _cached = null;
+        }
+    }
+
 }
 

@@ -11,7 +11,7 @@ using RegistryKey = Microsoft.Win32.RegistryKey;
 using RegistryValueKind = Microsoft.Win32.RegistryValueKind;
 using RegistryValueOptions = Microsoft.Win32.RegistryValueOptions;
 
-[assembly: CommandClass(typeof(AFR.DebugCommands.ProfileDumpCommand))]
+// [assembly: CommandClass(typeof(AFR.DebugCommands.ProfileDumpCommand))]
 
 namespace AFR.DebugCommands;
 
@@ -24,7 +24,7 @@ namespace AFR.DebugCommands;
 public static class ProfileDumpCommand
 {
     /// <summary>导出注册表 + Profile 磁盘文件的全量 dump 到 %TEMP%\afr-profile-*.txt。</summary>
-    [CommandMethod(AFR.Constants.CommandNames.DumpProfile)]
+    // [CommandMethod(AFR.Constants.CommandNames.DumpProfile)]
     public static void DumpCurrentProfile()
     {
         var doc = AcadApp.DocumentManager.MdiActiveDocument;

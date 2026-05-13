@@ -1,0 +1,132 @@
+/**
+ * AFR 文枢浅色设计令牌
+ *
+ * 来源：AFR.GlyphCore/DESIGN.md 的黑白编辑框架、粉彩色块、pill 控件和轻阴影。
+ * 工作台只实现浅色主题，避免运行时联网字体依赖。
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Core */
+  --color-primary: #000000;
+  --color-on-primary: #ffffff;
+  --color-ink: #000000;
+  --color-canvas: #ffffff;
+  --color-page: #f7f7f5;
+  --color-surface: #ffffff;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f7f7f5;
+  --color-surface-soft: #f1f1ef;
+  --color-inverse-canvas: #000000;
+  --color-inverse-ink: #ffffff;
+
+  /* Text */
+  --color-text: #000000;
+  --color-text-soft: #4b5563;
+  --color-text-muted: #6b7280;
+  --color-text-disabled: #9ca3af;
+  --color-text-inverse: #ffffff;
+
+  /* Lines */
+  --color-line: #e6e6e6;
+  --color-line-soft: #f1f1f1;
+  --color-line-hover: #c9c9c9;
+
+  /* GlyphCore semantic blocks */
+  --color-repair: #1f3a0f;
+  --color-repair-block: #dceeb1;
+  --color-repair-soft: #eef7d2;
+  --color-repair-border: #bddc77;
+
+  --color-ai: #2f215f;
+  --color-ai-block: #c5b0f4;
+  --color-ai-soft: #eee8ff;
+  --color-ai-border: #b299ef;
+
+  --color-keep: #173a20;
+  --color-keep-block: #c8e6cd;
+  --color-keep-soft: #e6f5e9;
+  --color-keep-border: #98cf9f;
+
+  --color-unsafe: #5d2211;
+  --color-unsafe-block: #f3c9b6;
+  --color-unsafe-soft: #fbe7de;
+  --color-unsafe-border: #e8a282;
+
+  --color-warn: #594000;
+  --color-warn-block: #f4ecd6;
+  --color-warn-soft: #fbf4df;
+  --color-warn-border: #e7d087;
+
+  --color-navy: #1f1d3d;
+  --color-magenta: #ff3d8b;
+
+  /* Functional */
+  --color-success: #1ea64a;
+  --color-error: #b42318;
+  --color-info: #235fd5;
+  --color-hover: rgba(0, 0, 0, 0.045);
+  --color-active: rgba(0, 0, 0, 0.08);
+  --color-focus: rgba(35, 95, 213, 0.12);
+  --color-focus-ring: #235fd5;
+
+  /* Typography */
+  --font-sans: "Inter", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Mono", "Consolas", monospace;
+
+  --font-weight-light: 320;
+  --font-weight-normal: 340;
+  --font-weight-medium: 480;
+  --font-weight-semibold: 540;
+  --font-weight-bold: 700;
+
+  --font-size-display-xl: 56px;
+  --font-size-display-lg: 40px;
+  --font-size-headline: 26px;
+  --font-size-card-title: 22px;
+  --font-size-body-lg: 18px;
+  --font-size-body: 15px;
+  --font-size-body-sm: 13px;
+  --font-size-eyebrow: 12px;
+  --font-size-caption: 11px;
+
+  --line-height-tight: 1;
+  --line-height-snug: 1.12;
+  --line-height-relaxed: 1.35;
+  --line-height-loose: 1.45;
+
+  --letter-spacing-tight: 0;
+  --letter-spacing-snug: 0;
+  --letter-spacing-normal: 0;
+  --letter-spacing-wide: 0.08em;
+  --letter-spacing-wider: 0.08em;
+
+  /* Spacing */
+  --spacing-hair: 1px;
+  --spacing-xxs: 4px;
+  --spacing-xs: 8px;
+  --spacing-sm: 12px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-xxl: 48px;
+  --spacing-section: 72px;
+
+  /* Radius */
+  --radius-xs: 2px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 50px;
+  --radius-full: 9999px;
+
+  /* Depth */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.12);
+
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 240ms cubic-bezier(0.4, 0, 0.2, 1);
+}

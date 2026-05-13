@@ -5,7 +5,7 @@ using System.Text;
 using Autodesk.AutoCAD.Runtime;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
-[assembly: CommandClass(typeof(AFR.DebugCommands.GenProbeScriptsCommand))]
+// [assembly: CommandClass(typeof(AFR.DebugCommands.GenProbeScriptsCommand))]
 
 namespace AFR.DebugCommands;
 
@@ -17,7 +17,7 @@ namespace AFR.DebugCommands;
 public static class GenProbeScriptsCommand
 {
     /// <summary>命令入口。</summary>
-    [CommandMethod(AFR.Constants.CommandNames.GenProbeScripts)]
+    // [CommandMethod(AFR.Constants.CommandNames.GenProbeScripts)]
     public static void GenerateProbeScripts()
     {
         var ed = AcadApp.DocumentManager.MdiActiveDocument?.Editor;

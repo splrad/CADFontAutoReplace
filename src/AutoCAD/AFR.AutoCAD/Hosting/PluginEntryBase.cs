@@ -131,7 +131,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         {
             // 第一阶段: 注册表初始化 — 检查/创建自动加载注册表项和默认配置
             // 首次安装时还会部署内嵌字体到 CAD Fonts 目录并写入默认替换字体
-            bool isFirstRun = AppInitializer.Initialize();
+            bool isFirstRun = AppInitializer.Initialize(out bool fontDeployFailed);
             if (isFirstRun)
             {
                 // 首次通过 NETLOAD 加载：CAD 已启动，Hook 无法拦截已加载的字体。
@@ -139,6 +139,16 @@ public abstract class PluginEntryBase : IExtensionApplication
                 try { AcadApp.SetSystemVariable("FONTMAP", ""); } catch { }
                 try { AcadApp.SetSystemVariable("FONTALT", "."); } catch { }
                 log.Info("首次加载完成，默认替换字体已部署。请重启 CAD 使插件自动生效。");
+                log.Flush();
+                return;
+            }
+
+            if (fontDeployFailed)
+            {
+                // 部署器安装后字体文件尚未释放到 CAD Fonts 目录（通常因权限不足）。
+                // 本次 CAD 会话将跳过字体替换；字体释放已在此次加载中重试，
+                // 若仍失败则请重启 CAD（以管理员身份运行部署工具或 CAD 可解决权限问题）。
+                log.Info("[AFR] 内嵌字体文件释放失败，本次无法执行字体替换。请以管理员身份重新运行部署工具，或重启 CAD 后重试。");
                 log.Flush();
                 return;
             }
@@ -175,6 +185,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         UnregisterEvents();
         AppDomain.CurrentDomain.AssemblyResolve -= OnResolveEmbeddedAssembly;
         ResolvedEmbeddedAssemblies.Clear();
+        AFR.GlyphCore.TextRepair.GlyphCoreTextRepairScorerFactory.DisposeAndReset();
     }
 
     /// <summary>
@@ -218,6 +229,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         // 上累加多份回调；同时静态字段持有旧 HandyControl 实例的引用会阻止旧 DLL 卸载。
         AppDomain.CurrentDomain.AssemblyResolve -= OnResolveEmbeddedAssembly;
         ResolvedEmbeddedAssemblies.Clear();
+        AFR.GlyphCore.TextRepair.GlyphCoreTextRepairScorerFactory.DisposeAndReset();
     }
 
     // ── 事件处理与延迟调度 ──

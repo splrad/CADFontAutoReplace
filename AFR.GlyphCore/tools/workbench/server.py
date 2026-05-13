@@ -1832,6 +1832,7 @@ class WorkbenchState:
             if result.returncode != 0:
                 raise RuntimeError((result.stdout + "\n" + result.stderr).strip())
             store.commit_training_dataset_build(training_records, promoted_ids, features_tmp_path)
+            store.features_path.touch()
             return {
                 "ok": True,
                 "message": result.stdout.strip(),
@@ -1910,8 +1911,10 @@ class WorkbenchState:
 
     def training_payload(self) -> dict:
         if not self.training_job:
-            return {"status": "idle", "lines": []}
-        return self.training_job.payload()
+            return {"status": "idle", "statusLabel": training_status_label("idle"), "lines": []}
+        payload = self.training_job.payload()
+        payload["statusLabel"] = training_status_label(str(payload.get("status") or "idle"))
+        return payload
 
     def report_payload(self) -> dict:
         model_dir = self.store.model_dir if self.store else self.model_root
@@ -1923,6 +1926,21 @@ class WorkbenchState:
         manifest = read_json_or_none(manifest_path)
         test_report = read_json_or_none(test_report_path)
         summary = read_json_or_none(summary_path)
+        model_version = (
+            manifest.get("modelVersion")
+            if isinstance(manifest, dict)
+            else None
+        ) or (
+            summary.get("modelVersion")
+            if isinstance(summary, dict)
+            else None
+        )
+        training_status = self.training_job.status if self.training_job else ("succeeded" if manifest_path.exists() else "idle")
+        training_result = {
+            "status": training_status,
+            "label": training_status_label(training_status),
+            "detail": training_result_detail(training_status, manifest, test_report),
+        }
         repo_root = find_repo_root(self.tool_root)
         release_command = (
             f'$env:AFR_GLYPHCORE_MODEL_PATH = "{onnx_path}"\n'
@@ -1937,6 +1955,9 @@ class WorkbenchState:
             "onnxPath": str(onnx_path),
             "manifestPath": str(manifest_path),
             "testReportPath": str(test_report_path),
+            "modelVersion": model_version,
+            "modelCreatedUtc": manifest.get("createdUtc") if isinstance(manifest, dict) else None,
+            "trainingResult": training_result,
             "manifest": manifest,
             "testReport": test_report,
             "summary": summary,
@@ -1947,6 +1968,29 @@ class WorkbenchState:
         if not self.store:
             raise ValueError("没有可用数据包。请先运行 AFRGLYPHCOREEXPORT 导出图纸数据。")
         return self.store
+
+
+def training_status_label(status: str) -> str:
+    labels = {
+        "idle": "未开始训练",
+        "running": "训练中",
+        "succeeded": "训练完成",
+        "failed": "训练失败",
+    }
+    return labels.get(status, status or "未知状态")
+
+
+def training_result_detail(status: str, manifest: object, test_report: object) -> str:
+    if status == "running":
+        return "训练进程正在本机运行，日志会持续刷新。"
+    if status == "failed":
+        return "训练进程失败，请查看训练日志中的错误。"
+    if not isinstance(manifest, dict):
+        return "尚未生成可用模型。"
+    summary = test_report.get("summary") if isinstance(test_report, dict) else {}
+    false_repair_rate = float((summary or {}).get("falseRepairRate") or 0)
+    recall = float((summary or {}).get("repairRecall") or 0)
+    return f"训练完成；验证误修率 {false_repair_rate * 100:.2f}%，修复召回率 {recall * 100:.2f}%。"
 
 
 class WorkbenchHandler(BaseHTTPRequestHandler):
@@ -1961,7 +2005,13 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 if index_path.exists():
                     self._send_file(index_path)
                 else:
-                    self._send_text(INDEX_HTML, "text/html; charset=utf-8")
+                    self._send_json(
+                        {
+                            "ok": False,
+                            "error": "React workbench assets are missing. Run npm run build in AFR.GlyphCore/tools/workbench/frontend or start through Start-GlyphCoreWorkbench.ps1.",
+                        },
+                        status=503,
+                    )
             elif path == "/api/health":
                 self._send_json({"ok": True})
             elif path == "/api/bootstrap":
@@ -2060,14 +2110,6 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
 
     def _send_error_json(self, exc: Exception) -> None:
         self._send_json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status=400)
-
-    def _send_text(self, value: str, content_type: str) -> None:
-        data = value.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
 
     def _send_static_asset(self, path: str) -> None:
         if not UI_DIST_DIR.exists():
@@ -2228,895 +2270,6 @@ def main() -> int:
     finally:
         server.server_close()
     return 0
-
-
-INDEX_HTML = r"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AFR 文枢训练工作台</title>
-  <style>
-    :root {
-      --bg: #f4f6f8;
-      --panel: #ffffff;
-      --line: #d9dee7;
-      --line-strong: #c7cfda;
-      --text: #182230;
-      --muted: #5f6c7b;
-      --subtle: #eef2f6;
-      --accent: #0b63ce;
-      --accent-soft: #e9f2ff;
-      --risk: #b42318;
-      --risk-soft: #fff1f3;
-      --warn: #b54708;
-      --warn-soft: #fff7ed;
-      --ok: #067647;
-      --ok-soft: #ecfdf3;
-      --shadow: 0 10px 24px rgba(16, 24, 40, .08);
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
-      font-size: 14px;
-      letter-spacing: 0;
-    }
-    header {
-      height: 64px;
-      display: flex;
-      align-items: center;
-      gap: 18px;
-      padding: 0 20px;
-      background: #111827;
-      color: white;
-      border-bottom: 1px solid #0f172a;
-    }
-    h1 { margin: 0; font-size: 18px; font-weight: 650; white-space: nowrap; }
-    h2 { margin: 0 0 12px; font-size: 16px; font-weight: 650; }
-    h3 { margin: 0 0 10px; font-size: 14px; font-weight: 650; }
-    .header-meta {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      color: #cbd5e1;
-    }
-    .tabs {
-      display: flex;
-      gap: 6px;
-      padding: 10px 12px 0;
-    }
-    .tab {
-      height: 36px;
-      border: 1px solid var(--line);
-      background: #fff;
-      color: var(--muted);
-      padding: 0 14px;
-      border-radius: 6px 6px 0 0;
-      cursor: pointer;
-    }
-    .tab.active {
-      color: var(--accent);
-      border-color: var(--line-strong);
-      border-bottom-color: #fff;
-      font-weight: 650;
-    }
-    main { height: calc(100vh - 110px); padding: 0 12px 12px; }
-    .view { display: none; height: 100%; }
-    .view.active { display: block; }
-    .grid { height: 100%; display: grid; gap: 10px; }
-    .grid.packages { grid-template-columns: 360px 1fr; }
-    .grid.review { grid-template-columns: 320px minmax(360px, 1fr) 430px; }
-    .grid.two { grid-template-columns: minmax(380px, .9fr) minmax(420px, 1.1fr); }
-    .panel {
-      min-height: 0;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      box-shadow: var(--shadow);
-      overflow: hidden;
-    }
-    .panel-header {
-      min-height: 48px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--line);
-      background: #fbfcfe;
-    }
-    .panel-body { padding: 12px; overflow: auto; height: calc(100% - 49px); }
-    .list { height: calc(100% - 50px); overflow: auto; }
-    .row {
-      padding: 10px 12px;
-      border-bottom: 1px solid #edf0f4;
-      cursor: pointer;
-    }
-    .row:hover { background: #f8fafc; }
-    .row.active { background: var(--accent-soft); }
-    .row.reviewed { border-left: 4px solid var(--ok); }
-    .row.problem:not(.reviewed) { border-left: 4px solid var(--warn); }
-    .row-top { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
-    .row-text { margin-top: 5px; line-height: 1.38; word-break: break-all; }
-    .cards { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); gap: 10px; margin-bottom: 12px; }
-    .card {
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: 12px;
-      background: #fff;
-    }
-    .card .value { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
-    .card .label { color: var(--muted); font-size: 12px; }
-    .kv { display: grid; grid-template-columns: 140px 1fr; gap: 8px 12px; }
-    .kv div:nth-child(odd) { color: var(--muted); }
-    .path { word-break: break-all; color: var(--muted); font-size: 12px; }
-    input, select, textarea, button {
-      font: inherit;
-      letter-spacing: 0;
-    }
-    input, select, textarea {
-      border: 1px solid var(--line);
-      border-radius: 5px;
-      padding: 8px 9px;
-      background: white;
-      color: var(--text);
-      min-width: 0;
-    }
-    textarea { min-height: 88px; resize: vertical; }
-    button {
-      border: 1px solid var(--line-strong);
-      border-radius: 5px;
-      padding: 8px 11px;
-      background: white;
-      color: var(--text);
-      cursor: pointer;
-    }
-    button.primary { background: var(--accent); border-color: var(--accent); color: white; font-weight: 650; }
-    button.ok { color: var(--ok); }
-    button.risk { color: var(--risk); }
-    button:disabled { opacity: .55; cursor: not-allowed; }
-    .stack { display: grid; gap: 10px; }
-    .form-row { display: grid; gap: 6px; margin-bottom: 11px; }
-    .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: 2px 8px;
-      font-size: 12px;
-      color: var(--muted);
-      background: #f8fafc;
-    }
-    .badge.warn { border-color: #fed7aa; color: var(--warn); background: var(--warn-soft); }
-    .badge.risk { border-color: #fecdd3; color: var(--risk); background: var(--risk-soft); }
-    .badge.ok { border-color: #bbf7d0; color: var(--ok); background: var(--ok-soft); }
-    .canvas-wrap { height: 38%; border-bottom: 1px solid var(--line); background: #f8fafc; }
-    svg { width: 100%; height: 100%; display: block; }
-    .detail { height: 62%; overflow: auto; padding: 12px; }
-    .candidate {
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: 10px;
-      margin-bottom: 8px;
-      background: white;
-      cursor: pointer;
-    }
-    .candidate.selected { border-color: var(--accent); background: var(--accent-soft); }
-    .candidate-head { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; margin-bottom: 5px; }
-    .candidate-text { word-break: break-all; line-height: 1.45; }
-    pre {
-      margin: 0;
-      padding: 12px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: #0f172a;
-      color: #e5e7eb;
-      overflow: auto;
-      min-height: 220px;
-      max-height: 460px;
-      white-space: pre-wrap;
-      word-break: break-word;
-      font-size: 12px;
-      line-height: 1.45;
-    }
-    .notice {
-      padding: 12px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #f8fafc;
-      color: var(--muted);
-      line-height: 1.55;
-    }
-    .error { color: var(--risk); }
-    @media (max-width: 1180px) {
-      main { height: auto; }
-      .grid, .grid.packages, .grid.review, .grid.two { grid-template-columns: 1fr; height: auto; }
-      .panel { min-height: 320px; }
-      .cards { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
-    }
-  </style>
-</head>
-<body>
-  <header>
-    <h1>AFR 文枢训练工作台</h1>
-    <div class="header-meta" id="headerMeta">正在加载...</div>
-  </header>
-  <nav class="tabs">
-    <button class="tab active" data-view="packages">数据包</button>
-    <button class="tab" data-view="review">标注审核</button>
-    <button class="tab" data-view="features">特征生成</button>
-    <button class="tab" data-view="training">模型训练</button>
-    <button class="tab" data-view="report">模型报告</button>
-  </nav>
-  <main>
-    <section id="view-packages" class="view active">
-      <div class="grid packages">
-        <div class="panel">
-          <div class="panel-header">
-            <strong>ExtractedCandidates</strong>
-            <button onclick="refresh()" style="margin-left:auto">刷新</button>
-          </div>
-          <div class="list" id="packageList"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-header"><strong>当前数据包</strong></div>
-          <div class="panel-body">
-            <div class="cards" id="packageCards"></div>
-            <div class="kv" id="packageDetails"></div>
-          </div>
-        </div>
-      </div>
-    </section>
-    <section id="view-review" class="view">
-      <div class="grid review">
-        <div class="panel">
-          <div class="panel-header">
-            <input id="search" placeholder="搜索文本 / 图层 / 样式" style="flex:1">
-            <select id="filter">
-              <option value="all">全部</option>
-              <option value="problem">疑似异常</option>
-              <option value="unreviewed">未标注</option>
-              <option value="reviewed">已标注</option>
-              <option value="risk">高风险</option>
-            </select>
-          </div>
-          <div class="list" id="recordList"></div>
-        </div>
-        <div class="panel">
-          <div class="canvas-wrap"><svg id="preview" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"></svg></div>
-          <div class="detail">
-            <div class="kv" id="recordDetails"></div>
-            <div class="badges" id="badges"></div>
-            <h3>Candidate 候选结果</h3>
-            <div id="candidateList"></div>
-          </div>
-        </div>
-        <div class="panel">
-          <div class="panel-header">
-            <strong>人工审核</strong>
-            <span id="reviewProgress" style="margin-left:auto;color:var(--muted)"></span>
-          </div>
-          <div class="panel-body">
-            <div class="form-row">
-              <label>标注动作</label>
-              <select id="labelAction">
-                <option value="repair">repair - 修复</option>
-                <option value="keep">keep - 保持原文</option>
-                <option value="unsafe">unsafe - 不安全</option>
-                <option value="unknown">unknown - 无法确认</option>
-                <option value="glyph-issue">glyph-issue - 字形/字体问题</option>
-              </select>
-            </div>
-            <div class="form-row">
-              <label>最终文本</label>
-              <textarea id="labelText" placeholder="repair 时填写正确文本；其它动作默认保留原文"></textarea>
-            </div>
-            <div class="form-row">
-              <label>审核人</label>
-              <input id="reviewer" value="developer">
-            </div>
-            <div class="form-row">
-              <label>备注</label>
-              <textarea id="note" style="min-height:70px" placeholder="记录判断依据或需复查原因"></textarea>
-            </div>
-            <div class="path" id="reviewedPath"></div>
-            <div class="actions" style="margin-top:12px">
-              <button class="ok" onclick="quickLabel('keep')">保持原文</button>
-              <button class="risk" onclick="quickLabel('unsafe')">标为不安全</button>
-              <button onclick="nextRecord()">下一条</button>
-              <button id="saveButton" class="primary" onclick="saveLabel()">保存标注</button>
-              <button onclick="goTraining()">去训练</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-    <section id="view-features" class="view">
-      <div class="grid two">
-        <div class="panel">
-          <div class="panel-header"><strong>Feature 生成</strong></div>
-          <div class="panel-body stack">
-            <div class="notice">Feature 表只能从 reviewed JSONL 生成。未审核的 Candidate 数据不会直接进入训练。也可以跳过本页，在“模型训练”中手动点击按钮一次完成 Feature 生成与训练。</div>
-            <button class="primary" onclick="buildFeatures()">生成 Feature 表</button>
-            <div class="kv" id="featureDetails"></div>
-            <div id="featureError" class="error"></div>
-          </div>
-        </div>
-        <div class="panel">
-          <div class="panel-header"><strong>标签分布</strong></div>
-          <div class="panel-body" id="featureStats"></div>
-        </div>
-      </div>
-    </section>
-    <section id="view-training" class="view">
-      <div class="grid two">
-        <div class="panel">
-          <div class="panel-header"><strong>LightGBM 训练</strong></div>
-          <div class="panel-body stack">
-            <div class="notice">训练只会在手动点击按钮后开始。点击后工作台会先生成或刷新 Feature 表，再在本机后台启动 LightGBM。</div>
-            <button class="primary" id="trainButton" onclick="startTraining()">生成 Feature 并训练模型</button>
-            <div id="trainingMessage" class="path"></div>
-            <div class="kv" id="trainingDetails"></div>
-            <div id="trainingError" class="error"></div>
-          </div>
-        </div>
-        <div class="panel">
-          <div class="panel-header">
-            <strong>训练日志</strong>
-            <button onclick="refresh()" style="margin-left:auto">刷新</button>
-          </div>
-          <div class="panel-body"><pre id="trainLog"></pre></div>
-        </div>
-      </div>
-    </section>
-    <section id="view-report" class="view">
-      <div class="grid two">
-        <div class="panel">
-          <div class="panel-header"><strong>模型验证摘要</strong></div>
-          <div class="panel-body">
-            <div class="cards" id="reportCards"></div>
-            <div class="kv" id="reportDetails"></div>
-          </div>
-        </div>
-        <div class="panel">
-          <div class="panel-header"><strong>Release 注入命令</strong></div>
-          <div class="panel-body stack">
-            <pre id="releaseCommand"></pre>
-            <button onclick="copyReleaseCommand()">复制命令</button>
-          </div>
-        </div>
-      </div>
-    </section>
-  </main>
-  <script>
-    let app = null;
-    let selectedId = null;
-    let selectedCandidate = null;
-    let activeView = 'packages';
-    let pollTimer = null;
-    let recordById = new Map();
-    let saveInFlight = false;
-
-    async function api(path, options) {
-      const res = await fetch(path, options || {});
-      const data = await res.json();
-      if (!res.ok || data.ok === false) throw new Error(data.error || '请求失败');
-      return data;
-    }
-
-    async function refresh() {
-      setApp(await api('/api/bootstrap'));
-      const records = getRecords();
-      if (!selectedId && records.length) selectedId = records[0].groupId;
-      render();
-      schedulePoll();
-    }
-
-    function setApp(nextApp) {
-      app = nextApp;
-      recordById = new Map(getRecords().map(record => [record.groupId, record]));
-    }
-
-    function getData() { return (app && app.data) || {records: [], reviewed: {}, summary: {}, paths: {}, manifest: {}}; }
-    function getRecords() { return getData().records || []; }
-    function getReviewed() { return getData().reviewed || {}; }
-    function currentRecord() { return recordById.get(selectedId) || getRecords()[0] || null; }
-
-    function render() {
-      renderHeader();
-      renderPackages();
-      renderReview();
-      renderFeatures();
-      renderTraining();
-      renderReport();
-    }
-
-    function renderHeader() {
-      const data = getData();
-      const manifest = data.manifest || {};
-      const drawing = manifest.drawing || {};
-      document.getElementById('headerMeta').textContent =
-        data.packageId ? `${data.packageId} · ${drawing.fileName || ''}` : '未选择数据包';
-    }
-
-    function renderPackages() {
-      const list = document.getElementById('packageList');
-      list.innerHTML = '';
-      const packages = (app && app.packages) || [];
-      if (!packages.length) {
-        list.innerHTML = '<div class="notice" style="margin:12px">未发现数据包。请在 AutoCAD Debug 中运行 AFRGLYPHCOREEXPORT。</div>';
-      }
-      for (const item of packages) {
-        const counts = item.counts || {};
-        const drawing = item.drawing || {};
-        const row = document.createElement('div');
-        row.className = `row ${item.active ? 'active' : ''}`;
-        row.onclick = () => selectPackage(item.id);
-        row.innerHTML = `
-          <div class="row-top"><span>${escapeHtml(drawing.fileName || item.id)}</span><span>${escapeHtml(String(counts.exported || 0))} 项</span></div>
-          <div class="row-text">${escapeHtml(item.id)}</div>
-          <div class="path">${escapeHtml(item.modifiedUtc || '')}</div>`;
-        list.appendChild(row);
-      }
-      const data = getData();
-      const s = data.summary || {};
-      document.getElementById('packageCards').innerHTML = card('DBText', s.total || 0) + card('疑似异常', s.problems || 0) + card('已审核', s.reviewed || 0) + card('高风险', s.highRisk || 0);
-      const manifest = data.manifest || {};
-      const drawing = manifest.drawing || {};
-      document.getElementById('packageDetails').innerHTML = kv([
-        ['数据包', data.packageId || ''],
-        ['DWG', drawing.fileName || ''],
-        ['DWG hash', drawing.sha256 || ''],
-        ['Candidate schema', manifest.candidateGroupSchema || ''],
-        ['Feature schema', manifest.featureSchema || ''],
-        ['Reviewed JSONL', (data.paths || {}).reviewed || ''],
-        ['Package path', (data.paths || {}).package || ''],
-      ]);
-    }
-
-    async function selectPackage(id) {
-      const data = await api('/api/package', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({package: id})
-      });
-      setApp(data.bootstrap);
-      selectedId = null;
-      selectedCandidate = null;
-      const records = getRecords();
-      if (records.length) selectedId = records[0].groupId;
-      render();
-    }
-
-    function filteredRecords() {
-      const q = (document.getElementById('search')?.value || '').trim().toLowerCase();
-      const filter = document.getElementById('filter')?.value || 'all';
-      return getRecords().filter(r => {
-        const ctx = r.context || {};
-        const text = [r.currentText, ctx.layer, ctx.textStyleName, ctx.ownerBlockName, ctx.handle].join(' ').toLowerCase();
-        if (q && !text.includes(q)) return false;
-        const reviewed = !!getReviewed()[r.groupId];
-        if (filter === 'problem' && !(r.problemGate && r.problemGate.hasProblem)) return false;
-        if (filter === 'reviewed' && !reviewed) return false;
-        if (filter === 'unreviewed' && reviewed) return false;
-        if (filter === 'risk' && !(r.risk && r.risk.highRisk)) return false;
-        return true;
-      });
-    }
-
-    function renderReview() {
-      renderReviewStatus();
-      renderRecordList();
-      renderPreview();
-      renderRecordDetails();
-    }
-
-    function renderReviewStatus() {
-      const data = getData();
-      const summary = data.summary || {};
-      document.getElementById('reviewProgress').textContent = `${summary.reviewed || 0}/${summary.total || 0}`;
-      document.getElementById('reviewedPath').textContent = `Reviewed: ${(data.paths || {}).reviewed || ''}`;
-    }
-
-    function renderRecordList() {
-      const list = document.getElementById('recordList');
-      list.innerHTML = '';
-      const fragment = document.createDocumentFragment();
-      for (const record of filteredRecords()) {
-        const ctx = record.context || {};
-        const reviewed = getReviewed()[record.groupId];
-        const div = document.createElement('div');
-        div.className = `row ${record.groupId === selectedId ? 'active' : ''} ${reviewed ? 'reviewed' : ''} ${record.problemGate?.hasProblem ? 'problem' : ''}`;
-        div.dataset.groupId = record.groupId;
-        div.onclick = () => selectRecord(record.groupId);
-        div.innerHTML = `
-          <div class="row-top"><span>${escapeHtml(ctx.handle || '')}</span><span>${escapeHtml(ctx.layer || '')}</span></div>
-          <div class="row-text">${escapeHtml(record.currentText || '')}</div>`;
-        fragment.appendChild(div);
-      }
-      list.appendChild(fragment);
-      updateRecordSelection();
-    }
-
-    function renderPreview() {
-      const svg = document.getElementById('preview');
-      svg.innerHTML = '';
-      const points = getRecords().map(r => ({r, p: r.geometry && r.geometry.position})).filter(x => x.p);
-      if (!points.length) return;
-      const xs = points.map(x => Number(x.p.x) || Number(x.p.X) || 0);
-      const ys = points.map(x => Number(x.p.y) || Number(x.p.Y) || 0);
-      const minX = Math.min(...xs), maxX = Math.max(...xs);
-      const minY = Math.min(...ys), maxY = Math.max(...ys);
-      const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
-      const fragment = document.createDocumentFragment();
-      for (const item of points) {
-        const px = Number(item.p.x) || Number(item.p.X) || 0;
-        const py = Number(item.p.y) || Number(item.p.Y) || 0;
-        const x = 5 + ((px - minX) / w) * 90;
-        const y = 95 - ((py - minY) / h) * 90;
-        const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        c.classList.add('preview-point');
-        c.dataset.groupId = item.r.groupId;
-        c.dataset.problem = item.r.problemGate?.hasProblem ? 'true' : 'false';
-        c.setAttribute('cx', x);
-        c.setAttribute('cy', y);
-        c.setAttribute('r', item.r.groupId === selectedId ? 1.8 : 0.9);
-        c.setAttribute('fill', item.r.groupId === selectedId ? '#0b63ce' : (item.r.problemGate?.hasProblem ? '#b54708' : '#98a2b3'));
-        c.style.cursor = 'pointer';
-        c.addEventListener('click', () => selectRecord(item.r.groupId));
-        fragment.appendChild(c);
-      }
-      svg.appendChild(fragment);
-      updatePreviewSelection();
-    }
-
-    function renderRecordDetails() {
-      const record = currentRecord();
-      const details = document.getElementById('recordDetails');
-      const badges = document.getElementById('badges');
-      const candidates = document.getElementById('candidateList');
-      details.innerHTML = '';
-      badges.innerHTML = '';
-      candidates.innerHTML = '';
-      if (!record) {
-        details.innerHTML = '<div></div><div class="notice">没有可审核记录。</div>';
-        return;
-      }
-      const ctx = record.context || {};
-      const reviewed = getReviewed()[record.groupId];
-      details.innerHTML = kv([
-        ['Handle', ctx.handle],
-        ['Layer', ctx.layer],
-        ['Block', ctx.ownerBlockName],
-        ['TextStyle', ctx.textStyleName],
-        ['Font', ctx.textStyleFileName],
-        ['BigFont', ctx.textStyleBigFontFileName],
-        ['门控原因', record.problemGate?.reason],
-        ['Label', reviewed ? reviewed.labelAction : '未标注'],
-      ]);
-      addBadge(record.problemGate?.hasProblem ? '疑似异常' : '未命中门控', record.problemGate?.hasProblem ? 'warn' : '');
-      if (record.risk?.highRisk) addBadge('高风险', 'risk');
-      if (ctx.isFromExternalReference) addBadge('Xref', 'risk');
-      if (record.risk?.candidateConflict) addBadge('候选冲突', 'risk');
-      if (record.risk?.hasNonRoundTrip) addBadge('不可逆候选', 'risk');
-      if (reviewed) addBadge('已审核', 'ok');
-
-      if (reviewed) {
-        document.getElementById('labelAction').value = reviewed.labelAction || 'repair';
-        document.getElementById('labelText').value = reviewed.labelText || '';
-        document.getElementById('note').value = reviewed.originDetail || '';
-        selectedCandidate = reviewed.selectedCandidateIndex;
-      } else {
-        document.getElementById('labelAction').value = 'repair';
-        document.getElementById('labelText').value = '';
-        document.getElementById('note').value = '';
-      }
-
-      (record.candidates || []).forEach((candidate, index) => {
-        const div = document.createElement('div');
-        div.className = `candidate ${selectedCandidate === index ? 'selected' : ''}`;
-        div.dataset.index = String(index);
-        div.onclick = () => selectCandidate(index);
-        const score = candidate.hasAiScore ? `score ${candidate.aiScore}` : 'no score';
-        div.innerHTML = `
-          <div class="candidate-head"><span>#${index} · ${escapeHtml(candidate.source || '')}</span><span>${escapeHtml(score)}</span></div>
-          <div class="candidate-text">${escapeHtml(candidate.text || '')}</div>
-          <div class="candidate-head"><span>${escapeHtml(candidate.reason || '')}</span><span>${candidate.isRoundTrip ? 'roundtrip' : 'non-roundtrip'}</span></div>`;
-        candidates.appendChild(div);
-      });
-      updateCandidateSelection();
-    }
-
-    function selectRecord(groupId) {
-      if (!groupId || groupId === selectedId) return;
-      selectedId = groupId;
-      selectedCandidate = null;
-      renderRecordDetails();
-      updateSelectionState();
-    }
-
-    function updateSelectionState() {
-      updateRecordSelection();
-      updatePreviewSelection();
-      updateCandidateSelection();
-    }
-
-    function updateRecordSelection() {
-      document.querySelectorAll('#recordList .row').forEach(row => {
-        row.classList.toggle('active', row.dataset.groupId === selectedId);
-      });
-    }
-
-    function updateReviewedRow(groupId) {
-      const rows = document.querySelectorAll('#recordList .row');
-      for (const row of rows) {
-        if (row.dataset.groupId === groupId) {
-          row.classList.toggle('reviewed', !!getReviewed()[groupId]);
-          return;
-        }
-      }
-    }
-
-    function updatePreviewSelection() {
-      document.querySelectorAll('#preview .preview-point').forEach(point => {
-        const active = point.dataset.groupId === selectedId;
-        point.setAttribute('r', active ? 1.8 : 0.9);
-        point.setAttribute('fill', active ? '#0b63ce' : (point.dataset.problem === 'true' ? '#b54708' : '#98a2b3'));
-      });
-    }
-
-    function updateCandidateSelection() {
-      document.querySelectorAll('#candidateList .candidate').forEach(item => {
-        item.classList.toggle('selected', Number(item.dataset.index) === selectedCandidate);
-      });
-    }
-
-    function selectCandidate(index) {
-      const record = currentRecord();
-      selectedCandidate = index;
-      const candidate = record && record.candidates ? record.candidates[index] : null;
-      if (candidate) {
-        document.getElementById('labelAction').value = candidate.isNoOp ? 'keep' : 'repair';
-        document.getElementById('labelText').value = candidate.text || '';
-      }
-      updateCandidateSelection();
-    }
-
-    function quickLabel(action) {
-      const record = currentRecord();
-      if (!record) return;
-      document.getElementById('labelAction').value = action;
-      document.getElementById('labelText').value = record.currentText || '';
-      saveLabel();
-    }
-
-    async function saveLabel() {
-      if (saveInFlight) return;
-      const record = currentRecord();
-      if (!record) return;
-      const savedId = record.groupId;
-      const saveButton = document.getElementById('saveButton');
-      saveInFlight = true;
-      if (saveButton) saveButton.disabled = true;
-      try {
-        const res = await fetch('/api/label', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            groupId: record.groupId,
-            labelAction: document.getElementById('labelAction').value,
-            candidateIndex: selectedCandidate,
-            labelText: document.getElementById('labelText').value,
-            reviewer: document.getElementById('reviewer').value,
-            note: document.getElementById('note').value
-          })
-        });
-        const data = await res.json();
-        if (!res.ok || data.ok === false) throw new Error(data.error || '请求失败');
-        const label = data.label || {};
-        const currentData = getData();
-        currentData.reviewed = currentData.reviewed || {};
-        if (label.record) currentData.reviewed[savedId] = label.record;
-        if (label.summary) currentData.summary = label.summary;
-        renderReviewStatus();
-        const filter = document.getElementById('filter')?.value || 'all';
-        if (filter === 'reviewed' || filter === 'unreviewed') {
-          renderRecordList();
-        } else {
-          updateReviewedRow(savedId);
-        }
-        nextRecord(false);
-      } finally {
-        saveInFlight = false;
-        if (saveButton) saveButton.disabled = false;
-      }
-    }
-
-    function nextRecord(fullRender) {
-      const visible = filteredRecords();
-      if (!visible.length) return;
-      const currentIndex = visible.findIndex(r => r.groupId === selectedId);
-      const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % visible.length : 0;
-      selectedId = visible[nextIndex].groupId;
-      selectedCandidate = null;
-      if (fullRender) {
-        render();
-      } else {
-        renderRecordDetails();
-        updateSelectionState();
-      }
-    }
-
-    async function buildFeatures() {
-      document.getElementById('featureError').textContent = '';
-      try {
-        const data = await api('/api/features', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
-        app.features = data.features;
-        renderFeatures();
-      } catch (err) {
-        document.getElementById('featureError').textContent = err.message;
-      }
-    }
-
-    function renderFeatures() {
-      const f = (app && app.features) || {};
-      document.getElementById('featureDetails').innerHTML = kv([
-        ['状态', f.exists ? '已生成' : '未生成'],
-        ['是否需刷新', f.stale ? '是' : '否'],
-        ['Reviewed 行数', f.reviewedRows || 0],
-        ['Feature CSV', f.path || ''],
-        ['行数', f.rows || 0],
-        ['样本组', f.groups || 0],
-        ['正样本行', f.positiveRows || 0],
-        ['Feature 列', f.featureColumns || 0],
-        ['更新时间', f.modifiedUtc || ''],
-      ]);
-      const labels = f.labelActions || {};
-      document.getElementById('featureStats').innerHTML = Object.keys(labels).length
-        ? Object.entries(labels).map(([k,v]) => `<div class="card"><div class="value">${escapeHtml(v)}</div><div class="label">${escapeHtml(k)}</div></div>`).join('')
-        : '<div class="notice">暂无 Feature 统计。</div>';
-    }
-
-    async function startTraining() {
-      document.getElementById('trainingError').textContent = '';
-      document.getElementById('trainingMessage').textContent = '';
-      try {
-        const data = await api('/api/train', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
-        if (data.features) app.features = data.features;
-        app.training = data.training;
-        document.getElementById('trainingMessage').textContent = data.autoBuiltFeatures
-          ? '已根据 reviewed JSONL 生成/刷新 Feature 表，并开始训练。'
-          : 'Feature 表已是最新，开始训练。';
-        renderTraining();
-        schedulePoll(true);
-      } catch (err) {
-        document.getElementById('trainingError').textContent = err.message;
-      }
-    }
-
-    function renderTraining() {
-      const t = (app && app.training) || {status: 'idle', lines: []};
-      const f = (app && app.features) || {};
-      document.getElementById('trainButton').disabled = t.status === 'running';
-      document.getElementById('trainingDetails').innerHTML = kv([
-        ['状态', translateStatus(t.status)],
-        ['Feature 状态', f.exists ? (f.stale ? '需刷新，点击训练时会刷新' : '已就绪') : '未生成，点击训练时会生成'],
-        ['Reviewed 行数', f.reviewedRows || 0],
-        ['开始时间', t.startedUtc || ''],
-        ['结束时间', t.endedUtc || ''],
-        ['返回码', t.returnCode === null || t.returnCode === undefined ? '' : t.returnCode],
-        ['日志文件', t.logPath || ''],
-      ]);
-      document.getElementById('trainLog').textContent = (t.lines || []).join('\n');
-    }
-
-    async function pollTraining() {
-      if (!app || !app.training || app.training.status !== 'running') return;
-      app.training = await api('/api/train');
-      if (app.training.status !== 'running') {
-        const latest = await api('/api/bootstrap');
-        setApp(latest);
-      }
-      renderTraining();
-      renderReport();
-      schedulePoll();
-    }
-
-    function schedulePoll(force) {
-      if (pollTimer) clearTimeout(pollTimer);
-      const running = app && app.training && app.training.status === 'running';
-      if (running || force) pollTimer = setTimeout(pollTraining, 1200);
-    }
-
-    function renderReport() {
-      const r = (app && app.report) || {};
-      const summary = r.testReport && r.testReport.summary ? r.testReport.summary : {};
-      const manifest = r.manifest || {};
-      document.getElementById('reportCards').innerHTML =
-        card('误修率', pct(summary.falseRepairRate)) +
-        card('正确修复', summary.correctRepairs || 0) +
-        card('漏修', summary.missedRepairs || 0) +
-        card('跳过', summary.skipped || 0);
-      document.getElementById('reportDetails').innerHTML = kv([
-        ['模型版本', manifest.modelVersion || ''],
-        ['Feature schema', manifest.featureSchemaVersion || ''],
-        ['训练数据 hash', manifest.trainingDataHash || ''],
-        ['最低置信度', manifest.minimumConfidence || ''],
-        ['最小分差', manifest.minimumScoreMargin || ''],
-        ['ONNX', r.onnxPath || ''],
-        ['Manifest', r.manifestPath || ''],
-        ['验证报告', r.testReportPath || ''],
-      ]);
-      document.getElementById('releaseCommand').textContent = r.releaseCommand || '';
-    }
-
-    function switchView(view) {
-      activeView = view;
-      document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.view === view));
-      document.querySelectorAll('.view').forEach(panel => panel.classList.toggle('active', panel.id === `view-${view}`));
-    }
-
-    function goTraining() {
-      switchView('training');
-      renderTraining();
-    }
-
-    function addBadge(text, cls) {
-      const span = document.createElement('span');
-      span.className = `badge ${cls || ''}`;
-      span.textContent = text;
-      document.getElementById('badges').appendChild(span);
-    }
-
-    function kv(rows) {
-      return rows.map(([k,v]) => `<div>${escapeHtml(k)}</div><div>${escapeHtml(v ?? '')}</div>`).join('');
-    }
-
-    function card(label, value) {
-      return `<div class="card"><div class="value">${escapeHtml(value)}</div><div class="label">${escapeHtml(label)}</div></div>`;
-    }
-
-    function translateStatus(status) {
-      return {idle: '未开始', running: '运行中', succeeded: '成功', failed: '失败'}[status] || status || '';
-    }
-
-    function pct(value) {
-      const n = Number(value);
-      if (!Number.isFinite(n)) return '0%';
-      return `${(n * 100).toFixed(3)}%`;
-    }
-
-    function copyReleaseCommand() {
-      const text = document.getElementById('releaseCommand').textContent;
-      if (navigator.clipboard && text) navigator.clipboard.writeText(text);
-    }
-
-    function escapeHtml(value) {
-      return String(value ?? '').replace(/[&<>"']/g, ch => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-      }[ch]));
-    }
-
-    document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => switchView(tab.dataset.view)));
-    document.getElementById('search').addEventListener('input', renderRecordList);
-    document.getElementById('filter').addEventListener('change', renderRecordList);
-    document.addEventListener('keydown', event => {
-      if (event.ctrlKey && event.key === 'Enter') saveLabel();
-      if (event.key === 'ArrowDown' && activeView === 'review') nextRecord();
-    });
-    refresh().catch(err => {
-      document.getElementById('headerMeta').textContent = err.message;
-    });
-  </script>
-</body>
-</html>
-"""
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

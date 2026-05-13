@@ -12,6 +12,7 @@ Raw DWG files remain local-only under `AFR.GlyphCore/raw-dwg`.
 
 ```text
 AFR.GlyphCore/tools/
+  Start-GlyphCoreWorkbench.cmd
   Start-GlyphCoreWorkbench.ps1
   Invoke-GlyphCoreTraining.ps1
   workbench/server.py
@@ -37,11 +38,30 @@ AFR.GlyphCore/models/
 
 Open the local workbench:
 
+From Windows Explorer, double-click or right-click-run the command wrapper:
+
+```cmd
+AFR.GlyphCore\tools\Start-GlyphCoreWorkbench.cmd
+```
+
+The `.cmd` wrapper starts PowerShell with a process-scoped execution-policy
+bypass, so it works on machines where direct right-click execution of `.ps1`
+files is blocked by policy. It does not change the user or machine execution
+policy.
+
+From an existing PowerShell session, you can still run the script directly:
+
 ```powershell
 .\AFR.GlyphCore\tools\Start-GlyphCoreWorkbench.ps1
 ```
 
 Open a specific extracted package:
+
+```cmd
+AFR.GlyphCore\tools\Start-GlyphCoreWorkbench.cmd -Package ".\AFR.GlyphCore\datasets\ExtractedCandidates\<package>"
+```
+
+or from PowerShell:
 
 ```powershell
 .\AFR.GlyphCore\tools\Start-GlyphCoreWorkbench.ps1 `
@@ -49,22 +69,47 @@ Open a specific extracted package:
 ```
 
 The workbench reads packages from `AFR.GlyphCore/datasets/ExtractedCandidates`,
-writes human-reviewed labels to `ReviewedLabels`, generates feature CSV files under
-`TrainingSets`, and trains the current model into
-`AFR.GlyphCore/models`. The browser UI is built from the React/Vite app
-under `workbench/frontend`; the Python server continues to be the local API and
-static-file host.
+writes human-reviewed labels to `ReviewedLabels`, generates feature CSV files
+under `TrainingSets`, and trains the current model into `AFR.GlyphCore/models`.
+The browser UI is the React/Vite app under `workbench/frontend`; the Python
+server is the local API and static-file host. The server no longer falls back to
+the old embedded HTML workbench, so `dist/index.html` must exist before opening
+the browser.
+
+`Start-GlyphCoreWorkbench.ps1` checks the frontend automatically:
+
+1. If `node_modules` is missing, it runs `npm install --cache .npm-cache`.
+2. If `src`, `index.html`, `package.json`, `package-lock.json`, `vite.config.ts`,
+   or `tsconfig.json` is newer than `dist/index.html`, it runs `npm run build`.
+3. It then starts `workbench/server.py` and opens the local browser URL.
+
+Pass `-NoInstallDeps` only when Python and frontend dependencies are already
+installed. With that switch, missing `node_modules` is treated as a startup
+error instead of installing packages.
 
 ## Manual table review workflow
 
-The browser workbench now uses a pure human table workflow:
+The browser workbench uses shadcn/ui code components on top of the light
+GlyphCore visual system: white canvas, black ink, pastel workflow blocks, pill
+actions, low-contrast hairlines, and minimal shadows. It is organized as:
+
+- `数据包`: package manager for exported DWG packages and reviewed/training counts.
+- `人工复核`: left filters, central virtualized text-cluster table, and right
+  batch confirmation panel.
+- `训练数据集`: searchable/sortable TanStack table of records already promoted
+  into the training dataset.
+- `特征生成`, `模型训练`, `模型报告`: local training pipeline status, logs,
+  validation metrics, model paths, and release command.
+
+The review flow is:
 
 1. Select a package.
 2. Open `人工复核`.
-3. Filter rows by `未审核`, `已审核`, or `全部`.
-4. Review the original text and rule candidate in the table.
-5. Edit the final action/text inline when needed.
-6. Check the rows to save and click `保存已选`.
+3. Filter by text, state, risk, layer, font, or encoding path.
+4. Review the original text and candidate text in the central table.
+5. Choose `原文`, `候选`, or `手动`, then adjust the final text if needed.
+6. Check rows and click `保存已选`, or apply the current table edits to all
+   visible rows.
 7. Generate features only after records have been written to `ReviewedLabels`.
 
 The table has only two review states: `未审核` and `已审核`. Already reviewed
@@ -94,6 +139,31 @@ Rebuild the browser assets after changing the React source:
 cd .\AFR.GlyphCore\tools\workbench\frontend
 npm install --cache .npm-cache
 npm run build
+```
+
+The frontend entrypoints are:
+
+```text
+workbench/frontend/src/types/api.ts       # shared API payload types
+workbench/frontend/src/api/workbench.ts   # typed API client
+workbench/frontend/components.json        # shadcn/ui configuration
+workbench/frontend/src/components/ui/     # shadcn/ui components and AFR wrappers
+workbench/frontend/src/store/             # Zustand state and actions
+```
+
+Add new UI primitives through shadcn-style files under
+`workbench/frontend/src/components/ui/`. Keep component filenames lowercase
+(`button.tsx`, `card.tsx`, `table.tsx`, etc.) because Windows treats
+case-only names as the same path.
+
+Validation after UI or API changes:
+
+```powershell
+cd .\AFR.GlyphCore\tools\workbench\frontend
+npm run build
+
+cd ..\
+..\.venv\Scripts\python.exe -m unittest test_review_clusters.py
 ```
 
 ## Command-Line Training

@@ -26,18 +26,18 @@ internal static class CommandNames
     public const string Unload = "AFRUNLOAD";
 
     // ── DEBUG 诊断命令（仅在 DEBUG 构建中由实现层注册）─────────────────
-    /// <summary>查看 MText / MLeader 格式与样式诊断。</summary>
-    public const string ViewMText = "AFRVIEW";
-    /// <summary>插入测试用 MText。</summary>
-    public const string InsertMText = "AFRINSERT";
-    /// <summary>转储当前 CAD 配置文件与注册表状态。</summary>
-    public const string DumpProfile = "AFRDUMPPROFILE";
-    /// <summary>列出候选 .aws 配置文件路径。</summary>
-    public const string ShowAwsPath = "AFRSHOWAWSPATH";
-    /// <summary>生成 PowerShell 反射探针脚本。</summary>
-    public const string GenProbeScripts = "AFRGENPROBESCRIPTS";
-    /// <summary>反射转储 CAD 对话框相关 API。</summary>
-    public const string DumpDialogApi = "AFRDUMPDIALOGAPI";
+    // /// <summary>查看 MText / MLeader 格式与样式诊断。</summary>
+    // public const string ViewMText = "AFRVIEW";
+    // /// <summary>插入测试用 MText。</summary>
+    // public const string InsertMText = "AFRINSERT";
+    // /// <summary>转储当前 CAD 配置文件与注册表状态。</summary>
+    // public const string DumpProfile = "AFRDUMPPROFILE";
+    // /// <summary>列出候选 .aws 配置文件路径。</summary>
+    // public const string ShowAwsPath = "AFRSHOWAWSPATH";
+    // /// <summary>生成 PowerShell 反射探针脚本。</summary>
+    // public const string GenProbeScripts = "AFRGENPROBESCRIPTS";
+    // /// <summary>反射转储 CAD 对话框相关 API。</summary>
+    // public const string DumpDialogApi = "AFRDUMPDIALOGAPI";
 #if DEBUG
     /// <summary>导出文枢 DBText AI 图纸训练数据包。</summary>
     public const string ExportGlyphCoreDataset = "AFRGLYPHCOREEXPORT";

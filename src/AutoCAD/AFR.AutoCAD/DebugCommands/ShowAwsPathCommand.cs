@@ -3,7 +3,7 @@ using AFR.Diagnostics;
 using Autodesk.AutoCAD.Runtime;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
-[assembly: CommandClass(typeof(AFR.DebugCommands.ShowAwsPathCommand))]
+// [assembly: CommandClass(typeof(AFR.DebugCommands.ShowAwsPathCommand))]
 
 namespace AFR.DebugCommands;
 
@@ -14,7 +14,7 @@ namespace AFR.DebugCommands;
 public static class ShowAwsPathCommand
 {
     /// <summary>命令入口。</summary>
-    [CommandMethod(AFR.Constants.CommandNames.ShowAwsPath)]
+    // [CommandMethod(AFR.Constants.CommandNames.ShowAwsPath)]
     public static void ShowAwsPath()
     {
         var ed = AcadApp.DocumentManager.MdiActiveDocument?.Editor;

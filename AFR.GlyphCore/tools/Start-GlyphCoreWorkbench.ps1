@@ -1,4 +1,5 @@
 #Requires -Version 5.1
+[CmdletBinding()]
 param(
     [string]$Package = "",
     [string]$Python = "",
@@ -89,6 +90,86 @@ function Ensure-PythonEnvironment([string]$ToolRoot, [string]$RequestedPython, [
     return $venvPython
 }
 
+function Test-FrontendBuildRequired([string]$FrontendRoot) {
+    $distIndex = Join-Path $FrontendRoot "dist\index.html"
+    if (-not (Test-Path -LiteralPath $distIndex)) {
+        return $true
+    }
+
+    $distTime = (Get-Item -LiteralPath $distIndex).LastWriteTimeUtc
+    $watchRoots = @(
+        (Join-Path $FrontendRoot "src"),
+        (Join-Path $FrontendRoot "index.html"),
+        (Join-Path $FrontendRoot "package.json"),
+        (Join-Path $FrontendRoot "package-lock.json"),
+        (Join-Path $FrontendRoot "vite.config.ts"),
+        (Join-Path $FrontendRoot "tsconfig.json")
+    )
+
+    foreach ($path in $watchRoots) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            continue
+        }
+        $item = Get-Item -LiteralPath $path
+        if ($item.PSIsContainer) {
+            $latest = Get-ChildItem -LiteralPath $path -Recurse -File |
+                Sort-Object LastWriteTimeUtc -Descending |
+                Select-Object -First 1
+            if ($latest -and $latest.LastWriteTimeUtc -gt $distTime) {
+                return $true
+            }
+        } elseif ($item.LastWriteTimeUtc -gt $distTime) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Ensure-FrontendAssets([string]$ToolRoot, [switch]$SkipInstall) {
+    $frontendRoot = Join-Path $ToolRoot "workbench\frontend"
+    if (-not (Test-Path -LiteralPath $frontendRoot)) {
+        throw "Workbench frontend was not found: $frontendRoot"
+    }
+
+    $npm = Get-Command npm -ErrorAction SilentlyContinue
+    if (-not $npm) {
+        throw "npm was not found. Install Node.js/npm so the React workbench can be built."
+    }
+
+    $nodeModules = Join-Path $frontendRoot "node_modules"
+    if (-not (Test-Path -LiteralPath $nodeModules)) {
+        if ($SkipInstall) {
+            throw "Frontend dependencies are missing and -NoInstallDeps was specified: $nodeModules"
+        }
+        Write-Warn "Frontend dependencies are missing. Installing npm packages. First run may take a few minutes."
+        Push-Location $frontendRoot
+        try {
+            & $npm.Source install --cache .npm-cache 2>&1 | ForEach-Object { Write-Host $_ }
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to install frontend dependencies. Exit code: $LASTEXITCODE"
+            }
+        }
+        finally {
+            Pop-Location
+        }
+    }
+
+    if (Test-FrontendBuildRequired $frontendRoot) {
+        Write-Info "Building React workbench assets..."
+        Push-Location $frontendRoot
+        try {
+            & $npm.Source run build 2>&1 | ForEach-Object { Write-Host $_ }
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to build React workbench assets. Exit code: $LASTEXITCODE"
+            }
+        }
+        finally {
+            Pop-Location
+        }
+    }
+}
+
 try {
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -104,6 +185,7 @@ try {
     }
 
     New-Item -ItemType Directory -Force -Path $DatasetRoot, $ModelRoot | Out-Null
+    Ensure-FrontendAssets $ToolRoot $NoInstallDeps
 
     $Python = Ensure-PythonEnvironment $ToolRoot $Python $NoInstallDeps
 
@@ -147,7 +229,11 @@ catch {
     Write-Host "1. Install Python 3.11+, or pass -Python with a full python.exe path." -ForegroundColor Yellow
     Write-Host "2. If dependency installation failed, retry with network access or run:" -ForegroundColor Yellow
     Write-Host "   .\AFR.GlyphCore\tools\.venv\Scripts\python.exe -m pip install -r .\AFR.GlyphCore\tools\requirements.txt" -ForegroundColor Yellow
-    Write-Host "3. If script execution policy blocks this file, run:" -ForegroundColor Yellow
+    Write-Host "3. If frontend dependency installation failed, run:" -ForegroundColor Yellow
+    Write-Host "   cd .\AFR.GlyphCore\tools\workbench\frontend; npm install --cache .npm-cache; npm run build" -ForegroundColor Yellow
+    Write-Host "4. If script execution policy blocks this file, run the command wrapper:" -ForegroundColor Yellow
+    Write-Host "   .\AFR.GlyphCore\tools\Start-GlyphCoreWorkbench.cmd" -ForegroundColor Yellow
+    Write-Host "   Or run PowerShell with a process-scoped bypass:" -ForegroundColor Yellow
     Write-Host "   powershell -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -ForegroundColor Yellow
     Write-Host ""
     Read-Host "Press Enter to close"

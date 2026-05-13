@@ -6,7 +6,7 @@ using System.Text;
 using Autodesk.AutoCAD.Runtime;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
-[assembly: CommandClass(typeof(AFR.DebugCommands.DumpDialogApiCommand))]
+// [assembly: CommandClass(typeof(AFR.DebugCommands.DumpDialogApiCommand))]
 
 namespace AFR.DebugCommands;
 
@@ -18,7 +18,7 @@ namespace AFR.DebugCommands;
 public static class DumpDialogApiCommand
 {
     /// <summary>命令入口。</summary>
-    [CommandMethod(AFR.Constants.CommandNames.DumpDialogApi)]
+    // [CommandMethod(AFR.Constants.CommandNames.DumpDialogApi)]
     public static void DumpDialogApi()
     {
         var ed = AcadApp.DocumentManager.MdiActiveDocument?.Editor;

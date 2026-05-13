@@ -42,12 +42,6 @@
     </EmbeddedResource>
   </ItemGroup>
 
-  <ItemGroup Condition="'$(GlyphCoreRuntimeDirectory)' != '' and Exists('$(GlyphCoreRuntimeDirectory)\Microsoft.ML.OnnxRuntime.dll')">
-    <EmbeddedResource Include="$(GlyphCoreRuntimeDirectory)\Microsoft.ML.OnnxRuntime.dll">
-      <LogicalName>Microsoft.ML.OnnxRuntime.dll</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
-
   <!-- 将第三方托管依赖和文枢 GlyphCore ONNX 原生运行库嵌入为程序集资源 -->
   <Target Name="EmbedPluginDependencies" AfterTargets="ResolveAssemblyReferences">
     <ItemGroup>

@@ -23,6 +23,8 @@ internal sealed class GlyphCoreTextRepairEmbeddedOnnxScorer : IGlyphCoreTextRepa
     public bool IsAvailable => true;
     public string Status => "onnx-loaded";
 
+    public void Dispose() => _session.Dispose();
+
     public bool TryScore(GlyphCoreTextRepairContext context, GlyphCoreTextRepairCandidate candidate, float[] features, out float score, out string error)
     {
         score = 0;
@@ -241,7 +243,7 @@ internal sealed class GlyphCoreTextRepairEmbeddedOnnxScorer : IGlyphCoreTextRepa
         string? assemblyDirectory = GetAssemblyDirectory(owner);
         return string.IsNullOrEmpty(assemblyDirectory)
             ? null
-            : Path.Combine(assemblyDirectory, "GlyphCoreRuntime", "TextRepair", "OnnxRuntime", cacheKey);
+            : Path.Combine(assemblyDirectory, "OnnxRuntime", cacheKey);
     }
 
     private static string? GetAssemblyDirectory(Assembly assembly)
