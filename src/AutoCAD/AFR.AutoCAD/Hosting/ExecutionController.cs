@@ -110,14 +110,6 @@ internal sealed class ExecutionController
                     doc.Editor.Regen();
                 }
 
-                // DBText 单行文字先过疑似异常门控，命中后才懒加载文枢模型。
-                DiagnosticLogger.BeginPhase("DBText文枢修复");
-                int repairedDbTextCount = GlyphCoreTextRepairService.Repair(doc.Database);
-                GlyphCoreTextRepairRunSummary dbTextRepairSummary = GlyphCoreTextRepairService.LastRunSummary;
-                DiagnosticLogger.EndPhase($"DBText实际修复: {repairedDbTextCount}个");
-                if (repairedDbTextCount > 0)
-                    doc.Editor.Regen();
-
                 // 第三阶段: 扫描 MText 内联字体，交叉比对 Hook 重定向记录
                 // 始终执行：即使文字样式表无缺失，MText 内联字体仍可能引用缺失字体
                 // 正向扫描法: 解析 MText.Contents 中的 \F/\f 格式代码，
@@ -157,6 +149,14 @@ internal sealed class ExecutionController
 
                 // TrueType→SHX 转换修改了 MText.Contents，需要 Regen 刷新
                 if (ttfFixRecords.Count > 0)
+                    doc.Editor.Regen();
+
+                // DBText 单行文字在样式表与 MText 内联字体处理完成后，再过疑似异常门控并懒加载文枢模型。
+                DiagnosticLogger.BeginPhase("DBText文枢修复");
+                int repairedDbTextCount = GlyphCoreTextRepairService.Repair(doc.Database);
+                GlyphCoreTextRepairRunSummary dbTextRepairSummary = GlyphCoreTextRepairService.LastRunSummary;
+                DiagnosticLogger.EndPhase($"DBText实际修复: {repairedDbTextCount}个");
+                if (repairedDbTextCount > 0)
                     doc.Editor.Regen();
 
                 // 统计汇总 — Regen 之后输出，确保统计信息是最后一行实质内容
