@@ -16,9 +16,6 @@ internal static class GlyphCoreTextRepairDecisionEngine
         if (context.IsFromExternalReference)
             return GlyphCoreTextRepairDecision.Unsafe("xref-or-dependent-block", summary);
 
-        if (GlyphCoreTextRepairFeatureExtractor.HasUnsafeText(context.CurrentText))
-            return GlyphCoreTextRepairDecision.Unsafe("unsafe-current-text", summary);
-
         if (!scorer.IsAvailable)
             return GlyphCoreTextRepairDecision.Skip("ai-model-unavailable", summary);
 
@@ -30,25 +27,14 @@ internal static class GlyphCoreTextRepairDecisionEngine
             return GlyphCoreTextRepairDecision.Skip("no-ai-score", summary);
 
         GlyphCoreTextRepairCandidate best = scored[0];
-        GlyphCoreTextRepairCandidate? second = scored.Count > 1 ? scored[1] : null;
-        float margin = best.AiScore - (second?.AiScore ?? 0);
 
         if (best.IsNoOp || string.Equals(best.Text, context.CurrentText, StringComparison.Ordinal))
             return GlyphCoreTextRepairDecision.Skip("ai-selected-current", summary);
 
-        if (!best.IsRoundTrip)
-            return GlyphCoreTextRepairDecision.Unsafe("candidate-not-roundtrip", summary);
+        if (string.IsNullOrEmpty(best.Text))
+            return GlyphCoreTextRepairDecision.Unsafe("candidate-empty", summary);
 
-        if (GlyphCoreTextRepairFeatureExtractor.HasUnsafeText(best.Text))
-            return GlyphCoreTextRepairDecision.Unsafe("unsafe-candidate-text", summary);
-
-        if (best.AiScore < GlyphCoreTextRepairConstants.MinimumConfidence)
-            return GlyphCoreTextRepairDecision.Skip("low-confidence", summary);
-
-        if (margin < GlyphCoreTextRepairConstants.MinimumScoreMargin)
-            return GlyphCoreTextRepairDecision.Skip("score-margin-too-small", summary);
-
-        return GlyphCoreTextRepairDecision.Repair(best.Text, "ai-high-confidence", summary);
+        return GlyphCoreTextRepairDecision.Repair(best.Text, "ai-selected-by-evidence", summary);
     }
 
     private static string BuildSummary(IReadOnlyList<GlyphCoreTextRepairCandidate> candidates, IGlyphCoreTextRepairScorer scorer)

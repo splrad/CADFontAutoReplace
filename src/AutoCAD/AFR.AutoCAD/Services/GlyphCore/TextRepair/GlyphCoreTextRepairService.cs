@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.Geometry;
 using AFR.GlyphCore.TextRepair;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
@@ -20,20 +21,54 @@ internal static class GlyphCoreTextRepairService
 
         GlyphCoreTextRepairAdvisor? advisor = null;
         GlyphCoreDrawingIdentity drawing = GlyphCoreDrawingIdentity.FromDatabase(db);
-
-        int scanned = 0;
-        int candidates = 0;
-        int aiScored = 0;
-        int problems = 0;
-        int repaired = 0;
-        int blocked = 0;
-        int errors = 0;
-        bool modelUnavailable = false;
-        string aiStatus = "not-invoked";
-        string lastDecisionReason = string.Empty;
-        string lastAiSummary = string.Empty;
+        var counters = new GlyphCoreTextRepairCounters();
+        var items = new List<GlyphCoreTextRepairItem>();
+        var repairedSeeds = new List<GlyphCoreTextRepairItem>();
 
         using var tr = db.TransactionManager.StartTransaction();
+        CollectItems(db, tr, drawing, items, counters);
+
+        List<GlyphCoreTextRepairItem> directEvidenceItems = items
+            .Where(item => item.Detection.HasProblem)
+            .ToList();
+        ProcessCandidateGroups(tr, directEvidenceItems, ref advisor, counters, repairedSeeds);
+
+        const int maxRipplePasses = 3;
+        for (int pass = 1; pass <= maxRipplePasses && repairedSeeds.Count > 0; pass++)
+        {
+            List<GlyphCoreTextRepairItem> rippleItems = BuildRippleItems(items, repairedSeeds);
+            if (rippleItems.Count == 0)
+                break;
+
+            int seedsBefore = repairedSeeds.Count;
+            ProcessCandidateGroups(tr, rippleItems, ref advisor, counters, repairedSeeds);
+            if (repairedSeeds.Count == seedsBefore)
+                break;
+        }
+
+        tr.Commit();
+        DiagnosticLogger.Log(
+            "DBText文枢",
+            $"扫描={counters.Scanned}, Hook强信号={counters.Problems}, 候选={counters.Candidates}, AI评分簇={counters.AiScored}, AI状态={counters.AiStatus}, " +
+            $"阻塞={counters.Blocked}, 实际修复={counters.Repaired}, 错误={counters.Errors}");
+        _lastRunSummary = new GlyphCoreTextRepairRunSummary(
+            counters.Scanned,
+            counters.Problems,
+            counters.Repaired,
+            counters.ModelUnavailable,
+            counters.AiStatus,
+            counters.LastDecisionReason,
+            counters.LastAiSummary);
+        return counters.Repaired;
+    }
+
+    private static void CollectItems(
+        Database db,
+        Transaction tr,
+        GlyphCoreDrawingIdentity drawing,
+        List<GlyphCoreTextRepairItem> items,
+        GlyphCoreTextRepairCounters counters)
+    {
         var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
 
         foreach (ObjectId blockId in blockTable)
@@ -47,7 +82,7 @@ internal static class GlyphCoreTextRepairService
             }
             catch
             {
-                errors++;
+                counters.Errors++;
                 continue;
             }
 
@@ -58,84 +93,214 @@ internal static class GlyphCoreTextRepairService
                     if (tr.GetObject(entityId, OpenMode.ForRead, false, true) is not DBText dbText)
                         continue;
 
-                    scanned++;
+                    counters.Scanned++;
                     string current = dbText.TextString ?? string.Empty;
                     if (string.IsNullOrEmpty(current))
                         continue;
 
                     GlyphCoreTextRepairContext context = GlyphCoreTextRepairEntitySnapshotBuilder.BuildContext(db, tr, dbText, drawing);
                     GlyphCoreTextRepairProblemDetection detection = GlyphCoreTextRepairProblemDetector.Detect(context);
-                    if (!detection.HasProblem)
-                        continue;
-
-                    problems++;
-                    IReadOnlyList<GlyphCoreTextRepairCandidate> generatedCandidates = detection.Candidates;
-                    candidates += generatedCandidates.Count;
-
-                    advisor ??= new GlyphCoreTextRepairAdvisor();
-                    aiStatus = advisor.AiStatus;
-                    if (!advisor.IsAiAvailable)
-                    {
-                        modelUnavailable = true;
-                        blocked++;
-                        DiagnosticLogger.Log(
-                            "DBText文枢",
-                            $"Handle={dbText.Handle}: 疑似异常={detection.Reason}, 文枢模型不可用, AI状态={advisor.AiStatus}");
-                        continue;
-                    }
-
-                    GlyphCoreTextRepairDecision decision = advisor.Evaluate(
+                    items.Add(new GlyphCoreTextRepairItem(
+                        entityId,
                         context,
-                        generatedCandidates);
-                    if (generatedCandidates.Any(c => c.HasAiScore))
-                        aiScored++;
-
-                    if (decision.IsBlocked)
-                    {
-                        blocked++;
-                        lastDecisionReason = decision.Reason;
-                        lastAiSummary = decision.AiSummary;
-                        DiagnosticLogger.Log(
-                            "DBText文枢",
-                            $"Handle={dbText.Handle}: 疑似异常={detection.Reason}, 安全阻断={decision.Reason}, AI={decision.AiSummary}");
-                        continue;
-                    }
-
-                    if (!decision.ShouldRepair)
-                    {
-                        blocked++;
-                        lastDecisionReason = decision.Reason;
-                        lastAiSummary = decision.AiSummary;
-                        DiagnosticLogger.Log(
-                            "DBText文枢",
-                            $"Handle={dbText.Handle}: 疑似异常={detection.Reason}, 未写回={decision.Reason}, AI={decision.AiSummary}");
-                        continue;
-                    }
-
-                    dbText.UpgradeOpen();
-                    dbText.TextString = decision.SelectedText;
-                    repaired++;
-                    lastDecisionReason = decision.Reason;
-                    lastAiSummary = decision.AiSummary;
-                    DiagnosticLogger.Log(
-                        "DBText文枢",
-                        $"Handle={dbText.Handle}: '{Trim(current)}' -> '{Trim(decision.SelectedText)}', 疑似异常={detection.Reason}, Reason={decision.Reason}, AI={decision.AiSummary}");
+                        detection,
+                        SafePosition(dbText),
+                        SafeHeight(dbText)));
                 }
                 catch (Exception ex)
                 {
-                    errors++;
+                    counters.Errors++;
                     DiagnosticLogger.Log("DBText文枢", $"对象处理失败: {ex.GetType().Name}: {ex.Message}");
                 }
             }
         }
+    }
 
-        tr.Commit();
-        DiagnosticLogger.Log(
-            "DBText文枢",
-            $"扫描={scanned}, 疑似异常={problems}, 候选={candidates}, AI评分={aiScored}, AI状态={aiStatus}, " +
-            $"阻塞={blocked}, 实际修复={repaired}, 错误={errors}");
-        _lastRunSummary = new GlyphCoreTextRepairRunSummary(scanned, problems, repaired, modelUnavailable, aiStatus, lastDecisionReason, lastAiSummary);
-        return repaired;
+    private static void ProcessCandidateGroups(
+        Transaction tr,
+        IReadOnlyList<GlyphCoreTextRepairItem> items,
+        ref GlyphCoreTextRepairAdvisor? advisor,
+        GlyphCoreTextRepairCounters counters,
+        List<GlyphCoreTextRepairItem> repairedSeeds)
+    {
+        if (items.Count == 0)
+            return;
+
+        advisor ??= new GlyphCoreTextRepairAdvisor();
+        counters.AiStatus = advisor.AiStatus;
+
+        foreach (IGrouping<string, GlyphCoreTextRepairItem> group in items.GroupBy(BuildDecisionClusterKey))
+        {
+            List<GlyphCoreTextRepairItem> groupedItems = group.ToList();
+            GlyphCoreTextRepairItem representative = groupedItems[0];
+            IReadOnlyList<GlyphCoreTextRepairCandidate> generatedCandidates = representative.Detection.Candidates;
+            counters.Problems += groupedItems.Count;
+            counters.Candidates += groupedItems.Sum(item => item.Detection.Candidates.Count);
+
+            if (!advisor.IsAiAvailable)
+            {
+                counters.ModelUnavailable = true;
+                counters.Blocked += groupedItems.Count;
+                MarkEvaluated(groupedItems);
+                DiagnosticLogger.Log(
+                    "DBText文枢",
+                    $"簇={groupedItems.Count}, Hook强信号={representative.Detection.Reason}, 文枢模型不可用, AI状态={advisor.AiStatus}");
+                continue;
+            }
+
+            GlyphCoreTextRepairDecision decision = advisor.Evaluate(
+                representative.Context,
+                generatedCandidates);
+            if (generatedCandidates.Any(c => c.HasAiScore))
+                counters.AiScored++;
+
+            counters.LastDecisionReason = decision.Reason;
+            counters.LastAiSummary = decision.AiSummary;
+
+            if (decision.IsBlocked || !decision.ShouldRepair)
+            {
+                counters.Blocked += groupedItems.Count;
+                MarkEvaluated(groupedItems);
+                string action = decision.IsBlocked ? "阻断" : "未写回";
+                DiagnosticLogger.Log(
+                    "DBText文枢",
+                    $"簇={groupedItems.Count}, Hook强信号={representative.Detection.Reason}, {action}={decision.Reason}, AI={decision.AiSummary}");
+                continue;
+            }
+
+            foreach (GlyphCoreTextRepairItem item in groupedItems)
+                ApplyDecision(tr, item, decision, counters, repairedSeeds);
+        }
+    }
+
+    private static List<GlyphCoreTextRepairItem> BuildRippleItems(
+        IReadOnlyList<GlyphCoreTextRepairItem> items,
+        IReadOnlyList<GlyphCoreTextRepairItem> repairedSeeds)
+    {
+        var rippleItems = new List<GlyphCoreTextRepairItem>();
+        foreach (GlyphCoreTextRepairItem item in items)
+        {
+            if (item.Evaluated || item.Repaired)
+                continue;
+
+            List<GlyphCoreTextRepairItem> nearbySeeds = repairedSeeds
+                .Where(seed => CanRipple(seed, item))
+                .ToList();
+            if (nearbySeeds.Count == 0)
+                continue;
+
+            GlyphCoreTextRepairItem nearestSeed = nearbySeeds
+                .OrderBy(seed => seed.Position.DistanceTo(item.Position))
+                .First();
+            GlyphCoreNativeDecodeEvidenceStore.ApplyRippleEvidence(
+                item.Context,
+                nearestSeed.Context,
+                nearbySeeds.Count);
+            item.Detection = GlyphCoreTextRepairProblemDetector.Detect(item.Context);
+            if (item.Detection.HasProblem)
+                rippleItems.Add(item);
+        }
+
+        return rippleItems;
+    }
+
+    private static void ApplyDecision(
+        Transaction tr,
+        GlyphCoreTextRepairItem item,
+        GlyphCoreTextRepairDecision decision,
+        GlyphCoreTextRepairCounters counters,
+        List<GlyphCoreTextRepairItem> repairedSeeds)
+    {
+        try
+        {
+            if (tr.GetObject(item.EntityId, OpenMode.ForRead, false, true) is not DBText dbText)
+            {
+                counters.Errors++;
+                item.Evaluated = true;
+                return;
+            }
+
+            string current = dbText.TextString ?? string.Empty;
+            dbText.UpgradeOpen();
+            dbText.TextString = decision.SelectedText;
+            item.Context.CurrentText = decision.SelectedText;
+            item.Repaired = true;
+            item.Evaluated = true;
+            item.RepairedText = decision.SelectedText;
+            counters.Repaired++;
+            repairedSeeds.Add(item);
+            DiagnosticLogger.Log(
+                "DBText文枢",
+                $"Handle={item.Context.Handle}: '{Trim(current)}' -> '{Trim(decision.SelectedText)}', Hook强信号={item.Detection.Reason}, Reason={decision.Reason}, AI={decision.AiSummary}");
+        }
+        catch (Exception ex)
+        {
+            item.Evaluated = true;
+            counters.Errors++;
+            counters.LastDecisionReason = "write-failed";
+            counters.LastAiSummary = ex.GetType().Name + ": " + ex.Message;
+            DiagnosticLogger.Log("DBText文枢", $"Handle={item.Context.Handle}: 写回失败: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static bool CanRipple(GlyphCoreTextRepairItem seed, GlyphCoreTextRepairItem target)
+    {
+        if (!seed.Repaired || !seed.Context.HasNativeDecodeEvidence || !seed.Context.NativeDecodeFamilyMismatch)
+            return false;
+
+        if (!SameTextContext(seed.Context, target.Context))
+            return false;
+
+        double height = Math.Max(Math.Max(seed.Height, target.Height), 1.0);
+        double maxDistance = height * 20.0;
+        return seed.Position.DistanceTo(target.Position) <= maxDistance;
+    }
+
+    private static bool SameTextContext(GlyphCoreTextRepairContext left, GlyphCoreTextRepairContext right)
+    {
+        return string.Equals(left.Layer, right.Layer, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(left.OwnerBlockName, right.OwnerBlockName, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(left.TextStyleName, right.TextStyleName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildDecisionClusterKey(GlyphCoreTextRepairItem item)
+    {
+        GlyphCoreTextRepairContext context = item.Context;
+        return string.Join("|", new[]
+        {
+            context.NativeDecodeSourceCodePageFamily,
+            context.NativeDecodeAppliedCodePageFamily,
+            context.NativeDecodeHookHitType,
+            context.NativeDecodeEvidenceScope,
+            context.Layer,
+            context.OwnerBlockName,
+            context.TextStyleName,
+            context.CurrentText,
+            BuildCandidateSignature(item.Detection.Candidates)
+        });
+    }
+
+    private static string BuildCandidateSignature(IReadOnlyList<GlyphCoreTextRepairCandidate> candidates)
+    {
+        return string.Join(";", candidates.Select(candidate => candidate.Source + "=" + candidate.Text));
+    }
+
+    private static void MarkEvaluated(IEnumerable<GlyphCoreTextRepairItem> items)
+    {
+        foreach (GlyphCoreTextRepairItem item in items)
+            item.Evaluated = true;
+    }
+
+    private static Point3d SafePosition(DBText dbText)
+    {
+        try { return dbText.Position; }
+        catch { return Point3d.Origin; }
+    }
+
+    private static double SafeHeight(DBText dbText)
+    {
+        try { return Math.Max(0, dbText.Height); }
+        catch { return 0; }
     }
 
     public static void WriteCommandLineSummary(GlyphCoreTextRepairRunSummary summary)
@@ -154,14 +319,14 @@ internal static class GlyphCoreTextRepairService
             message = $"[AFR 文枢] 当前 文枢 决策模型不可用（AI状态：{status}）；未执行 DBText 自动修复。";
         }
         else if (summary.Repaired > 0)
-            message = $"[AFR 文枢] 检测到疑似 DBText 乱码；文枢 已通过安全校验并成功修复 {summary.Repaired} 项。";
+            message = $"[AFR 文枢] 检测到 DBText native 解码强信号；文枢 已完成 AI 决策并成功修复 {summary.Repaired} 项。";
         else
         {
             string detail = BuildDecisionDetail(summary);
-            message = "[AFR 文枢] 检测到疑似 DBText 异常；当前候选结果未通过 文枢 安全校验，未执行写回" + detail + "。";
+            message = "[AFR 文枢] 检测到 DBText native 解码强信号；文枢 AI 选择不写回" + detail + "。";
         }
 
-        string summaryLine = $"扫描={summary.Scanned}, 疑似异常={summary.Problems}, 修复={summary.Repaired}, 未修复={summary.Unrepaired}";
+        string summaryLine = $"扫描={summary.Scanned}, Hook强信号={summary.Problems}, 修复={summary.Repaired}, 未修复={summary.Unrepaired}";
 
         DiagnosticLogger.Log("DBText文枢", summaryLine);
         DiagnosticLogger.Log("DBText文枢", message);
@@ -188,6 +353,47 @@ internal static class GlyphCoreTextRepairService
             : "AI：" + Trim(summary.AiSummary);
         string separator = !string.IsNullOrEmpty(reason) && !string.IsNullOrEmpty(ai) ? "；" : string.Empty;
         return "（" + reason + separator + ai + "）";
+    }
+
+    private sealed class GlyphCoreTextRepairCounters
+    {
+        public int Scanned;
+        public int Candidates;
+        public int AiScored;
+        public int Problems;
+        public int Repaired;
+        public int Blocked;
+        public int Errors;
+        public bool ModelUnavailable;
+        public string AiStatus = "not-invoked";
+        public string LastDecisionReason = string.Empty;
+        public string LastAiSummary = string.Empty;
+    }
+
+    private sealed class GlyphCoreTextRepairItem
+    {
+        public GlyphCoreTextRepairItem(
+            ObjectId entityId,
+            GlyphCoreTextRepairContext context,
+            GlyphCoreTextRepairProblemDetection detection,
+            Point3d position,
+            double height)
+        {
+            EntityId = entityId;
+            Context = context;
+            Detection = detection;
+            Position = position;
+            Height = height;
+        }
+
+        public ObjectId EntityId { get; }
+        public GlyphCoreTextRepairContext Context { get; }
+        public GlyphCoreTextRepairProblemDetection Detection { get; set; }
+        public Point3d Position { get; }
+        public double Height { get; }
+        public bool Evaluated { get; set; }
+        public bool Repaired { get; set; }
+        public string RepairedText { get; set; } = string.Empty;
     }
 }
 

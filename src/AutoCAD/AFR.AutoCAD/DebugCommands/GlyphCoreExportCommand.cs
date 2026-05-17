@@ -127,7 +127,7 @@ internal sealed class GlyphCoreExportCommand
     private static void WriteExportResult(Editor editor, GlyphCoreExportResult result)
     {
         editor.WriteMessage(
-            "\n[AFR 文枢] 已导出文枢 DBText 数据包：{0}\n扫描={1}, 导出={2}, 疑似异常={3}, 空文本跳过={4}, 错误={5}\n下一步：运行 AFR.GlyphCore\\tools\\Start-GlyphCoreWorkbench.cmd -Package \"{0}\"\n",
+            "\n[AFR 文枢] 已导出文枢 DBText 数据包：{0}\n扫描={1}, 导出={2}, Hook强信号={3}, 空文本跳过={4}, 错误={5}\n下一步：运行 AFR.GlyphCore\\tools\\Start-GlyphCoreWorkbench.cmd -Package \"{0}\"\n",
             result.PackageDirectory,
             result.Scanned,
             result.Exported,
@@ -393,7 +393,8 @@ internal sealed class GlyphCoreDatasetExporter
             problemGate = new
             {
                 hasProblem = detection.HasProblem,
-                reason = detection.Reason
+                reason = detection.Reason,
+                requiresNativeDecodeEvidence = true
             },
             risk = new
             {
@@ -451,7 +452,22 @@ internal sealed class GlyphCoreDatasetExporter
             textStyleBigFontFileName = context.TextStyleBigFontFileName,
             textStyleTypeFace = context.TextStyleTypeFace,
             currentText = context.CurrentText,
-            isFromExternalReference = context.IsFromExternalReference
+            isFromExternalReference = context.IsFromExternalReference,
+            nativeDecodeEvidence = new
+            {
+                hasEvidence = context.HasNativeDecodeEvidence,
+                familyMismatch = context.NativeDecodeFamilyMismatch,
+                scope = context.NativeDecodeEvidenceScope,
+                clusterKey = context.NativeDecodeEvidenceClusterKey,
+                sourceCodePageFamily = context.NativeDecodeSourceCodePageFamily,
+                appliedCodePageFamily = context.NativeDecodeAppliedCodePageFamily,
+                hookHitType = context.NativeDecodeHookHitType,
+                objectCorrelation = Math.Round(context.NativeDecodeObjectCorrelation, 6),
+                clusterCorrelation = Math.Round(context.NativeDecodeClusterCorrelation, 6),
+                hasLdFileFontEvidence = context.HasLdFileFontEvidence,
+                rippleSeedCount = context.RippleSeedCount,
+                rippleContextText = context.RippleContextText
+            }
         };
     }
 
@@ -511,6 +527,13 @@ internal sealed class GlyphCoreDatasetExporter
             isFromExternalReference = context.IsFromExternalReference,
             hasProblem = detection.HasProblem,
             problemReason = detection.Reason,
+            nativeDecodeEvidence = new
+            {
+                hasEvidence = context.HasNativeDecodeEvidence,
+                scope = context.NativeDecodeEvidenceScope,
+                sourceCodePageFamily = context.NativeDecodeSourceCodePageFamily,
+                appliedCodePageFamily = context.NativeDecodeAppliedCodePageFamily
+            },
             geometry = new
             {
                 position = geometry.Position,
@@ -533,6 +556,11 @@ internal sealed class GlyphCoreDatasetExporter
             "is_xref",
             "has_problem",
             "problem_reason",
+            "native_decode_evidence",
+            "native_decode_scope",
+            "native_decode_source_family",
+            "native_decode_applied_family",
+            "native_decode_hook_hit",
             "candidate_count",
             "current_text",
             "position_x",
@@ -561,6 +589,11 @@ internal sealed class GlyphCoreDatasetExporter
             context.IsFromExternalReference ? "1" : "0",
             detection.HasProblem ? "1" : "0",
             EscapeTsv(detection.Reason),
+            context.HasNativeDecodeEvidence ? "1" : "0",
+            EscapeTsv(context.NativeDecodeEvidenceScope),
+            EscapeTsv(context.NativeDecodeSourceCodePageFamily),
+            EscapeTsv(context.NativeDecodeAppliedCodePageFamily),
+            EscapeTsv(context.NativeDecodeHookHitType),
             candidates.Count.ToString(CultureInfo.InvariantCulture),
             EscapeTsv(context.CurrentText),
             Number(geometry.Position.X),

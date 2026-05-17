@@ -1,6 +1,6 @@
 {
-  "schema": "dbtext-ai-features-v1",
-  "featureCount": 56,
+  "schema": "dbtext-ai-features-v3",
+  "featureCount": 78,
   "inputName": "features",
   "description": "Feature order must match src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairFeatureExtractor.cs.",
   "features": [
@@ -59,6 +59,28 @@
     "candidate_loses_cjk",
     "candidate_becomes_ascii_from_nonascii",
     "candidate_mostly_symbols",
-    "current_mostly_symbols"
+    "current_mostly_symbols",
+    "candidate_len_ratio",
+    "current_cjk_count_norm",
+    "candidate_cjk_count_norm",
+    "font_is_gbk_family",
+    "font_is_big5_family",
+    "candidate_source_convergence",
+    "native_decode_evidence_present",
+    "native_decode_family_mismatch",
+    "native_decode_scope_object",
+    "native_decode_scope_cluster",
+    "native_decode_scope_ripple",
+    "native_decode_source_big5",
+    "native_decode_source_gbk",
+    "native_decode_applied_big5",
+    "native_decode_applied_gbk",
+    "native_decode_object_correlation",
+    "native_decode_cluster_correlation",
+    "native_decode_hook_hit_dbtext",
+    "ldfile_font_evidence",
+    "ripple_seed_count_norm",
+    "ripple_context_cjk_ratio",
+    "evidence_aligned_candidate"
   ]
 }

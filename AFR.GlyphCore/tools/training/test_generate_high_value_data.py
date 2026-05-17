@@ -149,7 +149,7 @@ class HighValueDataGeneratorTests(unittest.TestCase):
         ]
         return {
             "schema": "dbtext-ai-reviewed-label-v1",
-            "featureSchema": "dbtext-ai-features-v2",
+            "featureSchema": "dbtext-ai-features-v3",
             "exportId": "pkg1",
             "groupId": group_id,
             "drawing": {"fileName": "fixture.dwg"},

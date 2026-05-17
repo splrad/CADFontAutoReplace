@@ -6,7 +6,7 @@ namespace AFR.GlyphCore.TextRepair;
 
 internal static class GlyphCoreTextRepairFeatureExtractor
 {
-    public const int FeatureCount = 62;
+    public const int FeatureCount = 78;
 
     public static float[] Extract(GlyphCoreTextRepairContext context, GlyphCoreTextRepairCandidate candidate)
     {
@@ -81,6 +81,26 @@ internal static class GlyphCoreTextRepairFeatureExtractor
         features[59] = Bool(IsFontGbkFamily(context.TextStyleFileName, context.TextStyleBigFontFileName));
         features[60] = Bool(IsFontBig5Family(context.TextStyleFileName, context.TextStyleBigFontFileName));
         features[61] = CandidateSourceConvergence(candidate.Source);
+
+        // f62-f77: v3 Hook evidence features. Text appearance is still available to the model,
+        // but the strong trigger comes from native decode evidence recorded before DBText repair.
+        TextStats rippleStats = Analyze(context.RippleContextText);
+        features[62] = Bool(context.HasNativeDecodeEvidence);
+        features[63] = Bool(context.NativeDecodeFamilyMismatch);
+        features[64] = Bool(IsEvidenceScope(context, "object"));
+        features[65] = Bool(IsEvidenceScope(context, "cluster"));
+        features[66] = Bool(IsEvidenceScope(context, "ripple"));
+        features[67] = Bool(IsCodePageFamily(context.NativeDecodeSourceCodePageFamily, "big5"));
+        features[68] = Bool(IsCodePageFamily(context.NativeDecodeSourceCodePageFamily, "gbk"));
+        features[69] = Bool(IsCodePageFamily(context.NativeDecodeAppliedCodePageFamily, "big5"));
+        features[70] = Bool(IsCodePageFamily(context.NativeDecodeAppliedCodePageFamily, "gbk"));
+        features[71] = Clamp01(context.NativeDecodeObjectCorrelation);
+        features[72] = Clamp01(context.NativeDecodeClusterCorrelation);
+        features[73] = Bool(IsHookHitType(context.NativeDecodeHookHitType, "dbtext"));
+        features[74] = Bool(context.HasLdFileFontEvidence);
+        features[75] = Norm(context.RippleSeedCount, 8);
+        features[76] = rippleStats.CjkRatio;
+        features[77] = Bool(IsEvidenceAlignedCandidate(context, candidate.Source));
 
         return features;
     }
@@ -346,6 +366,40 @@ internal static class GlyphCoreTextRepairFeatureExtractor
         return Norm(1 + plusCount, 3);
     }
 
+    private static bool IsEvidenceAlignedCandidate(GlyphCoreTextRepairContext context, string candidateSource)
+    {
+        if (!context.NativeDecodeFamilyMismatch || string.IsNullOrEmpty(candidateSource))
+            return false;
+
+        string sourceFamily = context.NativeDecodeSourceCodePageFamily;
+        string appliedFamily = context.NativeDecodeAppliedCodePageFamily;
+        if (IsCodePageFamily(sourceFamily, "big5") && IsCodePageFamily(appliedFamily, "gbk"))
+            return ContainsToken(candidateSource, "gbk-carrier-to-big5");
+        if (IsCodePageFamily(sourceFamily, "gbk") && IsCodePageFamily(appliedFamily, "big5"))
+            return ContainsToken(candidateSource, "big5-carrier-to-gbk");
+        if (IsCodePageFamily(sourceFamily, "utf8") && IsCodePageFamily(appliedFamily, "gbk"))
+            return ContainsToken(candidateSource, "gbk-carrier-to-utf8");
+        if (IsCodePageFamily(sourceFamily, "gbk") && IsCodePageFamily(appliedFamily, "utf8"))
+            return ContainsToken(candidateSource, "utf8-carrier-to-gbk");
+
+        return false;
+    }
+
+    private static bool IsEvidenceScope(GlyphCoreTextRepairContext context, string scope)
+        => ContainsToken(context.NativeDecodeEvidenceScope, scope);
+
+    private static bool IsCodePageFamily(string value, string family)
+        => ContainsToken(value, family);
+
+    private static bool IsHookHitType(string value, string token)
+        => ContainsToken(value, token);
+
+    private static bool ContainsToken(string value, string token)
+    {
+        return !string.IsNullOrEmpty(value)
+               && value.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
     private static float ContainsSource(string source, string token)
     {
         return Bool(!string.IsNullOrEmpty(source)
@@ -353,6 +407,8 @@ internal static class GlyphCoreTextRepairFeatureExtractor
     }
 
     private static float Bool(bool value) => value ? 1f : 0f;
+
+    private static float Clamp01(float value) => Math.Max(0f, Math.Min(1f, value));
 
     private static float Norm(int value, int scale) => Math.Min(1f, value / (float)Math.Max(1, scale));
 

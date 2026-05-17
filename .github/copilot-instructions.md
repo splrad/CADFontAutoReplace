@@ -73,28 +73,32 @@ Debug 命令：
 
 ## 文枢 DBText 本地 AI 修复
 
-当前代码不再使用旧的原生 code page Hook 探针作为公开 DBText 修复路径。
+当前代码不再使用读取到的文字外观作为 DBText 乱码强信号；文枢介入必须来自 native DBCS/code page Hook evidence，或由已修复强证据种子产生的涟漪证据。
 
 当前实现：
 
 - 自动修复入口：`src/AutoCAD/AFR.AutoCAD/Services/GlyphCore/TextRepair/GlyphCoreTextRepairService.cs`。
 - AutoCAD 上下文快照：`GlyphCoreTextRepairEntitySnapshotBuilder`、`GlyphCoreDrawingIdentity`。
 - AutoCAD 侧 AI 适配：`src/AutoCAD/AFR.AutoCAD/Services/GlyphCore/TextRepair/GlyphCoreTextRepairAdvisor.cs`。
-- 疑似异常门控：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairProblemDetector.cs`。
+- native 解码 evidence 内存桥：`GlyphCoreNativeDecodeEvidenceStore`。
+- Hook 强信号门控：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairProblemDetector.cs`。
 - 候选生成：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairCandidateGenerator.cs`。
-- 特征提取：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairFeatureExtractor.cs`，schema 为 `dbtext-ai-features-v2`。
+- 特征提取：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairFeatureExtractor.cs`，schema 为 `dbtext-ai-features-v3`。
 - 本地评分：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairEmbeddedOnnxScorer.cs`，只从 DLL 嵌入资源加载 ONNX、模型清单和 ONNX Runtime 资源。
-- 自动决策：`GlyphCoreTextRepairDecisionEngine`，阈值来自 `GlyphCoreTextRepairConstants.MinimumConfidence = 0.92` 与 `MinimumScoreMargin = 0.18`。
+- 自动决策：`GlyphCoreTextRepairDecisionEngine`，不再使用固定低置信度或分差门槛替 AI 做最终判断。
 - 模型接口与数据结构：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairModels.cs`。
 
 自动写回规则：
 
-- 未检测到疑似 DBText 异常时保持静默，不加载文枢模型、不评分、不提示。
-- 检测到疑似异常后，候选来自原文、Big5/GBK/UTF-8 可逆转换、安全回退、已知乱码模式和保守候选。
+- 未检测到 native DBCS/code page Hook 强证据时保持静默，不加载文枢模型、不评分、不提示。
+- `GlyphCoreNativeDecodeEvidenceStore` 只消费内存证据，不伪造证据；没有 native Hook 生产者时 DBText 文枢不会触发。
+- `LdFileHook` 字体重定向记录只能作为辅助字体上下文，不得作为 DBText 错解码强信号。
+- 检测到强证据后，候选来自原文、Big5/GBK/UTF-8 carrier 转换，并按 Hook 证据方向优先排序。
+- 同类文本簇共享一次 AI 判断；涟漪机制只能从已修复且有 Hook 强证据的 DBText 向周边同层/同块/同样式对象扩散。
 - 文枢只使用嵌入 ONNX 模型评分，不再使用精确修复表或训练集查表短路。
-- 无模型、模型不匹配、低置信度、分差过小、AI 选择原文、候选冲突、不可逆转换、控制字符、异常 Unicode、Xref 或依赖块、高风险文本时，一律跳过写回。
+- 无模型、模型不匹配、AI 选择原文、Xref 或依赖块、写回失败时跳过写回。
 - 写回只修改通过 `ShouldRepair` 的 `DBText.TextString`；所有跳过、阻断和修复结果写入 DiagnosticLogger 与命令行摘要。
-- 保持“宁可不修，也不能误修”的保守原则；不要添加强制修复所有文本的逻辑。
+- 普通用户端不落盘候选、分数、证据或审计记录；Debug 导出命令可导出 evidence 字段用于离线训练。
 
 ## 文枢 DBText 数据与训练工具
 
@@ -156,7 +160,7 @@ AFR.GlyphCore/models/
 训练规则：
 
 - `Invoke-GlyphCoreTraining.ps1` 是命令行训练入口。
-- `training/build_features.py` 从 reviewed labels / training dataset 生成 `dbtext-ai-features-v2` CSV。
+- `training/build_features.py` 从 reviewed labels / training dataset 生成 `dbtext-ai-features-v3` CSV。
 - `training/train_lightgbm.py` 训练当前模型，输出 ONNX、模型清单和验证报告；不会生成 `AFR.GlyphCore.ExactRepairs.json`。
 - `workbench/test_review_clusters.py` 覆盖簇传播、已审核覆盖、training dataset 提升/删除/回流等核心行为。
 - 训练流程可以为效率做批量处理，但必须保留可审计的 reviewed JSONL、audit TSV 和训练摘要。
@@ -229,7 +233,7 @@ artifacts/ReleaseAssets/Fonts.zip
 
 - `dotnet build CADFontAutoReplace.slnx` 能通过，或明确说明本机缺失 SDK/AutoCAD 依赖。
 - 发布相关变更应验证 `tools/Publish-ReleaseAssets.ps1`。
-- DBText AI 变更应验证候选生成、特征稳定性、安全阻断、模型缺失跳过、schema 不匹配跳过、Release DLL 无旧用户端训练/标注入口。
+- DBText AI 变更应验证 native Hook evidence 门控、无强证据静默、候选生成、特征稳定性、模型缺失跳过、schema 不匹配跳过、Release DLL 无旧用户端训练/标注入口。
 - GlyphCore 导出命令变更应验证 Debug 构建包含 `AFRGLYPHCOREEXPORT` / `AFRGLYPHCOREEXPORTSELECT`，Release 构建不包含这两个命令。
 - Workbench 变更应运行 `AFR.GlyphCore/tools/workbench/test_review_clusters.py`，必要时通过真实浏览器验证 `Start-GlyphCoreWorkbench.ps1` 的可见交互路径。
 - 前端变更应在 `AFR.GlyphCore/tools/workbench/frontend` 运行 `npm run build` 并确认 `dist` 与 `server.py` 静态服务路径一致。

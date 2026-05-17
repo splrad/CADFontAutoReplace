@@ -71,6 +71,23 @@ FEATURE_NAMES = [
     "font_is_gbk_family",
     "font_is_big5_family",
     "candidate_source_convergence",
+    # v3 Hook evidence features
+    "native_decode_evidence_present",
+    "native_decode_family_mismatch",
+    "native_decode_scope_object",
+    "native_decode_scope_cluster",
+    "native_decode_scope_ripple",
+    "native_decode_source_big5",
+    "native_decode_source_gbk",
+    "native_decode_applied_big5",
+    "native_decode_applied_gbk",
+    "native_decode_object_correlation",
+    "native_decode_cluster_correlation",
+    "native_decode_hook_hit_dbtext",
+    "ldfile_font_evidence",
+    "ripple_seed_count_norm",
+    "ripple_context_cjk_ratio",
+    "evidence_aligned_candidate",
 ]
 
 
@@ -161,7 +178,66 @@ def extract_features(context: dict, candidate: Candidate) -> list[float]:
     features[59] = boolf(is_font_gbk_family(str(context.get("textStyleFileName") or ""), str(context.get("textStyleBigFontFileName") or "")))
     features[60] = boolf(is_font_big5_family(str(context.get("textStyleFileName") or ""), str(context.get("textStyleBigFontFileName") or "")))
     features[61] = candidate_source_convergence(candidate.source)
+    evidence = native_decode_evidence(context)
+    ripple_context = str(context.get("rippleContextText") or evidence.get("rippleContextText") or "")
+    ripple_stats = analyze(ripple_context)
+    features[62] = boolf(bool_value(context, evidence, "hasNativeDecodeEvidence", "hasEvidence"))
+    features[63] = boolf(bool_value(context, evidence, "nativeDecodeFamilyMismatch", "familyMismatch"))
+    features[64] = boolf(has_token(str_value(context, evidence, "nativeDecodeEvidenceScope", "scope"), "object"))
+    features[65] = boolf(has_token(str_value(context, evidence, "nativeDecodeEvidenceScope", "scope"), "cluster"))
+    features[66] = boolf(has_token(str_value(context, evidence, "nativeDecodeEvidenceScope", "scope"), "ripple"))
+    features[67] = boolf(has_token(str_value(context, evidence, "nativeDecodeSourceCodePageFamily", "sourceCodePageFamily"), "big5"))
+    features[68] = boolf(has_token(str_value(context, evidence, "nativeDecodeSourceCodePageFamily", "sourceCodePageFamily"), "gbk"))
+    features[69] = boolf(has_token(str_value(context, evidence, "nativeDecodeAppliedCodePageFamily", "appliedCodePageFamily"), "big5"))
+    features[70] = boolf(has_token(str_value(context, evidence, "nativeDecodeAppliedCodePageFamily", "appliedCodePageFamily"), "gbk"))
+    features[71] = clamp01(float_value(context, evidence, "nativeDecodeObjectCorrelation", "objectCorrelation"))
+    features[72] = clamp01(float_value(context, evidence, "nativeDecodeClusterCorrelation", "clusterCorrelation"))
+    features[73] = boolf(has_token(str_value(context, evidence, "nativeDecodeHookHitType", "hookHitType"), "dbtext"))
+    features[74] = boolf(bool_value(context, evidence, "hasLdFileFontEvidence", "hasLdFileFontEvidence"))
+    features[75] = norm(int(float_value(context, evidence, "rippleSeedCount", "rippleSeedCount")), 8)
+    features[76] = ripple_stats.cjk_ratio
+    features[77] = boolf(is_evidence_aligned_candidate(context, evidence, candidate.source))
     return features
+
+
+def native_decode_evidence(context: dict) -> dict:
+    value = context.get("nativeDecodeEvidence")
+    return value if isinstance(value, dict) else {}
+
+
+def bool_value(context: dict, evidence: dict, flat_key: str, nested_key: str) -> bool:
+    if flat_key in context:
+        return bool(context.get(flat_key))
+    return bool(evidence.get(nested_key))
+
+
+def str_value(context: dict, evidence: dict, flat_key: str, nested_key: str) -> str:
+    return str(context.get(flat_key) or evidence.get(nested_key) or "")
+
+
+def float_value(context: dict, evidence: dict, flat_key: str, nested_key: str) -> float:
+    value = context.get(flat_key)
+    if value is None:
+        value = evidence.get(nested_key)
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def is_evidence_aligned_candidate(context: dict, evidence: dict, source: str) -> bool:
+    source_family = str_value(context, evidence, "nativeDecodeSourceCodePageFamily", "sourceCodePageFamily")
+    applied_family = str_value(context, evidence, "nativeDecodeAppliedCodePageFamily", "appliedCodePageFamily")
+    lower_source = (source or "").lower()
+    if has_token(source_family, "big5") and has_token(applied_family, "gbk"):
+        return "gbk-carrier-to-big5" in lower_source
+    if has_token(source_family, "gbk") and has_token(applied_family, "big5"):
+        return "big5-carrier-to-gbk" in lower_source
+    if has_token(source_family, "utf8") and has_token(applied_family, "gbk"):
+        return "gbk-carrier-to-utf8" in lower_source
+    if has_token(source_family, "gbk") and has_token(applied_family, "utf8"):
+        return "utf8-carrier-to-gbk" in lower_source
+    return False
 
 
 def candidate_len_ratio(current_len: int, candidate_len: int) -> float:
@@ -333,8 +409,16 @@ def contains_source(source: str, token: str) -> float:
     return boolf(bool(source) and token.lower() in source.lower())
 
 
+def has_token(value: str, token: str) -> bool:
+    return bool(value) and token.lower() in value.lower()
+
+
 def boolf(value: bool) -> float:
     return 1.0 if value else 0.0
+
+
+def clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
 
 
 def norm(value: int, scale: int) -> float:

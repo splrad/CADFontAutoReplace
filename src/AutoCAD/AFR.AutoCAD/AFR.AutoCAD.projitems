@@ -28,6 +28,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetector.cs" Link="Services\FontDetector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontReplacer.cs" Link="Services\FontReplacer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreDrawingIdentity.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreDrawingIdentity.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreNativeDecodeEvidenceStore.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreNativeDecodeEvidenceStore.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreTextRepairEntitySnapshotBuilder.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreTextRepairEntitySnapshotBuilder.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreTextRepairAdvisor.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreTextRepairAdvisor.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreTextRepairService.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreTextRepairService.cs" />

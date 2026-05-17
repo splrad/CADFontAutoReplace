@@ -201,7 +201,7 @@ class DatasetStore:
 
         return {
             "schema": REVIEWED_SCHEMA,
-            "featureSchema": first.get("feature_schema") or "dbtext-ai-features-v1",
+            "featureSchema": first.get("feature_schema") or "dbtext-ai-features-v3",
             "groupId": group_id,
             "currentText": first.get("current_text") or source_record.get("currentText") or "",
             "labelAction": first.get("label_action") or "repair",
@@ -1294,9 +1294,7 @@ class DatasetStore:
 
         if self._looks_like_safe_number_or_code(current_text):
             return True
-        if (record.get("problemGate") or {}).get("hasProblem"):
-            return False
-        if self._contains_mojibake_marker(current_text):
+        if self._has_native_decode_evidence(record):
             return False
         if self._has_strong_repair_candidate(record):
             return False
@@ -1317,6 +1315,16 @@ class DatasetStore:
     @staticmethod
     def _contains_mojibake_marker(text: str) -> bool:
         return any(char in MOJIBAKE_MARKER_CHARS for char in text)
+
+    @staticmethod
+    def _has_native_decode_evidence(record: dict) -> bool:
+        context = record.get("context") or {}
+        evidence = context.get("nativeDecodeEvidence") or {}
+        return (
+            bool((record.get("problemGate") or {}).get("hasProblem"))
+            or bool(context.get("hasNativeDecodeEvidence"))
+            or bool(evidence.get("hasEvidence"))
+        )
 
     @staticmethod
     def _looks_like_safe_number_or_code(text: str) -> bool:
@@ -1354,6 +1362,9 @@ class DatasetStore:
         return has_cjk or has_alnum
 
     def _has_strong_repair_candidate(self, record: dict) -> bool:
+        if not self._has_native_decode_evidence(record):
+            return False
+
         current_text = str(record.get("currentText") or "")
         candidate = self._recommended_candidate(record)
         if not candidate or self._is_noop_candidate(candidate):

@@ -22,14 +22,21 @@ class Candidate:
         self.is_roundtrip = self.is_roundtrip and is_roundtrip
 
 
-def build_candidates(current_text: str) -> list[Candidate]:
+def build_candidates(current_text: str, context: dict | None = None) -> list[Candidate]:
     candidates: list[Candidate] = []
     _add_candidate(candidates, current_text, "current-noop", "current text", True)
-    _try_add_conversion(candidates, current_text, "cp950", "gbk", "big5-carrier-to-gbk")
-    _try_add_conversion(candidates, current_text, "gbk", "cp950", "gbk-carrier-to-big5")
-    _try_add_conversion(candidates, current_text, "utf-8", "gbk", "utf8-carrier-to-gbk")
-    _try_add_conversion(candidates, current_text, "gbk", "utf-8", "gbk-carrier-to-utf8")
-    return sorted(candidates, key=lambda c: (1 if c.is_noop else 0, c.text))
+    preferred_source = _evidence_preferred_source(context or {})
+    _add_preferred_conversion(candidates, current_text, preferred_source)
+
+    if preferred_source != "big5-carrier-to-gbk":
+        _try_add_conversion(candidates, current_text, "cp950", "gbk", "big5-carrier-to-gbk")
+    if preferred_source != "gbk-carrier-to-big5":
+        _try_add_conversion(candidates, current_text, "gbk", "cp950", "gbk-carrier-to-big5")
+    if preferred_source != "utf8-carrier-to-gbk":
+        _try_add_conversion(candidates, current_text, "utf-8", "gbk", "utf8-carrier-to-gbk")
+    if preferred_source != "gbk-carrier-to-utf8":
+        _try_add_conversion(candidates, current_text, "gbk", "utf-8", "gbk-carrier-to-utf8")
+    return sorted(candidates, key=lambda c: (1 if c.is_noop else 0, _source_priority(c.source, preferred_source), c.text))
 
 
 def make_corrupted_current(correct_text: str, carrier_encoding: str, target_encoding: str) -> str | None:
@@ -70,6 +77,38 @@ def _try_add_conversion(
         return
 
     _add_candidate(candidates, decoded, source, reason, roundtrip)
+
+
+def _add_preferred_conversion(candidates: list[Candidate], current_text: str, preferred_source: str) -> None:
+    if preferred_source == "big5-carrier-to-gbk":
+        _try_add_conversion(candidates, current_text, "cp950", "gbk", preferred_source)
+    elif preferred_source == "gbk-carrier-to-big5":
+        _try_add_conversion(candidates, current_text, "gbk", "cp950", preferred_source)
+    elif preferred_source == "utf8-carrier-to-gbk":
+        _try_add_conversion(candidates, current_text, "utf-8", "gbk", preferred_source)
+    elif preferred_source == "gbk-carrier-to-utf8":
+        _try_add_conversion(candidates, current_text, "gbk", "utf-8", preferred_source)
+
+
+def _evidence_preferred_source(context: dict) -> str:
+    evidence = context.get("nativeDecodeEvidence") if isinstance(context.get("nativeDecodeEvidence"), dict) else {}
+    source = str(context.get("nativeDecodeSourceCodePageFamily") or evidence.get("sourceCodePageFamily") or "").lower()
+    applied = str(context.get("nativeDecodeAppliedCodePageFamily") or evidence.get("appliedCodePageFamily") or "").lower()
+    if "big5" in source and "gbk" in applied:
+        return "gbk-carrier-to-big5"
+    if "gbk" in source and "big5" in applied:
+        return "big5-carrier-to-gbk"
+    if "utf8" in source and "gbk" in applied:
+        return "gbk-carrier-to-utf8"
+    if "gbk" in source and "utf8" in applied:
+        return "utf8-carrier-to-gbk"
+    return ""
+
+
+def _source_priority(source: str, preferred_source: str) -> int:
+    if not preferred_source:
+        return 1
+    return 0 if preferred_source.lower() in (source or "").lower() else 1
 
 
 def _add_candidate(

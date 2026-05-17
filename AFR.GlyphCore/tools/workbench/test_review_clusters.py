@@ -259,7 +259,7 @@ class ReviewClusterTests(unittest.TestCase):
             records.append(
                 {
                     "schema": "dbtext-ai-candidates-v1",
-                    "featureSchema": "dbtext-ai-features-v1",
+                    "featureSchema": "dbtext-ai-features-v3",
                     "groupId": f"r{index:04d}",
                     "currentText": "重复文本",
                     "context": {
@@ -303,7 +303,7 @@ class ReviewClusterTests(unittest.TestCase):
             records.append(
                 {
                     "schema": "dbtext-ai-candidates-v1",
-                    "featureSchema": "dbtext-ai-features-v1",
+                    "featureSchema": "dbtext-ai-features-v3",
                     "groupId": f"{prefix}{index:04d}",
                     "currentText": text,
                     "context": {
@@ -357,7 +357,7 @@ class ReviewClusterTests(unittest.TestCase):
             records.append(
                 {
                     "schema": "dbtext-ai-candidates-v1",
-                    "featureSchema": "dbtext-ai-features-v1",
+                    "featureSchema": "dbtext-ai-features-v3",
                     "groupId": f"{prefix}{index:04d}",
                     "currentText": current,
                     "context": {
@@ -368,6 +368,16 @@ class ReviewClusterTests(unittest.TestCase):
                         "textStyleBigFontFileName": "tssdchn.shx",
                         "ownerBlockName": "*Model_Space",
                         "isFromExternalReference": False,
+                        "nativeDecodeEvidence": {
+                            "hasEvidence": True,
+                            "familyMismatch": True,
+                            "scope": "object",
+                            "sourceCodePageFamily": "gbk",
+                            "appliedCodePageFamily": "big5",
+                            "hookHitType": "dbtext-deserialize",
+                            "objectCorrelation": 1.0,
+                            "clusterCorrelation": 0.0,
+                        },
                     },
                     "risk": {
                         "highRisk": False,
@@ -377,8 +387,8 @@ class ReviewClusterTests(unittest.TestCase):
                         "candidateUnsafe": False,
                     },
                     "problemGate": {
-                        "hasProblem": False,
-                        "reason": "no-suspicious-dbtext",
+                        "hasProblem": True,
+                        "reason": "native-dbcs-codepage-mismatch:object:gbk-as-big5",
                     },
                     "candidates": [
                         {

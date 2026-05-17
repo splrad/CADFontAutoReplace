@@ -39,11 +39,20 @@ METADATA_COLUMNS = [
     "font",
     "bigfont",
     "is_from_xref",
+    "native_decode_evidence",
+    "native_decode_scope",
+    "native_decode_source_family",
+    "native_decode_applied_family",
+    "native_decode_hook_hit",
+    "native_decode_object_correlation",
+    "native_decode_cluster_correlation",
+    "ldfile_font_evidence",
+    "ripple_seed_count",
 ]
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build dbtext-ai-features-v1 CSV from reviewed labels.")
+    parser = argparse.ArgumentParser(description="Build DBText GlyphCore feature CSV from reviewed labels.")
     parser.add_argument("--input", required=True, help="Reviewed candidate-group JSONL path.")
     parser.add_argument("--output", required=True, help="Output feature CSV path.")
     args = parser.parse_args()
@@ -72,6 +81,7 @@ def build_rows(input_path: Path):
             validate_record(record, line_number)
             context = dict(record.get("context") or {})
             context["currentText"] = record.get("currentText") or context.get("currentText") or ""
+            evidence = context.get("nativeDecodeEvidence") if isinstance(context.get("nativeDecodeEvidence"), dict) else {}
 
             for index, candidate_row in enumerate(record["candidates"]):
                 candidate = Candidate(
@@ -107,6 +117,15 @@ def build_rows(input_path: Path):
                     "font": context.get("textStyleFileName") or "",
                     "bigfont": context.get("textStyleBigFontFileName") or "",
                     "is_from_xref": 1 if bool(context.get("isFromExternalReference", False)) else 0,
+                    "native_decode_evidence": 1 if bool_value(context, evidence, "hasNativeDecodeEvidence", "hasEvidence") else 0,
+                    "native_decode_scope": str_value(context, evidence, "nativeDecodeEvidenceScope", "scope"),
+                    "native_decode_source_family": str_value(context, evidence, "nativeDecodeSourceCodePageFamily", "sourceCodePageFamily"),
+                    "native_decode_applied_family": str_value(context, evidence, "nativeDecodeAppliedCodePageFamily", "appliedCodePageFamily"),
+                    "native_decode_hook_hit": str_value(context, evidence, "nativeDecodeHookHitType", "hookHitType"),
+                    "native_decode_object_correlation": float_value(context, evidence, "nativeDecodeObjectCorrelation", "objectCorrelation"),
+                    "native_decode_cluster_correlation": float_value(context, evidence, "nativeDecodeClusterCorrelation", "clusterCorrelation"),
+                    "ldfile_font_evidence": 1 if bool_value(context, evidence, "hasLdFileFontEvidence", "hasLdFileFontEvidence") else 0,
+                    "ripple_seed_count": int(float_value(context, evidence, "rippleSeedCount", "rippleSeedCount")),
                 }
                 for feature_index, feature_value in enumerate(features):
                     row[f"f{feature_index:02d}_{FEATURE_NAMES[feature_index]}"] = float(feature_value)
@@ -120,6 +139,26 @@ def validate_record(record: dict, line_number: int) -> None:
         raise ValueError(f"line {line_number}: unsupported labelAction")
     if not isinstance(record.get("candidates"), list) or not record["candidates"]:
         raise ValueError(f"line {line_number}: candidates must be a non-empty array")
+
+
+def bool_value(context: dict, evidence: dict, flat_key: str, nested_key: str) -> bool:
+    if flat_key in context:
+        return bool(context.get(flat_key))
+    return bool(evidence.get(nested_key))
+
+
+def str_value(context: dict, evidence: dict, flat_key: str, nested_key: str) -> str:
+    return str(context.get(flat_key) or evidence.get(nested_key) or "")
+
+
+def float_value(context: dict, evidence: dict, flat_key: str, nested_key: str) -> float:
+    value = context.get(flat_key)
+    if value is None:
+        value = evidence.get(nested_key)
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 if __name__ == "__main__":

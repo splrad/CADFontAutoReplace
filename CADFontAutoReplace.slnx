@@ -49,7 +49,7 @@
   <Folder Name="/AFR GlyphCore/Schemas/">
     <File Path="AFR.GlyphCore/tools/schemas/candidate_group_v1.schema.json" />
     <File Path="AFR.GlyphCore/tools/schemas/export_package_v1.schema.json" />
-    <File Path="AFR.GlyphCore/tools/schemas/feature_schema_v1.json" />
+    <File Path="AFR.GlyphCore/tools/schemas/feature_schema_v3.json" />
     <File Path="AFR.GlyphCore/tools/schemas/reviewed_label_v1.schema.json" />
   </Folder>
 

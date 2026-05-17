@@ -175,6 +175,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         UnregisterEvents();
         AppDomain.CurrentDomain.AssemblyResolve -= OnResolveEmbeddedAssembly;
         ResolvedEmbeddedAssemblies.Clear();
+        AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDecodeEvidenceStore.Clear();
         AFR.GlyphCore.TextRepair.GlyphCoreTextRepairScorerFactory.DisposeAndReset();
     }
 
@@ -212,6 +213,7 @@ public abstract class PluginEntryBase : IExtensionApplication
 
         PlatformManager.FontHook.Uninstall();
         DocumentContextManager.Instance.Clear();
+        AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDecodeEvidenceStore.Clear();
         DiagnosticLogger.Disable();
 
         // 注销嵌入程序集解析回调并释放缓存的嵌入程序集。
@@ -402,7 +404,10 @@ public abstract class PluginEntryBase : IExtensionApplication
         try
         {
             if (e.Document != null)
+            {
                 DocumentContextManager.Instance.Remove(e.Document);
+                AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDecodeEvidenceStore.Clear();
+            }
         }
         catch { }
     }

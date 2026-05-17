@@ -151,7 +151,7 @@ internal sealed class ExecutionController
                 if (ttfFixRecords.Count > 0)
                     doc.Editor.Regen();
 
-                // DBText 单行文字在样式表与 MText 内联字体处理完成后，再过疑似异常门控并懒加载文枢模型。
+                // DBText 单行文字在样式表与 MText 内联字体处理完成后，再读取 native 解码证据并懒加载文枢模型。
                 DiagnosticLogger.BeginPhase("DBText文枢修复");
                 int repairedDbTextCount = GlyphCoreTextRepairService.Repair(doc.Database);
                 GlyphCoreTextRepairRunSummary dbTextRepairSummary = GlyphCoreTextRepairService.LastRunSummary;

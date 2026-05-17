@@ -4,14 +4,12 @@ namespace AFR.GlyphCore.TextRepair;
 
 internal static class GlyphCoreTextRepairConstants
 {
-    public const string FeatureSchemaVersion = "dbtext-ai-features-v2";
+    public const string FeatureSchemaVersion = "dbtext-ai-features-v3";
     public const string ModelResourceName = "AFR.GlyphCore.Model.onnx";
     public const string ModelManifestResourceName = "AFR.GlyphCore.ModelManifest.json";
     public const string RuntimeManagedResourceName = "Microsoft.ML.OnnxRuntime.dll";
     public const string RuntimeNativeResourceName = "onnxruntime.dll";
     public const string RuntimeProvidersSharedResourceName = "onnxruntime_providers_shared.dll";
-    public const float MinimumConfidence = 0.92f;
-    public const float MinimumScoreMargin = 0.18f;
 }
 
 internal sealed class GlyphCoreTextRepairContext
@@ -32,6 +30,18 @@ internal sealed class GlyphCoreTextRepairContext
     public string TextStyleTypeFace { get; set; } = string.Empty;
     public string CurrentText { get; set; } = string.Empty;
     public bool IsFromExternalReference { get; set; }
+    public bool HasNativeDecodeEvidence { get; set; }
+    public bool NativeDecodeFamilyMismatch { get; set; }
+    public string NativeDecodeEvidenceScope { get; set; } = string.Empty;
+    public string NativeDecodeEvidenceClusterKey { get; set; } = string.Empty;
+    public string NativeDecodeSourceCodePageFamily { get; set; } = string.Empty;
+    public string NativeDecodeAppliedCodePageFamily { get; set; } = string.Empty;
+    public string NativeDecodeHookHitType { get; set; } = string.Empty;
+    public float NativeDecodeObjectCorrelation { get; set; }
+    public float NativeDecodeClusterCorrelation { get; set; }
+    public bool HasLdFileFontEvidence { get; set; }
+    public string RippleContextText { get; set; } = string.Empty;
+    public int RippleSeedCount { get; set; }
 }
 
 internal sealed class GlyphCoreTextRepairCandidate

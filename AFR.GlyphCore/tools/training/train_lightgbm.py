@@ -16,8 +16,6 @@ sys.path.insert(0, str(ROOT))
 
 from afr_glyphcore import FEATURE_COUNT, FEATURE_SCHEMA_VERSION  # noqa: E402
 
-MINIMUM_CONFIDENCE = 0.92
-MINIMUM_SCORE_MARGIN = 0.18
 DEFAULT_MAX_ROUNDS = 650
 DEFAULT_EARLY_STOPPING_ROUNDS = 60
 OVERFIT_RECALL_GAP = 0.20
@@ -754,28 +752,12 @@ def error_severity(expected_repair: bool, decision: str, correct: bool, false_re
 
 
 def decide(best, margin: float, group) -> str:
-    current_unsafe = (
-        float(group.iloc[0]["f09_current_control_ratio"]) > 0
-        or float(group.iloc[0]["f11_current_replacement_ratio"]) > 0
-        or float(group.iloc[0]["f38_current_has_suspicious_unicode"]) > 0
-        or int(group.iloc[0]["is_from_xref"]) == 1
-    )
-    if current_unsafe:
+    if int(group.iloc[0]["is_from_xref"]) == 1:
         return "unsafe"
     if int(best["is_noop"]) == 1:
         return "skip"
-    if int(best["is_roundtrip"]) != 1:
+    if str(best.get("candidate_text") or "") == "":
         return "unsafe"
-    if (
-        float(best["f10_candidate_control_ratio"]) > 0
-        or float(best["f12_candidate_replacement_ratio"]) > 0
-        or float(best["f37_candidate_has_suspicious_unicode"]) > 0
-    ):
-        return "unsafe"
-    if float(best["prediction"]) < MINIMUM_CONFIDENCE:
-        return "skip"
-    if margin < MINIMUM_SCORE_MARGIN:
-        return "skip"
     return "repair"
 
 
@@ -878,8 +860,7 @@ def build_training_config(args, model) -> dict:
         "bestIteration": best_iteration,
         "actualIterations": actual_iterations,
         "stoppedEarly": bool(best_iteration and best_iteration < int(args.max_rounds)),
-        "minimumConfidence": MINIMUM_CONFIDENCE,
-        "minimumScoreMargin": MINIMUM_SCORE_MARGIN,
+        "decisionPolicy": "ai-top-candidate-with-native-evidence-trigger",
         "simulationSampleGroups": max(0, int(args.simulation_sample_groups)),
         "simulationMinimumGroups": max(1, int(args.simulation_min_groups)),
         "simulationMode": str(args.simulation_mode),
@@ -917,8 +898,7 @@ def build_manifest(
         "trainingDataHash": sha256_file(features_path),
         "trainingRows": int(len(df)),
         "trainingGroups": int(df["group_id"].nunique()),
-        "minimumConfidence": MINIMUM_CONFIDENCE,
-        "minimumScoreMargin": MINIMUM_SCORE_MARGIN,
+        "decisionPolicy": "ai-top-candidate-with-native-evidence-trigger",
         "validationSummary": test_report["summary"],
         "blindValidationSummary": test_report["summary"],
         "splitSummary": split_summary,
