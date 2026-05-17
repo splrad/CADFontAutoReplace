@@ -58,9 +58,9 @@ Debug 命令：
 
 1. 使用 `FontDetector` 检测样式表缺失字体。
 2. 使用 `FontReplacer` 替换 SHX 主字体、SHX 大字体与 TrueType。
-3. 执行文枢 DBText 本地 AI 修复。
-4. 扫描 MText 内联字体。
-5. 用 `LdFileHook` 重定向记录与 MText 正向扫描结果交叉生成修复记录。
+3. 扫描 MText 内联字体。
+4. 将 MText 内联缺失 TrueType 转换为 SHX `\F`，并用 `LdFileHook` 重定向记录与 MText 正向扫描结果交叉生成修复记录。
+5. 执行文枢 DBText 本地 AI 修复。
 6. 输出摘要并刷新显示。
 
 注意事项：
@@ -68,6 +68,7 @@ Debug 命令：
 - `AFRLOG` 不是通用 DiagnosticLogger 查看器；它主要展示字体表替换和内联字体替换的 UI。
 - TrueType 样式表替换必须继续使用 TrueType，避免污染 AutoCAD 字体缓存。
 - MText 内联缺失 TrueType 可转换为 SHX `\F` 格式，让后续渲染走 SHX/Hook 路径。
+- 文枢 DBText 修复必须位于样式表替换和 MText 内联处理之后，让 DBText 决策运行在更稳定的字体上下文中。
 - SHX 字形缺笔、字体形状不正确，与 DBText 编码修复是两类问题，不要混在同一修复策略里。
 
 ## 文枢 DBText 本地 AI 修复

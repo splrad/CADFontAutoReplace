@@ -51,12 +51,13 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 
 关键链路（执行阶段）：
 
-1. `MTextInlineFontReplacer.ReplaceMissingInlineFonts`（同类型替换）
-2. `MTextInlineFontScanner.ScanInlineFonts`（重新扫描）
-3. `ConvertMissingTrueTypeToShx`（兜底转换）
-4. `BuildInlineFixRecords`（日志记录）
+1. `MTextInlineFontScanner.ScanInlineFonts`（正向扫描 `\F` / `\f`）
+2. `MTextInlineFontReplacer.ConvertMissingTrueTypeToShx`（缺失 TrueType 兜底转换）
+3. `LdFileHook.GetRawRedirectLog`（读取本次会话重定向记录）
+4. `ExecutionController.BuildInlineFixRecords`（交叉生成内联修复记录）
 
 注意：若 DWG 文字内容本身编码已损坏，字体替换无法恢复原文。
+MText 内联处理在文枢 DBText 修复之前完成，避免 DBText 决策运行在未收敛的字体状态上。
 
 判定标准（实战）：
 - 若 `\F` / `\f` 字体名正常，但正文出现 `Î?²?` 类字符，通常是内容已损坏；
@@ -90,6 +91,7 @@ DBText 单行文字修复不再依赖旧的原生 code page Hook 调查链路，
 
 维护原则：
 
+- `ExecutionController.Execute` 中，DBText 文枢修复应排在样式表替换和 MText 内联处理之后。
 - 未检测到疑似 DBText 异常时不加载文枢模型、不评分、不提示。
 - 自动写回必须受疑似异常门控、AI 置信度、分差、可逆转换和安全策略共同约束。
 - 普通用户端禁止训练、导入样本、替换模型、修改参数或使用 DBText 纠错 UI。
@@ -174,6 +176,7 @@ artifacts/ReleaseAssets/Fonts.zip
 - [ ] Hook on/off 两条路径验证
 - [ ] SHX 主字体 / 大字体 / TrueType 三类都验证
 - [ ] MText `\F` / `\f` / 参数段 / 路径残留 / `@` 前缀都覆盖
+- [ ] 执行阶段顺序保持 MText 内联处理先于 DBText 文枢修复
 - [ ] DBText AI 模型缺失、schema 不匹配、低置信度和高置信写回路径已验证
 - [ ] Release 构建下 Debug 功能完全排除
 

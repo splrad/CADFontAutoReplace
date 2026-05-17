@@ -9,12 +9,12 @@ DBText 修复由封闭式本地 AI 决策链路负责，不依赖在线服务，
 执行入口位于 `ExecutionController.Execute`：
 
 1. 检测并替换文字样式表中的缺失字体。
-2. 执行 `GlyphCoreTextRepairService.Repair`，扫描非外参块中的 `DBText`。
-3. `GlyphCoreTextRepairProblemDetector` 判断当前 DBText 是否存在疑似异常。
-4. 未命中门控时静默跳过，不加载模型、不评分、不提示。
-5. 命中门控后才生成候选、提取 `dbtext-ai-features-v1` 特征并调用本地 AI 评分器。
-6. 由 Decision Engine 按保守策略决定写回或跳过。
-7. 扫描并处理 MText 内联字体。
+2. 扫描并处理 MText 内联字体；缺失 TrueType 内联字体可转换为 SHX `\F`，再与 `LdFileHook` 重定向记录交叉生成内联修复记录。
+3. 执行 `GlyphCoreTextRepairService.Repair`，扫描非外参块中的 `DBText`。
+4. `GlyphCoreTextRepairProblemDetector` 判断当前 DBText 是否存在疑似异常。
+5. 未命中门控时静默跳过，不加载模型、不评分、不提示。
+6. 命中门控后才生成候选、提取 `dbtext-ai-features-v2` 特征并调用本地 AI 评分器。
+7. 由 Decision Engine 按保守策略决定写回或跳过。
 
 ## 模型部署
 
