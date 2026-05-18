@@ -204,12 +204,14 @@ internal sealed class DbTextUpstreamDecodeHookProfile
         NativeHookTarget multiByteCifToWideChar,
         NativeHookTarget dTextFullInputProbe,
         NativeHookTarget utf16ToWideGetWideBuffer,
-        bool enableDispatcherPatterns)
+        NativeHookTarget mainDispatcher,
+        NativeHookTarget parallelDispatcher)
     {
         MultiByteCifToWideChar = multiByteCifToWideChar;
         DTextFullInputProbe = dTextFullInputProbe;
         Utf16ToWideGetWideBuffer = utf16ToWideGetWideBuffer;
-        EnableDispatcherPatterns = enableDispatcherPatterns;
+        MainDispatcher = mainDispatcher;
+        ParallelDispatcher = parallelDispatcher;
     }
 
     public NativeHookTarget MultiByteCifToWideChar { get; }
@@ -218,13 +220,16 @@ internal sealed class DbTextUpstreamDecodeHookProfile
 
     public NativeHookTarget Utf16ToWideGetWideBuffer { get; }
 
-    public bool EnableDispatcherPatterns { get; }
+    public NativeHookTarget MainDispatcher { get; }
+
+    public NativeHookTarget ParallelDispatcher { get; }
 
     public bool HasInstallableHook
         => MultiByteCifToWideChar.IsEnabled
             || DTextFullInputProbe.IsEnabled
             || Utf16ToWideGetWideBuffer.IsEnabled
-            || EnableDispatcherPatterns;
+            || MainDispatcher.IsEnabled
+            || ParallelDispatcher.IsEnabled;
 }
 
 internal sealed class TextEditorDbcsDecodeHookProfile
@@ -327,6 +332,7 @@ internal static class AutoCadNativeDecodeHookProfiles
     private const string Utf16ToWideGetWideBufferExport = "?getWideBuffer@Utf16ToWideCharHelper@UnicodeConvert@PAL@AutoCAD@Autodesk@@QEAA_NPEA_WAEA_K@Z";
     private const string ReadDoubleByteAnsiExport = "?read_doublebyte@TextEditor@@CA_NPEBDAEA_WW4code_page_id@@@Z";
     private const string MultiByteToUnicodeAcStringExport = "?MultiByteToUnicode@TextEditor@@SA_NPEBDHW4code_page_id@@AEAVAcString@@@Z";
+    private const string AcutUpdStringName = "acutUpdString(wchar_t const*, wchar_t**)";
 
     private static readonly byte[] ReadStringAcStringPrefix =
     [
@@ -394,6 +400,62 @@ internal static class AutoCadNativeDecodeHookProfiles
         0x48, 0x83, 0xEC, 0x20
     ];
 
+    private static readonly byte[] DispatcherPrefix =
+    [
+        0x48, 0x89, 0x5C, 0x24, 0x20,
+        0x55,
+        0x56,
+        0x57,
+        0x41, 0x54,
+        0x41, 0x55,
+        0x41, 0x56,
+        0x41, 0x57
+    ];
+
+    private static readonly int[] MainDispatcherPattern =
+    [
+        0x48, 0x89, 0x5C, 0x24, 0x20,
+        0x55,
+        0x56,
+        0x57,
+        0x41, 0x54,
+        0x41, 0x55,
+        0x41, 0x56,
+        0x41, 0x57,
+        0x48, 0x8B, 0xEC,
+        0x48, 0x83, 0xEC, 0x40,
+        0x48, 0x8B, 0x05, -1, -1, -1, -1,
+        0x48, 0x33, 0xC4,
+        0x48, 0x89, 0x45, 0xF8,
+        0x45, 0x8B, 0xA0, 0x6C, 0x04, 0x00, 0x00,
+        0x4C, 0x8B, 0xE9,
+        0x49, 0x8B, 0x88, 0x30, 0x04, 0x00, 0x00,
+        0x49, 0x8B, 0xF8,
+        0x48, 0x8B, 0xDA
+    ];
+
+    private static readonly int[] ParallelDispatcherPattern =
+    [
+        0x48, 0x89, 0x5C, 0x24, 0x20,
+        0x55,
+        0x56,
+        0x57,
+        0x41, 0x54,
+        0x41, 0x55,
+        0x41, 0x56,
+        0x41, 0x57,
+        0x48, 0x8B, 0xEC,
+        0x48, 0x83, 0xEC, 0x40,
+        0x48, 0x8B, 0x05, -1, -1, -1, -1,
+        0x48, 0x33, 0xC4,
+        0x48, 0x89, 0x45, 0xF8,
+        0x45, 0x8B, 0xA8, 0x6C, 0x04, 0x00, 0x00,
+        0x4C, 0x8B, 0xE1,
+        0x49, 0x8B, 0x88, 0x30, 0x04, 0x00, 0x00,
+        0x49, 0x8B, 0xF0,
+        0x48, 0x8B, 0xFA
+    ];
+
     private static readonly int[] CodePageFamilySignature =
     [
         0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C,
@@ -426,7 +488,14 @@ internal static class AutoCadNativeDecodeHookProfiles
         byte[]? readStringWideCharPointerPrefix = null,
         byte[]? dbTextDwgInFieldsPrefix = null,
         byte[]? multiByteCifToWideCharPrefix = null,
-        byte[]? readDoubleByteAnsiPrefix = null)
+        byte[]? readDoubleByteAnsiPrefix = null,
+        uint? acPalUtf16ToWideGetWideBufferRva = null,
+        byte[]? acPalUtf16ToWideGetWideBufferPrefix = null,
+        bool readStringWideCharPointerUseRvaOnly = false,
+        uint? mainDispatcherRva = null,
+        uint? parallelDispatcherRva = null,
+        int[]? mainDispatcherPattern = null,
+        int[]? parallelDispatcherPattern = null)
         => new(
             platformName,
             acDbDllName,
@@ -434,7 +503,9 @@ internal static class AutoCadNativeDecodeHookProfiles
             new DwgFilerCodePageHookProfile(
                 NativeHookTarget.Export("AcDbMemoryDwgFiler::readString(AcString)", ReadStringAcStringExport, readStringAcStringRva, readStringAcStringPrefix ?? ReadStringAcStringPrefix, maxPrologueSize: 64),
                 readStringWideCharPointerRva.HasValue
-                    ? NativeHookTarget.Export("AcDbMemoryDwgFiler::readString(wchar**)", ReadStringWideCharPointerExport, readStringWideCharPointerRva.Value, readStringWideCharPointerPrefix ?? ReadStringWideCharPointerPrefix, maxPrologueSize: 64)
+                    ? readStringWideCharPointerUseRvaOnly
+                        ? NativeHookTarget.RvaOnly("AcDbMemoryDwgFiler::readString(wchar**)", readStringWideCharPointerRva.Value, readStringWideCharPointerPrefix ?? ReadStringWideCharPointerPrefix, maxPrologueSize: 64)
+                        : NativeHookTarget.Export("AcDbMemoryDwgFiler::readString(wchar**)", ReadStringWideCharPointerExport, readStringWideCharPointerRva.Value, readStringWideCharPointerPrefix ?? ReadStringWideCharPointerPrefix, maxPrologueSize: 64)
                     : NativeHookTarget.Disabled("AcDbMemoryDwgFiler::readString(wchar**)", "当前版本缺少 readString(wchar**) 导出，跳过该可选 readString 子 hook。"),
                 NativeHookTarget.Export("AcCodePage::CodePageIdIsDoubleByte", CodePageIdIsDoubleByteExport, codePageIdIsDoubleByteRva, [0x40, 0x53, 0x48, 0x83, 0xEC, 0x20], 6),
                 NativeHookTarget.Export("acdbGetFilerCodePageId", GetFilerCodePageIdExport, getFilerCodePageIdRva, [0x48, 0x83, 0xEC, 0x28], 4),
@@ -447,8 +518,8 @@ internal static class AutoCadNativeDecodeHookProfiles
             new DbTextDwgInFieldsHookProfile(
                 NativeHookTarget.RvaOnly("AcDbImpText::dwgInFields", dbTextDwgInFieldsRva, dbTextDwgInFieldsPrefix ?? DbTextDwgInFieldsPrefix, maxPrologueSize: 64),
                 wideStringAssignRva.HasValue
-                    ? NativeHookTarget.RvaOnly("AcString::operator=(wchar_t const*)", wideStringAssignRva.Value, WideStringAssignPrefix, maxPrologueSize: 32)
-                    : NativeHookTarget.Disabled("AcString::operator=(wchar_t const*)", "当前版本未静态确认唯一 RVA，跳过可选文本写入来源 hook。"),
+                    ? NativeHookTarget.RvaOnly(AcutUpdStringName, wideStringAssignRva.Value, WideStringAssignPrefix, maxPrologueSize: 32)
+                    : NativeHookTarget.Disabled(AcutUpdStringName, "当前版本未静态确认唯一 RVA，跳过可选文本写入来源 hook。"),
                 impTextStringConstVtableOffset: 0x560,
                 impTextStringPointerOffset: 0x68,
                 impTextStringToWideCharMethodOffset: 0x40,
@@ -463,9 +534,14 @@ internal static class AutoCadNativeDecodeHookProfiles
                 NativeHookTarget.Export("MultiByteCIFToWideChar", MultiByteCifToWideCharExport, multiByteCifToWideCharRva, multiByteCifToWideCharPrefix ?? MultiByteCifToWideCharPrefix, maxPrologueSize: 24),
                 NativeHookTarget.RvaOnly("DText full-input multibyte decode probe", dTextFullInputProbeRva, DTextFullInputProbePrefix, DTextFullInputProbePrefix.Length, DTextFullInputProbePrefix.Length),
                 enableAcPalUtf16Probe
-                    ? NativeHookTarget.Export("Utf16ToWideCharHelper::getWideBuffer", Utf16ToWideGetWideBufferExport, 0x4F900, Utf16ToWideGetWideBufferPrefix, maxPrologueSize: 24)
+                    ? NativeHookTarget.Export("Utf16ToWideCharHelper::getWideBuffer", Utf16ToWideGetWideBufferExport, acPalUtf16ToWideGetWideBufferRva ?? 0x4F900, acPalUtf16ToWideGetWideBufferPrefix ?? Utf16ToWideGetWideBufferPrefix, maxPrologueSize: 24)
                     : NativeHookTarget.Disabled("Utf16ToWideCharHelper::getWideBuffer", "未提供当前 CAD 版本 AcPal.dll 基线，跳过可选 AcPal 子 hook。"),
-                enableDispatcherPatterns),
+                enableDispatcherPatterns
+                    ? CreateDispatcherTarget("DBText main dispatcher", mainDispatcherRva, mainDispatcherPattern ?? MainDispatcherPattern)
+                    : NativeHookTarget.Disabled("DBText main dispatcher", "当前版本未静态确认唯一 dispatcher 签名，跳过可选 dispatcher hook。"),
+                enableDispatcherPatterns
+                    ? CreateDispatcherTarget("DBText parallel dispatcher", parallelDispatcherRva, parallelDispatcherPattern ?? ParallelDispatcherPattern)
+                    : NativeHookTarget.Disabled("DBText parallel dispatcher", "当前版本未静态确认唯一 dispatcher 签名，跳过可选 dispatcher hook。")),
             new TextEditorDbcsDecodeHookProfile(
                 NativeHookTarget.Export("TextEditor::read_doublebyte", ReadDoubleByteAnsiExport, readDoubleByteAnsiRva, readDoubleByteAnsiPrefix ?? ReadDoubleByteAnsiPrefix, maxPrologueSize: 64),
                 NativeHookTarget.Export("TextEditor::MultiByteToUnicode(AcString)", MultiByteToUnicodeAcStringExport, multiByteToUnicodeAcStringRva, MultiByteToUnicodeAcStringPrefix, maxPrologueSize: 64)),
@@ -494,13 +570,14 @@ internal static class AutoCadNativeDecodeHookProfiles
             disabledDwgFiler,
             new DbTextDwgInFieldsHookProfile(
                 NativeHookTarget.Disabled("AcDbImpText::dwgInFields", reason),
-                NativeHookTarget.Disabled("AcString::operator=(wchar_t const*)", reason),
+                NativeHookTarget.Disabled(AcutUpdStringName, reason),
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             new DbTextUpstreamDecodeHookProfile(
                 NativeHookTarget.Disabled("MultiByteCIFToWideChar", reason),
                 NativeHookTarget.Disabled("DText full-input multibyte decode probe", reason),
                 NativeHookTarget.Disabled("Utf16ToWideCharHelper::getWideBuffer", reason),
-                enableDispatcherPatterns: false),
+                NativeHookTarget.Disabled("DBText main dispatcher", reason),
+                NativeHookTarget.Disabled("DBText parallel dispatcher", reason)),
             new TextEditorDbcsDecodeHookProfile(
                 NativeHookTarget.Disabled("TextEditor::read_doublebyte", reason),
                 NativeHookTarget.Disabled("TextEditor::MultiByteToUnicode(AcString)", reason)),
@@ -508,4 +585,9 @@ internal static class AutoCadNativeDecodeHookProfiles
                 NativeHookTarget.Disabled("code-page family context", reason),
                 codePageIdFieldOffset: 0x46C));
     }
+
+    private static NativeHookTarget CreateDispatcherTarget(string name, uint? rva, int[] signature)
+        => rva.HasValue
+            ? NativeHookTarget.Pattern(name, rva.Value, signature, DispatcherPrefix, DispatcherPrefix.Length, maxPrologueSize: 32)
+            : NativeHookTarget.Pattern(name, signature, DispatcherPrefix, DispatcherPrefix.Length, maxPrologueSize: 32);
 }

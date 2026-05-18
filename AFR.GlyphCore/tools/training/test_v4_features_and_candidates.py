@@ -47,7 +47,7 @@ class V4FeatureAndCandidateTests(unittest.TestCase):
         features = extract_features(context, candidates[0])
         self.assertEqual(FEATURE_COUNT, len(features))
         self.assertEqual(101, FEATURE_COUNT)
-        self.assertEqual("dbtext-ai-features-v6", FEATURE_SCHEMA_VERSION)
+        self.assertEqual("dbtext-ai-features-v7", FEATURE_SCHEMA_VERSION)
         self.assertEqual(FEATURE_COUNT, len(FEATURE_NAMES))
         self.assertEqual(1.0, features[26])
         self.assertEqual(0.0, features[27])
@@ -80,6 +80,7 @@ class V4FeatureAndCandidateTests(unittest.TestCase):
                     "appliedCodePageFamily": "big5",
                     "hookHitType": "dbtext-raw-stream",
                     "clusterCorrelation": 0.6,
+                    "hasLdFileFontEvidence": True,
                     "rippleContextText": "DN100 给水管",
                     "rippleSeedCount": 3,
                     "rippleSeedQuality": 0.82,
@@ -111,6 +112,8 @@ class V4FeatureAndCandidateTests(unittest.TestCase):
         self.assertEqual(2, len(rows))
         feature_columns = [key for key in rows[0] if re.match(r"^f\d+_", key)]
         self.assertEqual(FEATURE_COUNT, len(feature_columns))
+        self.assertNotIn("ldfile_font_evidence", rows[0])
+        self.assertEqual(0, rows[0]["ldfile_font_evidence_disabled"])
         self.assertEqual(3, rows[0]["ripple_seed_count"])
         self.assertGreater(float(rows[0]["ripple_seed_quality"]), 0.8)
         self.assertGreater(float(rows[0]["f86_candidate_preserves_ascii_tokens"]), 0.0)
@@ -125,6 +128,31 @@ class V4FeatureAndCandidateTests(unittest.TestCase):
         self.assertEqual(0.0, big5_to_gbk[27])
         self.assertEqual(0.0, gbk_to_big5[26])
         self.assertEqual(1.0, gbk_to_big5[27])
+
+    def test_font_file_identity_features_are_disabled(self) -> None:
+        base_context = {
+            "currentText": "價插喜渡",
+            "textStyleFileName": "txt.shx",
+            "textStyleBigFontFileName": "tssdchn.shx",
+            "textStyleTypeFace": "SimSun",
+            "hasLdFileFontEvidence": True,
+        }
+        variant_context = {
+            **base_context,
+            "textStyleFileName": r"C:\Fonts\arial.ttf",
+            "textStyleBigFontFileName": "gbcbig.shx",
+            "textStyleTypeFace": "Microsoft YaHei",
+            "hasLdFileFontEvidence": False,
+        }
+        candidate = Candidate("基础尺寸", "big5-carrier-to-gbk", "roundtrip-ok", True)
+
+        base_features = extract_features(base_context, candidate)
+        variant_features = extract_features(variant_context, candidate)
+
+        for index in (43, 44, 45, 47, 48, 59, 60, 74):
+            self.assertEqual(0.0, base_features[index])
+            self.assertEqual(0.0, variant_features[index])
+        self.assertEqual(base_features, variant_features)
 
     def test_native_evidence_direction_prefers_matching_conversion(self) -> None:
         context = {

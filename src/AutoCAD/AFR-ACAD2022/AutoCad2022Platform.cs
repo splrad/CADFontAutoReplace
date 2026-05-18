@@ -29,7 +29,7 @@ internal sealed class AutoCad2022Platform : ICadPlatform, INativeDecodeHookProfi
             getFilerCodePageIdRva: 0x3C6024,
             codePageIdIsDoubleByteRva: 0xACAAA8,
             dbTextDwgInFieldsRva: 0x353B0,
-            wideStringAssignRva: null,
+            wideStringAssignRva: 0x31B34,
             multiByteCifToWideCharRva: 0x116D70,
             dTextFullInputProbeRva: 0x6286BC,
             readDoubleByteAnsiRva: 0x62A440,

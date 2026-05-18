@@ -4,7 +4,7 @@ namespace AFR.GlyphCore.TextRepair;
 
 internal static class GlyphCoreTextRepairConstants
 {
-    public const string FeatureSchemaVersion = "dbtext-ai-features-v6";
+    public const string FeatureSchemaVersion = "dbtext-ai-features-v7";
     public const string ModelResourceName = "AFR.GlyphCore.Model.onnx";
     public const string ModelManifestResourceName = "AFR.GlyphCore.ModelManifest.json";
     public const string RuntimeManagedResourceName = "Microsoft.ML.OnnxRuntime.dll";

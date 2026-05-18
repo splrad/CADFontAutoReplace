@@ -108,6 +108,35 @@ function Find-BytePattern([byte[]]$Data, [byte[]]$Pattern) {
     $hits
 }
 
+function Find-TextWildcardPattern($Image, [int[]]$Pattern) {
+    $hits = New-Object 'System.Collections.Generic.List[uint32]'
+    if ($Pattern.Length -eq 0) {
+        return $hits
+    }
+
+    $text = $Image.Sections | Where-Object { $_.Name -eq ".text" } | Select-Object -First 1
+    if ($null -eq $text -or $text.RawSize -lt $Pattern.Length) {
+        return $hits
+    }
+
+    $lastStart = [int]($text.RawOffset + $text.RawSize - $Pattern.Length)
+    for ($offset = [int]$text.RawOffset; $offset -le $lastStart; $offset++) {
+        $matched = $true
+        for ($i = 0; $i -lt $Pattern.Length; $i++) {
+            if ($Pattern[$i] -ge 0 -and $Image.Data[$offset + $i] -ne $Pattern[$i]) {
+                $matched = $false
+                break
+            }
+        }
+
+        if ($matched) {
+            $hits.Add([uint32]($text.VirtualRva + ($offset - $text.RawOffset)))
+        }
+    }
+
+    $hits
+}
+
 function Test-AcDbImpTextVTableSlot($Image, [uint32]$ExpectedRva) {
     $typeNameBytes = [Text.Encoding]::ASCII.GetBytes(".?AVAcDbImpText@@")
     $typeNameHits = Find-BytePattern $Image.Data $typeNameBytes
@@ -223,6 +252,7 @@ $readStringAcStringLegacyPrefix = @(0x48,0x89,0x5C,0x24,0x18,0x57,0x48,0x83,0xEC
 $readStringAcString2027Prefix = @(0x40,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x81,0xEC,0x10,0x01,0x00,0x00)
 $readStringWidePrefix = @(0x40,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x81,0xEC,0x00,0x01,0x00,0x00)
 $readStringWideLegacyPrefix = @(0x40,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x81,0xEC,0xE0,0x00,0x00,0x00)
+$readStringWide2027VtablePrefix = @(0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20)
 $dwgInPrefix2022 = @(0x40,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x81,0xEC,0x40,0x01,0x00,0x00)
 $dwgInPrefix2024 = @(0x40,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x81,0xEC,0x60,0x01,0x00,0x00)
 $dwgInPrefix2027 = @(0x40,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x81,0xEC,0x30,0x02,0x00,0x00)
@@ -235,6 +265,11 @@ $readDoubleBytePrefix = @(0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57
 $readDoubleByteLegacyPrefix = @(0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x30)
 $multiByteToUnicodePrefix = @(0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48,0x89,0x68,0x10,0x48,0x89,0x70,0x18,0x48,0x89,0x78,0x20,0x41,0x56,0x48,0x83,0xEC,0x30)
 $codePageFamilyPrefix = @(0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57,0x48,0x83,0xEC,0x20)
+$dispatcherPrefix = @(0x48,0x89,0x5C,0x24,0x20,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57)
+$mainDispatcherPattern = @(0x48,0x89,0x5C,0x24,0x20,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x8B,0xEC,0x48,0x83,0xEC,0x40,0x48,0x8B,0x05,-1,-1,-1,-1,0x48,0x33,0xC4,0x48,0x89,0x45,0xF8,0x45,0x8B,0xA0,0x6C,0x04,0x00,0x00,0x4C,0x8B,0xE9,0x49,0x8B,0x88,0x30,0x04,0x00,0x00,0x49,0x8B,0xF8,0x48,0x8B,0xDA)
+$parallelDispatcherPattern = @(0x48,0x89,0x5C,0x24,0x20,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x8B,0xEC,0x48,0x83,0xEC,0x40,0x48,0x8B,0x05,-1,-1,-1,-1,0x48,0x33,0xC4,0x48,0x89,0x45,0xF8,0x45,0x8B,0xA8,0x6C,0x04,0x00,0x00,0x4C,0x8B,0xE1,0x49,0x8B,0x88,0x30,0x04,0x00,0x00,0x49,0x8B,0xF0,0x48,0x8B,0xFA)
+$mainDispatcher2027Pattern = @(0x48,0x89,0x5C,0x24,0x20,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x8B,0xEC,0x48,0x83,0xEC,0x40,0x48,0x8B,0x05,-1,-1,-1,-1,0x48,0x33,0xC4,0x48,0x89,0x45,0xF8,0x45,0x8B,0xA0,0x6C,0x04,0x00,0x00,0x4C,0x8B,0xF9,0x49,0x8B,0x88,0x30,0x04,0x00,0x00,0x49,0x8B,0xF0,0x48,0x8B,0xFA)
+$parallelDispatcher2027Pattern = @(0x48,0x89,0x5C,0x24,0x20,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x8B,0xEC,0x48,0x83,0xEC,0x40,0x48,0x8B,0x05,-1,-1,-1,-1,0x48,0x33,0xC4,0x48,0x89,0x45,0xF8,0x45,0x8B,0xB8,0x6C,0x04,0x00,0x00,0x4C,0x8B,0xE1,0x49,0x8B,0x88,0x30,0x04,0x00,0x00,0x49,0x8B,0xF0,0x48,0x8B,0xDA)
 
 $readStringAcStringExport = "?readString@AcDbMemoryDwgFiler@@UEAA?AW4ErrorStatus@Acad@@AEAVAcString@@@Z"
 $readStringWideExport = "?readString@AcDbMemoryDwgFiler@@UEAA?AW4ErrorStatus@Acad@@PEAPEA_W@Z"
@@ -243,6 +278,8 @@ $isDoubleByteExport = "?CodePageIdIsDoubleByte@AcCodePage@@SA_NW4code_page_id@@@
 $multiByteCifExport = "?MultiByteCIFToWideChar@@YAHW4code_page_id@@W4MB2Uni@@PEBDHPEA_WH@Z"
 $readDoubleByteExport = "?read_doublebyte@TextEditor@@CA_NPEBDAEA_WW4code_page_id@@@Z"
 $multiByteToUnicodeExport = "?MultiByteToUnicode@TextEditor@@SA_NPEBDHW4code_page_id@@AEAVAcString@@@Z"
+$acutUpdStringExport = "?acutUpdString@@YA?AW4ErrorStatus@Acad@@PEB_WAEAPEA_W@Z"
+$utf16ToWideGetWideBufferExport = "?getWideBuffer@Utf16ToWideCharHelper@UnicodeConvert@PAL@AutoCAD@Autodesk@@QEAA_NPEA_WAEA_K@Z"
 
 $profiles = @{
     "2022" = @(
@@ -251,6 +288,7 @@ $profiles = @{
         @{ Name="acdbGetFilerCodePageId"; Kind="Export"; Export=$getFilerCodePageExport; Rva=0x3C6024; Prefix=@(0x48,0x83,0xEC,0x28) },
         @{ Name="CodePageIdIsDoubleByte"; Kind="Export"; Export=$isDoubleByteExport; Rva=0xACAAA8; Prefix=@() },
         @{ Name="AcDbImpText::dwgInFields"; Kind="Rva"; Rva=0x353B0; Prefix=$dwgInPrefix2022 },
+        @{ Name="acutUpdString"; Kind="Export"; Export=$acutUpdStringExport; Rva=0x31B34; Prefix=$wideAssignPrefix; Optional=$true },
         @{ Name="MultiByteCIFToWideChar"; Kind="Export"; Export=$multiByteCifExport; Rva=0x116D70; Prefix=$multiByteCifPrefix },
         @{ Name="DText full input"; Kind="Rva"; Rva=0x6286BC; Prefix=$dtextFullInputPrefix },
         @{ Name="TextEditor::read_doublebyte"; Kind="Export"; Export=$readDoubleByteExport; Rva=0x62A440; Prefix=$readDoubleByteLegacyPrefix },
@@ -263,6 +301,7 @@ $profiles = @{
         @{ Name="acdbGetFilerCodePageId"; Kind="Export"; Export=$getFilerCodePageExport; Rva=0x3A95C0; Prefix=@(0x48,0x83,0xEC,0x28) },
         @{ Name="CodePageIdIsDoubleByte"; Kind="Export"; Export=$isDoubleByteExport; Rva=0xAD9644; Prefix=@() },
         @{ Name="AcDbImpText::dwgInFields"; Kind="Rva"; Rva=0x32B80; Prefix=$dwgInPrefix2022 },
+        @{ Name="acutUpdString"; Kind="Export"; Export=$acutUpdStringExport; Rva=0x4CCB0; Prefix=$wideAssignPrefix; Optional=$true },
         @{ Name="MultiByteCIFToWideChar"; Kind="Export"; Export=$multiByteCifExport; Rva=0xED7AC; Prefix=$multiByteCifPrefix },
         @{ Name="DText full input"; Kind="Rva"; Rva=0x613464; Prefix=$dtextFullInputPrefix },
         @{ Name="TextEditor::read_doublebyte"; Kind="Export"; Export=$readDoubleByteExport; Rva=0x6151F0; Prefix=$readDoubleByteLegacyPrefix },
@@ -275,6 +314,7 @@ $profiles = @{
         @{ Name="acdbGetFilerCodePageId"; Kind="Export"; Export=$getFilerCodePageExport; Rva=0x3DD32C; Prefix=@(0x48,0x83,0xEC,0x28) },
         @{ Name="CodePageIdIsDoubleByte"; Kind="Export"; Export=$isDoubleByteExport; Rva=0xAF0294; Prefix=@() },
         @{ Name="AcDbImpText::dwgInFields"; Kind="Rva"; Rva=0x7F730; Prefix=$dwgInPrefix2024 },
+        @{ Name="acutUpdString"; Kind="Export"; Export=$acutUpdStringExport; Rva=0x477D8; Prefix=$wideAssignPrefix; Optional=$true },
         @{ Name="MultiByteCIFToWideChar"; Kind="Export"; Export=$multiByteCifExport; Rva=0x8E888; Prefix=$multiByteCifPrefix },
         @{ Name="DText full input"; Kind="Rva"; Rva=0x646DBC; Prefix=$dtextFullInputPrefix },
         @{ Name="TextEditor::read_doublebyte"; Kind="Export"; Export=$readDoubleByteExport; Rva=0x648B40; Prefix=$readDoubleByteLegacyPrefix },
@@ -287,8 +327,10 @@ $profiles = @{
         @{ Name="acdbGetFilerCodePageId"; Kind="Export"; Export=$getFilerCodePageExport; Rva=0x43B100; Prefix=@(0x48,0x83,0xEC,0x28) },
         @{ Name="CodePageIdIsDoubleByte"; Kind="Export"; Export=$isDoubleByteExport; Rva=0xBC02EC; Prefix=@() },
         @{ Name="AcDbImpText::dwgInFields"; Kind="Rva"; Rva=0x49910; Prefix=$dwgInPrefix },
-        @{ Name="AcString wide assign"; Kind="Rva"; Rva=0x4EF44; Prefix=$wideAssignPrefix; Optional=$true },
+        @{ Name="acutUpdString"; Kind="Export"; Export=$acutUpdStringExport; Rva=0x4EF44; Prefix=$wideAssignPrefix; Optional=$true },
         @{ Name="MultiByteCIFToWideChar"; Kind="Export"; Export=$multiByteCifExport; Rva=0x12965C; Prefix=$multiByteCifPrefix },
+        @{ Name="DBText main dispatcher"; Kind="Pattern"; Rva=0x6D1C40; Prefix=$dispatcherPrefix; Pattern=$mainDispatcherPattern },
+        @{ Name="DBText parallel dispatcher"; Kind="Pattern"; Rva=0x6D1724; Prefix=$dispatcherPrefix; Pattern=$parallelDispatcherPattern },
         @{ Name="DText full input"; Kind="Rva"; Rva=0x6D1660; Prefix=$dtextFullInputPrefix },
         @{ Name="TextEditor::read_doublebyte"; Kind="Export"; Export=$readDoubleByteExport; Rva=0x6D32A4; Prefix=$readDoubleBytePrefix },
         @{ Name="TextEditor::MultiByteToUnicode"; Kind="Export"; Export=$multiByteToUnicodeExport; Rva=0x6ACF18; Prefix=$multiByteToUnicodePrefix },
@@ -300,7 +342,10 @@ $profiles = @{
         @{ Name="acdbGetFilerCodePageId"; Kind="Export"; Export=$getFilerCodePageExport; Rva=0x4478E0; Prefix=@(0x48,0x83,0xEC,0x28) },
         @{ Name="CodePageIdIsDoubleByte"; Kind="Export"; Export=$isDoubleByteExport; Rva=0xBCF310; Prefix=@() },
         @{ Name="AcDbImpText::dwgInFields"; Kind="Rva"; Rva=0x33690; Prefix=$dwgInPrefix },
+        @{ Name="acutUpdString"; Kind="Export"; Export=$acutUpdStringExport; Rva=0x5EFEC; Prefix=$wideAssignPrefix; Optional=$true },
         @{ Name="MultiByteCIFToWideChar"; Kind="Export"; Export=$multiByteCifExport; Rva=0xD71A8; Prefix=$multiByteCifPrefix },
+        @{ Name="DBText main dispatcher"; Kind="Pattern"; Rva=0x6DEB90; Prefix=$dispatcherPrefix; Pattern=$mainDispatcherPattern },
+        @{ Name="DBText parallel dispatcher"; Kind="Pattern"; Rva=0x6DE674; Prefix=$dispatcherPrefix; Pattern=$parallelDispatcherPattern },
         @{ Name="DText full input"; Kind="Rva"; Rva=0x6DE5B0; Prefix=$dtextFullInputPrefix },
         @{ Name="TextEditor::read_doublebyte"; Kind="Export"; Export=$readDoubleByteExport; Rva=0x6E01F8; Prefix=$readDoubleBytePrefix },
         @{ Name="TextEditor::MultiByteToUnicode"; Kind="Export"; Export=$multiByteToUnicodeExport; Rva=0x6B9F04; Prefix=$multiByteToUnicodePrefix },
@@ -308,14 +353,33 @@ $profiles = @{
     )
     "2027" = @(
         @{ Name="readString AcString"; Kind="Export"; Export=$readStringAcStringExport; Rva=0x4EF70; Prefix=$readStringAcString2027Prefix },
+        @{ Name="readString wchar**"; Kind="Rva"; Rva=0x18D174; Prefix=$readStringWide2027VtablePrefix },
         @{ Name="acdbGetFilerCodePageId"; Kind="Export"; Export=$getFilerCodePageExport; Rva=0x4579A4; Prefix=@(0x48,0x83,0xEC,0x28) },
         @{ Name="CodePageIdIsDoubleByte"; Kind="Export"; Export=$isDoubleByteExport; Rva=0xBF2344; Prefix=@() },
         @{ Name="AcDbImpText::dwgInFields"; Kind="Rva"; Rva=0x2E740; Prefix=$dwgInPrefix2027 },
+        @{ Name="acutUpdString"; Kind="Export"; Export=$acutUpdStringExport; Rva=0x54C18; Prefix=$wideAssignPrefix; Optional=$true },
         @{ Name="MultiByteCIFToWideChar"; Kind="Export"; Export=$multiByteCifExport; Rva=0x140220; Prefix=$multiByteCif2027Prefix },
+        @{ Name="DBText main dispatcher"; Kind="Pattern"; Rva=0x6E91A0; Prefix=$dispatcherPrefix; Pattern=$mainDispatcher2027Pattern },
+        @{ Name="DBText parallel dispatcher"; Kind="Pattern"; Rva=0x6E96BC; Prefix=$dispatcherPrefix; Pattern=$parallelDispatcher2027Pattern },
         @{ Name="DText full input"; Kind="Rva"; Rva=0x6E90DC; Prefix=$dtextFullInputPrefix },
         @{ Name="TextEditor::read_doublebyte"; Kind="Export"; Export=$readDoubleByteExport; Rva=0x6EAD14; Prefix=$readDoubleBytePrefix },
         @{ Name="TextEditor::MultiByteToUnicode"; Kind="Export"; Export=$multiByteToUnicodeExport; Rva=0x6C4A0C; Prefix=$multiByteToUnicodePrefix },
         @{ Name="code-page family context"; Kind="Rva"; Rva=0x6E79A0; Prefix=$codePageFamilyPrefix }
+    )
+}
+
+$acPalProfiles = @{
+    "2024" = @(
+        @{ Name="Utf16ToWideCharHelper::getWideBuffer"; Kind="Export"; Export=$utf16ToWideGetWideBufferExport; Rva=0x359B0; Prefix=$wideAssignPrefix }
+    )
+    "2025" = @(
+        @{ Name="Utf16ToWideCharHelper::getWideBuffer"; Kind="Export"; Export=$utf16ToWideGetWideBufferExport; Rva=0x4F900; Prefix=$wideAssignPrefix }
+    )
+    "2026" = @(
+        @{ Name="Utf16ToWideCharHelper::getWideBuffer"; Kind="Export"; Export=$utf16ToWideGetWideBufferExport; Rva=0x54D50; Prefix=$wideAssignPrefix }
+    )
+    "2027" = @(
+        @{ Name="Utf16ToWideCharHelper::getWideBuffer"; Kind="Export"; Export=$utf16ToWideGetWideBufferExport; Rva=0x5D430; Prefix=$wideAssignPrefix }
     )
 }
 
@@ -377,10 +441,60 @@ Get-ChildItem -LiteralPath $ChorePath -Filter "acdb*#*.dll" | Sort-Object Name |
             }
 
             $actualRva = [uint32]$exports[$target.Export]
+        } elseif ($target.Kind -eq "Pattern") {
+            $patternHits = Find-TextWildcardPattern $image $target.Pattern
+            if ($patternHits.Count -ne 1) {
+                $hitText = ($patternHits | Select-Object -First 8 | ForEach-Object { "0x$(([uint32]$_).ToString('X'))" }) -join ", "
+                Write-Host "  ERROR: $($target.Name) pattern match count $($patternHits.Count), hits=$hitText"
+                $script:failures++
+                continue
+            }
+
+            $actualRva = [uint32]$patternHits[0]
         } else {
             $actualRva = [uint32]$target.Rva
         }
 
+        if ($actualRva -ne [uint32]$target.Rva) {
+            Write-Host "  ERROR: $($target.Name) RVA expected 0x$(([uint32]$target.Rva).ToString('X')), actual 0x$($actualRva.ToString('X'))"
+            $script:failures++
+            continue
+        }
+
+        if ($target.Prefix.Count -gt 0 -and -not (Test-Prefix $image $actualRva $target.Prefix)) {
+            Write-Host "  ERROR: $($target.Name) prefix mismatch at 0x$($actualRva.ToString('X'))"
+            $script:failures++
+            continue
+        }
+
+        Write-Host "  OK: $($target.Name) 0x$($actualRva.ToString('X'))"
+    }
+}
+
+Get-ChildItem -LiteralPath $ChorePath -Filter "acpal*#*.dll" | Sort-Object Name | ForEach-Object {
+    if ($_.Name -notmatch "#(?<version>\d{4})\.dll$") {
+        return
+    }
+
+    $version = $Matches.version
+    $image = Get-PeImage $_.FullName
+    $exports = Get-Exports $image
+    Write-Host "[$version] $($_.Name)"
+
+    if (-not $acPalProfiles.ContainsKey($version)) {
+        Write-Host "  ERROR: no AcPal profile verification rule."
+        $script:failures++
+        return
+    }
+
+    foreach ($target in $acPalProfiles[$version]) {
+        if (-not $exports.ContainsKey($target.Export)) {
+            Write-Host "  ERROR: missing export $($target.Name)"
+            $script:failures++
+            continue
+        }
+
+        $actualRva = [uint32]$exports[$target.Export]
         if ($actualRva -ne [uint32]$target.Rva) {
             Write-Host "  ERROR: $($target.Name) RVA expected 0x$(([uint32]$target.Rva).ToString('X')), actual 0x$($actualRva.ToString('X'))"
             $script:failures++

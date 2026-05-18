@@ -175,7 +175,7 @@ public void YourCommand() { }
 - [ ] 新命令已注册到 `PluginEntry.cs`
 - [ ] 没有把 AutoCAD 类型放进 `AFR.Core` / `AFR.UI`
 - [ ] Debug 功能已用 `#if DEBUG` 控制
-- [ ] DBText AI 变更已同步 native Hook evidence 门控、ONNX 嵌入配置、`dbtext-ai-features-v6` 特征和文档
+- [ ] DBText AI 变更已同步 native Hook evidence 门控、ONNX 嵌入配置、`dbtext-ai-features-v7` 特征和文档
 - [ ] 新文档/命令在 README 或入口文档可被找到
 
 ---

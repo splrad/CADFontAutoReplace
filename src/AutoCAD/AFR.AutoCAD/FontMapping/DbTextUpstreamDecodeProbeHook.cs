@@ -28,62 +28,6 @@ internal static class DbTextUpstreamDecodeProbeHook
     private const int MaxDTextFullInputBytes = 4096;
     private const string AcPalDllName = "AcPal.dll";
 
-    private static readonly byte[] DispatcherPrefix =
-    [
-        0x48, 0x89, 0x5C, 0x24, 0x20,
-        0x55,
-        0x56,
-        0x57,
-        0x41, 0x54,
-        0x41, 0x55,
-        0x41, 0x56,
-        0x41, 0x57
-    ];
-
-    private static readonly int[] MainDispatcherPattern =
-    [
-        0x48, 0x89, 0x5C, 0x24, 0x20,
-        0x55,
-        0x56,
-        0x57,
-        0x41, 0x54,
-        0x41, 0x55,
-        0x41, 0x56,
-        0x41, 0x57,
-        0x48, 0x8B, 0xEC,
-        0x48, 0x83, 0xEC, 0x40,
-        0x48, 0x8B, 0x05, -1, -1, -1, -1,
-        0x48, 0x33, 0xC4,
-        0x48, 0x89, 0x45, 0xF8,
-        0x45, 0x8B, 0xA0, 0x6C, 0x04, 0x00, 0x00,
-        0x4C, 0x8B, 0xE9,
-        0x49, 0x8B, 0x88, 0x30, 0x04, 0x00, 0x00,
-        0x49, 0x8B, 0xF8,
-        0x48, 0x8B, 0xDA
-    ];
-
-    private static readonly int[] ParallelDispatcherPattern =
-    [
-        0x48, 0x89, 0x5C, 0x24, 0x20,
-        0x55,
-        0x56,
-        0x57,
-        0x41, 0x54,
-        0x41, 0x55,
-        0x41, 0x56,
-        0x41, 0x57,
-        0x48, 0x8B, 0xEC,
-        0x48, 0x83, 0xEC, 0x40,
-        0x48, 0x8B, 0x05, -1, -1, -1, -1,
-        0x48, 0x33, 0xC4,
-        0x48, 0x89, 0x45, 0xF8,
-        0x45, 0x8B, 0xA8, 0x6C, 0x04, 0x00, 0x00,
-        0x4C, 0x8B, 0xE1,
-        0x49, 0x8B, 0x88, 0x30, 0x04, 0x00, 0x00,
-        0x49, 0x8B, 0xF0,
-        0x48, 0x8B, 0xFA
-    ];
-
     private static NativeInlineHook<DispatcherDelegate>? _mainDispatcherHook;
     private static NativeInlineHook<DispatcherDelegate>? _parallelDispatcherHook;
     private static NativeInlineHook<MultiByteCifToWideCharDelegate>? _multiByteCifToWideCharHook;
@@ -193,19 +137,14 @@ internal static class DbTextUpstreamDecodeProbeHook
 
         bool mainInstalled = false;
         bool parallelInstalled = false;
-        if (profile.EnableDispatcherPatterns)
-        {
-            mainInstalled = TryInstallDispatcher(
-                "DBText main dispatcher",
-                MainDispatcherPattern,
-                MainDispatcherHookHandler,
-                out _mainDispatcherHook);
-            parallelInstalled = TryInstallDispatcher(
-                "DBText parallel dispatcher",
-                ParallelDispatcherPattern,
-                ParallelDispatcherHookHandler,
-                out _parallelDispatcherHook);
-        }
+        mainInstalled = TryInstallDispatcher(
+            profile.MainDispatcher,
+            MainDispatcherHookHandler,
+            out _mainDispatcherHook);
+        parallelInstalled = TryInstallDispatcher(
+            profile.ParallelDispatcher,
+            ParallelDispatcherHookHandler,
+            out _parallelDispatcherHook);
 
         bool cifInstalled = TryInstallMultiByteCifToWideChar(profile.MultiByteCifToWideChar);
         bool utf16Installed = TryInstallUtf16ToWideGetWideBuffer(profile.Utf16ToWideGetWideBuffer);
@@ -376,29 +315,47 @@ internal static class DbTextUpstreamDecodeProbeHook
     }
 
     private static bool TryInstallDispatcher(
-        string name,
-        int[] pattern,
+        NativeHookTarget target,
         DispatcherDelegate handler,
         out NativeInlineHook<DispatcherDelegate>? hook)
     {
         hook = null;
+        if (!target.IsEnabled)
+        {
+            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少 dispatcher 签名"}");
+            return false;
+        }
+
+        if (target.Signature is not { Length: > 0 } signature)
+        {
+            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：缺少 dispatcher 签名。");
+            return false;
+        }
+
         if (!NativeModulePatternScanner.TryFindUniqueTextPattern(
                 _moduleBase,
-                pattern,
+                signature,
                 Tag,
-                name,
+                target.Name,
                 out IntPtr address,
                 out uint rva))
             return false;
 
-        hook = new NativeInlineHook<DispatcherDelegate>(Tag, name, rva);
+        if (target.Rva.HasValue && target.Rva.Value != rva)
+        {
+            DiagnosticLogger.Log(Tag,
+                $"{target.Name} RVA 不匹配，expected=0x{target.Rva.Value:X}, actual=0x{rva:X}，跳过安装。");
+            return false;
+        }
+
+        hook = new NativeInlineHook<DispatcherDelegate>(Tag, target.Name, rva);
         return hook.InstallAtAddress(
             address,
             rva,
             handler,
-            DispatcherPrefix.Length,
-            32,
-            DispatcherPrefix);
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
     }
 
     private static bool TryInstallMultiByteCifToWideChar(NativeHookTarget target)

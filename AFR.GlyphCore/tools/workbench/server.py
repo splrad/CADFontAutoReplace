@@ -241,7 +241,7 @@ class DatasetStore:
 
         return {
             "schema": REVIEWED_SCHEMA,
-            "featureSchema": first.get("feature_schema") or "dbtext-ai-features-v6",
+            "featureSchema": first.get("feature_schema") or "dbtext-ai-features-v7",
             "groupId": group_id,
             "currentText": first.get("current_text") or source_record.get("currentText") or "",
             "labelAction": first.get("label_action") or "repair",

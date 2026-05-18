@@ -51,12 +51,12 @@ FEATURE_NAMES = [
     "layer_hash01",
     "owner_block_hash01",
     "text_style_hash01",
-    "font_hash01",
-    "bigfont_hash01",
-    "typeface_hash01",
+    "font_hash01_disabled",
+    "bigfont_hash01_disabled",
+    "typeface_hash01_disabled",
     "known_cad_text_style",
-    "known_cad_font",
-    "known_cad_bigfont",
+    "known_cad_font_disabled",
+    "known_cad_bigfont_disabled",
     "candidate_length_le_1",
     "current_length_le_1",
     "length_risk",
@@ -68,8 +68,8 @@ FEATURE_NAMES = [
     "candidate_len_ratio",
     "current_cjk_count_norm",
     "candidate_cjk_count_norm",
-    "font_is_gbk_family",
-    "font_is_big5_family",
+    "font_is_gbk_family_disabled",
+    "font_is_big5_family_disabled",
     "candidate_source_convergence",
     # v3 Hook evidence features
     "native_decode_evidence_present",
@@ -84,7 +84,7 @@ FEATURE_NAMES = [
     "native_decode_object_correlation",
     "native_decode_cluster_correlation",
     "native_decode_hook_hit_dbtext",
-    "ldfile_font_evidence",
+    "ldfile_font_evidence_disabled",
     "ripple_seed_count_norm",
     "ripple_context_cjk_ratio",
     "evidence_aligned_candidate",
@@ -183,12 +183,15 @@ def extract_features(context: dict, candidate: Candidate) -> list[float]:
     features[40] = stable_hash01(str(context.get("layer") or ""))
     features[41] = stable_hash01(str(context.get("ownerBlockName") or ""))
     features[42] = stable_hash01(str(context.get("textStyleName") or ""))
-    features[43] = stable_hash01(str(context.get("textStyleFileName") or ""))
-    features[44] = stable_hash01(str(context.get("textStyleBigFontFileName") or ""))
-    features[45] = stable_hash01(str(context.get("textStyleTypeFace") or ""))
+    # Font file names and typefaces vary by AutoCAD version and user workstation.
+    # Keep these feature slots for shape compatibility, but do not let the model
+    # learn repair decisions from environment-specific font identity.
+    features[43] = 0.0
+    features[44] = 0.0
+    features[45] = 0.0
     features[46] = boolf(is_known_cad_text_style(str(context.get("textStyleName") or "")))
-    features[47] = boolf(is_known_cad_font(str(context.get("textStyleFileName") or "")))
-    features[48] = boolf(is_known_cad_font(str(context.get("textStyleBigFontFileName") or "")))
+    features[47] = 0.0
+    features[48] = 0.0
     features[49] = boolf(len(candidate_text) <= 1)
     features[50] = boolf(len(current) <= 1)
     features[51] = boolf(length_risk(current, candidate_text))
@@ -200,8 +203,8 @@ def extract_features(context: dict, candidate: Candidate) -> list[float]:
     features[56] = candidate_len_ratio(len(current), len(candidate_text))
     features[57] = norm(cjk_count(current), 8)
     features[58] = norm(cjk_count(candidate_text), 8)
-    features[59] = boolf(is_font_gbk_family(str(context.get("textStyleFileName") or ""), str(context.get("textStyleBigFontFileName") or "")))
-    features[60] = boolf(is_font_big5_family(str(context.get("textStyleFileName") or ""), str(context.get("textStyleBigFontFileName") or "")))
+    features[59] = 0.0
+    features[60] = 0.0
     features[61] = candidate_source_convergence(candidate.source)
     evidence = native_decode_evidence(context)
     ripple_context = str(context.get("rippleContextText") or evidence.get("rippleContextText") or "")
@@ -218,7 +221,7 @@ def extract_features(context: dict, candidate: Candidate) -> list[float]:
     features[71] = clamp01(float_value(context, evidence, "nativeDecodeObjectCorrelation", "objectCorrelation"))
     features[72] = clamp01(float_value(context, evidence, "nativeDecodeClusterCorrelation", "clusterCorrelation"))
     features[73] = boolf(has_token(str_value(context, evidence, "nativeDecodeHookHitType", "hookHitType"), "dbtext"))
-    features[74] = boolf(bool_value(context, evidence, "hasLdFileFontEvidence", "hasLdFileFontEvidence"))
+    features[74] = 0.0
     features[75] = norm(int(float_value(context, evidence, "rippleSeedCount", "rippleSeedCount")), 8)
     features[76] = ripple_stats.cjk_ratio
     features[77] = boolf(is_evidence_aligned_candidate(context, evidence, candidate.source))

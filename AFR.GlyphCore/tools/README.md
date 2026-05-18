@@ -205,7 +205,10 @@ maximum rounds and early-stopping patience:
     -Seed 20260512
 ```
 
-The feature schema is `dbtext-ai-features-v6` with 101 ordered features. The
+The feature schema is `dbtext-ai-features-v7` with 101 ordered features. Font
+file identity slots are intentionally zeroed because font names vary across
+AutoCAD versions and user workstations; DBText repair must be driven by native
+decode evidence and text/candidate semantics instead. The
 trainer splits data by stable text pattern into train, validation, and blind
 test sets. The blind test set is not used for training or early stopping; it is
 used only after training to compare AI decisions with human labels. Model

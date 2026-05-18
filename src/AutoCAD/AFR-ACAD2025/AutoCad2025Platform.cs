@@ -36,5 +36,8 @@ internal sealed class AutoCad2025Platform : ICadPlatform, INativeDecodeHookProfi
             multiByteToUnicodeAcStringRva: 0x6ACF18,
             codePageFamilyRva: 0x6CFE6C,
             enableDispatcherPatterns: true,
-            enableAcPalUtf16Probe: true);
+            enableAcPalUtf16Probe: true,
+            acPalUtf16ToWideGetWideBufferRva: 0x4F900,
+            mainDispatcherRva: 0x6D1C40,
+            parallelDispatcherRva: 0x6D1724);
 }

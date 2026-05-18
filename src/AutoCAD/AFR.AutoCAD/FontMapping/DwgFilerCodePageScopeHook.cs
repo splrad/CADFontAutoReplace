@@ -315,13 +315,37 @@ internal static class DwgFilerCodePageScopeHook
         out IntPtr address,
         out uint rva)
     {
-        string? exportName = target.ExportName;
-        if (!target.IsEnabled || string.IsNullOrWhiteSpace(exportName))
+        if (!target.IsEnabled)
         {
             address = IntPtr.Zero;
             rva = 0;
-            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少导出符号"}");
+            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少导出符号或 RVA"}");
             return false;
+        }
+
+        string? exportName = target.ExportName;
+        if (string.IsNullOrWhiteSpace(exportName))
+        {
+            if (!target.Rva.HasValue || target.Rva.Value > int.MaxValue)
+            {
+                address = IntPtr.Zero;
+                rva = 0;
+                DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：缺少导出符号或有效 RVA。");
+                return false;
+            }
+
+            rva = target.Rva.Value;
+            address = module + (int)rva;
+            if (!IsCommittedMemory(address))
+            {
+                DiagnosticLogger.Log(Tag, $"{target.Name} RVA 地址无效，跳过。RVA=0x{rva:X}, Address=0x{address.ToInt64():X}");
+                address = IntPtr.Zero;
+                rva = 0;
+                return false;
+            }
+
+            DiagnosticLogger.Log(Tag, $"{target.Name} RVA 解析成功。RVA=0x{rva:X}");
+            return true;
         }
 
         address = NativeInlineHookInterop.GetProcAddress(module, exportName!);

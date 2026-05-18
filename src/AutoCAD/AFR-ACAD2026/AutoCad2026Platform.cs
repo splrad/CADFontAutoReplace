@@ -29,12 +29,15 @@ internal sealed class AutoCad2026Platform : ICadPlatform, INativeDecodeHookProfi
             getFilerCodePageIdRva: 0x4478E0,
             codePageIdIsDoubleByteRva: 0xBCF310,
             dbTextDwgInFieldsRva: 0x33690,
-            wideStringAssignRva: null,
+            wideStringAssignRva: 0x5EFEC,
             multiByteCifToWideCharRva: 0xD71A8,
             dTextFullInputProbeRva: 0x6DE5B0,
             readDoubleByteAnsiRva: 0x6E01F8,
             multiByteToUnicodeAcStringRva: 0x6B9F04,
             codePageFamilyRva: 0x6DCDC0,
-            enableDispatcherPatterns: false,
-            enableAcPalUtf16Probe: false);
+            enableDispatcherPatterns: true,
+            enableAcPalUtf16Probe: true,
+            acPalUtf16ToWideGetWideBufferRva: 0x54D50,
+            mainDispatcherRva: 0x6DEB90,
+            parallelDispatcherRva: 0x6DE674);
 }

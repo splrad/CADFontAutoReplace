@@ -61,12 +61,15 @@ internal static class GlyphCoreTextRepairFeatureExtractor
         features[40] = StableHash01(context.Layer);
         features[41] = StableHash01(context.OwnerBlockName);
         features[42] = StableHash01(context.TextStyleName);
-        features[43] = StableHash01(context.TextStyleFileName);
-        features[44] = StableHash01(context.TextStyleBigFontFileName);
-        features[45] = StableHash01(context.TextStyleTypeFace);
+        // Font file names and typefaces vary by AutoCAD version and user workstation.
+        // Keep the feature slots for schema compatibility, but do not let the model
+        // learn repair decisions from environment-specific font identity.
+        features[43] = 0f;
+        features[44] = 0f;
+        features[45] = 0f;
         features[46] = Bool(IsKnownCadTextStyle(context.TextStyleName));
-        features[47] = Bool(IsKnownCadFont(context.TextStyleFileName));
-        features[48] = Bool(IsKnownCadFont(context.TextStyleBigFontFileName));
+        features[47] = 0f;
+        features[48] = 0f;
         features[49] = Bool(candidateText.Length <= 1);
         features[50] = Bool(current.Length <= 1);
         features[51] = Bool(LengthRisk(current, candidateText));
@@ -79,8 +82,8 @@ internal static class GlyphCoreTextRepairFeatureExtractor
         features[56] = CandidateLenRatio(current.Length, candidateText.Length);
         features[57] = Norm(CjkCount(current), 8);
         features[58] = Norm(CjkCount(candidateText), 8);
-        features[59] = Bool(IsFontGbkFamily(context.TextStyleFileName, context.TextStyleBigFontFileName));
-        features[60] = Bool(IsFontBig5Family(context.TextStyleFileName, context.TextStyleBigFontFileName));
+        features[59] = 0f;
+        features[60] = 0f;
         features[61] = CandidateSourceConvergence(candidate.Source);
 
         // f62-f77: v3 Hook evidence features. Text appearance is still available to the model,
@@ -98,7 +101,7 @@ internal static class GlyphCoreTextRepairFeatureExtractor
         features[71] = Clamp01(context.NativeDecodeObjectCorrelation);
         features[72] = Clamp01(context.NativeDecodeClusterCorrelation);
         features[73] = Bool(IsHookHitType(context.NativeDecodeHookHitType, "dbtext"));
-        features[74] = Bool(context.HasLdFileFontEvidence);
+        features[74] = 0f;
         features[75] = Norm(context.RippleSeedCount, 8);
         features[76] = rippleStats.CjkRatio;
         features[77] = Bool(IsEvidenceAlignedCandidate(context, candidate.Source));
@@ -145,6 +148,7 @@ internal static class GlyphCoreTextRepairFeatureExtractor
         return stats.ControlRatio > 0
                || stats.ReplacementRatio > 0
                || HasLeadingPrivateUsePlaceholder(text)
+               || HasDisallowedRepairCandidateUnicode(text)
                || HasSuspiciousUnicode(text);
     }
 
@@ -158,6 +162,38 @@ internal static class GlyphCoreTextRepairFeatureExtractor
             prefixLength++;
 
         return prefixLength > 0 && prefixLength < text.Length;
+    }
+
+    private static bool HasDisallowedRepairCandidateUnicode(string text)
+    {
+        foreach (char ch in text ?? string.Empty)
+        {
+            UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(ch);
+            if (char.IsControl(ch)
+                || char.IsSurrogate(ch)
+                || ch == '\uFFFD'
+                || IsPrivateUse(ch)
+                || IsBopomofoOrKana(ch)
+                || category == UnicodeCategory.OtherNotAssigned)
+                return true;
+
+            if (IsNonEngineeringSymbol(ch, category))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsNonEngineeringSymbol(char ch, UnicodeCategory category)
+    {
+        if (category != UnicodeCategory.MathSymbol
+            && category != UnicodeCategory.CurrencySymbol
+            && category != UnicodeCategory.ModifierSymbol
+            && category != UnicodeCategory.OtherSymbol)
+            return false;
+
+        const string allowed = "+-()./×xXΦφ%#@=<>≤≥±°℃㎡³ⅡⅢⅣⅤ";
+        return allowed.IndexOf(ch) < 0;
     }
 
     private static TextStats Analyze(string text)
@@ -561,17 +597,6 @@ internal static class GlyphCoreTextRepairFeatureExtractor
                || text.IndexOf("TEXT", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
-    private static bool IsKnownCadFont(string text)
-    {
-        if (string.IsNullOrEmpty(text))
-            return false;
-
-        return text.EndsWith(".shx", StringComparison.OrdinalIgnoreCase)
-               || text.IndexOf("GB", StringComparison.OrdinalIgnoreCase) >= 0
-               || text.IndexOf("tssd", StringComparison.OrdinalIgnoreCase) >= 0
-               || text.IndexOf("txt", StringComparison.OrdinalIgnoreCase) >= 0;
-    }
-
     private static float CandidateLenRatio(int currentLen, int candidateLen)
     {
         if (currentLen == 0)
@@ -588,28 +613,6 @@ internal static class GlyphCoreTextRepairFeatureExtractor
                 count++;
         }
         return count;
-    }
-
-    private static bool IsFontGbkFamily(string fontFileName, string bigFontFileName)
-    {
-        return FontNameContains(fontFileName, "gb") || FontNameContains(fontFileName, "hztxt")
-               || FontNameContains(fontFileName, "tssd")
-               || FontNameContains(bigFontFileName, "gb") || FontNameContains(bigFontFileName, "gbcbig")
-               || FontNameContains(bigFontFileName, "hztxt") || FontNameContains(bigFontFileName, "tssd");
-    }
-
-    private static bool IsFontBig5Family(string fontFileName, string bigFontFileName)
-    {
-        return FontNameContains(fontFileName, "big5") || FontNameContains(fontFileName, "hzbig5")
-               || FontNameContains(fontFileName, "cns")
-               || FontNameContains(bigFontFileName, "big5") || FontNameContains(bigFontFileName, "hzbig5")
-               || FontNameContains(bigFontFileName, "cns");
-    }
-
-    private static bool FontNameContains(string fontFileName, string token)
-    {
-        return !string.IsNullOrEmpty(fontFileName)
-               && fontFileName.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static float CandidateSourceConvergence(string source)
