@@ -91,20 +91,22 @@ error instead of installing packages.
 
 The browser workbench uses shadcn/ui code components on top of the light
 GlyphCore visual system: white canvas, black ink, pastel workflow blocks, pill
-actions, low-contrast hairlines, and minimal shadows. It is organized as:
+actions, low-contrast hairlines, and minimal shadows. The production workbench
+is organized as four fixed tabs:
 
-- `数据包`: package manager for exported DWG packages and reviewed/training counts.
-- `人工复核`: left filters, central virtualized text-cluster table, and right
-  batch confirmation panel.
-- `训练数据集`: searchable/sortable TanStack table of records already promoted
-  into the training dataset.
-- `特征生成`, `模型训练`, `模型报告`: local training pipeline status, logs,
-  validation metrics, model paths, and release command.
+- `数据标注`: package selection, dense review table, source selector, encoding
+  path filtering, and batch confirmation/reset/delete actions.
+- `训练数据集`: searchable/sortable training records with batch delete, import,
+  export, and return-to-review behavior.
+- `模型训练`: package selection, feature refresh, full local training, cancel,
+  and live log polling.
+- `模型报告`: summary metrics, full simulation, model reset, run history, and
+  mismatch records sorted to the top.
 
 The review flow is:
 
 1. Select a package.
-2. Open `人工复核`.
+2. Open `数据标注`.
 3. Filter by text, state, risk, layer, font, or encoding path.
 4. Review the original text and candidate text in the central table.
 5. Choose `原文`, `候选`, or `手动`, then adjust the final text if needed.
@@ -115,6 +117,13 @@ The review flow is:
 The table has only two review states: `未审核` and `已审核`. Already reviewed
 rows remain editable; saving them again overwrites the corresponding reviewed
 JSONL records.
+
+The workbench, export command, feature builder, and simulation report must use
+the same text identity that CAD exposes for the DBText object. `displayText` is
+only the current CAD text for display; it must not normalize `井` to `#`, `#` to
+`井`, or any similar drawing-specific alias. For example, `FL-井1` and `FL-#1`
+are distinct labels, and the model must learn the correct keep/repair decision
+from human labels plus drawing context instead of hard-coded alias rules.
 
 For 10k+ text packages, the default review workflow is text-cluster
 propagation. The workbench groups records by current text, recommended
@@ -196,11 +205,12 @@ maximum rounds and early-stopping patience:
     -Seed 20260512
 ```
 
-The trainer splits data by stable text pattern into train, validation, and blind
+The feature schema is `dbtext-ai-features-v6` with 101 ordered features. The
+trainer splits data by stable text pattern into train, validation, and blind
 test sets. The blind test set is not used for training or early stopping; it is
-used only after training to compare AI decisions with human labels. Model reports
-include the conservative acceptance result, overfitting status, blind-test
-metrics, and error samples.
+used only after training to compare AI decisions with human labels. Model
+reports include the conservative acceptance result, overfitting status,
+blind-test metrics, and error samples.
 
 For smoke testing, omit `-ReviewedInput` to generate synthetic seed labels:
 
@@ -215,9 +225,16 @@ For smoke testing, omit `-ReviewedInput` to generate synthetic seed labels:
 
 1. Put user-provided raw DWG files under `AFR.GlyphCore/raw-dwg`.
 2. Open a DWG in an AutoCAD Debug build with AFR loaded.
-3. Run `AFRGLYPHCOREEXPORT`.
+3. Run `AFRGLYPHCOREEXPORT`, or `AFRGLYPHCOREEXPORTSELECT` when only selected
+   DBText objects should be exported.
 4. Review and train from the browser workbench.
 
 Release builds do not expose `AFRGLYPHCOREEXPORT` or the training workbench.
 Release model embedding should point at a private local model directory such as
 `AFR.GlyphCore/models`; the model files are not part of the GitHub repo.
+
+The export package writes `manifest.json`, `candidate_groups.jsonl`,
+`preview.json`, and `audit.tsv`. Candidate groups carry native decode evidence,
+geometry/context snapshots, raw current text, display text, and deterministic
+candidates; export code must not make irreversible display substitutions before
+human review.

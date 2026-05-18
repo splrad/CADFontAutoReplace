@@ -63,7 +63,7 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 3. 在 CAD 里执行 `AFR`，完成一次字体配置。
 4. 执行 `AFRLOG` 查看当前图纸的检测与替换结果。
 5. 如需调试 MText 场景，再在 Debug 构建下执行 `AFRINSERT` / `AFRVIEW` 建立“输入-输出”直觉。
-6. 如需验证 DBText AI，请使用带官方嵌入 ONNX 模型的 DLL；没有 native DBCS/code page Hook 强证据时应静默跳过，命中强证据但没有模型时应提示模型不可用并跳过写回。
+6. 如需验证 DBText AI，请使用带官方嵌入 ONNX 模型的 DLL；没有 native DBCS/code page Hook 强证据或等同强信号时应静默跳过，命中强证据但没有模型时应提示模型不可用并跳过写回。
 
 ## 7. 生成发布资产
 
@@ -147,7 +147,7 @@ public void YourCommand() { }
 
 ### 错误 3：改 Hook 后行为异常
 
-`LdFileHook` 涉及非托管逻辑，改动要小、每次改完都实测。
+`LdFileHook` 和 DBText native evidence Hook 都涉及非托管逻辑，改动要小、每次改完都实测。两者用途不同：`LdFileHook` 处理字体加载，不能拿来当 DBText AI 启动强信号。
 
 ### 错误 4：改了代码但 CAD 行为没变化
 
@@ -166,7 +166,7 @@ public void YourCommand() { }
 - 先定位，再改代码：优先看 `ExecutionController` 调用链。
 - 先加日志，再动逻辑：避免“改完不知道哪里坏”。
 - 每次只改一个小目标：例如“只改 MText 解析，不碰 Hook”。
-- DBText 单行文字 AI 修复优先看 `docs/debugging/DBText-Repair-Model.md`；当前强信号来自 native Hook evidence，不来自读取到的文字是否像乱码，也不要参考已删除的旧 code page Hook 调查文档。
+- DBText 单行文字 AI 修复优先看 `docs/debugging/DBText-Repair-Model.md`；当前强信号来自 native Hook evidence 或已修复强证据种子的等同证据，不来自读取到的文字是否像乱码，也不要参考旧 code page 调查文档里的直接修文本/直接改 code page 做法。
 
 ## 11. 提交前快速检查
 
@@ -175,7 +175,7 @@ public void YourCommand() { }
 - [ ] 新命令已注册到 `PluginEntry.cs`
 - [ ] 没有把 AutoCAD 类型放进 `AFR.Core` / `AFR.UI`
 - [ ] Debug 功能已用 `#if DEBUG` 控制
-- [ ] DBText AI 变更已同步 native Hook evidence 门控、ONNX 嵌入配置、v3 特征和文档
+- [ ] DBText AI 变更已同步 native Hook evidence 门控、ONNX 嵌入配置、`dbtext-ai-features-v6` 特征和文档
 - [ ] 新文档/命令在 README 或入口文档可被找到
 
 ---

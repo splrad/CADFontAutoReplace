@@ -4,7 +4,7 @@
 
 ## 当前实现
 
-DBText 修复由封闭式本地 AI 决策链路负责，不依赖在线服务，也不允许普通用户训练或替换模型。AI 不扫描所有正常文本；必须先命中 native DBCS/code page Hook 强证据，文枢模型才会介入。
+DBText 修复由封闭式本地 AI 决策链路负责，不依赖在线服务，也不允许普通用户训练或替换模型。文枢不会因为文本“看起来像乱码”、字体缺失或候选转换成功就扫描所有正常文本；必须先命中 native DBCS/code page Hook 强证据，或由已修复强证据种子产生严格等同证据，文枢模型才会介入。
 
 执行入口位于 `ExecutionController.Execute`：
 
@@ -13,10 +13,20 @@ DBText 修复由封闭式本地 AI 决策链路负责，不依赖在线服务，
 3. 执行 `GlyphCoreTextRepairService.Repair`，扫描非外参块中的 `DBText`。
 4. `GlyphCoreTextRepairProblemDetector` 只读取 `NativeDecodeEvidence`；不再根据 `CurrentText` 是否像乱码触发。
 5. 未命中 Hook 强证据时静默跳过，不加载模型、不评分、不提示。
-6. 命中强证据后生成候选、提取 `dbtext-ai-features-v4` 特征并调用本地 AI 评分器。
+6. 命中强证据后生成候选、提取 `dbtext-ai-features-v6` 特征并调用本地 AI 评分器。
 7. 同类 DBText 簇共享一次 AI 判断；已修复文本可作为涟漪种子为周边对象提供上下文。
 
 `GlyphCoreNativeDecodeEvidenceStore` 只是内存桥，不会伪造证据；如果当前构建没有 native Hook 生产者注册对象级或簇级证据，DBText 文枢会保持静默。
+
+当前已验证的 DBText native evidence 链路只在 AutoCAD 2025 / `acdb25.dll` 路径启用，其它版本 fail closed。主要组件是：
+
+- `DwgFilerCodePageScopeHook`：读取 DWG filer 中真实 DBCS code page 作用域。
+- `DbTextDwgInFieldsScopeHook`：建立 DBText 反序列化对象级作用域并记录 `AcDbImpText` provenance。
+- `DbTextUpstreamDecodeProbeHook` / `TextEditorDbcsDecodeHook`：捕获 DBText 实际 DBCS 解码点、原始 code page、filer code page 和原始字节证据。
+- `CodePageFamilyHook`：只记录 code page family mismatch 证据，不写 native context，也不修正文本文字。
+- `GlyphCoreNativeDbTextEvidenceProjector`：从托管 `DBText` 找回 native provenance，校验 native/current text 一致后调用 `GlyphCoreNativeDecodeEvidenceStore.RegisterDbTextDecodeEvidence(...)`。
+
+这些 Hook 只生产文枢强信号。最终是否写回仍由候选特征和文枢 AI 决策；`LdFileHook` 只属于字体加载/字体重定向链路，不能作为 DBText AI 启动条件。
 
 ## 模型部署
 
@@ -52,6 +62,7 @@ DBText 修复由封闭式本地 AI 决策链路负责，不依赖在线服务，
 - 强信号来自 native Hook 数据流中可证明 `DBCS/code page family mismatch` 的对象级或簇级证据。
 - `LdFileHook` 字体重定向记录只作为辅助字体上下文，不作为乱码强信号。
 - 控制字符、替代字符、扩展拉丁 mojibake 外观、候选中文比例提升等文本外观特征不再触发 AI。
+- 从强证据修复种子产生的 `ripple` / `document-family` 等同证据可以触发文枢，但仍必须继承 `NativeDecodeFamilyMismatch`；不能从字体 Hook、训练集命中、文本外观或手写字符串规则产生。
 - 未命中门控时不加载 ONNX 模型、不做 AI 评分、不向命令行输出 DBText 提示。
 
 `GlyphCoreTextRepairAdvisor` 只负责编排：
@@ -89,6 +100,17 @@ Decision Engine 不再用固定低置信度阈值或分数差阈值替 AI 做最
 
 开发者在私有环境中提取样本、人工审核、训练 LightGBM / XGBoost / FastTree 模型，并随新版 DLL 发布。
 
+## 数据与标注边界
+
+导出命令、网页工作台、训练集和模拟报告必须以 CAD 当前实际文本为准。`displayText` 只是展示当前文本，不再把 `井` / `#` 当成显示别名互相归一化。
+
+典型例子：
+
+- 如果本图纸中 `FL-井1` 是正确文本，人工标注应保留 `FL-井1`。
+- 如果另一张图纸中同位置语义应为 `FL-#1`，人工标注可以标为 `FL-#1`。
+
+不能在运行时、训练脚本或工作台中写死 `井 -> #` 或 `# -> 井` 限制规则；这会把某一张图纸的局部语义错误扩散到其它图纸。正确做法是保留真实文本、坐标、图层、块、样式、编码路径和候选证据，由文枢模型结合上下文学习最终 keep/repair 决策。
+
 ## 边界
 
 - 不要恢复 `data/DbTextRepairModel.jsonl` 作为运行时输入。
@@ -96,6 +118,7 @@ Decision Engine 不再用固定低置信度阈值或分数差阈值替 AI 做最
 - 不要把 DBText 编码修复做成全局字符串替换。
 - 不要把读取出来的 DBText 文本是否像乱码作为强信号；强信号只能来自 native Hook 证据流或由已修复强证据种子产生的涟漪证据。
 - 不要把 `LdFileHook` 字体重定向记录当成 DBText 错解码证明。
+- 不要在导出、工作台、训练或运行时增加 `井/#` 这类硬编码显示别名或禁修规则。
 - 字形缺笔、SHX 字体形状问题仍应走字体/样式诊断，不应强行写回 DBText 文本。
 
 ## 提交前检查
@@ -105,4 +128,5 @@ Decision Engine 不再用固定低置信度阈值或分数差阈值替 AI 做最
 - 无官方 ONNX 模型时 DBText 修复只在 Hook 强证据命中后提示模型不可用。
 - 无 Hook 强证据图纸不应加载文枢模型，也不应输出 DBText 文枢提示。
 - 训练集和盲测集必须包含正常简体中文、英文、数字、符号、混合文本和真实错解码文本。
+- `dbtext-ai-features-v6` schema、ONNX manifest、导出包 schema 和训练脚本必须保持一致。
 - `AFRLOG` 仍只展示字体替换结果，不作为 DBText AI 纠错入口。
