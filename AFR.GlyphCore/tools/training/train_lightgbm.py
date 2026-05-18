@@ -18,6 +18,10 @@ from afr_glyphcore import FEATURE_COUNT, FEATURE_SCHEMA_VERSION  # noqa: E402
 
 DEFAULT_MAX_ROUNDS = 650
 DEFAULT_EARLY_STOPPING_ROUNDS = 60
+MINIMUM_CONFIDENCE = 0.92
+MINIMUM_SCORE_MARGIN = 0.18
+MINIMUM_PUBLISH_REPAIR_RECALL = 0.785
+MINIMUM_PUBLISH_DECISION_ACCURACY = 0.936
 OVERFIT_RECALL_GAP = 0.20
 OVERFIT_ACCURACY_GAP = 0.15
 OVERFIT_WARNING_RECALL_GAP = 0.10
@@ -71,7 +75,7 @@ def main() -> int:
     if stale_exact_repairs.exists():
         stale_exact_repairs.unlink()
 
-    df = pd.read_csv(features_path, encoding="utf-8-sig")
+    df = pd.read_csv(features_path, encoding="utf-8-sig", low_memory=False)
     feature_cols = [col for col in df.columns if re.match(r"^f\d{2}_", col)]
     if len(feature_cols) != FEATURE_COUNT:
         raise ValueError(f"expected {FEATURE_COUNT} feature columns, got {len(feature_cols)}")
@@ -421,7 +425,9 @@ def pending_acceptance() -> dict:
         "label": "待模拟测试",
         "canPublish": False,
         "blockers": ["manual-simulation-required"],
-        "policy": "blind-false-repairs-must-be-zero-and-no-severe-overfit",
+        "policy": "blind-false-repairs-must-be-zero-no-severe-overfit-and-baseline-metrics",
+        "minimumRepairRecall": MINIMUM_PUBLISH_REPAIR_RECALL,
+        "minimumDecisionAccuracy": MINIMUM_PUBLISH_DECISION_ACCURACY,
     }
 
 
@@ -480,7 +486,7 @@ def run_simulation_only(args, pd, lgb) -> int:
 
     features_path = Path(args.features)
     output_dir = Path(args.output_dir)
-    df = pd.read_csv(features_path, encoding="utf-8-sig")
+    df = pd.read_csv(features_path, encoding="utf-8-sig", low_memory=False)
     feature_cols = [col for col in df.columns if re.match(r"^f\d{2}_", col)]
     if len(feature_cols) != FEATURE_COUNT:
         raise ValueError(f"expected {FEATURE_COUNT} feature columns, got {len(feature_cols)}")
@@ -754,11 +760,44 @@ def error_severity(expected_repair: bool, decision: str, correct: bool, false_re
 def decide(best, margin: float, group) -> str:
     if int(group.iloc[0]["is_from_xref"]) == 1:
         return "unsafe"
+    if row_has_current_unsafe(group.iloc[0]):
+        return "unsafe"
     if int(best["is_noop"]) == 1:
         return "skip"
     if str(best.get("candidate_text") or "") == "":
         return "unsafe"
+    if row_has_candidate_unsafe(best):
+        return "unsafe"
+    if int(best.get("is_roundtrip") or 0) != 1:
+        return "skip"
+    if float(best.get("prediction") or 0.0) < MINIMUM_CONFIDENCE:
+        return "skip"
+    if margin < MINIMUM_SCORE_MARGIN:
+        return "skip"
     return "repair"
+
+
+def row_has_current_unsafe(row) -> bool:
+    return (
+        row_float(row, "f09_current_control_ratio") > 0
+        or row_float(row, "f11_current_replacement_ratio") > 0
+        or row_float(row, "f38_current_has_suspicious_unicode") > 0
+    )
+
+
+def row_has_candidate_unsafe(row) -> bool:
+    return (
+        row_float(row, "f10_candidate_control_ratio") > 0
+        or row_float(row, "f12_candidate_replacement_ratio") > 0
+        or row_float(row, "f37_candidate_has_suspicious_unicode") > 0
+    )
+
+
+def row_float(row, name: str) -> float:
+    try:
+        return float(row.get(name) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def safe_div(numerator: int, denominator: int) -> float:
@@ -827,6 +866,10 @@ def evaluate_acceptance(blind_report: dict, overfitting: dict) -> dict:
         blockers.append("blind-test-empty")
     if int(summary.get("falseRepairs") or 0) > 0:
         blockers.append("blind-false-repairs")
+    if float(summary.get("repairRecall") or 0.0) < MINIMUM_PUBLISH_REPAIR_RECALL:
+        blockers.append("repair-recall-below-baseline")
+    if float(summary.get("decisionAccuracy") or 0.0) < MINIMUM_PUBLISH_DECISION_ACCURACY:
+        blockers.append("decision-accuracy-below-baseline")
     if bool(overfitting.get("severe")):
         blockers.append("severe-overfitting")
 
@@ -846,6 +889,8 @@ def evaluate_acceptance(blind_report: dict, overfitting: dict) -> dict:
         "canPublish": status == "passed",
         "blockers": blockers,
         "policy": "simulation-false-repairs-must-be-zero-and-no-severe-overfit",
+        "minimumRepairRecall": MINIMUM_PUBLISH_REPAIR_RECALL,
+        "minimumDecisionAccuracy": MINIMUM_PUBLISH_DECISION_ACCURACY,
     }
 
 
@@ -861,6 +906,8 @@ def build_training_config(args, model) -> dict:
         "actualIterations": actual_iterations,
         "stoppedEarly": bool(best_iteration and best_iteration < int(args.max_rounds)),
         "decisionPolicy": "ai-top-candidate-with-native-evidence-trigger",
+        "minimumConfidence": MINIMUM_CONFIDENCE,
+        "minimumScoreMargin": MINIMUM_SCORE_MARGIN,
         "simulationSampleGroups": max(0, int(args.simulation_sample_groups)),
         "simulationMinimumGroups": max(1, int(args.simulation_min_groups)),
         "simulationMode": str(args.simulation_mode),
@@ -899,6 +946,8 @@ def build_manifest(
         "trainingRows": int(len(df)),
         "trainingGroups": int(df["group_id"].nunique()),
         "decisionPolicy": "ai-top-candidate-with-native-evidence-trigger",
+        "minimumConfidence": MINIMUM_CONFIDENCE,
+        "minimumScoreMargin": MINIMUM_SCORE_MARGIN,
         "validationSummary": test_report["summary"],
         "blindValidationSummary": test_report["summary"],
         "splitSummary": split_summary,

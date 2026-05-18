@@ -195,7 +195,9 @@ internal static class GlyphCoreTextRepairService
             GlyphCoreNativeDecodeEvidenceStore.ApplyRippleEvidence(
                 item.Context,
                 nearestSeed.Context,
-                nearbySeeds.Count);
+                nearbySeeds.Count,
+                RippleDistanceRatio(nearestSeed, item),
+                SeedQuality(nearestSeed.Context));
             item.Detection = GlyphCoreTextRepairProblemDetector.Detect(item.Context);
             if (item.Detection.HasProblem)
                 rippleItems.Add(item);
@@ -258,9 +260,29 @@ internal static class GlyphCoreTextRepairService
 
     private static bool SameTextContext(GlyphCoreTextRepairContext left, GlyphCoreTextRepairContext right)
     {
-        return string.Equals(left.Layer, right.Layer, StringComparison.OrdinalIgnoreCase)
+        return string.Equals(LayerSemanticClass(left.Layer), LayerSemanticClass(right.Layer), StringComparison.OrdinalIgnoreCase)
                && string.Equals(left.OwnerBlockName, right.OwnerBlockName, StringComparison.OrdinalIgnoreCase)
                && string.Equals(left.TextStyleName, right.TextStyleName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static float RippleDistanceRatio(GlyphCoreTextRepairItem seed, GlyphCoreTextRepairItem target)
+    {
+        double height = Math.Max(Math.Max(seed.Height, target.Height), 1.0);
+        double maxDistance = height * 20.0;
+        if (maxDistance <= 0)
+            return 1f;
+
+        return (float)Math.Max(0.0, Math.Min(1.0, seed.Position.DistanceTo(target.Position) / maxDistance));
+    }
+
+    private static float SeedQuality(GlyphCoreTextRepairContext context)
+    {
+        float evidenceQuality = Math.Max(context.NativeDecodeObjectCorrelation, context.NativeDecodeClusterCorrelation);
+        if (context.HasHookRawDecodeEvidence)
+            evidenceQuality = Math.Max(evidenceQuality, context.HookRawConfidence);
+        if (evidenceQuality <= 0)
+            evidenceQuality = 0.5f;
+        return Math.Max(0f, Math.Min(1f, evidenceQuality));
     }
 
     private static string BuildDecisionClusterKey(GlyphCoreTextRepairItem item)
@@ -272,12 +294,50 @@ internal static class GlyphCoreTextRepairService
             context.NativeDecodeAppliedCodePageFamily,
             context.NativeDecodeHookHitType,
             context.NativeDecodeEvidenceScope,
-            context.Layer,
+            LayerSemanticClass(context.Layer),
             context.OwnerBlockName,
             context.TextStyleName,
+            BuildRecommendedActionSignature(item),
             context.CurrentText,
             BuildCandidateSignature(item.Detection.Candidates)
         });
+    }
+
+    private static string BuildRecommendedActionSignature(GlyphCoreTextRepairItem item)
+    {
+        if (!item.Detection.HasProblem)
+            return "keep";
+
+        return item.Detection.Candidates.Any(candidate => !candidate.IsNoOp)
+            ? "repair-candidate"
+            : "unknown";
+    }
+
+    private static string LayerSemanticClass(string layer)
+    {
+        string value = (layer ?? string.Empty).ToUpperInvariant();
+        if (ContainsAny(value, "FIRE", "喷淋", "消防", "消火", "HYDRANT"))
+            return "fire";
+        if (ContainsAny(value, "WATER", "给水", "排水", "DRAIN", "PIPE", "PLUMB"))
+            return "water";
+        if (ContainsAny(value, "ELEC", "电气", "照明", "POWER"))
+            return "electric";
+        if (ContainsAny(value, "HVAC", "暖通", "风管", "AIR"))
+            return "hvac";
+        if (ContainsAny(value, "TEXT", "DIM", "标注", "文字"))
+            return "annotation";
+        return string.IsNullOrWhiteSpace(value) ? "unknown" : "general";
+    }
+
+    private static bool ContainsAny(string value, params string[] tokens)
+    {
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            if (value.IndexOf(tokens[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+        }
+
+        return false;
     }
 
     private static string BuildCandidateSignature(IReadOnlyList<GlyphCoreTextRepairCandidate> candidates)

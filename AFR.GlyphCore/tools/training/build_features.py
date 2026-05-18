@@ -47,7 +47,14 @@ METADATA_COLUMNS = [
     "native_decode_object_correlation",
     "native_decode_cluster_correlation",
     "ldfile_font_evidence",
+    "hook_raw_evidence",
+    "hook_raw_payload_length",
+    "hook_raw_confidence",
+    "hook_raw_roundtrip",
+    "hook_raw_candidate_source",
     "ripple_seed_count",
+    "ripple_seed_quality",
+    "ripple_distance_ratio",
 ]
 
 
@@ -125,7 +132,14 @@ def build_rows(input_path: Path):
                     "native_decode_object_correlation": float_value(context, evidence, "nativeDecodeObjectCorrelation", "objectCorrelation"),
                     "native_decode_cluster_correlation": float_value(context, evidence, "nativeDecodeClusterCorrelation", "clusterCorrelation"),
                     "ldfile_font_evidence": 1 if bool_value(context, evidence, "hasLdFileFontEvidence", "hasLdFileFontEvidence") else 0,
+                    "hook_raw_evidence": 1 if bool_value(context, evidence, "hasHookRawDecodeEvidence", "hasHookRawDecodeEvidence") else 0,
+                    "hook_raw_payload_length": int(float_value(context, evidence, "hookRawPayloadLength", "hookRawPayloadLength")),
+                    "hook_raw_confidence": float_value(context, evidence, "hookRawConfidence", "hookRawConfidence"),
+                    "hook_raw_roundtrip": 1 if bool_value(context, evidence, "hookRawRoundTrip", "hookRawRoundTrip") else 0,
+                    "hook_raw_candidate_source": str_value(context, evidence, "hookRawCandidateSource", "hookRawCandidateSource"),
                     "ripple_seed_count": int(float_value(context, evidence, "rippleSeedCount", "rippleSeedCount")),
+                    "ripple_seed_quality": float_value(context, evidence, "rippleSeedQuality", "rippleSeedQuality"),
+                    "ripple_distance_ratio": float_value(context, evidence, "rippleDistanceRatio", "rippleDistanceRatio"),
                 }
                 for feature_index, feature_value in enumerate(features):
                     row[f"f{feature_index:02d}_{FEATURE_NAMES[feature_index]}"] = float(feature_value)

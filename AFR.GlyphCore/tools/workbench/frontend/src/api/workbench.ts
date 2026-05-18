@@ -5,12 +5,17 @@ import type {
   ConfirmReviewRowsPayload,
   ConfirmReviewRowsResult,
   DataPayload,
+  DeletePackageResult,
   DeleteTrainingRecordsResult,
   FeatureStatus,
+  ImportTrainingDatasetResult,
   ReportPayload,
+  ResetModelResult,
+  ResetReviewRowsResult,
   ReviewClustersPayload,
   StartSimulationTestResult,
   StartTrainingResult,
+  TrainingCancelResult,
   TrainingDatasetPayload,
   TrainingOptions,
   TrainingStatus
@@ -34,8 +39,20 @@ export function selectPackage(packageId: string) {
   });
 }
 
+export function deletePackage(packageId: string) {
+  return post<DeletePackageResult>('/api/package/delete', {
+    packageId
+  });
+}
+
 export function confirmReviewRows(payload: ConfirmReviewRowsPayload) {
   return post<ConfirmReviewRowsResult>('/api/review-table/confirm', payload);
+}
+
+export function resetReviewRows(reviewGroupIds: string[]) {
+  return post<ResetReviewRowsResult>('/api/review-table/reset', {
+    reviewGroupIds
+  });
 }
 
 export function getTrainingDataset() {
@@ -67,10 +84,26 @@ export function startTraining(packageIds?: string[], trainingOptions?: TrainingO
   });
 }
 
+export function cancelTraining() {
+  return post<TrainingCancelResult>('/api/train/cancel', {});
+}
+
 export function startSimulationTest() {
   return post<StartSimulationTestResult>('/api/simulate-test', {});
 }
 
 export function getReport() {
   return get<ReportPayload>('/api/report');
+}
+
+export function importTrainingDataset(content: string, mode: 'merge' | 'replace' = 'merge') {
+  return post<ImportTrainingDatasetResult>('/api/training-dataset/import', {
+    format: 'jsonl',
+    mode,
+    content
+  });
+}
+
+export function resetModel() {
+  return post<ResetModelResult>('/api/model/reset', {});
 }

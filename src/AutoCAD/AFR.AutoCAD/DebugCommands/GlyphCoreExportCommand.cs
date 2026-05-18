@@ -465,8 +465,17 @@ internal sealed class GlyphCoreDatasetExporter
                 objectCorrelation = Math.Round(context.NativeDecodeObjectCorrelation, 6),
                 clusterCorrelation = Math.Round(context.NativeDecodeClusterCorrelation, 6),
                 hasLdFileFontEvidence = context.HasLdFileFontEvidence,
+                hasHookRawDecodeEvidence = context.HasHookRawDecodeEvidence,
+                hookRawPayloadSha256 = context.HookRawPayloadSha256,
+                hookRawPayloadLength = context.HookRawPayloadLength,
+                hookPreferredDecodedText = context.HookPreferredDecodedText,
+                hookRawCandidateSource = context.HookRawCandidateSource,
+                hookRawRoundTrip = context.HookRawRoundTrip,
+                hookRawConfidence = Math.Round(context.HookRawConfidence, 6),
                 rippleSeedCount = context.RippleSeedCount,
-                rippleContextText = context.RippleContextText
+                rippleContextText = context.RippleContextText,
+                rippleSeedQuality = Math.Round(context.RippleSeedQuality, 6),
+                rippleDistanceRatio = Math.Round(context.RippleDistanceRatio, 6)
             }
         };
     }
@@ -561,6 +570,9 @@ internal sealed class GlyphCoreDatasetExporter
             "native_decode_source_family",
             "native_decode_applied_family",
             "native_decode_hook_hit",
+            "hook_raw_evidence",
+            "hook_raw_payload_length",
+            "hook_raw_confidence",
             "candidate_count",
             "current_text",
             "position_x",
@@ -594,6 +606,9 @@ internal sealed class GlyphCoreDatasetExporter
             EscapeTsv(context.NativeDecodeSourceCodePageFamily),
             EscapeTsv(context.NativeDecodeAppliedCodePageFamily),
             EscapeTsv(context.NativeDecodeHookHitType),
+            context.HasHookRawDecodeEvidence ? "1" : "0",
+            context.HookRawPayloadLength.ToString(CultureInfo.InvariantCulture),
+            Number(context.HookRawConfidence),
             candidates.Count.ToString(CultureInfo.InvariantCulture),
             EscapeTsv(context.CurrentText),
             Number(geometry.Position.X),

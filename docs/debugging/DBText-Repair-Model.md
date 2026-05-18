@@ -13,7 +13,7 @@ DBText 修复由封闭式本地 AI 决策链路负责，不依赖在线服务，
 3. 执行 `GlyphCoreTextRepairService.Repair`，扫描非外参块中的 `DBText`。
 4. `GlyphCoreTextRepairProblemDetector` 只读取 `NativeDecodeEvidence`；不再根据 `CurrentText` 是否像乱码触发。
 5. 未命中 Hook 强证据时静默跳过，不加载模型、不评分、不提示。
-6. 命中强证据后生成候选、提取 `dbtext-ai-features-v3` 特征并调用本地 AI 评分器。
+6. 命中强证据后生成候选、提取 `dbtext-ai-features-v4` 特征并调用本地 AI 评分器。
 7. 同类 DBText 簇共享一次 AI 判断；已修复文本可作为涟漪种子为周边对象提供上下文。
 
 `GlyphCoreNativeDecodeEvidenceStore` 只是内存桥，不会伪造证据；如果当前构建没有 native Hook 生产者注册对象级或簇级证据，DBText 文枢会保持静默。

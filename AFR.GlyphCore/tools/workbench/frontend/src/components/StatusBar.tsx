@@ -1,47 +1,23 @@
-import { AlertTriangle, CheckCircle2, CircleDot, Loader2 } from 'lucide-react';
-import { useFilteredGroups, useVisibleSelection } from '@/hooks/useFilters';
-import { cn } from '@/lib/utils';
-import { useWorkbenchStore } from '@/store/useWorkbenchStore';
+import { Info, Save } from 'lucide-react';
 
-export function StatusBar() {
-  const { message, error, busy, activeTab, groups } = useWorkbenchStore();
-  const filteredGroups = useFilteredGroups();
-  const { selectedReviewVisibleCount } = useVisibleSelection();
+interface Props {
+  message: string;
+  selectedCount?: number;
+  lastSaved?: string;
+}
 
-  const Icon = error ? AlertTriangle : busy ? Loader2 : message ? CheckCircle2 : CircleDot;
-  const statusText = busy
-    ? '处理中...'
-    : error ||
-      message ||
-      (activeTab === 'review' ? `已选择 ${selectedReviewVisibleCount} 个文本簇` : '就绪');
-  const visibleCount = filteredGroups.length;
-  const clusterCount = (groups.clusters || groups.groups || []).length;
-
+export default function StatusBar({ message, selectedCount = 0, lastSaved }: Props) {
   return (
-    <footer className="flex h-8 shrink-0 items-center gap-4 overflow-hidden border-t border-[var(--color-line)] bg-[var(--color-canvas)] px-4 text-caption text-[var(--color-text-muted)]">
-      <span
-        className={cn(
-          'inline-flex min-w-0 items-center gap-2 truncate',
-          error && 'text-[var(--color-unsafe)]',
-          busy && 'text-[var(--color-warn)]',
-          message && !error && !busy && 'text-[var(--color-keep)]'
-        )}
-      >
-        <Icon className={cn('h-3.5 w-3.5 shrink-0', busy && 'animate-spin')} aria-hidden />
-        <span className="truncate">{statusText}</span>
+    <footer className="fixed inset-x-0 bottom-0 z-50 flex h-7 items-center gap-4 border-t border-gray-200 bg-gray-50 px-4">
+      <span className="flex items-center gap-1.5 text-xs text-gray-500">
+        <Info size={11} className="shrink-0 text-gray-400" />
+        {message}
       </span>
-      {activeTab === 'review' && (
-        <>
-          <span className="shrink-0">显示 {visibleCount} / {clusterCount}</span>
-        <span className="min-w-0 truncate max-[640px]:hidden">保存会按文本簇展开并进入训练数据集</span>
-        </>
-      )}
-      {activeTab === 'dataset' && (
-        <span className="min-w-0 truncate">删除训练记录会回流复核队列并移除 Feature 行</span>
-      )}
-      {activeTab !== 'review' && activeTab !== 'dataset' && (
-        <span className="min-w-0 truncate">数据、训练集和模型仅保存在本机 AFR.GlyphCore 目录</span>
-      )}
+      {selectedCount > 0 && <span className="text-xs font-medium text-blue-600">已选 {selectedCount} 条</span>}
+      <span className="ml-auto flex items-center gap-1.5 text-xs text-gray-400">
+        <Save size={11} />
+        本地数据自动保存{lastSaved ? ` · 上次保存 ${lastSaved}` : ''}
+      </span>
     </footer>
   );
 }

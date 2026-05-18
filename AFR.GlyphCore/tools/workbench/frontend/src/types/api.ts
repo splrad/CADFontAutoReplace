@@ -408,3 +408,49 @@ export interface DeleteTrainingRecordsResult {
   reviewClusters?: ReviewClustersPayload;
   [key: string]: unknown;
 }
+
+export interface DeletePackageResult {
+  ok?: boolean;
+  deletedPackageId?: string;
+  deletedPaths?: Array<{ label?: string; path?: string }>;
+  bootstrap?: BootstrapPayload;
+  [key: string]: unknown;
+}
+
+export interface ResetReviewRowsResult {
+  ok?: boolean;
+  reset?: number;
+  recordIds?: string[];
+  data?: DataPayload;
+  features?: FeatureStatus;
+  reviewClusters?: ReviewClustersPayload;
+  trainingDataset?: TrainingDatasetPayload;
+  [key: string]: unknown;
+}
+
+export interface ImportTrainingDatasetResult {
+  ok?: boolean;
+  imported?: number;
+  errors?: Array<{ line?: number; error?: string }>;
+  data?: DataPayload;
+  features?: FeatureStatus;
+  reviewClusters?: ReviewClustersPayload;
+  trainingDataset?: TrainingDatasetPayload;
+  [key: string]: unknown;
+}
+
+export interface TrainingCancelResult {
+  ok?: boolean;
+  canceled?: boolean;
+  training?: TrainingStatus;
+  [key: string]: unknown;
+}
+
+export interface ResetModelResult {
+  ok?: boolean;
+  reset?: number;
+  trashPath?: string;
+  report?: ReportPayload;
+  training?: TrainingStatus;
+  [key: string]: unknown;
+}

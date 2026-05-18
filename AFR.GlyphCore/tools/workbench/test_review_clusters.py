@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import csv
 import json
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
-from server import DatasetStore, WorkbenchState
+TOOL_ROOT = Path(__file__).resolve().parents[1]
+if str(TOOL_ROOT) not in sys.path:
+    sys.path.insert(0, str(TOOL_ROOT))
+
+from afr_glyphcore import FEATURE_COUNT, FEATURE_SCHEMA_VERSION
+from server import DatasetStore, ProcessJob, WorkbenchState
 
 
 class ReviewClusterTests(unittest.TestCase):
@@ -221,6 +228,185 @@ class ReviewClusterTests(unittest.TestCase):
             feature_group_ids = self._feature_group_ids(store.features_path)
             self.assertNotIn(deleted_group_id, feature_group_ids)
 
+            remaining_group_ids = [record["groupId"] for record in self._read_jsonl(store.training_dataset_path)]
+            self.assertNotIn(deleted_group_id, remaining_group_ids)
+
+            remaining_ids = [record["groupId"] for record in built["data"]["trainingDataset"]["records"][1:]]
+            delete_all = state.delete_training_dataset_records({"groupIds": remaining_ids})
+            self.assertEqual(2, delete_all["removed"])
+            self.assertFalse(store.training_dataset_path.exists())
+            self.assertFalse(store.features_path.exists())
+
+    def test_review_table_reset_reflows_cluster_and_removes_features(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state = self._create_state(root, self._normal_records("reset", "12345", 3))
+            store = state.require_store()
+            cluster = store.review_clusters_payload()["clusters"][0]
+
+            store.confirm_review_table_rows(
+                {
+                    "rows": [
+                        {
+                            "reviewGroupId": cluster["id"],
+                            "labelAction": "keep",
+                            "labelText": "12345",
+                            "candidateIndex": 1,
+                        }
+                    ],
+                    "reviewer": "unit",
+                    "note": "reset-test",
+                }
+            )
+            state.build_features()
+            self.assertTrue(store.features_path.exists())
+            self.assertEqual(3, len(store.training_dataset))
+
+            reset = state.reset_review_rows({"reviewGroupIds": [cluster["id"]]})
+
+            self.assertEqual(3, reset["reset"])
+            self.assertEqual(0, len(store.reviewed))
+            self.assertEqual(0, len(store.training_dataset))
+            self.assertFalse(store.training_dataset_path.exists())
+            self.assertFalse(store.features_path.exists())
+            reflowed = store.review_clusters_payload()["clusters"]
+            self.assertEqual(1, len(reflowed))
+            self.assertEqual(3, reflowed[0]["unreviewedCount"])
+
+    def test_training_dataset_export_and_import_jsonl_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state = self._create_state(root, self._normal_records("import", "12345", 2))
+            store = state.require_store()
+            cluster = store.review_clusters_payload()["clusters"][0]
+            store.confirm_review_table_rows(
+                {
+                    "rows": [
+                        {
+                            "reviewGroupId": cluster["id"],
+                            "labelAction": "keep",
+                            "labelText": "12345",
+                            "candidateIndex": 1,
+                        }
+                    ],
+                    "reviewer": "unit",
+                    "note": "export-import-test",
+                }
+            )
+
+            exported = state.export_training_dataset("jsonl")
+            self.assertIn("training_dataset.jsonl", exported["filename"])
+            csv_export = state.export_training_dataset("csv")
+            self.assertIn("currentText", csv_export["data"].decode("utf-8-sig"))
+
+            state.reset_review_rows({"reviewGroupIds": [cluster["id"]]})
+            self.assertEqual(0, len(store.training_dataset))
+
+            imported = state.import_training_dataset(
+                {
+                    "format": "jsonl",
+                    "content": exported["data"].decode("utf-8"),
+                }
+            )
+
+            self.assertTrue(imported["ok"])
+            self.assertEqual(2, imported["imported"])
+            self.assertEqual(2, len(store.training_dataset))
+
+    def test_command_export_records_promote_to_model_feature_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state = self._create_state(root, self._command_export_records())
+            store = state.require_store()
+            cluster = store.review_clusters_payload()["clusters"][0]
+
+            store.confirm_review_table_rows(
+                {
+                    "rows": [
+                        {
+                            "reviewGroupId": cluster["id"],
+                            "labelAction": "repair",
+                            "labelText": "检修洞800宽X500高,顶到梁底",
+                            "candidateIndex": 0,
+                        }
+                    ],
+                    "reviewer": "unit",
+                    "note": "command-export-alignment",
+                }
+            )
+
+            built = state.build_features()
+
+            self.assertEqual(0, built["promoted"])
+            self.assertEqual(FEATURE_COUNT, built["features"]["featureColumns"])
+            rows = self._read_csv(store.features_path)
+            self.assertEqual(1, len(rows))
+            row = rows[0]
+            self.assertEqual("dbtext-ai-training-row-v1", row["schema"])
+            self.assertEqual(FEATURE_SCHEMA_VERSION, row["feature_schema"])
+            self.assertEqual("cmd0000", row["group_id"])
+            self.assertEqual("repair", row["label_action"])
+            self.assertEqual("object", row["native_decode_scope"])
+            self.assertEqual("dbtext-deserialize", row["native_decode_hook_hit"])
+            feature_columns = [column for column in row if column.startswith("f") and len(column) > 1 and column[1].isdigit()]
+            self.assertEqual(FEATURE_COUNT, len(feature_columns))
+
+    def test_delete_package_removes_related_local_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state = self._create_state(root, self._normal_records("delete", "12345", 1))
+            store = state.require_store()
+            store.reviewed_path.write_text("{}\n", encoding="utf-8")
+            store.audit_path.write_text("audit\n", encoding="utf-8")
+            store.training_dataset_path.write_text("{}\n", encoding="utf-8")
+            store.features_path.write_text("group_id\nx\n", encoding="utf-8")
+
+            result = state.delete_package({"packageId": "pkg"})
+
+            self.assertTrue(result["ok"])
+            self.assertFalse(store.package_dir.exists())
+            self.assertFalse(store.reviewed_path.exists())
+            self.assertFalse(store.training_dataset_path.exists())
+            self.assertFalse(store.features_path.exists())
+            self.assertNotIn("trashPath", result)
+            self.assertGreaterEqual(len(result["deletedPaths"]), 4)
+            self.assertEqual([], result["bootstrap"]["packages"])
+
+    def test_cancel_training_job_and_reset_model_archive_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state = self._create_state(root, self._normal_records("job", "12345", 1))
+            job = ProcessJob(
+                [sys.executable, "-c", "import time; time.sleep(10)"],
+                root,
+                root / "train.log",
+            )
+            job.start()
+            try:
+                for _ in range(100):
+                    if job.process is not None:
+                        break
+                    time.sleep(0.01)
+                state.training_job = job
+                canceled = state.cancel_training()
+                self.assertTrue(canceled["canceled"])
+                job.thread.join(timeout=5)
+                self.assertEqual("canceled", job.status)
+            finally:
+                if job.status == "running":
+                    job.cancel()
+
+            (root / "model").mkdir(exist_ok=True)
+            (root / "model" / "AFR.GlyphCore.ModelManifest.json").write_text("{}", encoding="utf-8")
+            (root / "model" / "training_summary.json").write_text("{}", encoding="utf-8")
+
+            reset = state.reset_model()
+
+            self.assertTrue(reset["ok"])
+            self.assertEqual(2, reset["reset"])
+            self.assertFalse((root / "model" / "AFR.GlyphCore.ModelManifest.json").exists())
+            self.assertTrue(Path(reset["trashPath"]).exists())
+
     @staticmethod
     def _create_store(root: Path, records: list[dict]) -> DatasetStore:
         dataset_root = root / "dataset"
@@ -247,10 +433,97 @@ class ReviewClusterTests(unittest.TestCase):
 
     @staticmethod
     def _feature_group_ids(path: Path) -> set[str]:
-        import csv
-
         with path.open("r", encoding="utf-8-sig", newline="") as reader:
             return {str(row.get("group_id") or "") for row in csv.DictReader(reader)}
+
+    @staticmethod
+    def _read_jsonl(path: Path) -> list[dict]:
+        with path.open("r", encoding="utf-8") as reader:
+            return [json.loads(line) for line in reader if line.strip()]
+
+    @staticmethod
+    def _read_csv(path: Path) -> list[dict[str, str]]:
+        with path.open("r", encoding="utf-8-sig", newline="") as reader:
+            return list(csv.DictReader(reader))
+
+    @staticmethod
+    def _command_export_records() -> list[dict]:
+        return [
+            {
+                "schema": "dbtext-ai-candidate-group-v1",
+                "featureSchema": FEATURE_SCHEMA_VERSION,
+                "exportId": "pkg",
+                "groupId": "cmd0000",
+                "currentText": "潰党韌800遵X500詢,階善褽菁",
+                "drawing": {
+                    "fileName": "unit.dwg",
+                    "handle": "42",
+                    "kind": "DBText",
+                },
+                "context": {
+                    "currentText": "潰党韌800遵X500詢,階善褽菁",
+                    "drawingFileName": "unit.dwg",
+                    "handle": "42",
+                    "layer": "BAD",
+                    "ownerBlockName": "*Model_Space",
+                    "textStyleName": "HZTXT",
+                    "textStyleFileName": "txt.shx",
+                    "textStyleBigFontFileName": "tssdchn.shx",
+                    "textStyleTypeFace": "",
+                    "isFromExternalReference": False,
+                    "nativeDecodeEvidence": {
+                        "hasEvidence": True,
+                        "familyMismatch": True,
+                        "scope": "object",
+                        "sourceCodePageFamily": "gbk",
+                        "appliedCodePageFamily": "big5",
+                        "hookHitType": "dbtext-deserialize",
+                        "objectCorrelation": 1.0,
+                        "clusterCorrelation": 0.25,
+                        "hasLdFileFontEvidence": True,
+                        "hasHookRawDecodeEvidence": True,
+                        "hookRawPayloadLength": 18,
+                        "hookPreferredDecodedText": "检修洞800宽X500高,顶到梁底",
+                        "hookRawCandidateSource": "ldfile-hook",
+                        "hookRawRoundTrip": True,
+                        "hookRawConfidence": 0.93,
+                        "rippleSeedCount": 4,
+                        "rippleContextText": "检修洞",
+                        "rippleSeedQuality": 0.82,
+                        "rippleDistanceRatio": 0.17,
+                    },
+                },
+                "geometry": {
+                    "position": {"x": 12.5, "y": 32.0, "z": 0.0},
+                    "rotation": 0.0,
+                },
+                "risk": {
+                    "highRisk": False,
+                    "candidateConflict": False,
+                    "hasNonRoundTrip": False,
+                    "currentUnsafe": False,
+                    "candidateUnsafe": False,
+                },
+                "problemGate": {
+                    "hasProblem": True,
+                    "reason": "native-decode-evidence",
+                },
+                "candidates": [
+                    {
+                        "index": 0,
+                        "text": "检修洞800宽X500高,顶到梁底",
+                        "source": "big5-carrier-to-gbk",
+                        "reason": "roundtrip-ok",
+                        "isRoundTrip": True,
+                        "isNoOp": False,
+                        "hasAiScore": False,
+                        "aiScore": None,
+                        "unsafeText": False,
+                        "features": [0.0] * FEATURE_COUNT,
+                    }
+                ],
+            }
+        ]
 
     @staticmethod
     def _records(count: int) -> list[dict]:
@@ -259,7 +532,7 @@ class ReviewClusterTests(unittest.TestCase):
             records.append(
                 {
                     "schema": "dbtext-ai-candidates-v1",
-                    "featureSchema": "dbtext-ai-features-v3",
+                    "featureSchema": "dbtext-ai-features-v4",
                     "groupId": f"r{index:04d}",
                     "currentText": "重复文本",
                     "context": {
@@ -303,7 +576,7 @@ class ReviewClusterTests(unittest.TestCase):
             records.append(
                 {
                     "schema": "dbtext-ai-candidates-v1",
-                    "featureSchema": "dbtext-ai-features-v3",
+                    "featureSchema": "dbtext-ai-features-v4",
                     "groupId": f"{prefix}{index:04d}",
                     "currentText": text,
                     "context": {
@@ -357,7 +630,7 @@ class ReviewClusterTests(unittest.TestCase):
             records.append(
                 {
                     "schema": "dbtext-ai-candidates-v1",
-                    "featureSchema": "dbtext-ai-features-v3",
+                    "featureSchema": "dbtext-ai-features-v4",
                     "groupId": f"{prefix}{index:04d}",
                     "currentText": current,
                     "context": {

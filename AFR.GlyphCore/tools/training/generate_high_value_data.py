@@ -28,7 +28,7 @@ REVIEWED_SCHEMA = "dbtext-ai-reviewed-label-v1"
 CANDIDATE_SCHEMA = "dbtext-ai-candidate-group-v1"
 LEGACY_TRAINING_SCHEMA = "dbtext-ai-candidates-v1"
 TRAINING_DATASET_SCHEMA = "dbtext-ai-training-dataset-entry-v1"
-GENERATION_RULE_VERSION = "high-value-dbtext-augmentation-v1"
+GENERATION_RULE_VERSION = "hook-cluster-ripple-v4"
 DEFAULT_SEED = 20260514
 DEFAULT_COUNT = 10000
 
@@ -203,7 +203,7 @@ def main() -> int:
 
 def default_export_id() -> str:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"{stamp}_high_value_augmented_2packages_10000"
+    return f"{stamp}_hook_cluster_ripple_v4"
 
 
 def parse_utc(value: str) -> datetime:
@@ -317,7 +317,7 @@ def generate_augmented_dataset(
             for member_index in range(cluster_size):
                 ordinal += 1
                 context_source = choose_context_source(corpus, spec.source_record, rng, member_index)
-                context = make_context(context_source, spec.current_text, ordinal, rng)
+                context = make_context(context_source, spec, ordinal, rng)
                 geometry = make_geometry(context_source, ordinal, rng)
                 candidates = list(spec.candidates)
                 selected_index = ensure_selected_candidate(candidates, spec.selected_text, spec.selected_source_hint)
@@ -556,6 +556,8 @@ def make_repair_spec(corpus: SourceCorpus, rng: random.Random) -> tuple:
     clean = choose_clean_text(corpus, source, rng)
     variant = rng.choices(
         [
+            "hook-raw-roundtrip",
+            "ripple-context-repair",
             "encoding-roundtrip",
             "half-corrupt-manual",
             "ocr-single-char-manual",
@@ -564,7 +566,7 @@ def make_repair_spec(corpus: SourceCorpus, rng: random.Random) -> tuple:
             "long-note-manual",
             "source-real-repair",
         ],
-        weights=[66, 10, 7, 5, 4, 3, 5],
+        weights=[16, 12, 42, 10, 7, 5, 4, 3, 5],
         k=1,
     )[0]
     if corpus.conflicting_repair_records and rng.random() < 0.12:
@@ -574,7 +576,22 @@ def make_repair_spec(corpus: SourceCorpus, rng: random.Random) -> tuple:
     roundtrip_status = "manual-nonroundtrip"
     accepted = False
 
-    if variant == "source-real-repair" and source.action == "repair":
+    if variant == "hook-raw-roundtrip":
+        current, path_name = make_roundtrip_corruption(clean, rng)
+        label = clean
+        candidates = build_candidates(current)
+        selected_source = "hook-raw-stream+" + path_name
+        add_or_merge_candidate(candidates, Candidate(label, selected_source, "hook-raw-roundtrip-ok", True))
+        accepted = True
+        roundtrip_status = "hook-raw-roundtrip-ok"
+    elif variant == "ripple-context-repair":
+        current, path_name = make_roundtrip_corruption(clean, rng)
+        label = clean
+        candidates = build_candidates(current)
+        selected_source = path_name
+        accepted = candidate_contains_text(candidates, label)
+        roundtrip_status = "ripple-seed-context"
+    elif variant == "source-real-repair" and source.action == "repair":
         current = source.current_text
         label = source.label_text or clean
         candidates = candidates_from_source_or_build(source, current)
@@ -1026,9 +1043,9 @@ def strip_training_targets(candidate_rows: list[dict]) -> list[dict]:
     return stripped
 
 
-def make_context(source: SourceRecord, current_text: str, ordinal: int, rng: random.Random) -> dict:
+def make_context(source: SourceRecord, spec: ClusterSpec, ordinal: int, rng: random.Random) -> dict:
     context = dict(source_context(source))
-    context["currentText"] = current_text
+    context["currentText"] = spec.current_text
     context["handle"] = f"{0xA00000 + ordinal:X}"
     context["objectId"] = f"({9000000000000 + ordinal})"
     if "entityType" not in context:
@@ -1039,7 +1056,104 @@ def make_context(source: SourceRecord, current_text: str, ordinal: int, rng: ran
         context["textStyleName"] = choose_neighbor_context_value(source, "textStyleName", context.get("textStyleName") or "")
     if rng.random() < 0.08:
         context["layer"] = choose_neighbor_context_value(source, "layer", context.get("layer") or "")
+    apply_native_decode_training_context(context, spec, ordinal, rng)
     return context
+
+
+def apply_native_decode_training_context(context: dict, spec: ClusterSpec, ordinal: int, rng: random.Random) -> None:
+    if spec.label_action != "repair":
+        return
+
+    source_hint = spec.selected_source_hint or first_repair_candidate_source(spec.candidates)
+    source_family, applied_family = codepage_families_from_candidate_source(source_hint)
+    if not source_family or not applied_family:
+        source_family, applied_family = "gbk", "big5"
+
+    is_ripple = spec.variant_rule == "ripple-context-repair"
+    is_hook_raw = "hook-raw-stream" in source_hint.lower() or spec.variant_rule == "hook-raw-roundtrip"
+    scope = "ripple" if is_ripple else ("object" if rng.random() < 0.70 else "cluster")
+    evidence = {
+        "hasEvidence": True,
+        "familyMismatch": True,
+        "scope": scope,
+        "clusterKey": stable_id(
+            "native-evidence",
+            context.get("layer") or "",
+            context.get("ownerBlockName") or "",
+            context.get("textStyleName") or "",
+            source_family,
+            applied_family,
+        ),
+        "sourceCodePageFamily": source_family,
+        "appliedCodePageFamily": applied_family,
+        "hookHitType": "dbtext-raw-stream",
+        "objectCorrelation": 0.0 if is_ripple else (1.0 if scope == "object" else 0.0),
+        "clusterCorrelation": 0.45 if is_ripple else (1.0 if scope == "cluster" else 0.0),
+    }
+    context["nativeDecodeEvidence"] = evidence
+    context["hasNativeDecodeEvidence"] = True
+    context["nativeDecodeFamilyMismatch"] = True
+    context["nativeDecodeEvidenceScope"] = scope
+    context["nativeDecodeSourceCodePageFamily"] = source_family
+    context["nativeDecodeAppliedCodePageFamily"] = applied_family
+    context["nativeDecodeHookHitType"] = "dbtext-raw-stream"
+    context["nativeDecodeObjectCorrelation"] = evidence["objectCorrelation"]
+    context["nativeDecodeClusterCorrelation"] = evidence["clusterCorrelation"]
+
+    if is_hook_raw:
+        payload_key = stable_id("raw", spec.current_text, spec.label_text, str(ordinal))
+        context["hasHookRawDecodeEvidence"] = True
+        context["hookRawPayloadSha256"] = payload_key + payload_key
+        context["hookRawPayloadLength"] = max(1, len(spec.current_text.encode("utf-8", errors="ignore")))
+        context["hookPreferredDecodedText"] = spec.label_text
+        context["hookRawCandidateSource"] = source_hint
+        context["hookRawRoundTrip"] = spec.roundtrip_status != "manual-nonroundtrip"
+        context["hookRawConfidence"] = 0.96 if context["hookRawRoundTrip"] else 0.72
+        evidence.update(
+            {
+                "hasHookRawDecodeEvidence": context["hasHookRawDecodeEvidence"],
+                "hookRawPayloadSha256": context["hookRawPayloadSha256"],
+                "hookRawPayloadLength": context["hookRawPayloadLength"],
+                "hookPreferredDecodedText": context["hookPreferredDecodedText"],
+                "hookRawCandidateSource": context["hookRawCandidateSource"],
+                "hookRawRoundTrip": context["hookRawRoundTrip"],
+                "hookRawConfidence": context["hookRawConfidence"],
+            }
+        )
+
+    if is_ripple:
+        context["rippleContextText"] = spec.label_text
+        context["rippleSeedCount"] = rng.randint(1, 5)
+        context["rippleSeedQuality"] = round(rng.uniform(0.70, 0.98), 6)
+        context["rippleDistanceRatio"] = round(rng.uniform(0.05, 0.85), 6)
+        evidence.update(
+            {
+                "rippleContextText": context["rippleContextText"],
+                "rippleSeedCount": context["rippleSeedCount"],
+                "rippleSeedQuality": context["rippleSeedQuality"],
+                "rippleDistanceRatio": context["rippleDistanceRatio"],
+            }
+        )
+
+
+def first_repair_candidate_source(candidates: list[Candidate]) -> str:
+    for candidate in candidates:
+        if not candidate.is_noop:
+            return candidate.source
+    return ""
+
+
+def codepage_families_from_candidate_source(source: str) -> tuple[str, str]:
+    lower = (source or "").lower()
+    if "big5-carrier-to-gbk" in lower:
+        return "gbk", "big5"
+    if "gbk-carrier-to-big5" in lower:
+        return "big5", "gbk"
+    if "utf8-carrier-to-gbk" in lower:
+        return "gbk", "utf8"
+    if "gbk-carrier-to-utf8" in lower:
+        return "utf8", "gbk"
+    return "", ""
 
 
 def choose_context_source(
@@ -1287,7 +1401,7 @@ def make_manifest(result: GenerationResult) -> dict:
         "origin": "high-value-synthetic-from-real",
         "generationRuleVersion": GENERATION_RULE_VERSION,
         "drawing": {
-            "fileName": "high_value_augmented_from_2packages.dwg",
+            "fileName": "hook_cluster_ripple_v4_augmented_from_real_packages.dwg",
             "sourcePackages": sorted({row["sourcePackageId"] for row in result.audit_rows}),
         },
         "files": {

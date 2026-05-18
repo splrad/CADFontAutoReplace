@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 
@@ -6,7 +7,7 @@ namespace AFR.GlyphCore.TextRepair;
 
 internal static class GlyphCoreTextRepairFeatureExtractor
 {
-    public const int FeatureCount = 78;
+    public const int FeatureCount = 98;
 
     public static float[] Extract(GlyphCoreTextRepairContext context, GlyphCoreTextRepairCandidate candidate)
     {
@@ -102,6 +103,28 @@ internal static class GlyphCoreTextRepairFeatureExtractor
         features[76] = rippleStats.CjkRatio;
         features[77] = Bool(IsEvidenceAlignedCandidate(context, candidate.Source));
 
+        // f78-f97: v4 engineering semantics, raw Hook candidate evidence, and ripple quality.
+        features[78] = SimplifiedEngineeringChineseRatio(current);
+        features[79] = SimplifiedEngineeringChineseRatio(candidateText);
+        features[80] = Bool(SimplifiedEngineeringChineseRatio(candidateText) > SimplifiedEngineeringChineseRatio(current));
+        features[81] = TraditionalOrRareCjkRatio(current);
+        features[82] = TraditionalOrRareCjkRatio(candidateText);
+        features[83] = Bool(TraditionalOrRareCjkRatio(candidateText) < TraditionalOrRareCjkRatio(current));
+        features[84] = EngineeringKeywordRatio(context.Layer);
+        features[85] = LayerCandidateKeywordOverlap(context.Layer, candidateText);
+        features[86] = Bool(PreservesAsciiTokens(current, candidateText));
+        features[87] = EngineeringSymbolPreservation(current, candidateText);
+        features[88] = Norm(AsciiTokenCount(current), 8);
+        features[89] = Norm(AsciiTokenCount(candidateText), 8);
+        features[90] = Norm(EngineeringSymbolCount(current), 8);
+        features[91] = Norm(EngineeringSymbolCount(candidateText), 8);
+        features[92] = Bool(context.HasHookRawDecodeEvidence && context.HookRawPayloadLength > 0);
+        features[93] = Bool(IsHookRawPreferredCandidate(context, candidateText, candidate.Source));
+        features[94] = Bool(context.HookRawRoundTrip);
+        features[95] = Clamp01(context.HookRawConfidence);
+        features[96] = Clamp01(context.RippleSeedQuality);
+        features[97] = Clamp01(context.RippleDistanceRatio);
+
         return features;
     }
 
@@ -190,6 +213,218 @@ internal static class GlyphCoreTextRepairFeatureExtractor
         }
 
         return count / (float)Math.Max(1, text.Length);
+    }
+
+    private static float SimplifiedEngineeringChineseRatio(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return 0;
+
+        int count = 0;
+        int cjk = 0;
+        foreach (char ch in text)
+        {
+            if (!IsCjk(ch))
+                continue;
+
+            cjk++;
+            if (IsSimplifiedEngineeringChar(ch))
+                count++;
+        }
+
+        return count / (float)Math.Max(1, cjk);
+    }
+
+    private static float TraditionalOrRareCjkRatio(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return 0;
+
+        int count = 0;
+        foreach (char ch in text)
+        {
+            if (IsTraditionalOrRareCjk(ch))
+                count++;
+        }
+
+        return count / (float)Math.Max(1, text.Length);
+    }
+
+    private static float EngineeringKeywordRatio(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return 0;
+
+        string normalized = text.ToUpperInvariant();
+        string[] tokens =
+        {
+            "WATER", "DRAIN", "PIPE", "FIRE", "HVAC", "ELEC", "TEXT", "DIM",
+            "给水", "排水", "消防", "喷淋", "电气", "风管", "暖通", "结构", "建筑", "标注",
+            "水", "管", "阀", "泵", "风", "电", "层", "井", "标高"
+        };
+
+        int hits = 0;
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            if (normalized.IndexOf(tokens[i].ToUpperInvariant(), StringComparison.OrdinalIgnoreCase) >= 0)
+                hits++;
+        }
+
+        return Norm(hits, 6);
+    }
+
+    private static float LayerCandidateKeywordOverlap(string layer, string candidate)
+    {
+        HashSet<char> layerChars = EngineeringChars(layer);
+        if (layerChars.Count == 0 || string.IsNullOrEmpty(candidate))
+            return 0;
+
+        int hits = 0;
+        foreach (char ch in candidate)
+        {
+            if (layerChars.Contains(ch))
+                hits++;
+        }
+
+        return hits / (float)Math.Max(1, layerChars.Count);
+    }
+
+    private static bool PreservesAsciiTokens(string current, string candidate)
+    {
+        List<string> tokens = ExtractAsciiTokens(current);
+        if (tokens.Count == 0)
+            return true;
+
+        int preserved = 0;
+        for (int i = 0; i < tokens.Count; i++)
+        {
+            if ((candidate ?? string.Empty).IndexOf(tokens[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                preserved++;
+        }
+
+        return preserved >= Math.Max(1, tokens.Count - 1);
+    }
+
+    private static float EngineeringSymbolPreservation(string current, string candidate)
+    {
+        int total = 0;
+        int preserved = 0;
+        foreach (char ch in current ?? string.Empty)
+        {
+            if (!IsEngineeringSymbol(ch))
+                continue;
+
+            total++;
+            if ((candidate ?? string.Empty).IndexOf(ch) >= 0)
+                preserved++;
+        }
+
+        if (total == 0)
+            return 1f;
+
+        return preserved / (float)total;
+    }
+
+    private static int AsciiTokenCount(string text) => ExtractAsciiTokens(text).Count;
+
+    private static int EngineeringSymbolCount(string text)
+    {
+        int count = 0;
+        foreach (char ch in text ?? string.Empty)
+        {
+            if (IsEngineeringSymbol(ch))
+                count++;
+        }
+
+        return count;
+    }
+
+    private static bool IsHookRawPreferredCandidate(
+        GlyphCoreTextRepairContext context,
+        string candidateText,
+        string candidateSource)
+    {
+        if (!context.HasHookRawDecodeEvidence)
+            return false;
+
+        if (ContainsToken(candidateSource, "hook-raw-stream"))
+            return true;
+
+        return !string.IsNullOrWhiteSpace(context.HookPreferredDecodedText)
+               && string.Equals(context.HookPreferredDecodedText, candidateText, StringComparison.Ordinal);
+    }
+
+    private static HashSet<char> EngineeringChars(string text)
+    {
+        const string keywords = "水管井泵阀风压流排污喷淋消防电气设备材料表房库层标高详见安装系统屋顶支架压力自动给排暖通建筑结构标注";
+        var result = new HashSet<char>();
+        foreach (char ch in text ?? string.Empty)
+        {
+            if (keywords.IndexOf(ch) >= 0)
+                result.Add(ch);
+        }
+
+        return result;
+    }
+
+    private static List<string> ExtractAsciiTokens(string text)
+    {
+        var tokens = new List<string>();
+        var builder = new StringBuilder();
+        foreach (char ch in text ?? string.Empty)
+        {
+            if (IsAsciiTokenChar(ch))
+            {
+                builder.Append(ch);
+                continue;
+            }
+
+            FlushToken(tokens, builder);
+        }
+
+        FlushToken(tokens, builder);
+        return tokens;
+    }
+
+    private static void FlushToken(List<string> tokens, StringBuilder builder)
+    {
+        if (builder.Length >= 2)
+            tokens.Add(builder.ToString());
+        builder.Clear();
+    }
+
+    private static bool IsAsciiTokenChar(char ch)
+    {
+        return (ch >= 'A' && ch <= 'Z')
+               || (ch >= 'a' && ch <= 'z')
+               || (ch >= '0' && ch <= '9')
+               || ch == '+'
+               || ch == '-'
+               || ch == '.'
+               || ch == '/'
+               || ch == '('
+               || ch == ')';
+    }
+
+    private static bool IsEngineeringSymbol(char ch)
+    {
+        const string symbols = "+-()./×xXΦφ%#@=<>≤≥±°";
+        return symbols.IndexOf(ch) >= 0;
+    }
+
+    private static bool IsSimplifiedEngineeringChar(char ch)
+    {
+        const string simplified = "检宽顶图层风阀喷淋电气设备材料库给压流排污消防标高详见安装系统屋顶支架自动泵管水井房";
+        return simplified.IndexOf(ch) >= 0 || CadKeywordRatio(ch.ToString()) > 0;
+    }
+
+    private static bool IsTraditionalOrRareCjk(char ch)
+    {
+        const string traditional = "檢寬頂圖層風閥噴電氣設備給壓詳見築標號號體體臺臺";
+        if (traditional.IndexOf(ch) >= 0)
+            return true;
+
+        return IsCjk(ch) && !IsSimplifiedEngineeringChar(ch) && !char.IsLetterOrDigit(ch);
     }
 
     private static float NormalizedEditDistance(string left, string right)

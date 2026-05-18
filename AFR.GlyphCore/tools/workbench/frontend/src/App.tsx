@@ -1,86 +1,49 @@
-/**
- * AFR 文枢工作台根组件
- * 
- * 按 activeTab 分发视图：review / dataset / workflow tabs。
- * 包裹 AppShell 与 ToastProvider。
- */
-
-import { useState, useEffect } from 'react';
-import { AppShell } from '@/components/layout/AppShell';
-import { ReviewWorkspace } from '@/components/review/ReviewWorkspace';
-import { TrainingDatasetPage } from '@/components/dataset/TrainingDatasetPage';
-import { WorkflowViews } from '@/components/workflow/WorkflowViews';
-import { ToastProvider, type ToastItem } from '@/components/ui/Toast';
+import { useEffect } from 'react';
+import NavBar from '@/components/NavBar';
+import StatusBar from '@/components/StatusBar';
+import { lastSavedAt, PAGE_STATUS, toApiTab, toBoltTab } from '@/lib/boltAdapters';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
-
-const WORKFLOW_TABS = new Set(['packages', 'features', 'training', 'report']);
+import AnnotationPage from '@/pages/AnnotationPage';
+import ModelReportPage from '@/pages/ModelReportPage';
+import ModelTrainingPage from '@/pages/ModelTrainingPage';
+import TrainingDatasetPage from '@/pages/TrainingDatasetPage';
 
 export function App() {
-  const { activeTab, app, refresh, refreshTrainingStatus, message, error, busy, deleteTrainingRecord } =
-    useWorkbenchStore();
-
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
-
-  // 初始加载
-  useEffect(() => {
-    refresh();
-  }, []);
+  const { activeTab, setActiveTab, refresh, refreshTrainingStatus, message, error, busy, app } = useWorkbenchStore();
+  const tab = toBoltTab(activeTab);
 
   useEffect(() => {
-    const status = app?.training?.status;
+    void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const trainingStatus = app?.training?.status;
     const simulationStatus = app?.report?.simulation?.status;
-    const reportNeedsPolling = activeTab === 'report' && simulationStatus === 'running';
-    if (activeTab !== 'training' && status !== 'running' && !reportNeedsPolling) return;
-    refreshTrainingStatus();
-    const timer = window.setInterval(() => {
-      refreshTrainingStatus();
-    }, status === 'running' || reportNeedsPolling ? 1500 : 4000);
+    if (tab !== 'training' && tab !== 'report' && trainingStatus !== 'running' && simulationStatus !== 'running') return;
+    void refreshTrainingStatus();
+    const timer = window.setInterval(
+      () => { void refreshTrainingStatus(); },
+      trainingStatus === 'running' || simulationStatus === 'running' ? 1500 : 4000
+    );
     return () => window.clearInterval(timer);
-  }, [activeTab, app?.training?.status, app?.report?.simulation?.status, refreshTrainingStatus]);
+  }, [app?.report?.simulation?.status, app?.training?.status, refreshTrainingStatus, tab]);
 
-  // 将 error / message 推入 Toast 队列（最多保留 5 条）
-  useEffect(() => {
-    if (!error) return;
-    setToasts((prev) => [
-      ...prev.slice(-4),
-      { id: `err-${Date.now()}`, message: error, tone: 'error' as const }
-    ]);
-  }, [error]);
-
-  useEffect(() => {
-    if (!message) return;
-    setToasts((prev) => [
-      ...prev.slice(-4),
-      { id: `msg-${Date.now()}`, message, tone: 'success' as const }
-    ]);
-  }, [message]);
-
-  function removeToast(id: string) {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  }
-
-  const dataset = app?.data?.trainingDataset ?? { records: [], summary: {} };
-
-  function renderContent() {
-    if (activeTab === 'review') return <ReviewWorkspace />;
-    if (activeTab === 'dataset') {
-      return (
-        <TrainingDatasetPage
-          dataset={dataset}
-          busy={busy}
-          onDeleteRecord={deleteTrainingRecord}
-        />
-      );
-    }
-    if (WORKFLOW_TABS.has(activeTab)) return <WorkflowViews />;
-    return null;
-  }
+  const statusText = busy ? '处理中...' : error || message || PAGE_STATUS[tab];
 
   return (
-    <ToastProvider toasts={toasts} onClose={removeToast}>
-      <AppShell>
-        {renderContent()}
-      </AppShell>
-    </ToastProvider>
+    <div className="flex h-screen flex-col overflow-hidden bg-gray-100">
+      <NavBar activeTab={tab} onTabChange={(nextTab) => setActiveTab(toApiTab(nextTab))} />
+
+      <main className="overflow-hidden" style={{ marginTop: '44px', marginBottom: '28px', height: 'calc(100vh - 72px)' }}>
+        <div className="h-full px-4 py-3">
+          {tab === 'annotation' && <AnnotationPage />}
+          {tab === 'dataset' && <TrainingDatasetPage />}
+          {tab === 'training' && <ModelTrainingPage />}
+          {tab === 'report' && <ModelReportPage />}
+        </div>
+      </main>
+
+      <StatusBar message={statusText} lastSaved={lastSavedAt(app)} />
+    </div>
   );
 }

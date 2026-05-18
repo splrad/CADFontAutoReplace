@@ -21,7 +21,7 @@
       "const": "dbtext-ai-candidate-group-v1"
     },
     "featureSchema": {
-      "const": "dbtext-ai-features-v3"
+      "const": "dbtext-ai-features-v4"
     },
     "exportId": {
       "type": "string",

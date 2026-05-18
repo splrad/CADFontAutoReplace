@@ -7,12 +7,17 @@
 import { create } from 'zustand';
 import {
   buildFeatures as buildFeaturesRequest,
+  cancelTraining as cancelTrainingRequest,
   confirmReviewRows,
-  deleteTrainingRecords,
+  deletePackage as deletePackageRequest,
+  deleteTrainingRecords as deleteTrainingRecordsRequest,
   getBootstrap,
   getFeatureStatus,
   getReviewClusters,
   getReport,
+  importTrainingDataset as importTrainingDatasetRequest,
+  resetModel as resetModelRequest,
+  resetReviewRows as resetReviewRowsRequest,
   getTrainingStatus,
   selectPackage as selectPackageRequest,
   startSimulationTest as startSimulationTestRequest,
@@ -81,10 +86,16 @@ export interface WorkbenchState {
   refreshGroupsOnly: () => Promise<GroupsPayload>;
   refreshTrainingStatus: () => Promise<void>;
   selectPackage: (id: string) => Promise<void>;
+  deletePackage: (id: string) => Promise<void>;
   buildFeatures: () => Promise<void>;
   startTraining: (packageIds?: string[], trainingOptions?: TrainingOptions) => Promise<void>;
+  cancelTraining: () => Promise<void>;
   startSimulationTest: () => Promise<void>;
+  resetModel: () => Promise<void>;
   deleteTrainingRecord: (record: TrainingRecord) => Promise<void>;
+  deleteTrainingRecords: (groupIds: string[]) => Promise<void>;
+  resetReviewRows: (reviewGroupIds: string[]) => Promise<void>;
+  importTrainingDataset: (content: string) => Promise<void>;
   saveSelectedReviews: (targetGroupIds?: string[]) => Promise<void>;
   saveAllVisibleReviews: (selectableReviewGroups: ReviewGroup[]) => Promise<void>;
 }
@@ -104,7 +115,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   groups: { groups: [], summary: {} },
   activeTab: (() => {
     const id = window.location.hash.replace(/^#/, '');
-    const validTabs: TabId[] = ['packages', 'review', 'dataset', 'features', 'training', 'report'];
+    const validTabs: TabId[] = ['review', 'dataset', 'training', 'report'];
     return validTabs.includes(id as TabId) ? (id as TabId) : 'review';
   })(),
   query: '',
@@ -204,6 +215,36 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     }
   },
 
+  deletePackage: async (id) => {
+    if (!id || get().busy) return;
+    set({ busy: true, error: '', message: '正在删除本地数据包...' });
+    try {
+      const result = await deletePackageRequest(id);
+      const bootstrap = result.bootstrap || await getBootstrap();
+      let reviewGroups: GroupsPayload = { groups: [], summary: {} };
+      if (bootstrap.data?.packageId) {
+        try {
+          reviewGroups = await getReviewClusters();
+        } catch {
+          reviewGroups = { groups: [], summary: {} };
+        }
+      }
+      set({
+        app: bootstrap,
+        groups: reviewGroups,
+        selectedReviewGroupIds: [],
+        reviewEdits: {},
+        activeTab: 'review',
+        message: `已删除本地数据包 ${id}`
+      });
+      window.location.hash = 'review';
+    } catch (err: any) {
+      get().showError(err);
+    } finally {
+      set({ busy: false });
+    }
+  },
+
   buildFeatures: async () => {
     set({ busy: true, error: '', message: '正在重建 Feature...' });
     try {
@@ -261,6 +302,25 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     }
   },
 
+  cancelTraining: async () => {
+    if (get().busy) return;
+    set({ busy: true, error: '', message: '正在取消训练...' });
+    try {
+      const result = await cancelTrainingRequest();
+      set((state) => ({
+        app: {
+          ...state.app,
+          training: result.training || state.app?.training
+        },
+        message: '训练任务已取消'
+      }));
+    } catch (err: any) {
+      get().showError(err);
+    } finally {
+      set({ busy: false });
+    }
+  },
+
   startSimulationTest: async () => {
     set({ busy: true, error: '', message: '正在启动全量模拟测试...' });
     try {
@@ -278,6 +338,26 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         message: '已开始全量模拟测试'
       }));
       window.location.hash = 'report';
+    } catch (err: any) {
+      get().showError(err);
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  resetModel: async () => {
+    if (get().busy) return;
+    set({ busy: true, error: '', message: '正在归档当前模型...' });
+    try {
+      const result = await resetModelRequest();
+      set((state) => ({
+        app: {
+          ...state.app,
+          training: result.training || state.app?.training,
+          report: result.report || state.app?.report
+        },
+        message: `模型输出已归档 ${Number(result.reset || 0)} 项`
+      }));
     } catch (err: any) {
       get().showError(err);
     } finally {
@@ -320,7 +400,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       return;
     set({ busy: true, error: '' });
     try {
-      const result = await deleteTrainingRecords([groupId]);
+      const result = await deleteTrainingRecordsRequest([groupId]);
       set((state) => ({
         app: {
           ...state.app,
@@ -329,6 +409,83 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         },
         groups: result.reviewClusters || { groups: [], summary: {} },
         message: `已删除 ${result.removed || 0} 条训练数据，并回流到复核队列`
+      }));
+    } catch (err: any) {
+      get().showError(err);
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  deleteTrainingRecords: async (groupIds) => {
+    const ids = groupIds.filter(Boolean);
+    if (ids.length === 0 || get().busy) return;
+    set({ busy: true, error: '', message: `正在删除 ${ids.length} 条训练数据...` });
+    try {
+      const result = await deleteTrainingRecordsRequest(ids);
+      set((state) => ({
+        app: {
+          ...state.app,
+          data: result.data || state.app?.data,
+          features: result.features || state.app?.features
+        },
+        groups: result.reviewClusters || { groups: [], summary: {} },
+        message: `已删除 ${result.removed || 0} 条训练数据，并回流到复核队列`
+      }));
+    } catch (err: any) {
+      get().showError(err);
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  resetReviewRows: async (reviewGroupIds) => {
+    const ids = reviewGroupIds.filter(Boolean);
+    if (ids.length === 0 || get().busy) return;
+    set({ busy: true, error: '', message: `正在重置 ${ids.length} 个复核项...` });
+    try {
+      const result = await resetReviewRowsRequest(ids);
+      const resetIds = new Set(ids);
+      set((state) => ({
+        app: {
+          ...state.app,
+          data: result.data || state.app?.data,
+          features: result.features || state.app?.features
+        },
+        groups: result.reviewClusters || state.groups,
+        selectedReviewGroupIds: state.selectedReviewGroupIds.filter((id) => !resetIds.has(id)),
+        reviewEdits: Object.fromEntries(
+          Object.entries(state.reviewEdits).filter(([id]) => !resetIds.has(id))
+        ),
+        message: `已重置 ${result.reset || 0} 条复核/训练记录`
+      }));
+    } catch (err: any) {
+      get().showError(err);
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  importTrainingDataset: async (content) => {
+    if (!content.trim() || get().busy) return;
+    set({ busy: true, error: '', message: '正在导入训练数据 JSONL...' });
+    try {
+      const result = await importTrainingDatasetRequest(content);
+      if (result.ok === false) {
+        const first = result.errors?.[0];
+        set({
+          error: first ? `导入失败：第 ${first.line || '?'} 行 ${first.error}` : '导入失败：JSONL 校验未通过'
+        });
+        return;
+      }
+      set((state) => ({
+        app: {
+          ...state.app,
+          data: result.data || state.app?.data,
+          features: result.features || state.app?.features
+        },
+        groups: result.reviewClusters || state.groups,
+        message: `已导入 ${result.imported || 0} 条训练数据`
       }));
     } catch (err: any) {
       get().showError(err);

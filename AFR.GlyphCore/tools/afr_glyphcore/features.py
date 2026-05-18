@@ -88,6 +88,27 @@ FEATURE_NAMES = [
     "ripple_seed_count_norm",
     "ripple_context_cjk_ratio",
     "evidence_aligned_candidate",
+    # v4 engineering semantics, raw Hook candidate evidence, and ripple quality
+    "current_simplified_engineering_chinese_ratio",
+    "candidate_simplified_engineering_chinese_ratio",
+    "candidate_simplified_engineering_chinese_improved",
+    "current_traditional_or_rare_cjk_ratio",
+    "candidate_traditional_or_rare_cjk_ratio",
+    "candidate_reduces_traditional_or_rare_cjk",
+    "layer_engineering_keyword_ratio",
+    "layer_candidate_keyword_overlap",
+    "candidate_preserves_ascii_tokens",
+    "candidate_preserves_engineering_symbols",
+    "current_ascii_token_count_norm",
+    "candidate_ascii_token_count_norm",
+    "current_engineering_symbol_count_norm",
+    "candidate_engineering_symbol_count_norm",
+    "hook_raw_payload_present",
+    "hook_raw_preferred_candidate",
+    "hook_raw_roundtrip_ok",
+    "hook_raw_confidence",
+    "ripple_seed_quality",
+    "ripple_distance_ratio",
 ]
 
 
@@ -197,6 +218,26 @@ def extract_features(context: dict, candidate: Candidate) -> list[float]:
     features[75] = norm(int(float_value(context, evidence, "rippleSeedCount", "rippleSeedCount")), 8)
     features[76] = ripple_stats.cjk_ratio
     features[77] = boolf(is_evidence_aligned_candidate(context, evidence, candidate.source))
+    features[78] = simplified_engineering_chinese_ratio(current)
+    features[79] = simplified_engineering_chinese_ratio(candidate_text)
+    features[80] = boolf(simplified_engineering_chinese_ratio(candidate_text) > simplified_engineering_chinese_ratio(current))
+    features[81] = traditional_or_rare_cjk_ratio(current)
+    features[82] = traditional_or_rare_cjk_ratio(candidate_text)
+    features[83] = boolf(traditional_or_rare_cjk_ratio(candidate_text) < traditional_or_rare_cjk_ratio(current))
+    features[84] = engineering_keyword_ratio(str(context.get("layer") or ""))
+    features[85] = layer_candidate_keyword_overlap(str(context.get("layer") or ""), candidate_text)
+    features[86] = boolf(preserves_ascii_tokens(current, candidate_text))
+    features[87] = engineering_symbol_preservation(current, candidate_text)
+    features[88] = norm(ascii_token_count(current), 8)
+    features[89] = norm(ascii_token_count(candidate_text), 8)
+    features[90] = norm(engineering_symbol_count(current), 8)
+    features[91] = norm(engineering_symbol_count(candidate_text), 8)
+    features[92] = boolf(bool_value(context, evidence, "hasHookRawDecodeEvidence", "hasHookRawDecodeEvidence") and int(float_value(context, evidence, "hookRawPayloadLength", "hookRawPayloadLength")) > 0)
+    features[93] = boolf(is_hook_raw_preferred_candidate(context, evidence, candidate_text, candidate.source))
+    features[94] = boolf(bool_value(context, evidence, "hookRawRoundTrip", "hookRawRoundTrip"))
+    features[95] = clamp01(float_value(context, evidence, "hookRawConfidence", "hookRawConfidence"))
+    features[96] = clamp01(float_value(context, evidence, "rippleSeedQuality", "rippleSeedQuality"))
+    features[97] = clamp01(float_value(context, evidence, "rippleDistanceRatio", "rippleDistanceRatio"))
     return features
 
 
@@ -331,6 +372,134 @@ def cad_keyword_ratio(text: str) -> float:
         return 0.0
     keywords = "水管井泵阀风压流排污喷淋消防电气设备材料表房库层标高详见安装系统屋顶支架压力自动"
     return sum(1 for ch in text if ch in keywords) / max(1, len(text))
+
+
+def simplified_engineering_chinese_ratio(text: str) -> float:
+    if not text:
+        return 0.0
+    cjk_chars = [ch for ch in text if is_cjk(ch)]
+    if not cjk_chars:
+        return 0.0
+    return sum(1 for ch in cjk_chars if is_simplified_engineering_char(ch)) / max(1, len(cjk_chars))
+
+
+def traditional_or_rare_cjk_ratio(text: str) -> float:
+    if not text:
+        return 0.0
+    return sum(1 for ch in text if is_traditional_or_rare_cjk(ch)) / max(1, len(text))
+
+
+def engineering_keyword_ratio(text: str) -> float:
+    if not text:
+        return 0.0
+    upper = text.upper()
+    tokens = [
+        "WATER",
+        "DRAIN",
+        "PIPE",
+        "FIRE",
+        "HVAC",
+        "ELEC",
+        "TEXT",
+        "DIM",
+        "给水",
+        "排水",
+        "消防",
+        "喷淋",
+        "电气",
+        "风管",
+        "暖通",
+        "结构",
+        "建筑",
+        "标注",
+        "水",
+        "管",
+        "阀",
+        "泵",
+        "风",
+        "电",
+        "层",
+        "井",
+        "标高",
+    ]
+    return norm(sum(1 for token in tokens if token.upper() in upper), 6)
+
+
+def layer_candidate_keyword_overlap(layer: str, candidate: str) -> float:
+    layer_chars = engineering_chars(layer)
+    if not layer_chars or not candidate:
+        return 0.0
+    return sum(1 for ch in candidate if ch in layer_chars) / max(1, len(layer_chars))
+
+
+def preserves_ascii_tokens(current: str, candidate: str) -> bool:
+    tokens = extract_ascii_tokens(current)
+    if not tokens:
+        return True
+    preserved = sum(1 for token in tokens if token.lower() in (candidate or "").lower())
+    return preserved >= max(1, len(tokens) - 1)
+
+
+def engineering_symbol_preservation(current: str, candidate: str) -> float:
+    symbols = [ch for ch in current or "" if is_engineering_symbol(ch)]
+    if not symbols:
+        return 1.0
+    return sum(1 for ch in symbols if ch in (candidate or "")) / max(1, len(symbols))
+
+
+def ascii_token_count(text: str) -> int:
+    return len(extract_ascii_tokens(text))
+
+
+def engineering_symbol_count(text: str) -> int:
+    return sum(1 for ch in text or "" if is_engineering_symbol(ch))
+
+
+def is_hook_raw_preferred_candidate(context: dict, evidence: dict, candidate_text: str, candidate_source: str) -> bool:
+    if not bool_value(context, evidence, "hasHookRawDecodeEvidence", "hasHookRawDecodeEvidence"):
+        return False
+    if "hook-raw-stream" in (candidate_source or "").lower():
+        return True
+    preferred = str_value(context, evidence, "hookPreferredDecodedText", "hookPreferredDecodedText")
+    return bool(preferred) and preferred == candidate_text
+
+
+def engineering_chars(text: str) -> set[str]:
+    keywords = "水管井泵阀风压流排污喷淋消防电气设备材料表房库层标高详见安装系统屋顶支架压力自动给排暖通建筑结构标注"
+    return {ch for ch in text or "" if ch in keywords}
+
+
+def extract_ascii_tokens(text: str) -> list[str]:
+    tokens: list[str] = []
+    current: list[str] = []
+    for ch in text or "":
+        if is_ascii_token_char(ch):
+            current.append(ch)
+        else:
+            if len(current) >= 2:
+                tokens.append("".join(current))
+            current = []
+    if len(current) >= 2:
+        tokens.append("".join(current))
+    return tokens
+
+
+def is_ascii_token_char(ch: str) -> bool:
+    return ch.isascii() and (ch.isalnum() or ch in "+-()./")
+
+
+def is_engineering_symbol(ch: str) -> bool:
+    return ch in "+-()./×xXΦφ%#@=<>≤≥±°"
+
+
+def is_simplified_engineering_char(ch: str) -> bool:
+    simplified = "检宽顶图层风阀喷淋电气设备材料库给压流排污消防标高详见安装系统屋顶支架自动泵管水井房"
+    return ch in simplified or cad_keyword_ratio(ch) > 0
+
+
+def is_traditional_or_rare_cjk(ch: str) -> bool:
+    traditional = "檢寬頂圖層風閥噴電氣設備給壓詳見築標號號體體臺臺"
+    return ch in traditional
 
 
 def normalized_edit_distance(left: str, right: str) -> float:

@@ -26,6 +26,7 @@ def build_candidates(current_text: str, context: dict | None = None) -> list[Can
     candidates: list[Candidate] = []
     _add_candidate(candidates, current_text, "current-noop", "current text", True)
     preferred_source = _evidence_preferred_source(context or {})
+    _add_hook_raw_candidate(candidates, current_text, context or {})
     _add_preferred_conversion(candidates, current_text, preferred_source)
 
     if preferred_source != "big5-carrier-to-gbk":
@@ -106,9 +107,29 @@ def _evidence_preferred_source(context: dict) -> str:
 
 
 def _source_priority(source: str, preferred_source: str) -> int:
+    if "hook-raw-stream" in (source or "").lower():
+        return 0
     if not preferred_source:
         return 1
     return 0 if preferred_source.lower() in (source or "").lower() else 1
+
+
+def _add_hook_raw_candidate(candidates: list[Candidate], current_text: str, context: dict) -> None:
+    evidence = context.get("nativeDecodeEvidence") if isinstance(context.get("nativeDecodeEvidence"), dict) else {}
+    has_raw = bool(context.get("hasHookRawDecodeEvidence") or evidence.get("hasHookRawDecodeEvidence"))
+    text = str(context.get("hookPreferredDecodedText") or evidence.get("hookPreferredDecodedText") or "")
+    if not has_raw or not text or text == current_text:
+        return
+
+    source = str(context.get("hookRawCandidateSource") or evidence.get("hookRawCandidateSource") or "hook-raw-stream")
+    if "hook-raw-stream" not in source.lower():
+        source = "hook-raw-stream+" + source
+    roundtrip = bool(context.get("hookRawRoundTrip") or evidence.get("hookRawRoundTrip"))
+    reason = "hook-raw-roundtrip-ok" if roundtrip else "hook-raw-derived"
+    length = context.get("hookRawPayloadLength") or evidence.get("hookRawPayloadLength")
+    if length:
+        reason += f"; raw-len={length}"
+    _add_candidate(candidates, text, source, reason, roundtrip)
 
 
 def _add_candidate(

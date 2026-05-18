@@ -26,10 +26,8 @@ export function cn(...inputs: ClassValue[]) {
 // ========== 常量 ==========
 
 export const TABS = [
-  ['packages', '数据包'],
-  ['review', '人工复核'],
+  ['review', '数据标注'],
   ['dataset', '训练数据集'],
-  ['features', '特征生成'],
   ['training', '模型训练'],
   ['report', '模型报告']
 ] as const;
@@ -142,10 +140,8 @@ export function tabLabel(id: string): string {
 
 export function moduleDescription(id: string): string {
   const descriptions: Record<string, string> = {
-    packages: '切换候选包并查看 DWG 来源、Reviewed 进度和数据规模。',
     review: '复核保存后直接进入训练数据集；从训练集删除后回流复核。',
     dataset: '查看、追溯和删除已经进入训练数据集的记录。',
-    features: '基于当前训练数据集刷新特征表。',
     training: '多选数据包后完整重训本地模型并跟踪训练日志。',
     report: '查看模型验证指标、发布命令和当前模型清单。'
   };

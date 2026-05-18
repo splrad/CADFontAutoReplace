@@ -23,6 +23,7 @@ internal static class GlyphCoreTextRepairCandidateGenerator
         AddCandidate(candidates, currentText, "current-noop", "当前文本", isRoundTrip: true);
 
         string preferredSource = GetEvidencePreferredSource(context);
+        AddHookRawCandidate(candidates, currentText, context);
         AddPreferredConversion(candidates, currentText, preferredSource);
 
         if (!string.Equals(preferredSource, "big5-carrier-to-gbk", StringComparison.OrdinalIgnoreCase))
@@ -80,10 +81,40 @@ internal static class GlyphCoreTextRepairCandidateGenerator
 
     private static int CandidateSourcePriority(string source, string preferredSource)
     {
+        if (ContainsSource(source, "hook-raw-stream"))
+            return 0;
+
         if (string.IsNullOrEmpty(preferredSource))
             return 1;
 
         return ContainsSource(source, preferredSource) ? 0 : 1;
+    }
+
+    private static void AddHookRawCandidate(
+        List<GlyphCoreTextRepairCandidate> candidates,
+        string currentText,
+        GlyphCoreTextRepairContext? context)
+    {
+        if (context == null || !context.HasHookRawDecodeEvidence)
+            return;
+
+        string text = context.HookPreferredDecodedText ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(text) || string.Equals(text, currentText, StringComparison.Ordinal))
+            return;
+
+        string source = string.IsNullOrWhiteSpace(context.HookRawCandidateSource)
+            ? "hook-raw-stream"
+            : context.HookRawCandidateSource;
+        if (!ContainsSource(source, "hook-raw-stream"))
+            source = "hook-raw-stream+" + source;
+
+        string reason = context.HookRawRoundTrip
+            ? "hook-raw-roundtrip-ok"
+            : "hook-raw-derived";
+        if (context.HookRawPayloadLength > 0)
+            reason += $"; raw-len={context.HookRawPayloadLength}";
+
+        AddCandidate(candidates, text, source, reason, context.HookRawRoundTrip);
     }
 
     private static void TryAddConversion(

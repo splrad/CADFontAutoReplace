@@ -83,7 +83,7 @@ Debug 命令：
 - native 解码 evidence 内存桥：`GlyphCoreNativeDecodeEvidenceStore`。
 - Hook 强信号门控：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairProblemDetector.cs`。
 - 候选生成：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairCandidateGenerator.cs`。
-- 特征提取：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairFeatureExtractor.cs`，schema 为 `dbtext-ai-features-v3`。
+- 特征提取：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairFeatureExtractor.cs`，schema 为 `dbtext-ai-features-v4`。
 - 本地评分：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairEmbeddedOnnxScorer.cs`，只从 DLL 嵌入资源加载 ONNX、模型清单和 ONNX Runtime 资源。
 - 自动决策：`GlyphCoreTextRepairDecisionEngine`，不再使用固定低置信度或分差门槛替 AI 做最终判断。
 - 模型接口与数据结构：`src/AFR.Core/GlyphCore/TextRepair/GlyphCoreTextRepairModels.cs`。
@@ -160,7 +160,7 @@ AFR.GlyphCore/models/
 训练规则：
 
 - `Invoke-GlyphCoreTraining.ps1` 是命令行训练入口。
-- `training/build_features.py` 从 reviewed labels / training dataset 生成 `dbtext-ai-features-v3` CSV。
+- `training/build_features.py` 从 reviewed labels / training dataset 生成 `dbtext-ai-features-v4` CSV。
 - `training/train_lightgbm.py` 训练当前模型，输出 ONNX、模型清单和验证报告；不会生成 `AFR.GlyphCore.ExactRepairs.json`。
 - `workbench/test_review_clusters.py` 覆盖簇传播、已审核覆盖、training dataset 提升/删除/回流等核心行为。
 - 训练流程可以为效率做批量处理，但必须保留可审计的 reviewed JSONL、audit TSV 和训练摘要。

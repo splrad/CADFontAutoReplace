@@ -4,7 +4,7 @@ namespace AFR.GlyphCore.TextRepair;
 
 internal static class GlyphCoreTextRepairConstants
 {
-    public const string FeatureSchemaVersion = "dbtext-ai-features-v3";
+    public const string FeatureSchemaVersion = "dbtext-ai-features-v4";
     public const string ModelResourceName = "AFR.GlyphCore.Model.onnx";
     public const string ModelManifestResourceName = "AFR.GlyphCore.ModelManifest.json";
     public const string RuntimeManagedResourceName = "Microsoft.ML.OnnxRuntime.dll";
@@ -40,8 +40,17 @@ internal sealed class GlyphCoreTextRepairContext
     public float NativeDecodeObjectCorrelation { get; set; }
     public float NativeDecodeClusterCorrelation { get; set; }
     public bool HasLdFileFontEvidence { get; set; }
+    public bool HasHookRawDecodeEvidence { get; set; }
+    public string HookRawPayloadSha256 { get; set; } = string.Empty;
+    public int HookRawPayloadLength { get; set; }
+    public string HookPreferredDecodedText { get; set; } = string.Empty;
+    public string HookRawCandidateSource { get; set; } = string.Empty;
+    public bool HookRawRoundTrip { get; set; }
+    public float HookRawConfidence { get; set; }
     public string RippleContextText { get; set; } = string.Empty;
     public int RippleSeedCount { get; set; }
+    public float RippleSeedQuality { get; set; }
+    public float RippleDistanceRatio { get; set; }
 }
 
 internal sealed class GlyphCoreTextRepairCandidate

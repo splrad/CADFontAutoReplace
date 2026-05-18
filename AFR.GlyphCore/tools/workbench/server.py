@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import mimetypes
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -17,7 +19,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 
 LABEL_ACTIONS = {"repair", "keep", "unsafe", "unknown", "glyph-issue"}
@@ -201,7 +203,7 @@ class DatasetStore:
 
         return {
             "schema": REVIEWED_SCHEMA,
-            "featureSchema": first.get("feature_schema") or "dbtext-ai-features-v3",
+            "featureSchema": first.get("feature_schema") or "dbtext-ai-features-v4",
             "groupId": group_id,
             "currentText": first.get("current_text") or source_record.get("currentText") or "",
             "labelAction": first.get("label_action") or "repair",
@@ -723,6 +725,47 @@ class DatasetStore:
 
         return {"ok": True, "batchId": batch_id, "removed": len(removed_ids), "recordIds": removed_ids, "summary": self.summary()}
 
+    def reset_review_rows(self, payload: dict) -> dict:
+        raw_ids = (
+            payload.get("reviewGroupIds")
+            or payload.get("reviewClusterIds")
+            or payload.get("groupIds")
+            or []
+        )
+        if isinstance(raw_ids, str):
+            raw_ids = [raw_ids]
+        if not isinstance(raw_ids, list):
+            raise ValueError("reviewGroupIds must be an array")
+        requested_ids = {str(value or "").strip() for value in raw_ids if str(value or "").strip()}
+        if not requested_ids:
+            raise ValueError("请选择要重置的复核行。")
+
+        removed_ids: list[str] = []
+        with self.lock:
+            for group_id, record in list(self.reviewed.items()):
+                if self._record_matches_reset_ids(group_id, record, requested_ids):
+                    removed_ids.append(group_id)
+                    del self.reviewed[group_id]
+            for group_id, record in list(self.training_dataset.items()):
+                if self._record_matches_reset_ids(group_id, record, requested_ids):
+                    if group_id not in removed_ids:
+                        removed_ids.append(group_id)
+                    del self.training_dataset[group_id]
+            if not removed_ids:
+                raise ValueError("没有找到可重置的复核或训练记录。")
+            self._rewrite_training_dataset_file()
+            self._rewrite_features_without_group_ids(set(removed_ids))
+            self._rewrite_reviewed_files()
+            self._invalidate_review_groups()
+
+        return {
+            "ok": True,
+            "reset": len(removed_ids),
+            "recordIds": removed_ids,
+            "summary": self.summary(),
+            "trainingDataset": self.training_dataset_payload(),
+        }
+
     def training_dataset_payload(self) -> dict:
         feature_counts = self._feature_row_counts()
         records = [
@@ -758,6 +801,110 @@ class DatasetStore:
                 "layers": layers,
                 "fonts": fonts,
             },
+        }
+
+    def export_training_dataset(self, export_format: str) -> dict:
+        export_format = str(export_format or "csv").lower()
+        if export_format not in {"csv", "jsonl"}:
+            raise ValueError("format must be csv or jsonl")
+        if export_format == "jsonl":
+            lines = [
+                json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+                for record in self._ordered_training_records(self.training_dataset.values())
+            ]
+            data = ("\n".join(lines) + ("\n" if lines else "")).encode("utf-8")
+            return {
+                "filename": f"{self.export_id}_training_dataset.jsonl",
+                "contentType": "application/x-ndjson; charset=utf-8",
+                "data": data,
+            }
+
+        rows = self.training_dataset_payload().get("records") or []
+        fieldnames = [
+            "groupId",
+            "currentText",
+            "labelText",
+            "labelAction",
+            "candidateText",
+            "candidateSource",
+            "layer",
+            "font",
+            "bigFont",
+            "drawingFileName",
+            "handle",
+            "reviewer",
+            "reviewedUtc",
+            "enteredTrainingUtc",
+            "trainingSource",
+            "featureRows",
+        ]
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in fieldnames})
+        return {
+            "filename": f"{self.export_id}_training_dataset.csv",
+            "contentType": "text/csv; charset=utf-8-sig",
+            "data": ("\ufeff" + buffer.getvalue()).encode("utf-8"),
+        }
+
+    def import_training_dataset(self, payload: dict) -> dict:
+        content = str(payload.get("content") or "")
+        if not content.strip():
+            raise ValueError("导入内容为空。")
+        import_format = str(payload.get("format") or "jsonl").lower()
+        if import_format not in {"jsonl", "ndjson"}:
+            raise ValueError("训练集导入仅支持 JSONL。CSV 仅用于人工审阅导出。")
+        mode = str(payload.get("mode") or "merge").lower()
+        if mode not in {"merge", "replace"}:
+            raise ValueError("mode must be merge or replace")
+
+        imported: list[dict] = []
+        errors: list[dict] = []
+        build_id = f"jsonl-import-{uuid.uuid4().hex}"
+        entered_utc = now_utc()
+        for line_number, line in enumerate(content.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+                if not isinstance(record, dict):
+                    raise ValueError("record must be an object")
+                imported.append(self._coerce_imported_training_record(record, entered_utc, build_id))
+            except Exception as exc:
+                errors.append({"line": line_number, "error": f"{type(exc).__name__}: {exc}"})
+
+        if errors:
+            return {
+                "ok": False,
+                "imported": 0,
+                "errors": errors,
+                "trainingDataset": self.training_dataset_payload(),
+            }
+        if not imported:
+            raise ValueError("没有可导入的 JSONL 记录。")
+
+        with self.lock:
+            if mode == "replace":
+                self.training_dataset = {}
+                self.reviewed = {}
+                if self.features_path.exists():
+                    self.features_path.unlink()
+            for record in imported:
+                group_id = str(record.get("groupId") or "")
+                self.training_dataset[group_id] = record
+                self.reviewed.pop(group_id, None)
+            self._rewrite_training_dataset_file()
+            self._rewrite_reviewed_files()
+            self._invalidate_review_groups()
+
+        return {
+            "ok": True,
+            "imported": len(imported),
+            "errors": [],
+            "summary": self.summary(),
+            "trainingDataset": self.training_dataset_payload(),
         }
 
     def prepare_training_dataset_build(self) -> tuple[list[dict], list[str], str]:
@@ -1123,6 +1270,48 @@ class DatasetStore:
             "origin": record.get("origin"),
             "originDetail": record.get("originDetail"),
         }
+
+    def _coerce_imported_training_record(self, record: dict, entered_utc: str, build_id: str) -> dict:
+        group_id = str(record.get("groupId") or "").strip()
+        if not group_id:
+            raise ValueError("missing groupId")
+        if group_id not in self.record_index:
+            raise ValueError(f"groupId 不属于当前数据包：{group_id}")
+
+        if record.get("trainingDatasetSchema") == TRAINING_DATASET_SCHEMA and isinstance(record.get("candidates"), list):
+            imported = deepcopy(record)
+            imported["trainingDatasetSchema"] = TRAINING_DATASET_SCHEMA
+            imported.setdefault("trainingFeatureBuildId", build_id)
+            imported.setdefault("trainingSource", "jsonl-import")
+            imported.setdefault("trainingPackageId", self.package_id)
+            imported.setdefault("trainingExportId", self.export_id)
+            imported.setdefault("enteredTrainingUtc", entered_utc)
+            return imported
+
+        action = str(record.get("labelAction") or "").strip()
+        if action not in LABEL_ACTIONS:
+            raise ValueError("unsupported labelAction")
+        selected_index = record.get("selectedCandidateIndex")
+        if selected_index is None:
+            selected_index = record.get("candidateIndex")
+        reviewed = self._build_reviewed_record(
+            self.record_index[group_id],
+            action,
+            selected_index,
+            str(record.get("labelText") or ""),
+            str(record.get("reviewer") or "").strip() or "jsonl-import",
+            str(record.get("originDetail") or record.get("note") or "training-dataset-import"),
+        )
+        return self._build_training_dataset_entry(reviewed, entered_utc, build_id, "jsonl-import")
+
+    @staticmethod
+    def _record_matches_reset_ids(group_id: str, record: dict, requested_ids: set[str]) -> bool:
+        if group_id in requested_ids:
+            return True
+        return any(
+            str(record.get(key) or "") in requested_ids
+            for key in ("propagationGroupId", "propagationClusterId", "batchId")
+        )
 
     @staticmethod
     def _selected_candidate(record: dict) -> dict:
@@ -1524,6 +1713,11 @@ class DatasetStore:
 
     def _rewrite_training_dataset_file(self) -> None:
         training_records = self._ordered_training_records(self.training_dataset.values())
+        if not training_records:
+            if self.training_dataset_path.exists():
+                self.training_dataset_path.unlink()
+            return
+
         tmp_path = self.work_dir / f"{self.training_dataset_path.name}.{uuid.uuid4().hex}.tmp"
         try:
             with tmp_path.open("w", encoding="utf-8", newline="\n") as writer:
@@ -1654,6 +1848,8 @@ class ProcessJob:
         self.lines: list[str] = []
         self.lock = threading.Lock()
         self.thread: threading.Thread | None = None
+        self.process: subprocess.Popen[str] | None = None
+        self.cancel_requested = False
 
     def start(self) -> None:
         if self.status == "running":
@@ -1678,16 +1874,20 @@ class ProcessJob:
                     errors="replace",
                     env=utf8_subprocess_env(),
                 )
+                self.process = process
                 assert process.stdout is not None
                 for line in process.stdout:
                     self._append_line(line.rstrip("\n"), log)
                 self.return_code = process.wait()
-                self.status = "succeeded" if self.return_code == 0 else "failed"
+                self.status = "canceled" if self.cancel_requested else ("succeeded" if self.return_code == 0 else "failed")
             except Exception as exc:  # pragma: no cover - displayed by UI
                 self.return_code = -1
-                self.status = "failed"
+                self.status = "canceled" if self.cancel_requested else "failed"
                 self._append_line(f"{type(exc).__name__}: {exc}", log)
             finally:
+                if self.process and self.process.stdout:
+                    self.process.stdout.close()
+                self.process = None
                 self.ended_utc = now_utc()
 
     def _append_line(self, line: str, log) -> None:
@@ -1711,6 +1911,22 @@ class ProcessJob:
             "lines": lines,
             "command": self.command,
         }
+
+    def cancel(self) -> bool:
+        if self.status != "running":
+            return False
+        self.cancel_requested = True
+        process = self.process
+        if process and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=3)
+        self.status = "canceled"
+        self.ended_utc = now_utc()
+        return True
 
 
 class WorkbenchState:
@@ -1786,6 +2002,50 @@ class WorkbenchState:
         package_path = self.resolve_package(package)
         self.store = DatasetStore(self.dataset_root, self.model_root, package_path)
         return self.bootstrap_payload()
+
+    def delete_package(self, payload: dict) -> dict:
+        package_id = str(payload.get("packageId") or payload.get("package") or "").strip()
+        if not package_id:
+            raise ValueError("packageId is required")
+        package_path = self.resolve_package(package_id)
+        if not package_path.exists():
+            raise FileNotFoundError(f"找不到数据包：{package_id}")
+
+        try:
+            manifest = read_json(package_path / "manifest.json")
+        except Exception:
+            manifest = {}
+        export_id = str(manifest.get("exportId") or package_path.name)
+
+        deleted: list[dict] = []
+
+        def delete_path(path: Path, label: str) -> None:
+            if not path.exists():
+                return
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            deleted.append({"label": label, "path": str(path)})
+
+        delete_path(package_path, "package")
+        delete_path(self.review_root / f"{export_id}_reviewed.jsonl", "reviewed")
+        delete_path(self.review_root / f"{export_id}_review_audit.tsv", "audit")
+        delete_path(self.training_sets_root / f"{export_id}_training_dataset.jsonl", "trainingDataset")
+        delete_path(self.training_sets_root / f"{export_id}_features.csv", "features")
+
+        if self.store and self.store.package_id == package_path.name:
+            self.store = None
+            latest = self.latest_package_id()
+            if latest:
+                self.select_package(latest)
+
+        return {
+            "ok": True,
+            "deletedPackageId": package_path.name,
+            "deletedPaths": deleted,
+            "bootstrap": self.bootstrap_payload(),
+        }
 
     def resolve_package(self, package: str) -> Path:
         package = str(package or "").strip()
@@ -1864,6 +2124,16 @@ class WorkbenchState:
         store = self.require_store()
         return store.confirm_review_table_rows(payload)
 
+    def reset_review_rows(self, payload: dict) -> dict:
+        store = self.require_store()
+        result = store.reset_review_rows(payload)
+        return {
+            **result,
+            "data": store.data_payload(),
+            "features": self.features_payload(),
+            "reviewClusters": store.review_clusters_payload(),
+        }
+
     def save_batch_label(self, payload: dict) -> dict:
         store = self.require_store()
         return store.save_batch_label(payload)
@@ -1879,6 +2149,20 @@ class WorkbenchState:
     def training_dataset_payload(self) -> dict:
         store = self.require_store()
         return store.training_dataset_payload()
+
+    def export_training_dataset(self, export_format: str) -> dict:
+        store = self.require_store()
+        return store.export_training_dataset(export_format)
+
+    def import_training_dataset(self, payload: dict) -> dict:
+        store = self.require_store()
+        result = store.import_training_dataset(payload)
+        return {
+            **result,
+            "data": store.data_payload(),
+            "features": self.features_payload(),
+            "reviewClusters": store.review_clusters_payload(),
+        }
 
     def delete_training_dataset_records(self, payload: dict) -> dict:
         store = self.require_store()
@@ -2112,6 +2396,12 @@ class WorkbenchState:
             **selected_context,
         }
 
+    def cancel_training(self) -> dict:
+        if not self.training_job or self.training_job.status != "running":
+            raise ValueError("没有正在运行的训练任务。")
+        canceled = self.training_job.cancel()
+        return {"ok": True, "canceled": canceled, "training": self.training_payload()}
+
     def training_payload(self) -> dict:
         if not self.training_job:
             return {"status": "idle", "statusLabel": training_status_label("idle"), "lines": []}
@@ -2275,6 +2565,44 @@ class WorkbenchState:
             "releaseCommand": release_command,
         }
 
+    def reset_model(self) -> dict:
+        if self.training_job and self.training_job.status == "running":
+            raise ValueError("训练任务仍在运行，不能重置模型。")
+        if self.simulation_job and self.simulation_job.status == "running":
+            raise ValueError("模拟测试仍在运行，不能重置模型。")
+
+        self.model_root.mkdir(parents=True, exist_ok=True)
+        trash_dir = unique_child_path(self.model_root / ".trash", timestamp_id())
+        resettable_names = {
+            "AFR.GlyphCore.Model.onnx",
+            "AFR.GlyphCore.Model.txt",
+            "AFR.GlyphCore.ModelManifest.json",
+            "AFR.GlyphCore.TrainingState.json",
+            "training_history.jsonl",
+            "training_summary.json",
+        }
+        moved: list[dict] = []
+        for item in list(self.model_root.iterdir()):
+            if item.name == ".trash" or item.is_dir():
+                continue
+            if item.name not in resettable_names and not item.name.endswith("_validation_report.json"):
+                continue
+            target = unique_child_path(trash_dir, item.name)
+            trash_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(item), str(target))
+            moved.append({"from": str(item), "to": str(target)})
+        self.training_job = None
+        self.simulation_job = None
+        self.training_context = {}
+        return {
+            "ok": True,
+            "reset": len(moved),
+            "trashPath": str(trash_dir),
+            "moved": moved,
+            "report": self.report_payload(),
+            "training": self.training_payload(),
+        }
+
     def require_store(self) -> DatasetStore:
         if not self.store:
             raise ValueError("没有可用数据包。请先运行 AFRGLYPHCOREEXPORT 导出图纸数据。")
@@ -2287,6 +2615,7 @@ def training_status_label(status: str) -> str:
         "running": "训练中",
         "succeeded": "训练完成",
         "failed": "训练失败",
+        "canceled": "已取消",
     }
     return labels.get(status, status or "未知状态")
 
@@ -2452,6 +2781,10 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 )
             elif path == "/api/training-dataset":
                 self._send_json(self.state.training_dataset_payload())
+            elif path == "/api/training-dataset/export":
+                query = parse_qs(parsed.query)
+                export = self.state.export_training_dataset((query.get("format") or ["csv"])[0])
+                self._send_download(export["data"], export["filename"], export["contentType"])
             elif path == "/api/features":
                 self._send_json(self.state.features_payload())
             elif path == "/api/train":
@@ -2471,6 +2804,8 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             payload = self._read_json_body()
             if path == "/api/package":
                 self._send_json({"ok": True, "bootstrap": self.state.select_package(str(payload.get("package") or ""))})
+            elif path == "/api/package/delete":
+                self._send_json(self.state.delete_package(payload))
             elif path == "/api/label":
                 self._send_json(self.state.save_label(payload))
             elif path == "/api/confirm-group":
@@ -2479,6 +2814,8 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 self._send_json(self.state.confirm_cluster(payload))
             elif path == "/api/review-table/confirm":
                 self._send_json(self.state.confirm_review_table_rows(payload))
+            elif path == "/api/review-table/reset":
+                self._send_json(self.state.reset_review_rows(payload))
             elif path == "/api/batch-label":
                 self._send_json(self.state.save_batch_label(payload))
             elif path == "/api/batch-label-groups":
@@ -2487,12 +2824,18 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 self._send_json(self.state.rollback_batch(payload))
             elif path == "/api/training-dataset/delete":
                 self._send_json(self.state.delete_training_dataset_records(payload))
+            elif path == "/api/training-dataset/import":
+                self._send_json(self.state.import_training_dataset(payload))
             elif path == "/api/features":
                 self._send_json(self.state.build_features())
             elif path == "/api/train":
                 self._send_json(self.state.start_training(payload))
+            elif path == "/api/train/cancel":
+                self._send_json(self.state.cancel_training())
             elif path == "/api/simulate-test":
                 self._send_json(self.state.start_simulation_test(payload))
+            elif path == "/api/model/reset":
+                self._send_json(self.state.reset_model())
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
         except Exception as exc:  # pragma: no cover - displayed by UI
@@ -2516,6 +2859,18 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
         data = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_download(self, data: bytes, filename: str, content_type: str) -> None:
+        filename = str(filename or "download").replace('"', "")
+        fallback = "".join(char if 32 <= ord(char) < 127 and char not in {'"', "\\"} else "_" for char in filename) or "download"
+        encoded_filename = quote(filename.encode("utf-8"))
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Disposition", f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{encoded_filename}')
+        self.send_header("Cache-Control", "no-store, max-age=0")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -2584,6 +2939,27 @@ def ensure_under(path: Path, root: Path) -> Path:
     return resolved
 
 
+def timestamp_id() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
+
+def safe_name(value: str) -> str:
+    text = str(value or "").strip() or "item"
+    return "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in text)[:120]
+
+
+def unique_child_path(root: Path, name: str) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    base = root / safe_name(name)
+    if not base.exists():
+        return base
+    for index in range(1, 1000):
+        candidate = root / f"{safe_name(name)}_{index}"
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"cannot allocate unique archive path under {root}")
+
+
 def find_repo_root(start: Path) -> Path:
     current = start.resolve()
     for candidate in [current, *current.parents]:
@@ -2619,7 +2995,11 @@ def summarize_features(path: Path) -> dict:
     positives = 0
     with path.open("r", encoding="utf-8-sig", newline="") as reader:
         csv_reader = csv.DictReader(reader)
-        feature_columns = [name for name in (csv_reader.fieldnames or []) if name.startswith("f") and "_" in name]
+        feature_columns = [
+            name
+            for name in (csv_reader.fieldnames or [])
+            if name.startswith("f") and len(name) > 1 and name[1].isdigit() and "_" in name
+        ]
         for row in csv_reader:
             rows += 1
             groups.add(row.get("group_id") or "")
