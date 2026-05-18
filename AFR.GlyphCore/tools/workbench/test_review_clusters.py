@@ -19,21 +19,21 @@ from server import DatasetStore, ProcessJob, WorkbenchState
 
 
 class ReviewClusterTests(unittest.TestCase):
-    def test_shx_number_sign_alias_is_display_only(self) -> None:
+    def test_well_character_in_code_is_not_number_sign_alias(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             store = self._create_store(root, [self._display_alias_record("FL-井1")])
 
             cluster = store.review_clusters_payload()["clusters"][0]
-            self.assertEqual("FL-#1", cluster["currentText"])
+            self.assertEqual("FL-井1", cluster["currentText"])
             self.assertEqual("FL-井1", cluster["rawCurrentText"])
-            self.assertEqual("FL-#1", cluster["candidateText"])
+            self.assertEqual("FL-井1", cluster["candidateText"])
 
             result = store.confirm_cluster(
                 {
                     "reviewClusterId": cluster["id"],
                     "labelAction": "keep",
-                    "labelText": "FL-#1",
+                    "labelText": "FL-井1",
                     "reviewer": "unit",
                     "representativeGroupId": cluster["representativeRecords"][0]["groupId"],
                 }
@@ -45,11 +45,11 @@ class ReviewClusterTests(unittest.TestCase):
             self.assertEqual("FL-井1", training_record["labelText"])
 
             digest = store.training_dataset_payload()["records"][0]
-            self.assertEqual("FL-#1", digest["currentText"])
-            self.assertEqual("FL-#1", digest["labelText"])
+            self.assertEqual("FL-井1", digest["currentText"])
+            self.assertEqual("FL-井1", digest["labelText"])
             self.assertEqual("FL-井1", digest["rawCurrentText"])
 
-    def test_shx_number_sign_alias_does_not_rewrite_chinese_well_text(self) -> None:
+    def test_chinese_well_text_remains_raw_text(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             store = self._create_store(root, [self._display_alias_record("检查井1")])

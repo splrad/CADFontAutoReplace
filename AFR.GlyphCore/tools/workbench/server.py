@@ -43,7 +43,7 @@ def display_text_for_record(record: dict) -> str:
     explicit = str(record.get("displayText") or context.get("displayText") or "")
     if explicit:
         return explicit
-    return normalize_shx_display_aliases(raw_current_text(record))
+    return raw_current_text(record)
 
 
 def raw_current_text(record: dict) -> str:
@@ -74,38 +74,6 @@ def candidate_encoding_path(record: dict, candidate: dict) -> str:
         return problem_reason
 
     return "候选路径未标明"
-
-
-def normalize_shx_display_aliases(text: str) -> str:
-    if not text or "\u4E95" not in text:
-        return text or ""
-    chars = list(text)
-    for index, char in enumerate(chars):
-        if char == "\u4E95" and should_render_number_sign_alias(text, index):
-            chars[index] = "#"
-    return "".join(chars)
-
-
-def should_render_number_sign_alias(text: str, index: int) -> bool:
-    if index < 2 or index + 1 >= len(text):
-        return False
-    if text[index - 1] not in {"-", "\uFF0D"}:
-        return False
-    if not is_ascii_alnum(text[index + 1]):
-        return False
-    start = index - 2
-    while start >= 0 and is_ascii_alnum(text[start]):
-        start -= 1
-    prefix = text[start + 1 : index - 1]
-    return 1 <= len(prefix) <= 8 and any(is_ascii_alpha(char) for char in prefix)
-
-
-def is_ascii_alnum(char: str) -> bool:
-    return ("0" <= char <= "9") or is_ascii_alpha(char)
-
-
-def is_ascii_alpha(char: str) -> bool:
-    return ("A" <= char <= "Z") or ("a" <= char <= "z")
 
 
 class DatasetStore:

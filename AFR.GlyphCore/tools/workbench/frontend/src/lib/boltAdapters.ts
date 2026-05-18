@@ -489,7 +489,7 @@ function validationDetails(errorSamples?: ValidationDetail[], fullDetails?: Vali
 }
 
 function normalizedVisibleText(value: unknown): string {
-  return normalizeShxNumberSignAliases(String(value ?? ''))
+  return String(value ?? '')
     .normalize('NFKC')
     .replace(/[\u200B-\u200D\uFEFF]/g, '');
 }
@@ -504,32 +504,6 @@ function visibleTextEqual(left: unknown, right: unknown): boolean {
 
 function startsWithPlaceholderSpaceRun(value: string): boolean {
   return value.length >= 2 && /^\s\s/.test(value);
-}
-
-function normalizeShxNumberSignAliases(value: string): string {
-  if (!value.includes('井')) return value;
-  const chars = Array.from(value);
-  return chars
-    .map((char, index) => (char === '井' && shouldRenderNumberSignAlias(chars, index) ? '#' : char))
-    .join('');
-}
-
-function shouldRenderNumberSignAlias(chars: string[], index: number): boolean {
-  if (index < 2 || index + 1 >= chars.length) return false;
-  if (chars[index - 1] !== '-' && chars[index - 1] !== '－') return false;
-  if (!isAsciiAlnum(chars[index + 1])) return false;
-  let start = index - 2;
-  while (start >= 0 && isAsciiAlnum(chars[start])) start -= 1;
-  const prefix = chars.slice(start + 1, index - 1);
-  return prefix.length >= 1 && prefix.length <= 8 && prefix.some(isAsciiAlpha);
-}
-
-function isAsciiAlnum(char: string): boolean {
-  return isAsciiAlpha(char) || (char >= '0' && char <= '9');
-}
-
-function isAsciiAlpha(char: string): boolean {
-  return (char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z');
 }
 
 function trainingRecordPackageId(record: TrainingDatasetRecord, packages: PackageSummary[]): string {

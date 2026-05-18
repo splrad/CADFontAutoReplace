@@ -192,7 +192,6 @@ def is_manual_review_candidate(candidate: dict) -> bool:
 
 def normalize_visible_text(value: str) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
-    text = normalize_shx_number_sign_aliases(text)
     text = re.sub(r"[\u200b-\u200d\ufeff]", "", text)
     return text
 
@@ -209,38 +208,6 @@ def visible_text_equal(left: str, right: str) -> bool:
 
 def starts_with_placeholder_space_run(text: str) -> bool:
     return len(text) >= 2 and text[0].isspace() and text[1].isspace()
-
-
-def normalize_shx_number_sign_aliases(text: str) -> str:
-    if not text or "\u4E95" not in text:
-        return text or ""
-    chars = list(text)
-    for index, char in enumerate(chars):
-        if char == "\u4E95" and should_render_number_sign_alias(text, index):
-            chars[index] = "#"
-    return "".join(chars)
-
-
-def should_render_number_sign_alias(text: str, index: int) -> bool:
-    if index < 2 or index + 1 >= len(text):
-        return False
-    if text[index - 1] not in {"-", "\uFF0D"}:
-        return False
-    if not is_ascii_alnum(text[index + 1]):
-        return False
-    start = index - 2
-    while start >= 0 and is_ascii_alnum(text[start]):
-        start -= 1
-    prefix = text[start + 1 : index - 1]
-    return 1 <= len(prefix) <= 8 and any(is_ascii_alpha(char) for char in prefix)
-
-
-def is_ascii_alnum(char: str) -> bool:
-    return ("0" <= char <= "9") or is_ascii_alpha(char)
-
-
-def is_ascii_alpha(char: str) -> bool:
-    return ("A" <= char <= "Z") or ("a" <= char <= "z")
 
 
 def bool_value(context: dict, evidence: dict, flat_key: str, nested_key: str) -> bool:

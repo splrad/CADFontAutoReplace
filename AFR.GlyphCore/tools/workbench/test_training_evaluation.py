@@ -83,7 +83,7 @@ class TrainingEvaluationTests(unittest.TestCase):
         self.assertEqual(0, summary["falseRepairs"])
         self.assertEqual("ok", detail["severity"])
 
-    def test_evaluate_groups_treats_shx_number_sign_alias_as_visible_match(self) -> None:
+    def test_evaluate_groups_treats_well_character_and_number_sign_as_mismatch(self) -> None:
         rows = [
             self._scored_row("alias", "repair", "FL-井1", "FL-井1", "FL-#1", "current-noop", 0.99, True, True),
             self._scored_row("alias", "repair", "FL-井1", "FL-#1", "FL-#1", "gbk-carrier-to-big5", 0.20, False, True),
@@ -93,10 +93,10 @@ class TrainingEvaluationTests(unittest.TestCase):
         summary = report["summary"]
         detail = report["details"][0]
 
-        self.assertTrue(detail["correct"])
-        self.assertEqual(1, summary["correctRepairs"])
-        self.assertEqual(0, summary["missedRepairs"])
-        self.assertEqual("ok", detail["severity"])
+        self.assertFalse(detail["correct"])
+        self.assertEqual(0, summary["correctRepairs"])
+        self.assertEqual(1, summary["missedRepairs"])
+        self.assertEqual("missed-repair", detail["severity"])
 
     def test_evaluate_groups_applies_runtime_context_ripple_from_nearby_seed(self) -> None:
         rows = [
