@@ -126,6 +126,26 @@ class V4FeatureAndCandidateTests(unittest.TestCase):
         self.assertEqual(0.0, gbk_to_big5[26])
         self.assertEqual(1.0, gbk_to_big5[27])
 
+    def test_native_evidence_direction_prefers_matching_conversion(self) -> None:
+        context = {
+            "currentText": "GB50016-2014(2018\u5533)",
+            "hasNativeDecodeEvidence": True,
+            "nativeDecodeFamilyMismatch": True,
+            "nativeDecodeEvidenceScope": "object",
+            "nativeDecodeSourceCodePageFamily": "big5",
+            "nativeDecodeAppliedCodePageFamily": "gbk",
+        }
+
+        candidates = build_candidates(context["currentText"], context)
+        repair_candidates = [candidate for candidate in candidates if not candidate.is_noop]
+        self.assertTrue(repair_candidates)
+        self.assertIn("big5-carrier-to-gbk", repair_candidates[0].source)
+
+        aligned = extract_features(context, Candidate("GB50016-2014(2018\u7248)", "big5-carrier-to-gbk", "fixture", True))
+        reversed_direction = extract_features(context, Candidate("GB50016-2014(2018\u7248)", "gbk-carrier-to-big5", "fixture", True))
+        self.assertEqual(1.0, aligned[77])
+        self.assertEqual(0.0, reversed_direction[77])
+
     def test_feature_build_prefers_visible_candidate_over_manual_duplicate(self) -> None:
         record = {
             "schema": "dbtext-ai-reviewed-label-v1",

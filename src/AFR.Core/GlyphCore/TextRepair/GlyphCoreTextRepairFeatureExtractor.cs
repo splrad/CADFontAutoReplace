@@ -633,13 +633,13 @@ internal static class GlyphCoreTextRepairFeatureExtractor
         string sourceFamily = context.NativeDecodeSourceCodePageFamily;
         string appliedFamily = context.NativeDecodeAppliedCodePageFamily;
         if (IsCodePageFamily(sourceFamily, "big5") && IsCodePageFamily(appliedFamily, "gbk"))
-            return ContainsToken(candidateSource, "gbk-carrier-to-big5");
-        if (IsCodePageFamily(sourceFamily, "gbk") && IsCodePageFamily(appliedFamily, "big5"))
             return ContainsToken(candidateSource, "big5-carrier-to-gbk");
+        if (IsCodePageFamily(sourceFamily, "gbk") && IsCodePageFamily(appliedFamily, "big5"))
+            return ContainsToken(candidateSource, "gbk-carrier-to-big5");
         if (IsCodePageFamily(sourceFamily, "utf8") && IsCodePageFamily(appliedFamily, "gbk"))
-            return ContainsToken(candidateSource, "gbk-carrier-to-utf8");
-        if (IsCodePageFamily(sourceFamily, "gbk") && IsCodePageFamily(appliedFamily, "utf8"))
             return ContainsToken(candidateSource, "utf8-carrier-to-gbk");
+        if (IsCodePageFamily(sourceFamily, "gbk") && IsCodePageFamily(appliedFamily, "utf8"))
+            return ContainsToken(candidateSource, "gbk-carrier-to-utf8");
 
         return false;
     }

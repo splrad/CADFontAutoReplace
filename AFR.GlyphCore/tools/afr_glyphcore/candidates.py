@@ -127,13 +127,13 @@ def _evidence_preferred_source(context: dict) -> str:
     source = str(context.get("nativeDecodeSourceCodePageFamily") or evidence.get("sourceCodePageFamily") or "").lower()
     applied = str(context.get("nativeDecodeAppliedCodePageFamily") or evidence.get("appliedCodePageFamily") or "").lower()
     if "big5" in source and "gbk" in applied:
-        return "gbk-carrier-to-big5"
-    if "gbk" in source and "big5" in applied:
         return "big5-carrier-to-gbk"
+    if "gbk" in source and "big5" in applied:
+        return "gbk-carrier-to-big5"
     if "utf8" in source and "gbk" in applied:
-        return "gbk-carrier-to-utf8"
-    if "gbk" in source and "utf8" in applied:
         return "utf8-carrier-to-gbk"
+    if "gbk" in source and "utf8" in applied:
+        return "gbk-carrier-to-utf8"
     return ""
 
 

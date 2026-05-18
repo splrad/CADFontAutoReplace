@@ -278,13 +278,13 @@ def is_evidence_aligned_candidate(context: dict, evidence: dict, source: str) ->
     applied_family = str_value(context, evidence, "nativeDecodeAppliedCodePageFamily", "appliedCodePageFamily")
     lower_source = (source or "").lower()
     if has_token(source_family, "big5") and has_token(applied_family, "gbk"):
-        return "gbk-carrier-to-big5" in lower_source
-    if has_token(source_family, "gbk") and has_token(applied_family, "big5"):
         return "big5-carrier-to-gbk" in lower_source
+    if has_token(source_family, "gbk") and has_token(applied_family, "big5"):
+        return "gbk-carrier-to-big5" in lower_source
     if has_token(source_family, "utf8") and has_token(applied_family, "gbk"):
-        return "gbk-carrier-to-utf8" in lower_source
-    if has_token(source_family, "gbk") and has_token(applied_family, "utf8"):
         return "utf8-carrier-to-gbk" in lower_source
+    if has_token(source_family, "gbk") and has_token(applied_family, "utf8"):
+        return "gbk-carrier-to-utf8" in lower_source
     return False
 
 

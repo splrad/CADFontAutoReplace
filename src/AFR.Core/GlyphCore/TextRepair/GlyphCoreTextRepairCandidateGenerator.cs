@@ -72,13 +72,13 @@ internal static class GlyphCoreTextRepairCandidateGenerator
         string source = context.NativeDecodeSourceCodePageFamily ?? string.Empty;
         string applied = context.NativeDecodeAppliedCodePageFamily ?? string.Empty;
         if (ContainsFamily(source, "big5") && ContainsFamily(applied, "gbk"))
-            return "gbk-carrier-to-big5";
-        if (ContainsFamily(source, "gbk") && ContainsFamily(applied, "big5"))
             return "big5-carrier-to-gbk";
+        if (ContainsFamily(source, "gbk") && ContainsFamily(applied, "big5"))
+            return "gbk-carrier-to-big5";
         if (ContainsFamily(source, "utf8") && ContainsFamily(applied, "gbk"))
-            return "gbk-carrier-to-utf8";
-        if (ContainsFamily(source, "gbk") && ContainsFamily(applied, "utf8"))
             return "utf8-carrier-to-gbk";
+        if (ContainsFamily(source, "gbk") && ContainsFamily(applied, "utf8"))
+            return "gbk-carrier-to-utf8";
 
         return string.Empty;
     }
