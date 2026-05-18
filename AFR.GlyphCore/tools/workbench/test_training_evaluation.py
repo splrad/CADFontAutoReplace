@@ -17,6 +17,7 @@ from train_lightgbm import (  # noqa: E402
     evaluate_groups,
     evaluate_overfitting,
     full_simulation_slice,
+    namespace_duplicate_group_ids,
     split_groups_by_text_pattern,
 )
 
@@ -82,6 +83,38 @@ class TrainingEvaluationTests(unittest.TestCase):
         self.assertEqual(0, summary["falseRepairs"])
         self.assertEqual("ok", detail["severity"])
 
+    def test_evaluate_groups_treats_shx_number_sign_alias_as_visible_match(self) -> None:
+        rows = [
+            self._scored_row("alias", "repair", "FL-井1", "FL-井1", "FL-#1", "current-noop", 0.99, True, True),
+            self._scored_row("alias", "repair", "FL-井1", "FL-#1", "FL-#1", "gbk-carrier-to-big5", 0.20, False, True),
+        ]
+
+        report = evaluate_groups(pd.DataFrame(rows))
+        summary = report["summary"]
+        detail = report["details"][0]
+
+        self.assertTrue(detail["correct"])
+        self.assertEqual(1, summary["correctRepairs"])
+        self.assertEqual(0, summary["missedRepairs"])
+        self.assertEqual("ok", detail["severity"])
+
+    def test_evaluate_groups_applies_runtime_context_ripple_from_nearby_seed(self) -> None:
+        rows = [
+            self._scored_row("seed", "repair", "錯A", "正确", "正确", "gbk-carrier-to-big5", 0.99, False, True, x=0, y=0, native=True),
+            self._scored_row("seed", "repair", "錯A", "錯A", "正确", "current-noop", 0.10, True, True, x=0, y=0, native=True),
+            self._scored_row("target", "repair", "錯B", "錯B", "正确", "current-noop", 0.55, True, True, x=10, y=0),
+            self._scored_row("target", "repair", "錯B", "正确", "正确", "gbk-carrier-to-big5", 0.45, False, True, x=10, y=0),
+        ]
+
+        report = evaluate_groups(pd.DataFrame(rows))
+        summary = report["summary"]
+        details = {item["groupId"]: item for item in report["details"]}
+
+        self.assertEqual(2, summary["correctRepairs"])
+        self.assertEqual(1, summary["runtimeContextRippleRepairs"])
+        self.assertTrue(details["target"]["runtimeContextRipple"])
+        self.assertEqual("ok", details["target"]["severity"])
+
     def test_evaluate_groups_repairs_confirmed_single_character_label(self) -> None:
         rows = [
             self._scored_row("confirmed", "repair", "棒", "堵", "堵", "gbk-carrier-to-big5", 0.99, False, True),
@@ -97,6 +130,36 @@ class TrainingEvaluationTests(unittest.TestCase):
         self.assertEqual("ok", detail["severity"])
         self.assertEqual(1, summary["correctRepairs"])
         self.assertEqual(0, summary["falseRepairs"])
+
+    def test_duplicate_same_output_candidates_do_not_reduce_margin(self) -> None:
+        rows = [
+            self._scored_row("duplicate", "repair", "翋猁", "主要设备及材料表", "主要设备及材料表", "big5-carrier-to-gbk", 0.99, False, True),
+            self._scored_row("duplicate", "repair", "翋猁", "主要设备及材料表", "主要设备及材料表", "big5-carrier-to-gbk", 0.985, False, True),
+            self._scored_row("duplicate", "repair", "翋猁", "翋猁", "主要设备及材料表", "current-noop", 0.20, True, True),
+        ]
+
+        report = evaluate_groups(pd.DataFrame(rows))
+        summary = report["summary"]
+        detail = report["details"][0]
+
+        self.assertEqual("repair", detail["decision"])
+        self.assertGreater(detail["margin"], 0.7)
+        self.assertEqual(1, summary["correctRepairs"])
+        self.assertEqual(0, summary["missedRepairs"])
+
+    def test_duplicate_group_ids_are_namespaced_by_package(self) -> None:
+        frame = pd.DataFrame(
+            [
+                {**self._feature_row("dup", "错A", "正A", "big5-carrier-to-gbk"), "training_package_id": "pkg-a"},
+                {**self._feature_row("dup", "错A", "错A", "current-noop"), "training_package_id": "pkg-a"},
+                {**self._feature_row("dup", "错B", "正B", "big5-carrier-to-gbk"), "training_package_id": "pkg-b"},
+                {**self._feature_row("unique", "错C", "正C", "big5-carrier-to-gbk"), "training_package_id": "pkg-a"},
+            ]
+        )
+
+        namespaced = namespace_duplicate_group_ids(frame)
+
+        self.assertEqual({"pkg-a::dup", "pkg-b::dup", "unique"}, set(namespaced["group_id"]))
 
     def test_full_simulation_uses_every_group(self) -> None:
         rows = [
@@ -153,6 +216,9 @@ class TrainingEvaluationTests(unittest.TestCase):
         prediction: float,
         is_noop: bool,
         is_roundtrip: bool,
+        x: float | None = None,
+        y: float | None = None,
+        native: bool = False,
     ) -> dict:
         row = {
             "group_id": group_id,
@@ -168,7 +234,19 @@ class TrainingEvaluationTests(unittest.TestCase):
             "training_package_id": "pkg",
             "training_export_id": "export",
             "drawing_file_name": "drawing.dwg",
+            "layer": "TEXT",
+            "owner_block_name": "Model",
+            "text_style_name": "Standard",
         }
+        if x is not None and y is not None:
+            row["position_x"] = x
+            row["position_y"] = y
+            row["height"] = 1.0
+        if native:
+            row["native_decode_evidence"] = 1
+            row["native_decode_source_family"] = "gbk"
+            row["native_decode_applied_family"] = "big5"
+            row["native_decode_hook_hit"] = "dbtext-dwgin-fields"
         for column in [
             "f09_current_control_ratio",
             "f10_candidate_control_ratio",

@@ -38,6 +38,9 @@ METADATA_COLUMNS = [
     "layer",
     "owner_block_name",
     "text_style_name",
+    "position_x",
+    "position_y",
+    "height",
     "font",
     "bigfont",
     "is_from_xref",
@@ -90,6 +93,8 @@ def build_rows(input_path: Path):
             validate_record(record, line_number)
             context = dict(record.get("context") or {})
             context["currentText"] = record.get("currentText") or context.get("currentText") or ""
+            geometry = record.get("geometry") if isinstance(record.get("geometry"), dict) else {}
+            position = geometry.get("position") if isinstance(geometry.get("position"), dict) else {}
             evidence = context.get("nativeDecodeEvidence") if isinstance(context.get("nativeDecodeEvidence"), dict) else {}
             target_scores = candidate_target_scores(record)
 
@@ -124,6 +129,9 @@ def build_rows(input_path: Path):
                     "layer": context.get("layer") or "",
                     "owner_block_name": context.get("ownerBlockName") or "",
                     "text_style_name": context.get("textStyleName") or "",
+                    "position_x": float_dict_value(position, "x"),
+                    "position_y": float_dict_value(position, "y"),
+                    "height": float_dict_value(geometry, "height"),
                     "font": context.get("textStyleFileName") or "",
                     "bigfont": context.get("textStyleBigFontFileName") or "",
                     "is_from_xref": 1 if bool(context.get("isFromExternalReference", False)) else 0,
@@ -184,6 +192,7 @@ def is_manual_review_candidate(candidate: dict) -> bool:
 
 def normalize_visible_text(value: str) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
+    text = normalize_shx_number_sign_aliases(text)
     text = re.sub(r"[\u200b-\u200d\ufeff]", "", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
@@ -191,6 +200,38 @@ def normalize_visible_text(value: str) -> str:
 
 def visible_text_equal(left: str, right: str) -> bool:
     return normalize_visible_text(left) == normalize_visible_text(right)
+
+
+def normalize_shx_number_sign_aliases(text: str) -> str:
+    if not text or "\u4E95" not in text:
+        return text or ""
+    chars = list(text)
+    for index, char in enumerate(chars):
+        if char == "\u4E95" and should_render_number_sign_alias(text, index):
+            chars[index] = "#"
+    return "".join(chars)
+
+
+def should_render_number_sign_alias(text: str, index: int) -> bool:
+    if index < 2 or index + 1 >= len(text):
+        return False
+    if text[index - 1] not in {"-", "\uFF0D"}:
+        return False
+    if not is_ascii_alnum(text[index + 1]):
+        return False
+    start = index - 2
+    while start >= 0 and is_ascii_alnum(text[start]):
+        start -= 1
+    prefix = text[start + 1 : index - 1]
+    return 1 <= len(prefix) <= 8 and any(is_ascii_alpha(char) for char in prefix)
+
+
+def is_ascii_alnum(char: str) -> bool:
+    return ("0" <= char <= "9") or is_ascii_alpha(char)
+
+
+def is_ascii_alpha(char: str) -> bool:
+    return ("A" <= char <= "Z") or ("a" <= char <= "z")
 
 
 def bool_value(context: dict, evidence: dict, flat_key: str, nested_key: str) -> bool:
@@ -209,6 +250,13 @@ def float_value(context: dict, evidence: dict, flat_key: str, nested_key: str) -
         value = evidence.get(nested_key)
     try:
         return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def float_dict_value(source: dict, key: str) -> float:
+    try:
+        return float(source.get(key) or 0.0)
     except (TypeError, ValueError):
         return 0.0
 

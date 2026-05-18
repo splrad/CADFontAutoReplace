@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
@@ -10,6 +11,10 @@ namespace AFR.Services.GlyphCore.TextRepair;
 
 internal static class GlyphCoreTextRepairService
 {
+    private const int DocumentFamilyMinimumSeedCount = 6;
+    private const int DocumentFamilyMinimumRatioSeedCount = 3;
+    private const double DocumentFamilyMinimumSeedRatio = 0.05;
+
     private static GlyphCoreTextRepairRunSummary _lastRunSummary;
 
     public static GlyphCoreTextRepairRunSummary LastRunSummary => _lastRunSummary;
@@ -49,11 +54,18 @@ internal static class GlyphCoreTextRepairService
                 break;
         }
 
+        List<GlyphCoreTextRepairItem> documentFamilyItems = BuildDocumentFamilyItems(items, repairedSeeds, counters.Scanned);
+        if (documentFamilyItems.Count > 0)
+        {
+            counters.DocumentFamilyPromoted += documentFamilyItems.Count;
+            ProcessCandidateGroups(tr, documentFamilyItems, ref advisor, counters, repairedSeeds);
+        }
+
         tr.Commit();
         DiagnosticLogger.Log(
             "DBText文枢",
             $"扫描={counters.Scanned}, Hook强信号={counters.Problems}, 候选={counters.Candidates}, AI评分簇={counters.AiScored}, AI状态={counters.AiStatus}, " +
-            $"阻塞={counters.Blocked}, 实际修复={counters.Repaired}, 错误={counters.Errors}, NativeEvidence={GlyphCoreNativeDbTextEvidenceProjector.GetSummary()}");
+            $"阻塞={counters.Blocked}, 实际修复={counters.Repaired}, 等效强信号={counters.DocumentFamilyPromoted}, 错误={counters.Errors}, NativeEvidence={GlyphCoreNativeDbTextEvidenceProjector.GetSummary()}");
         _lastRunSummary = new GlyphCoreTextRepairRunSummary(
             counters.Scanned,
             counters.Problems,
@@ -220,6 +232,61 @@ internal static class GlyphCoreTextRepairService
         return rippleItems;
     }
 
+    private static List<GlyphCoreTextRepairItem> BuildDocumentFamilyItems(
+        IReadOnlyList<GlyphCoreTextRepairItem> items,
+        IReadOnlyList<GlyphCoreTextRepairItem> repairedSeeds,
+        int scanned)
+    {
+        var seedGroups = repairedSeeds
+            .Where(IsDocumentFamilySeed)
+            .GroupBy(seed => BuildDocumentFamilyKey(seed.Context))
+            .Where(group => !string.IsNullOrWhiteSpace(group.Key))
+            .Select(group => new
+            {
+                Seeds = group.ToList(),
+                Count = group.Count()
+            })
+            .Where(group => MeetsDocumentFamilyPromotionThreshold(group.Count, scanned))
+            .OrderByDescending(group => group.Count)
+            .ToList();
+        if (seedGroups.Count == 0)
+            return new List<GlyphCoreTextRepairItem>();
+
+        var promoted = new List<GlyphCoreTextRepairItem>();
+        foreach (GlyphCoreTextRepairItem item in items)
+        {
+            if (item.Evaluated || item.Repaired || item.Context.HasNativeDecodeEvidence)
+                continue;
+            if (IsShortPunctuationOrSymbolText(item.Context.CurrentText))
+                continue;
+
+            foreach (var seedGroup in seedGroups)
+            {
+                GlyphCoreTextRepairItem bestSeed = seedGroup.Seeds
+                    .OrderByDescending(seed => SeedQuality(seed.Context))
+                    .First();
+                if (!HasDocumentFamilyRepairCandidate(item.Detection.Candidates, bestSeed.Context))
+                    continue;
+
+                float seedQuality = seedGroup.Seeds
+                    .Select(seed => SeedQuality(seed.Context))
+                    .DefaultIfEmpty(0.25f)
+                    .Max();
+                GlyphCoreNativeDecodeEvidenceStore.ApplyDocumentFamilyEvidence(
+                    item.Context,
+                    bestSeed.Context,
+                    seedGroup.Count,
+                    seedQuality);
+                item.Detection = GlyphCoreTextRepairProblemDetector.Detect(item.Context);
+                if (item.Detection.HasProblem && HasDocumentFamilyRepairCandidate(item.Detection.Candidates, bestSeed.Context))
+                    promoted.Add(item);
+                break;
+            }
+        }
+
+        return promoted;
+    }
+
     private static void ApplyDecision(
         Transaction tr,
         GlyphCoreTextRepairItem item,
@@ -270,6 +337,83 @@ internal static class GlyphCoreTextRepairService
         double height = Math.Max(Math.Max(seed.Height, target.Height), 1.0);
         double maxDistance = height * 20.0;
         return seed.Position.DistanceTo(target.Position) <= maxDistance;
+    }
+
+    private static bool IsDocumentFamilySeed(GlyphCoreTextRepairItem seed)
+    {
+        return seed.Repaired
+               && seed.Context.HasNativeDecodeEvidence
+               && seed.Context.NativeDecodeFamilyMismatch
+               && !string.Equals(seed.Context.NativeDecodeEvidenceScope, "document-family", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MeetsDocumentFamilyPromotionThreshold(int seedCount, int scanned)
+    {
+        if (seedCount >= DocumentFamilyMinimumSeedCount)
+            return true;
+
+        return seedCount >= DocumentFamilyMinimumRatioSeedCount
+               && (double)seedCount / Math.Max(1, scanned) >= DocumentFamilyMinimumSeedRatio;
+    }
+
+    private static string BuildDocumentFamilyKey(GlyphCoreTextRepairContext context)
+    {
+        if (context == null || !context.NativeDecodeFamilyMismatch)
+            return string.Empty;
+
+        return string.Join("|", new[]
+        {
+            context.NativeDecodeSourceCodePageFamily ?? string.Empty,
+            context.NativeDecodeAppliedCodePageFamily ?? string.Empty
+        });
+    }
+
+    private static bool HasDocumentFamilyRepairCandidate(
+        IReadOnlyList<GlyphCoreTextRepairCandidate> candidates,
+        GlyphCoreTextRepairContext seedContext)
+    {
+        return candidates.Any(candidate => !candidate.IsNoOp
+                                           && candidate.IsRoundTrip
+                                           && CandidateSourceMatchesFamily(candidate.Source, seedContext));
+    }
+
+    private static bool CandidateSourceMatchesFamily(string candidateSource, GlyphCoreTextRepairContext seedContext)
+    {
+        if (string.IsNullOrWhiteSpace(candidateSource) || seedContext == null)
+            return false;
+
+        string sourceFamily = seedContext.NativeDecodeSourceCodePageFamily ?? string.Empty;
+        string appliedFamily = seedContext.NativeDecodeAppliedCodePageFamily ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(sourceFamily) || string.IsNullOrWhiteSpace(appliedFamily))
+            return false;
+
+        return candidateSource.IndexOf(sourceFamily, StringComparison.OrdinalIgnoreCase) >= 0
+               && candidateSource.IndexOf(appliedFamily, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool IsShortPunctuationOrSymbolText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text.Length > 2)
+            return false;
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(text, i);
+            if (category != UnicodeCategory.ConnectorPunctuation
+                && category != UnicodeCategory.DashPunctuation
+                && category != UnicodeCategory.OpenPunctuation
+                && category != UnicodeCategory.ClosePunctuation
+                && category != UnicodeCategory.InitialQuotePunctuation
+                && category != UnicodeCategory.FinalQuotePunctuation
+                && category != UnicodeCategory.OtherPunctuation
+                && category != UnicodeCategory.MathSymbol
+                && category != UnicodeCategory.CurrencySymbol
+                && category != UnicodeCategory.ModifierSymbol
+                && category != UnicodeCategory.OtherSymbol)
+                return false;
+        }
+
+        return true;
     }
 
     private static bool SameTextContext(GlyphCoreTextRepairContext left, GlyphCoreTextRepairContext right)
@@ -438,6 +582,7 @@ internal static class GlyphCoreTextRepairService
         public int Repaired;
         public int Blocked;
         public int Errors;
+        public int DocumentFamilyPromoted;
         public bool ModelUnavailable;
         public string AiStatus = "not-invoked";
         public string LastDecisionReason = string.Empty;

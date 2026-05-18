@@ -107,7 +107,13 @@ export interface ReviewCluster {
   candidateText?: string;
   rawCandidateText?: string;
   candidateSource?: string;
+  candidateReason?: string;
   encodingPath?: string;
+  problemGate?: {
+    hasProblem?: boolean;
+    reason?: string;
+    [key: string]: unknown;
+  };
   recommendedAction?: LabelAction;
   recommendedCandidateIndex?: number;
   reviewStatus?: string;
@@ -204,6 +210,9 @@ export interface SimulationStatus {
   lines?: string[];
   logPath?: string;
   returnCode?: number;
+  startedUtc?: string;
+  endedUtc?: string;
+  completedUtc?: string;
   [key: string]: unknown;
 }
 

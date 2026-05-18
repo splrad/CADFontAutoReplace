@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 TOOL_ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +57,18 @@ class ReviewClusterTests(unittest.TestCase):
             cluster = store.review_clusters_payload()["clusters"][0]
             self.assertEqual("检查井1", cluster["currentText"])
             self.assertEqual("检查井1", cluster["rawCurrentText"])
+
+    def test_missing_candidate_source_falls_back_to_problem_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = self._create_store(root, [self._missing_source_record()])
+
+            cluster = store.review_clusters_payload()["clusters"][0]
+            self.assertEqual("native-dbcs-codepage-mismatch:object:big5-as-gbk", cluster["encodingPath"])
+            self.assertEqual("native-dbcs-codepage-mismatch:object:big5-as-gbk", cluster["candidateSource"])
+
+            digest = cluster["representativeRecords"][0]
+            self.assertEqual("native-dbcs-codepage-mismatch:object:big5-as-gbk", digest["candidateSource"])
 
     def test_repeated_text_forms_one_cluster_and_propagates_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -390,6 +403,25 @@ class ReviewClusterTests(unittest.TestCase):
             feature_columns = [column for column in row if column.startswith("f") and len(column) > 1 and column[1].isdigit()]
             self.assertEqual(FEATURE_COUNT, len(feature_columns))
 
+    def test_selected_training_features_namespace_duplicate_group_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            dataset_root = root / "dataset"
+            self._create_package_with_training(dataset_root, "pkg-a", "export-a")
+            self._create_package_with_training(dataset_root, "pkg-b", "export-b")
+            state = WorkbenchState(TOOL_ROOT, dataset_root, root / "model", sys.executable, "pkg-a")
+
+            stores = state.package_stores(["pkg-a", "pkg-b"])
+            result = state.build_selected_training_features(stores)
+
+            rows = self._read_csv(Path(result["featurePath"]))
+            group_ids = {row["group_id"] for row in rows}
+            self.assertIn("pkg-a::dup0000", group_ids)
+            self.assertIn("pkg-b::dup0000", group_ids)
+            for store in stores:
+                persisted = self._read_jsonl(store.training_dataset_path)
+                self.assertEqual("dup0000", persisted[0]["groupId"])
+
     def test_delete_package_removes_related_local_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -469,6 +501,37 @@ class ReviewClusterTests(unittest.TestCase):
                 writer.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
                 writer.write("\n")
         return WorkbenchState(Path(__file__).resolve().parents[1], dataset_root, root / "model", sys.executable, "pkg")
+
+    @staticmethod
+    def _create_package_with_training(dataset_root: Path, package_id: str, export_id: str) -> None:
+        package_dir = dataset_root / "ExtractedCandidates" / package_id
+        package_dir.mkdir(parents=True)
+        (package_dir / "manifest.json").write_text(json.dumps({"exportId": export_id}, ensure_ascii=False), encoding="utf-8")
+        record = ReviewClusterTests._reviewed_training_record(package_id, export_id)
+        with (package_dir / "candidate_groups.jsonl").open("w", encoding="utf-8", newline="\n") as writer:
+            writer.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+            writer.write("\n")
+        training_dir = dataset_root / "TrainingSets"
+        training_dir.mkdir(parents=True, exist_ok=True)
+        with (training_dir / f"{export_id}_training_dataset.jsonl").open("w", encoding="utf-8", newline="\n") as writer:
+            writer.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+            writer.write("\n")
+
+    @staticmethod
+    def _reviewed_training_record(package_id: str, export_id: str) -> dict:
+        record = deepcopy(ReviewClusterTests._normal_records("dup", "耗蔗旃掙", 1)[0])
+        record["schema"] = "dbtext-ai-reviewed-label-v1"
+        record["groupId"] = "dup0000"
+        record["labelAction"] = "repair"
+        record["labelText"] = "主要设备及材料表"
+        record["selectedCandidateIndex"] = 0
+        record["trainingDatasetSchema"] = "dbtext-ai-training-dataset-v1"
+        record["trainingPackageId"] = package_id
+        record["trainingExportId"] = export_id
+        record["candidates"][0]["text"] = "主要设备及材料表"
+        record["candidates"][0]["source"] = "big5-carrier-to-gbk"
+        record["candidates"][1]["text"] = "耗蔗旃掙"
+        return record
 
     @staticmethod
     def _feature_group_ids(path: Path) -> set[str]:
@@ -698,6 +761,55 @@ class ReviewClusterTests(unittest.TestCase):
                     "isRoundTrip": True,
                     "isNoOp": True,
                 }
+            ],
+        }
+
+    @staticmethod
+    def _missing_source_record() -> dict:
+        return {
+            "schema": "dbtext-ai-candidate-group-v1",
+            "featureSchema": FEATURE_SCHEMA_VERSION,
+            "exportId": "pkg",
+            "groupId": "missing-source-0000",
+            "currentText": "耗蔗旃掙",
+            "context": {
+                "currentText": "耗蔗旃掙",
+                "handle": "B1",
+                "layer": "TEXT",
+                "textStyleName": "HZTXT",
+                "textStyleFileName": "txt.shx",
+                "textStyleBigFontFileName": "tssdchn.shx",
+                "ownerBlockName": "*Model_Space",
+                "isFromExternalReference": False,
+            },
+            "risk": {
+                "highRisk": False,
+                "candidateConflict": False,
+                "hasNonRoundTrip": False,
+                "currentUnsafe": False,
+                "candidateUnsafe": False,
+            },
+            "problemGate": {
+                "hasProblem": True,
+                "reason": "native-dbcs-codepage-mismatch:object:big5-as-gbk",
+            },
+            "candidates": [
+                {
+                    "index": 0,
+                    "text": "消火栓泵剖面图",
+                    "source": "",
+                    "reason": "",
+                    "isRoundTrip": True,
+                    "isNoOp": False,
+                },
+                {
+                    "index": 1,
+                    "text": "耗蔗旃掙",
+                    "source": "current-noop",
+                    "reason": "current text",
+                    "isRoundTrip": True,
+                    "isNoOp": True,
+                },
             ],
         }
 

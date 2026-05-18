@@ -210,7 +210,7 @@ export function trainingRunView(app: BootstrapPayload | null, packages: DataPack
 export function modelReportView(app: BootstrapPayload | null): ModelReport {
   const report = app?.report || {};
   const summary = report.testReport?.summary || report.blindReport?.summary || {};
-  const testDetails = report.testReport?.details || report.errorSamples || [];
+  const testDetails = validationDetails(report.errorSamples, report.testReport?.details);
   const overfitScore = Math.max(
     Math.abs(Number(report.overfitting?.recallGap || 0)),
     Math.abs(Number(report.overfitting?.accuracyGap || 0))
@@ -225,7 +225,7 @@ export function modelReportView(app: BootstrapPayload | null): ModelReport {
     overfitScore,
     wrongFixes: visibleFalseRepairCount(testDetails, Number(summary.falseRepairs || 0)),
     bestEpoch: Number(report.trainingConfig?.bestIteration || report.trainingConfig?.actualIterations || 0),
-    simulatedTests: simulationRows(report.errorSamples || report.testReport?.details || [])
+    simulatedTests: simulationRows(testDetails)
   };
 }
 
@@ -353,11 +353,12 @@ function candidateSourceMap(
   const result = new Map<string, string>();
   for (const option of options) {
     const text = displayCandidateOptionText(option.text, option.isNoOp, rawOriginalText, originalText);
-    if (text && option.source) result.set(text, option.isNoOp ? '原文' : option.source);
+    const sourceText = sourceLabel(option.source);
+    if (text && sourceText) result.set(text, option.isNoOp ? '原文' : sourceText);
   }
 
   const groupCandidateText = String(group.candidateText || '');
-  const groupSource = String(group.candidateSource || group.encodingPath || '');
+  const groupSource = sourceLabel(group.candidateSource || group.encodingPath || group.candidateReason || group.problemGate?.reason);
   if (groupCandidateText && groupSource && !result.has(groupCandidateText)) {
     result.set(groupCandidateText, groupSource);
   }
@@ -369,7 +370,7 @@ function candidateSourceMap(
       rawOriginalText,
       originalText
     );
-    const sourceText = String(candidate.source || candidate.candidateSource || candidate.reason || '');
+    const sourceText = sourceLabel(candidate.source || candidate.candidateSource || candidate.reason || source?.problemGate?.reason);
     if (text && sourceText && !result.has(text)) {
       result.set(text, candidate.isNoOp ? '原文' : sourceText);
     }
@@ -380,6 +381,11 @@ function candidateSourceMap(
   return result;
 }
 
+function sourceLabel(value: unknown): string {
+  const text = String(value || '').trim();
+  return text && text !== '--' ? text : '';
+}
+
 function encodingPathForMode(
   mode: CorrectTextMode,
   selectedCandidate: string,
@@ -387,7 +393,7 @@ function encodingPathForMode(
 ): string {
   if (mode === 'original') return '原文';
   if (mode === 'manual') return '手动';
-  return candidateSources.get(selectedCandidate) || '--';
+  return candidateSources.get(selectedCandidate) || '候选路径未标明';
 }
 
 function correctTextModeForTraining(record: TrainingDatasetRecord): CorrectTextMode {
@@ -436,8 +442,10 @@ function precisionFromSummary(summary: ValidationSummary): number {
 function simulationRows(details: ValidationDetail[]): SimulatedTestResult[] {
   return details.map((detail, index) => {
     const originalText = String(detail.currentText || '');
-    const aiOutput = String(detail.bestText || detail.decision || '');
-    const correctText = String(detail.labelText || '');
+    const decision = String(detail.decision || '');
+    const bestText = String(detail.bestText || '');
+    const aiOutput = decision === 'repair' ? bestText : originalText;
+    const correctText = String(detail.labelText || originalText);
     return {
       id: String(detail.groupId || `${originalText}-${index}`),
       originalText,
@@ -450,9 +458,16 @@ function simulationRows(details: ValidationDetail[]): SimulatedTestResult[] {
 }
 
 function hasMismatch(detail: ValidationDetail): boolean {
+  const explicitDecision = (detail as Record<string, unknown>).correctDecision;
+  if (typeof explicitDecision === 'boolean') return !explicitDecision;
+  const severity = String(detail.severity || '');
+  if (severity) return severity !== 'ok';
+
   const action = String(detail.labelAction || '');
+  const decision = String(detail.decision || '');
+  const finalText = decision === 'repair' ? detail.bestText : detail.currentText;
   if (action === 'repair' && detail.bestText !== undefined && detail.labelText !== undefined) {
-    return normalizedVisibleText(detail.bestText) !== normalizedVisibleText(detail.labelText);
+    return normalizedVisibleText(finalText) !== normalizedVisibleText(detail.labelText);
   }
   if (detail.decision !== undefined && action) return String(detail.decision) !== action;
   return true;
@@ -467,12 +482,44 @@ function visibleFalseRepairCount(details: ValidationDetail[], fallback: number):
   }).length;
 }
 
+function validationDetails(errorSamples?: ValidationDetail[], fullDetails?: ValidationDetail[]): ValidationDetail[] {
+  if (Array.isArray(errorSamples) && errorSamples.length > 0) return errorSamples;
+  if (Array.isArray(fullDetails)) return fullDetails;
+  return [];
+}
+
 function normalizedVisibleText(value: unknown): string {
-  return String(value ?? '')
+  return normalizeShxNumberSignAliases(String(value ?? ''))
     .normalize('NFKC')
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function normalizeShxNumberSignAliases(value: string): string {
+  if (!value.includes('井')) return value;
+  const chars = Array.from(value);
+  return chars
+    .map((char, index) => (char === '井' && shouldRenderNumberSignAlias(chars, index) ? '#' : char))
+    .join('');
+}
+
+function shouldRenderNumberSignAlias(chars: string[], index: number): boolean {
+  if (index < 2 || index + 1 >= chars.length) return false;
+  if (chars[index - 1] !== '-' && chars[index - 1] !== '－') return false;
+  if (!isAsciiAlnum(chars[index + 1])) return false;
+  let start = index - 2;
+  while (start >= 0 && isAsciiAlnum(chars[start])) start -= 1;
+  const prefix = chars.slice(start + 1, index - 1);
+  return prefix.length >= 1 && prefix.length <= 8 && prefix.some(isAsciiAlpha);
+}
+
+function isAsciiAlnum(char: string): boolean {
+  return isAsciiAlpha(char) || (char >= '0' && char <= '9');
+}
+
+function isAsciiAlpha(char: string): boolean {
+  return (char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z');
 }
 
 function trainingRecordPackageId(record: TrainingDatasetRecord, packages: PackageSummary[]): string {

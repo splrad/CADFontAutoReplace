@@ -146,6 +146,30 @@ internal static class GlyphCoreNativeDecodeEvidenceStore
         context.RippleSeedQuality = Clamp01(seedQuality);
     }
 
+    public static void ApplyDocumentFamilyEvidence(
+        GlyphCoreTextRepairContext context,
+        GlyphCoreTextRepairContext seed,
+        int seedCount,
+        float seedQuality)
+    {
+        if (context == null || seed == null)
+            return;
+
+        context.HasNativeDecodeEvidence = true;
+        context.NativeDecodeFamilyMismatch = seed.NativeDecodeFamilyMismatch;
+        context.NativeDecodeEvidenceScope = "document-family";
+        context.NativeDecodeEvidenceClusterKey = seed.NativeDecodeEvidenceClusterKey;
+        context.NativeDecodeSourceCodePageFamily = seed.NativeDecodeSourceCodePageFamily;
+        context.NativeDecodeAppliedCodePageFamily = seed.NativeDecodeAppliedCodePageFamily;
+        context.NativeDecodeHookHitType = seed.NativeDecodeHookHitType;
+        context.NativeDecodeObjectCorrelation = 0f;
+        context.NativeDecodeClusterCorrelation = Math.Max(0.25f, Clamp01(seedQuality));
+        context.RippleContextText = seed.CurrentText;
+        context.RippleSeedCount = Math.Max(1, seedCount);
+        context.RippleDistanceRatio = 1f;
+        context.RippleSeedQuality = Clamp01(seedQuality);
+    }
+
     public static void Clear()
     {
         lock (Lock)

@@ -7,9 +7,13 @@ import type { SimulatedTestResult } from '@/types/bolt';
 export default function ModelReportPage() {
   const { app, busy, startSimulationTest, resetModel } = useWorkbenchStore();
   const report = modelReportView(app);
+  const validationSummary = app?.report?.testReport?.summary || app?.report?.blindReport?.summary || {};
   const mismatches: SimulatedTestResult[] = report.simulatedTests.filter((test) => !test.matched);
-  const mismatchCount = mismatches.length;
+  const summaryMismatchCount = summaryMismatchCountFrom(validationSummary);
+  const mismatchCount = Math.max(mismatches.length, summaryMismatchCount);
   const history = (app?.report?.history || []).slice(0, 5);
+  const totalTestCount = Number(validationSummary.groups || app?.report?.simulation?.sampledGroups || report.simulatedTests.length || 0);
+  const rippleRepairs = Number(validationSummary.runtimeContextRippleRepairs || 0);
 
   const runSimulation = () => {
     void startSimulationTest();
@@ -44,15 +48,16 @@ export default function ModelReportPage() {
               />
               <MetricTile
                 label="模拟测试"
-                value={`${report.simulatedTests.length}/${mismatchCount}`}
+                value={`${totalTestCount} 条`}
                 color={mismatchCount > 0 ? 'text-orange-600' : 'text-green-700'}
-                sub={mismatchCount > 0 ? `${mismatchCount} 条不一致` : '全部通过'}
+                sub={mismatchCount > 0 ? `不一致 ${mismatchCount} 条` : '全部通过'}
               />
             </div>
             {mismatchCount > 0 && (
               <div className="mt-3 flex items-center gap-1.5 rounded border border-orange-200 bg-orange-50 px-2 py-1.5 text-xs text-orange-700">
                 <AlertTriangle size={11} />
-                模拟测试存在 {mismatchCount} 条 AI 输出与正确文本不一致，已置顶高亮。
+                全量模拟测试共 {totalTestCount} 条，存在 {mismatchCount} 条 AI 输出与正确文本不一致，已置顶高亮。
+                {rippleRepairs > 0 && <span>上下文联想已修正 {rippleRepairs} 条。</span>}
               </div>
             )}
           </div>
@@ -95,8 +100,17 @@ export default function ModelReportPage() {
               {mismatches.length === 0 && (
                 <tr>
                   <td colSpan={3} className="py-16 text-center text-xs text-gray-400">
-                    <CheckCircle size={14} className="mr-1.5 inline text-green-500" />
-                    全部测试通过，无不一致记录
+                    {mismatchCount > 0 ? (
+                      <>
+                        <AlertTriangle size={14} className="mr-1.5 inline text-orange-500" />
+                        当前报告摘要存在 {mismatchCount} 条不一致，但没有可展开的明细行，请重新运行一次模拟测试。
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle size={14} className="mr-1.5 inline text-green-500" />
+                        全部测试通过，无不一致记录
+                      </>
+                    )}
                   </td>
                 </tr>
               )}
@@ -134,6 +148,17 @@ export default function ModelReportPage() {
           <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-700">模拟测试日志</div>
           <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
             {history.length === 0 && (app?.report?.simulation?.lines || []).length === 0 && <div className="text-xs text-gray-400">暂无模拟测试历史</div>}
+            {app?.report?.simulation?.startedUtc && (
+              <div className="flex items-start gap-2">
+                <span className="mt-0.5 shrink-0 text-blue-600">
+                  <RefreshCw size={10} />
+                </span>
+                <div className="min-w-0">
+                  <div className="text-xs text-gray-800">{app.report.simulation.statusLabel || app.report.simulation.label || '模拟测试运行中'}</div>
+                  <div className="text-xs text-gray-400">开始 {formatDateTime(String(app.report.simulation.startedUtc))}</div>
+                </div>
+              </div>
+            )}
             {(app?.report?.simulation?.lines || []).slice(-8).map((line, index) => (
               <div key={`${index}-${line}`} className="flex items-start gap-2">
                 <span className="mt-0.5 shrink-0 text-blue-600">
@@ -146,15 +171,17 @@ export default function ModelReportPage() {
               </div>
             ))}
             {history.map((event, index) => {
-              const status = String(event.status || event.result || event.action || '');
-              const failed = status.includes('fail') || status.includes('失败');
-              const action = String(event.label || event.action || event.status || '模拟测试完成');
-              const date = String(event.createdUtc || event.finishedUtc || event.time || '');
+              const status = historyStatus(event);
+              const action = historyAction(event);
+              const date = historyDate(event);
+              const result = historyResult(event);
+              const iconClass = status === 'failed' ? 'text-red-500' : status === 'warning' ? 'text-orange-500' : 'text-green-600';
               return (
                 <div key={index} className="flex items-start gap-2">
-                  <span className={`mt-0.5 shrink-0 ${failed ? 'text-red-500' : 'text-green-600'}`}>{failed ? <XCircle size={10} /> : <CheckCircle size={10} />}</span>
+                  <span className={`mt-0.5 shrink-0 ${iconClass}`}>{status === 'failed' ? <XCircle size={10} /> : status === 'warning' ? <AlertTriangle size={10} /> : <CheckCircle size={10} />}</span>
                   <div className="min-w-0">
                     <div className="text-xs text-gray-800">{action}</div>
+                    <div className="break-all text-xs text-gray-500">{result}</div>
                     <div className="text-xs text-gray-400">{formatDateTime(date)}</div>
                   </div>
                 </div>
@@ -165,6 +192,62 @@ export default function ModelReportPage() {
       </div>
     </div>
   );
+}
+
+function historyAction(event: Record<string, unknown>): string {
+  const simulation = recordValue(event.simulation);
+  return String(simulation.label || event.label || event.action || '全量模拟测试完成');
+}
+
+function historyDate(event: Record<string, unknown>): string {
+  return String(event.completedUtc || event.createdUtc || event.finishedUtc || event.time || '');
+}
+
+function historyStatus(event: Record<string, unknown>): 'ok' | 'warning' | 'failed' {
+  const rawStatus = String(event.status || event.result || '');
+  if (rawStatus.includes('fail') || rawStatus.includes('失败')) return 'failed';
+  if (historyMismatchCount(event) > 0) return 'warning';
+  return 'ok';
+}
+
+function historyResult(event: Record<string, unknown>): string {
+  const result = recordValue(event.simulationResult);
+  const summary = recordValue(event.simulationSummary || event.blindSummary);
+  const simulation = recordValue(event.simulation);
+  const groups = numberValue(result.groups) || numberValue(summary.groups) || numberValue(simulation.sampledGroups);
+  const mismatches = historyMismatchCount(event);
+  const ripple = numberValue(result.runtimeContextRippleRepairs) || numberValue(summary.runtimeContextRippleRepairs);
+  if (groups <= 0) return String(event.status || '无测试结果');
+  const parts = [`全量 ${groups} 条`, mismatches > 0 ? `${mismatches} 条不一致` : '全部通过'];
+  if (ripple > 0) parts.push(`上下文联想 ${ripple} 条`);
+  return parts.join('，');
+}
+
+function historyMismatchCount(event: Record<string, unknown>): number {
+  const result = recordValue(event.simulationResult);
+  const summary = recordValue(event.simulationSummary || event.blindSummary);
+  const explicit = numberValue(result.mismatches);
+  if (explicit > 0) return explicit;
+  const groups = numberValue(result.groups) || numberValue(summary.groups);
+  const correct = numberValue(summary.correctDecisions);
+  if (groups > 0 && correct > 0) return Math.max(0, groups - correct);
+  return numberValue(summary.missedRepairs) + numberValue(summary.falseRepairs);
+}
+
+function summaryMismatchCountFrom(summary: Record<string, unknown>): number {
+  const groups = numberValue(summary.groups);
+  const correct = numberValue(summary.correctDecisions);
+  if (groups > 0) return Math.max(0, groups - correct);
+  return numberValue(summary.missedRepairs) + numberValue(summary.falseRepairs);
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function numberValue(value: unknown): number {
+  const next = Number(value || 0);
+  return Number.isFinite(next) ? next : 0;
 }
 
 function MetricTile({ label, value, color, sub }: { label: string; value: string; color: string; sub?: string }) {

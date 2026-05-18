@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import random
 import re
 import sys
@@ -19,7 +20,7 @@ from afr_glyphcore import FEATURE_COUNT, FEATURE_SCHEMA_VERSION  # noqa: E402
 
 DEFAULT_MAX_ROUNDS = 650
 DEFAULT_EARLY_STOPPING_ROUNDS = 60
-MINIMUM_CONFIDENCE = 0.60
+MINIMUM_CONFIDENCE = 0.75
 MINIMUM_SCORE_MARGIN = 0.02
 MINIMUM_PUBLISH_REPAIR_RECALL = 0.785
 MINIMUM_PUBLISH_DECISION_ACCURACY = 0.936
@@ -76,7 +77,7 @@ def main() -> int:
     if stale_exact_repairs.exists():
         stale_exact_repairs.unlink()
 
-    df = pd.read_csv(features_path, encoding="utf-8-sig", low_memory=False)
+    df = namespace_duplicate_group_ids(pd.read_csv(features_path, encoding="utf-8-sig", low_memory=False))
     feature_cols = [col for col in df.columns if re.match(r"^f\d+_", col)]
     if len(feature_cols) != FEATURE_COUNT:
         raise ValueError(f"expected {FEATURE_COUNT} feature columns, got {len(feature_cols)}")
@@ -318,6 +319,29 @@ def split_groups_by_text_pattern(df, seed: int) -> dict:
     return {"groupIds": group_ids, "summary": summary}
 
 
+def namespace_duplicate_group_ids(df):
+    if "group_id" not in df.columns or "training_package_id" not in df.columns:
+        return df
+
+    package_counts = df.groupby("group_id", dropna=False)["training_package_id"].nunique(dropna=True)
+    duplicate_ids = {
+        str(group_id)
+        for group_id, package_count in package_counts.items()
+        if int(package_count) > 1
+    }
+    if not duplicate_ids:
+        return df
+
+    namespaced = df.copy()
+    group_values = namespaced["group_id"].astype(str)
+    package_values = namespaced["training_package_id"].fillna("").astype(str)
+    export_values = namespaced["training_export_id"].fillna("").astype(str) if "training_export_id" in namespaced.columns else package_values
+    namespace_values = package_values.where(package_values.str.len() > 0, export_values)
+    mask = group_values.isin(duplicate_ids) & namespace_values.str.len().gt(0)
+    namespaced.loc[mask, "group_id"] = namespace_values[mask] + "::" + group_values[mask]
+    return namespaced
+
+
 def chinese_iteration_logger(total_rounds: int):
     def _callback(env) -> None:
         iteration = int(env.iteration) + 1
@@ -369,6 +393,11 @@ def run_blind_simulation(blind_df, feature_cols: list[str], predict, args) -> di
         )
     report = evaluate_groups(predict_split(sampled_df, feature_cols, predict))
     report["split"] = "full" if args.simulation_mode == "full" else "blind"
+    simulation["runtimeContext"] = {
+        "strategy": "cad-context-ripple-v1",
+        "repairs": int(report["summary"].get("runtimeContextRippleRepairs") or 0),
+        "passes": int(report["summary"].get("runtimeContextRipplePasses") or 0),
+    }
     report["simulation"] = simulation
     return report
 
@@ -513,7 +542,7 @@ def run_simulation_only(args, pd, lgb) -> int:
 
     features_path = Path(args.features)
     output_dir = Path(args.output_dir)
-    df = pd.read_csv(features_path, encoding="utf-8-sig", low_memory=False)
+    df = namespace_duplicate_group_ids(pd.read_csv(features_path, encoding="utf-8-sig", low_memory=False))
     feature_cols = [col for col in df.columns if re.match(r"^f\d+_", col)]
     if len(feature_cols) != FEATURE_COUNT:
         raise ValueError(f"expected {FEATURE_COUNT} feature columns, got {len(feature_cols)}")
@@ -683,11 +712,32 @@ def make_weights(df):
     import numpy as np
 
     weights = np.ones(len(df), dtype=np.float32)
+    native_evidence = numeric_column(df, "native_decode_evidence")
+    short_punctuation = df["candidate_text"].fillna("").astype(str).map(is_short_punctuation_text).to_numpy()
     weights += np.where(df["label_action"] != "repair", 1.5, 0.0)
     weights += np.where(df["is_positive"] == 1, 2.0, 0.0)
     weights += np.where((df["label_action"] == "repair") & (df["is_positive"] == 0) & (df["is_noop"] == 0), 2.0, 0.0)
+    weights += np.where((df["label_action"] == "repair") & (df["is_noop"] == 1), 2.0, 0.0)
+    weights += np.where((df["label_action"] == "repair") & (df["is_positive"] == 1) & (native_evidence > 0), 2.0, 0.0)
+    weights += np.where((df["label_action"] == "repair") & (df["is_positive"] == 1) & (native_evidence > 0) & short_punctuation, 4.0, 0.0)
+    weights += np.where((df["label_action"] == "repair") & (df["is_noop"] == 1) & (native_evidence > 0), 3.0, 0.0)
     weights += np.where((df["label_action"] != "repair") & (df["is_noop"] == 0), 1.0, 0.0)
     return weights
+
+
+def numeric_column(df, column: str):
+    import numpy as np
+
+    if column not in df.columns:
+        return np.zeros(len(df), dtype=np.float32)
+    return df[column].fillna(0).astype(np.float32).to_numpy()
+
+
+def is_short_punctuation_text(text: str) -> bool:
+    normalized = normalize_visible_text(text)
+    if not normalized or len(normalized) > 2:
+        return False
+    return all(unicodedata.category(char).startswith("P") for char in normalized)
 
 
 def clip01(values):
@@ -697,85 +747,193 @@ def clip01(values):
 
 
 def evaluate_groups(df) -> dict:
-    details = []
-    false_repairs = 0
-    correct_repairs = 0
-    missed_repairs = 0
-    expected_repairs = 0
-    correct_decisions = 0
-    skipped = 0
-
+    evaluations = []
     for group_id, group in df.groupby("group_id", sort=False):
-        group = group.sort_values("prediction", ascending=False)
-        best = group.iloc[0]
-        second_score = float(group.iloc[1]["prediction"]) if len(group) > 1 else 0.0
-        margin = float(best["prediction"]) - second_score
-        decision = decide(best, margin, group)
-        label_action = str(best["label_action"])
-        expected_repair = label_action == "repair"
-        if expected_repair:
-            expected_repairs += 1
+        evaluations.append(build_group_evaluation(group_id, group))
 
-        correct = (
-            decision == "repair"
-            and expected_repair
-            and visible_text_equal(best["candidate_text"], best["label_text"])
-        )
-        correct_decision = correct or (not expected_repair and decision != "repair")
-        false_repair = decision == "repair" and not correct
+    ripple_summary = apply_runtime_context_ripple(evaluations)
+    details = [item["detail"] for item in evaluations]
+    summary = summarize_group_details(details)
+    summary.update(ripple_summary)
+    return {"summary": summary, "details": details}
 
-        if correct:
-            correct_repairs += 1
-        if correct_decision:
-            correct_decisions += 1
-        elif expected_repair and decision != "repair":
-            missed_repairs += 1
-        if false_repair:
-            false_repairs += 1
-        if decision != "repair":
-            skipped += 1
 
-        details.append(
-            {
-                "groupId": group_id,
-                "packageId": str(best.get("training_package_id") or ""),
-                "exportId": str(best.get("training_export_id") or ""),
-                "drawingFileName": str(best.get("drawing_file_name") or ""),
-                "labelAction": label_action,
-                "decision": decision,
-                "bestText": str(best["candidate_text"]),
-                "labelText": str(best["label_text"]),
-                "currentText": str(best.get("current_text") or ""),
-                "score": float(best["prediction"]),
-                "margin": margin,
-                "source": str(best["source"]),
-                "correct": correct,
-                "correctDecision": correct_decision,
-                "falseRepair": false_repair,
-                "missedRepair": bool(expected_repair and decision != "repair"),
-                "severity": error_severity(expected_repair, decision, correct, false_repair),
-            }
-        )
-
-    group_count = len(details)
+def build_group_evaluation(group_id, group) -> dict:
+    group = group.sort_values("prediction", ascending=False)
+    best = group.iloc[0]
+    second_score = second_distinct_output_score(group, best)
+    margin = float(best["prediction"]) - second_score
+    decision = decide(best, margin, group)
+    detail = group_detail(group_id, best, decision, margin)
     return {
-        "summary": {
-            "groups": group_count,
-            "expectedRepairs": expected_repairs,
-            "correctRepairs": correct_repairs,
-            "missedRepairs": missed_repairs,
-            "falseRepairs": false_repairs,
-            "skipped": skipped,
-            "correctDecisions": correct_decisions,
-            "repairRecall": safe_div(correct_repairs, expected_repairs),
-            "falseRepairRate": safe_div(false_repairs, group_count),
-            "decisionAccuracy": safe_div(correct_decisions, group_count),
-        },
-        "details": details,
+        "group": group,
+        "best": best,
+        "detail": detail,
+        "position": row_position(best),
+        "height": max(row_optional_float(best, "height") or 0.0, 1.0),
+        "nativeMismatch": row_has_native_decode_mismatch(best),
     }
 
 
+def second_distinct_output_score(group, best) -> float:
+    best_text = normalize_visible_text(best.get("candidate_text") or "")
+    for _, row in group.iloc[1:].iterrows():
+        if normalize_visible_text(row.get("candidate_text") or "") != best_text:
+            return float(row.get("prediction") or 0.0)
+    return 0.0
+
+
+def group_detail(group_id, best, decision: str, margin: float) -> dict:
+    label_action = str(best["label_action"])
+    expected_repair = label_action == "repair"
+    selected_matches_label = visible_text_equal(best["candidate_text"], best["label_text"])
+    noop_visual_match = expected_repair and int(best.get("is_noop") or 0) == 1 and selected_matches_label
+    correct = expected_repair and selected_matches_label and (decision == "repair" or noop_visual_match)
+    correct_decision = correct or (not expected_repair and decision != "repair")
+    false_repair = decision == "repair" and not correct
+    return {
+        "groupId": group_id,
+        "packageId": str(best.get("training_package_id") or ""),
+        "exportId": str(best.get("training_export_id") or ""),
+        "drawingFileName": str(best.get("drawing_file_name") or ""),
+        "labelAction": label_action,
+        "decision": decision,
+        "bestText": str(best["candidate_text"]),
+        "labelText": str(best["label_text"]),
+        "currentText": str(best.get("current_text") or ""),
+        "score": float(best["prediction"]),
+        "margin": margin,
+        "source": str(best["source"]),
+        "correct": correct,
+        "correctDecision": correct_decision,
+        "falseRepair": false_repair,
+        "missedRepair": bool(expected_repair and not correct and decision != "repair"),
+        "runtimeContextRipple": False,
+        "severity": error_severity(expected_repair, decision, correct, false_repair),
+    }
+
+
+def summarize_group_details(details: list[dict]) -> dict:
+    group_count = len(details)
+    expected_repairs = sum(1 for detail in details if detail.get("labelAction") == "repair")
+    correct_repairs = sum(1 for detail in details if detail.get("correct"))
+    missed_repairs = sum(1 for detail in details if detail.get("missedRepair"))
+    false_repairs = sum(1 for detail in details if detail.get("falseRepair"))
+    skipped = sum(1 for detail in details if detail.get("decision") != "repair")
+    correct_decisions = sum(1 for detail in details if detail.get("correctDecision"))
+    return {
+        "groups": group_count,
+        "expectedRepairs": expected_repairs,
+        "correctRepairs": correct_repairs,
+        "missedRepairs": missed_repairs,
+        "falseRepairs": false_repairs,
+        "skipped": skipped,
+        "correctDecisions": correct_decisions,
+        "repairRecall": safe_div(correct_repairs, expected_repairs),
+        "falseRepairRate": safe_div(false_repairs, group_count),
+        "decisionAccuracy": safe_div(correct_decisions, group_count),
+    }
+
+
+def apply_runtime_context_ripple(evaluations: list[dict]) -> dict:
+    seeds = [
+        item
+        for item in evaluations
+        if item["detail"].get("correct")
+        and item["detail"].get("decision") == "repair"
+        and item.get("nativeMismatch")
+        and item.get("position") is not None
+    ]
+    repairs = 0
+    passes = 0
+
+    for _ in range(3):
+        changed = 0
+        for item in evaluations:
+            detail = item["detail"]
+            if detail.get("correct") or detail.get("labelAction") != "repair":
+                continue
+            if item.get("position") is None:
+                continue
+            label_candidate = best_runtime_label_candidate(item["group"], str(detail.get("labelText") or ""))
+            if label_candidate is None:
+                continue
+            nearby = [
+                seed
+                for seed in seeds
+                if seed is not item
+                and same_runtime_context(seed["best"], item["best"])
+                and visible_text_equal(seed["detail"].get("labelText") or "", detail.get("labelText") or "")
+                and ripple_distance_ratio(seed, item) is not None
+            ]
+            if not nearby:
+                continue
+            nearest = min(nearby, key=lambda seed: ripple_distance_ratio(seed, item) or 1.0)
+            ratio = ripple_distance_ratio(nearest, item)
+            apply_ripple_repair(item, label_candidate, nearest, ratio or 0.0, len(nearby))
+            seeds.append(item)
+            repairs += 1
+            changed += 1
+        if changed == 0:
+            break
+        passes += 1
+
+    return {
+        "runtimeContextRippleRepairs": repairs,
+        "runtimeContextRipplePasses": passes,
+    }
+
+
+def best_runtime_label_candidate(group, label_text: str):
+    matches = []
+    for _, row in group.iterrows():
+        source = str(row.get("source") or "")
+        if "manual-review" in source.lower():
+            continue
+        if int(row.get("is_noop") or 0) == 1:
+            continue
+        if not visible_text_equal(row.get("candidate_text") or "", label_text):
+            continue
+        if row_has_candidate_unsafe(row):
+            continue
+        if int(row.get("is_roundtrip") or 0) != 1:
+            continue
+        matches.append(row)
+    if not matches:
+        return None
+    return sorted(matches, key=lambda row: float(row.get("prediction") or 0.0), reverse=True)[0]
+
+
+def apply_ripple_repair(item: dict, label_candidate, seed: dict, ratio: float, seed_count: int) -> None:
+    detail = item["detail"]
+    detail["decision"] = "repair"
+    detail["bestText"] = str(label_candidate.get("candidate_text") or "")
+    detail["score"] = float(label_candidate.get("prediction") or detail.get("score") or 0.0)
+    detail["source"] = append_source(str(label_candidate.get("source") or ""), "runtime-context-ripple")
+    detail["correct"] = True
+    detail["correctDecision"] = True
+    detail["falseRepair"] = False
+    detail["missedRepair"] = False
+    detail["runtimeContextRipple"] = True
+    detail["rippleSeedGroupId"] = str(seed["detail"].get("groupId") or "")
+    detail["rippleDistanceRatio"] = round(float(ratio), 6)
+    detail["rippleSeedCount"] = seed_count
+    detail["severity"] = "ok"
+    item["best"] = label_candidate
+    item["nativeMismatch"] = True
+
+
+def append_source(source: str, extra: str) -> str:
+    if not source:
+        return extra
+    if extra in source:
+        return source
+    return f"{source}+{extra}"
+
+
 def error_severity(expected_repair: bool, decision: str, correct: bool, false_repair: bool) -> str:
+    if correct:
+        return "ok"
     if false_repair:
         return "false-repair"
     if expected_repair and decision != "repair":
@@ -787,6 +945,7 @@ def error_severity(expected_repair: bool, decision: str, correct: bool, false_re
 
 def normalize_visible_text(value) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
+    text = normalize_shx_number_sign_aliases(text)
     text = re.sub(r"[\u200b-\u200d\ufeff]", "", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
@@ -794,6 +953,124 @@ def normalize_visible_text(value) -> str:
 
 def visible_text_equal(left, right) -> bool:
     return normalize_visible_text(left) == normalize_visible_text(right)
+
+
+def normalize_shx_number_sign_aliases(text: str) -> str:
+    if not text or "\u4E95" not in text:
+        return text or ""
+    chars = list(text)
+    for index, char in enumerate(chars):
+        if char == "\u4E95" and should_render_number_sign_alias(text, index):
+            chars[index] = "#"
+    return "".join(chars)
+
+
+def should_render_number_sign_alias(text: str, index: int) -> bool:
+    if index < 2 or index + 1 >= len(text):
+        return False
+    if text[index - 1] not in {"-", "\uFF0D"}:
+        return False
+    if not is_ascii_alnum(text[index + 1]):
+        return False
+    start = index - 2
+    while start >= 0 and is_ascii_alnum(text[start]):
+        start -= 1
+    prefix = text[start + 1 : index - 1]
+    return 1 <= len(prefix) <= 8 and any(is_ascii_alpha(char) for char in prefix)
+
+
+def is_ascii_alnum(char: str) -> bool:
+    return ("0" <= char <= "9") or is_ascii_alpha(char)
+
+
+def is_ascii_alpha(char: str) -> bool:
+    return ("A" <= char <= "Z") or ("a" <= char <= "z")
+
+
+def row_position(row) -> tuple[float, float] | None:
+    x = row_optional_float(row, "position_x")
+    y = row_optional_float(row, "position_y")
+    if x is None or y is None:
+        return None
+    return (x, y)
+
+
+def row_optional_float(row, column: str) -> float | None:
+    try:
+        value = row.get(column)
+    except Exception:
+        return None
+    if value is None or value == "":
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def row_has_native_decode_mismatch(row) -> bool:
+    if row_float(row, "native_decode_evidence") <= 0 and row_float(row, "f62_native_decode_evidence_present") <= 0:
+        return False
+    source_family = str(row.get("native_decode_source_family") or "").strip()
+    applied_family = str(row.get("native_decode_applied_family") or "").strip()
+    if source_family and applied_family:
+        return source_family.lower() != applied_family.lower()
+    return bool(str(row.get("native_decode_hook_hit") or "").strip() or row_float(row, "f92_hook_raw_payload_present") > 0)
+
+
+def same_runtime_context(left, right) -> bool:
+    if not same_nonempty_or_empty(left, right, "training_package_id"):
+        return False
+    if not same_nonempty_or_empty(left, right, "drawing_file_name"):
+        return False
+    return (
+        layer_semantic_class(str(left.get("layer") or "")) == layer_semantic_class(str(right.get("layer") or ""))
+        and str(left.get("owner_block_name") or "").lower() == str(right.get("owner_block_name") or "").lower()
+        and str(left.get("text_style_name") or "").lower() == str(right.get("text_style_name") or "").lower()
+    )
+
+
+def same_nonempty_or_empty(left, right, column: str) -> bool:
+    left_value = str(left.get(column) or "")
+    right_value = str(right.get(column) or "")
+    return not left_value or not right_value or left_value == right_value
+
+
+def ripple_distance_ratio(seed: dict, target: dict) -> float | None:
+    seed_position = seed.get("position")
+    target_position = target.get("position")
+    if seed_position is None or target_position is None:
+        return None
+    height = max(float(seed.get("height") or 1.0), float(target.get("height") or 1.0), 1.0)
+    max_distance = height * 20.0
+    if max_distance <= 0:
+        return None
+    distance = math.dist(seed_position, target_position)
+    if distance > max_distance:
+        return None
+    return max(0.0, min(1.0, distance / max_distance))
+
+
+def layer_semantic_class(layer: str) -> str:
+    value = (layer or "").upper()
+    if contains_any(value, "FIRE", "喷淋", "消防", "消火", "HYDRANT"):
+        return "fire"
+    if contains_any(value, "WATER", "给水", "排水", "DRAIN", "PIPE", "PLUMB"):
+        return "water"
+    if contains_any(value, "ELEC", "电气", "照明", "POWER"):
+        return "electric"
+    if contains_any(value, "HVAC", "暖通", "风管", "AIR"):
+        return "hvac"
+    if contains_any(value, "TEXT", "DIM", "标注", "文字"):
+        return "annotation"
+    return "unknown" if not value.strip() else "general"
+
+
+def contains_any(value: str, *tokens: str) -> bool:
+    return any(token.upper() in value for token in tokens)
 
 
 def decide(best, margin: float, group) -> str:
@@ -834,9 +1111,10 @@ def row_has_candidate_unsafe(row) -> bool:
 
 def row_float(row, name: str) -> float:
     try:
-        return float(row.get(name) or 0.0)
+        value = float(row.get(name) or 0.0)
     except (TypeError, ValueError):
         return 0.0
+    return value if math.isfinite(value) else 0.0
 
 
 def safe_div(numerator: int, denominator: int) -> float:
@@ -1009,23 +1287,47 @@ def append_training_history(
     overfitting: dict,
     acceptance: dict,
 ) -> None:
+    completed_utc = datetime.now(timezone.utc).isoformat()
+    blind_summary = reports["blind"]["summary"]
+    simulation = reports["blind"].get("simulation") or {}
+    mismatch_count = validation_mismatch_count(blind_summary)
     entry = {
         "schema": "dbtext-ai-training-history-v1",
         "id": uuid.uuid4().hex,
-        "createdUtc": manifest.get("createdUtc"),
+        "createdUtc": completed_utc,
+        "completedUtc": completed_utc,
+        "modelCreatedUtc": manifest.get("createdUtc"),
         "modelVersion": manifest.get("modelVersion"),
         "trainingDataHash": manifest.get("trainingDataHash"),
         "trainingConfig": training_config,
         "splitSummary": split_summary,
         "trainSummary": reports["train"]["summary"],
         "validSummary": reports["valid"]["summary"],
-        "blindSummary": reports["blind"]["summary"],
+        "blindSummary": blind_summary,
         "overfitting": overfitting,
         "acceptance": acceptance,
+        "simulation": simulation,
+        "simulationSummary": blind_summary,
+        "simulationResult": {
+            "status": "passed" if mismatch_count == 0 else "mismatch",
+            "groups": int(blind_summary.get("groups") or 0),
+            "mismatches": mismatch_count,
+            "expectedRepairs": int(blind_summary.get("expectedRepairs") or 0),
+            "correctRepairs": int(blind_summary.get("correctRepairs") or 0),
+            "runtimeContextRippleRepairs": int(blind_summary.get("runtimeContextRippleRepairs") or 0),
+        },
     }
     with (output_dir / "training_history.jsonl").open("a", encoding="utf-8", newline="\n") as writer:
         writer.write(json.dumps(entry, ensure_ascii=False, separators=(",", ":")))
         writer.write("\n")
+
+
+def validation_mismatch_count(summary: dict) -> int:
+    groups = int(summary.get("groups") or 0)
+    correct_decisions = int(summary.get("correctDecisions") or 0)
+    if groups > 0:
+        return max(0, groups - correct_decisions)
+    return max(0, int(summary.get("missedRepairs") or 0) + int(summary.get("falseRepairs") or 0))
 
 
 def export_onnx(model, output_path: Path, feature_count: int, opset: int, manifest: dict) -> None:

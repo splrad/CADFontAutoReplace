@@ -57,6 +57,25 @@ def display_candidate_text(record: dict, candidate: dict) -> str:
     return text
 
 
+def candidate_encoding_path(record: dict, candidate: dict) -> str:
+    source = str(candidate.get("source") or candidate.get("candidateSource") or "").strip()
+    if source and source != "--":
+        return source
+
+    if DatasetStore._is_noop_candidate(candidate):
+        return "原文"
+
+    reason = str(candidate.get("reason") or candidate.get("candidateReason") or "").strip()
+    if reason and reason != "--":
+        return reason
+
+    problem_reason = str((record.get("problemGate") or {}).get("reason") or "").strip()
+    if problem_reason and problem_reason not in {"--", "no-suspicious-dbtext"}:
+        return problem_reason
+
+    return "候选路径未标明"
+
+
 def normalize_shx_display_aliases(text: str) -> str:
     if not text or "\u4E95" not in text:
         return text or ""
@@ -1134,7 +1153,7 @@ class DatasetStore:
         return (
             str(record.get("currentText") or ""),
             str(candidate.get("text") or ""),
-            str(candidate.get("source") or ""),
+            candidate_encoding_path(record, candidate),
             action,
         )
 
@@ -1145,6 +1164,7 @@ class DatasetStore:
         current_text = raw_current_text(first)
         display_text = display_text_for_record(first)
         candidate_text = display_candidate_text(first, candidate)
+        candidate_source = candidate_encoding_path(first, candidate)
         group_type = "noop" if self._is_noop_candidate(candidate) else "encoding"
         action = self._recommended_action(candidate)
         group_id = uuid.uuid5(uuid.NAMESPACE_URL, REVIEW_GROUP_RULE_VERSION + "\0" + "\0".join(map(str, self._review_group_key(first)))).hex
@@ -1176,7 +1196,7 @@ class DatasetStore:
             "ruleVersion": REVIEW_GROUP_RULE_VERSION,
             "groupType": group_type,
             "clusterType": group_type,
-            "encodingPath": str(candidate.get("source") or ""),
+            "encodingPath": candidate_source,
             "count": len(records),
             "impactCount": len(records),
             "reviewedCount": len(reviewed_records),
@@ -1207,7 +1227,7 @@ class DatasetStore:
             "sourceTextVariants": source_variants,
             "candidateText": candidate_text,
             "rawCandidateText": str(candidate.get("text") or ""),
-            "candidateSource": str(candidate.get("source") or ""),
+            "candidateSource": candidate_source,
             "candidateReason": str(candidate.get("reason") or ""),
             "isRoundTrip": bool(candidate.get("isRoundTrip")),
             "risk": risk_totals,
@@ -1270,6 +1290,7 @@ class DatasetStore:
         context = record.get("context") or {}
         candidate = self._review_candidate(record)
         reviewed = self.reviewed.get(str(record.get("groupId") or ""))
+        candidate_source = candidate_encoding_path(record, candidate)
         return {
             "groupId": record.get("groupId"),
             "handle": context.get("handle"),
@@ -1283,7 +1304,7 @@ class DatasetStore:
             "ownerBlockName": context.get("ownerBlockName"),
             "candidateText": display_candidate_text(record, candidate),
             "rawCandidateText": candidate.get("text"),
-            "candidateSource": candidate.get("source"),
+            "candidateSource": candidate_source,
             "candidateReason": candidate.get("reason"),
             "isRoundTrip": bool(candidate.get("isRoundTrip")),
             "problemReason": (record.get("problemGate") or {}).get("reason"),
@@ -1305,6 +1326,7 @@ class DatasetStore:
         drawing = self.manifest.get("drawing") or {}
         display_text = display_text_for_record(record)
         display_label = display_text if record.get("labelAction") == "keep" else record.get("labelText")
+        candidate_source = candidate_encoding_path(record, selected)
         return {
             "groupId": record.get("groupId"),
             "currentText": display_text,
@@ -1331,7 +1353,7 @@ class DatasetStore:
             "isFromExternalReference": bool(context.get("isFromExternalReference")),
             "candidateText": display_candidate_text(record, selected),
             "rawCandidateText": selected.get("text"),
-            "candidateSource": selected.get("source"),
+            "candidateSource": candidate_source,
             "candidateReason": selected.get("reason"),
             "selectedCandidateIndex": record.get("selectedCandidateIndex"),
             "candidateCount": len(record.get("candidates") or []),
@@ -1744,7 +1766,7 @@ class DatasetStore:
             f"{REVIEW_GROUP_RULE_VERSION}: currentText+candidateText+candidateSource+action; "
             f"current={record.get('currentText') or ''}; "
             f"candidate={candidate.get('text') or ''}; "
-            f"source={candidate.get('source') or ''}; "
+            f"source={candidate_encoding_path(record, candidate)}; "
             "risk-and-context-audited"
         )
 
@@ -2312,6 +2334,7 @@ class WorkbenchState:
         prepared: list[tuple[DatasetStore, list[dict], list[str]]] = []
         empty_packages: list[str] = []
         training_records: list[dict] = []
+        feature_records: list[dict] = []
         for store in stores:
             records, promoted_ids, _ = store.prepare_training_dataset_build()
             if not records:
@@ -2319,6 +2342,7 @@ class WorkbenchState:
                 continue
             prepared.append((store, records, promoted_ids))
             training_records.extend(records)
+            feature_records.extend(self._records_for_selected_feature_build(store, records, len(stores)))
 
         if empty_packages:
             raise ValueError("所选数据包没有训练数据：" + ", ".join(empty_packages))
@@ -2327,7 +2351,7 @@ class WorkbenchState:
 
         try:
             with training_tmp_path.open("w", encoding="utf-8", newline="\n") as writer:
-                for record in training_records:
+                for record in feature_records:
                     writer.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
                     writer.write("\n")
 
@@ -2357,6 +2381,21 @@ class WorkbenchState:
                 training_tmp_path.unlink()
             if features_tmp_path.exists():
                 features_tmp_path.unlink()
+
+    @staticmethod
+    def _records_for_selected_feature_build(store: DatasetStore, records: list[dict], package_count: int) -> list[dict]:
+        if package_count <= 1:
+            return records
+
+        combined_records: list[dict] = []
+        for record in records:
+            combined = deepcopy(record)
+            group_id = str(record.get("groupId") or "")
+            combined["groupId"] = f"{store.package_id}::{group_id}" if group_id else store.package_id
+            combined.setdefault("trainingPackageId", store.package_id)
+            combined.setdefault("trainingExportId", store.export_id)
+            combined_records.append(combined)
+        return combined_records
 
     def features_payload(self) -> dict:
         if not self.store:

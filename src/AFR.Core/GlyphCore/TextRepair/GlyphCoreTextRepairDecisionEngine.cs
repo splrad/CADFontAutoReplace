@@ -6,7 +6,7 @@ namespace AFR.GlyphCore.TextRepair;
 
 internal static class GlyphCoreTextRepairDecisionEngine
 {
-    private const float MinimumConfidence = 0.60f;
+    private const float MinimumConfidence = 0.75f;
     private const float MinimumScoreMargin = 0.02f;
 
     public static GlyphCoreTextRepairDecision Evaluate(
@@ -33,7 +33,8 @@ internal static class GlyphCoreTextRepairDecisionEngine
             return GlyphCoreTextRepairDecision.Skip("no-ai-score", summary);
 
         GlyphCoreTextRepairCandidate best = scored[0];
-        float secondScore = scored.Count > 1 ? scored[1].AiScore : 0f;
+        GlyphCoreTextRepairCandidate? second = FindSecondDistinctOutput(scored, best);
+        float secondScore = second == null ? 0f : second.AiScore;
         float margin = best.AiScore - secondScore;
 
         if (best.IsNoOp || string.Equals(best.Text, context.CurrentText, StringComparison.Ordinal))
@@ -74,14 +75,32 @@ internal static class GlyphCoreTextRepairDecisionEngine
             return $"{status}, scoreError='{Trim(failed.AiScoreError)}', source={failed.Source}";
         }
 
-        GlyphCoreTextRepairCandidate? second = candidates
-            .Where(c => c.HasAiScore && !ReferenceEquals(c, best))
-            .OrderByDescending(c => c.AiScore)
-            .FirstOrDefault();
+        GlyphCoreTextRepairCandidate? second = FindSecondDistinctOutput(
+            candidates
+                .Where(c => c.HasAiScore)
+                .OrderByDescending(c => c.AiScore)
+                .ToList(),
+            best);
         string margin = second == null
             ? "margin=1.000"
             : $"margin={best.AiScore - second.AiScore:0.000}";
         return $"{status}, best='{Trim(best.Text)}', score={best.AiScore:0.000}, {margin}, source={best.Source}";
+    }
+
+    private static GlyphCoreTextRepairCandidate? FindSecondDistinctOutput(
+        IReadOnlyList<GlyphCoreTextRepairCandidate> scored,
+        GlyphCoreTextRepairCandidate best)
+    {
+        for (int i = 0; i < scored.Count; i++)
+        {
+            GlyphCoreTextRepairCandidate candidate = scored[i];
+            if (ReferenceEquals(candidate, best))
+                continue;
+            if (!string.Equals(candidate.Text, best.Text, StringComparison.Ordinal))
+                return candidate;
+        }
+
+        return null;
     }
 
     private static string Trim(string text)

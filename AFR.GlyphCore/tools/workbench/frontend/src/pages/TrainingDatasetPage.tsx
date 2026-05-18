@@ -14,21 +14,21 @@ interface ConfirmModal {
 const TABLE_ROW_HEIGHT = 44;
 
 export default function TrainingDatasetPage() {
-  const { app, busy, deletePackage, deleteTrainingRecords, importTrainingDataset } = useWorkbenchStore();
+  const { app, busy, selectPackage, deletePackage, deleteTrainingRecords, importTrainingDataset } = useWorkbenchStore();
   const fileRef = useRef<HTMLInputElement>(null);
   const records = useMemo(() => trainingRecordViews(app), [app]);
   const packages = useMemo(() => packageViews(app, records), [app, records]);
   const [search, setSearch] = useState('');
   const [fMode, setFMode] = useState<CorrectTextMode | 'all'>('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [activePkg, setActivePkg] = useState<string | null>(null);
   const [pkgSearch, setPkgSearch] = useState('');
   const [confirm, setConfirm] = useState<ConfirmModal | null>(null);
   const deferredSearch = useDeferredValue(search);
   const deferredPkgSearch = useDeferredValue(pkgSearch);
+  const activePkg = app?.data?.packageId || null;
 
   const handleSelectPkg = (pkg: DataPackage) => {
-    setActivePkg(activePkg === pkg.id ? null : pkg.id);
+    if (activePkg !== pkg.id) void selectPackage(pkg.id);
     setSelected(new Set());
     setSearch('');
     setFMode('all');
@@ -47,7 +47,6 @@ export default function TrainingDatasetPage() {
     if (!confirm) return;
     if (confirm.type === 'pkg' && confirm.pkg) {
       void deletePackage(confirm.pkg.id);
-      if (activePkg === confirm.pkg.id) setActivePkg(null);
       setSelected(new Set());
     } else if (confirm.type === 'records' && confirm.recordIds) {
       void deleteTrainingRecords(confirm.recordIds);
@@ -129,11 +128,11 @@ export default function TrainingDatasetPage() {
           <div className="flex-1 overflow-y-auto">
             {visiblePkgs.length === 0 && <div className="py-8 text-center text-xs text-gray-400">无匹配数据集</div>}
             {visiblePkgs.map((pkg) => {
-              const cnt = pkgCounts[pkg.id] || 0;
+              const isActive = activePkg === pkg.id;
+              const cnt = isActive ? pkgCounts[pkg.id] || 0 : pkg.inTrainingSet;
               const total = pkg.inTrainingSet || 1;
               const pct = Math.round((cnt / total) * 100);
               const isArchived = pkg.status === 'archived';
-              const isActive = activePkg === pkg.id;
               return (
                 <div key={pkg.id} className={`flex items-start border-b border-gray-100 transition-colors ${isActive ? 'bg-gray-900' : 'bg-white hover:bg-gray-50'}`}>
                   <button type="button" onClick={() => handleSelectPkg(pkg)} className="min-w-0 flex-1 px-3 py-3 text-left">
