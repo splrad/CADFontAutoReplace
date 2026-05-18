@@ -20,6 +20,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextFontParser.cs" Link="FontMapping\MTextFontParser.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontReplacer.cs" Link="FontMapping\MTextInlineFontReplacer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontScanner.cs" Link="FontMapping\MTextInlineFontScanner.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeDecodeHookProfile.cs" Link="FontMapping\NativeDecodeHookProfile.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeInlineHook.cs" Link="FontMapping\NativeInlineHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\TextEditorDbcsDecodeHook.cs" Link="FontMapping\TextEditorDbcsDecodeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AppInitializer.cs" Link="Hosting\AppInitializer.cs" />

@@ -17,35 +17,15 @@ namespace AFR.FontMapping;
 internal static class TextEditorDbcsDecodeHook
 {
     private const string Tag = "TextEditorDbcs";
-    private const string ReadDoubleByteAnsiExport = "?read_doublebyte@TextEditor@@CA_NPEBDAEA_WW4code_page_id@@@Z";
-    private const string MultiByteToUnicodeAcStringExport = "?MultiByteToUnicode@TextEditor@@SA_NPEBDHW4code_page_id@@AEAVAcString@@@Z";
     private const uint MemCommit = 0x1000;
     private const int EvidenceLogLimit = 40;
     private const int NoScopeLogLimit = 20;
     private const int DecodeProbeLogLimit = 80;
     private const int DecodeEvidenceSampleLimit = 16;
 
-    private static readonly byte[] ReadDoubleByteAnsiPrefix =
-    [
-        0x48, 0x89, 0x5C, 0x24, 0x10,
-        0x48, 0x89, 0x74, 0x24, 0x18,
-        0x57,
-        0x48, 0x83, 0xEC, 0x30
-    ];
-
-    private static readonly byte[] MultiByteToUnicodeAcStringPrefix =
-    [
-        0x48, 0x8B, 0xC4,
-        0x48, 0x89, 0x58, 0x08,
-        0x48, 0x89, 0x68, 0x10,
-        0x48, 0x89, 0x70, 0x18,
-        0x48, 0x89, 0x78, 0x20,
-        0x41, 0x56,
-        0x48, 0x83, 0xEC, 0x30
-    ];
-
     private static NativeInlineHook<ReadDoubleByteAnsiDelegate>? _readDoubleByteHook;
     private static NativeInlineHook<MultiByteToUnicodeAcStringDelegate>? _multiByteToUnicodeAcStringHook;
+    private static TextEditorDbcsDecodeHookProfile? _profile;
     private static IntPtr _moduleBase;
     private static bool _installed;
     private static int _hitCount;
@@ -88,8 +68,16 @@ internal static class TextEditorDbcsDecodeHook
     {
         if (_installed) return;
 
-        if (!IsSupportedPlatform())
+        if (!NativeDecodeHookProfileResolver.TryGetCurrent(Tag, out var nativeProfile))
             return;
+
+        var profile = nativeProfile.TextEditorDbcsDecode;
+        _profile = profile;
+        if (!profile.HasInstallableHook)
+        {
+            DiagnosticLogger.Log(Tag, $"{nativeProfile.PlatformName}: {profile.ReadDoubleByteAnsi.DisabledReason ?? profile.MultiByteToUnicodeAcString.DisabledReason ?? nativeProfile.SupportNote}");
+            return;
+        }
 
         _moduleBase = GetModuleHandle(PlatformManager.Platform.AcDbDllName);
         if (_moduleBase == IntPtr.Zero)
@@ -98,8 +86,8 @@ internal static class TextEditorDbcsDecodeHook
             return;
         }
 
-        bool installed = TryInstallReadDoubleByteHook();
-        installed |= TryInstallMultiByteToUnicodeAcStringHook();
+        bool installed = TryInstallReadDoubleByteHook(profile.ReadDoubleByteAnsi);
+        installed |= TryInstallMultiByteToUnicodeAcStringHook(profile.MultiByteToUnicodeAcString);
         _installed = installed;
     }
 
@@ -110,6 +98,7 @@ internal static class TextEditorDbcsDecodeHook
         _multiByteToUnicodeAcStringHook?.Uninstall();
         _readDoubleByteHook = null;
         _multiByteToUnicodeAcStringHook = null;
+        _profile = null;
         _moduleBase = IntPtr.Zero;
         _installed = false;
         DiagnosticLogger.Log(Tag,
@@ -346,12 +335,11 @@ internal static class TextEditorDbcsDecodeHook
             allowNativeExpansion);
     }
 
-    private static bool TryInstallReadDoubleByteHook()
+    private static bool TryInstallReadDoubleByteHook(NativeHookTarget target)
     {
         if (!TryGetExportAddress(
                 _moduleBase,
-                ReadDoubleByteAnsiExport,
-                "TextEditor::read_doublebyte(char*)",
+                target,
                 out IntPtr address,
                 out uint rva))
             return false;
@@ -364,17 +352,16 @@ internal static class TextEditorDbcsDecodeHook
             address,
             rva,
             ReadDoubleByteAnsiHookHandler,
-            ReadDoubleByteAnsiPrefix.Length,
-            64,
-            ReadDoubleByteAnsiPrefix);
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
     }
 
-    private static bool TryInstallMultiByteToUnicodeAcStringHook()
+    private static bool TryInstallMultiByteToUnicodeAcStringHook(NativeHookTarget target)
     {
         if (!TryGetExportAddress(
                 _moduleBase,
-                MultiByteToUnicodeAcStringExport,
-                "TextEditor::MultiByteToUnicode(char*,AcString)",
+                target,
                 out IntPtr address,
                 out uint rva))
             return false;
@@ -387,22 +374,9 @@ internal static class TextEditorDbcsDecodeHook
             address,
             rva,
             MultiByteToUnicodeAcStringHookHandler,
-            MultiByteToUnicodeAcStringPrefix.Length,
-            64,
-            MultiByteToUnicodeAcStringPrefix);
-    }
-
-    private static bool IsSupportedPlatform()
-    {
-        if (!PlatformManager.Platform.AcDbDllName.Equals("acdb25.dll", StringComparison.OrdinalIgnoreCase)
-            || !PlatformManager.Platform.VersionName.Equals("2025", StringComparison.OrdinalIgnoreCase))
-        {
-            DiagnosticLogger.Log(Tag,
-                $"{PlatformManager.Platform.DisplayName} 未验证 TextEditor DBCS 解码导出符号，跳过安装。");
-            return false;
-        }
-
-        return true;
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
     }
 
     private static bool ReadDoubleByteAnsiHookHandler(IntPtr input, IntPtr outputChar, int codePageId)
@@ -818,29 +792,45 @@ internal static class TextEditorDbcsDecodeHook
 
     private static bool TryGetExportAddress(
         IntPtr module,
-        string exportName,
-        string displayName,
+        NativeHookTarget target,
         out IntPtr address,
         out uint rva)
     {
-        address = NativeInlineHookInterop.GetProcAddress(module, exportName);
+        string? exportName = target.ExportName;
+        if (!target.IsEnabled || string.IsNullOrWhiteSpace(exportName))
+        {
+            address = IntPtr.Zero;
+            rva = 0;
+            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少导出符号"}");
+            return false;
+        }
+
+        address = NativeInlineHookInterop.GetProcAddress(module, exportName!);
         rva = 0;
         if (address == IntPtr.Zero)
         {
-            DiagnosticLogger.Log(Tag, $"{displayName} 导出符号未找到，跳过。");
+            DiagnosticLogger.Log(Tag, $"{target.Name} 导出符号未找到，跳过。");
             return false;
         }
 
         long delta = address.ToInt64() - module.ToInt64();
         if (delta <= 0 || delta > uint.MaxValue || !IsCommittedMemory(address))
         {
-            DiagnosticLogger.Log(Tag, $"{displayName} 导出地址无效，跳过。Address=0x{address.ToInt64():X}");
+            DiagnosticLogger.Log(Tag, $"{target.Name} 导出地址无效，跳过。Address=0x{address.ToInt64():X}");
             address = IntPtr.Zero;
             return false;
         }
 
         rva = (uint)delta;
-        DiagnosticLogger.Log(Tag, $"{displayName} 导出解析成功。RVA=0x{rva:X}");
+        if (target.Rva.HasValue && target.Rva.Value != rva)
+        {
+            DiagnosticLogger.Log(Tag, $"{target.Name} RVA 不匹配，跳过。Expected=0x{target.Rva.Value:X}, Actual=0x{rva:X}");
+            address = IntPtr.Zero;
+            rva = 0;
+            return false;
+        }
+
+        DiagnosticLogger.Log(Tag, $"{target.Name} 导出解析成功。RVA=0x{rva:X}");
         return true;
     }
 

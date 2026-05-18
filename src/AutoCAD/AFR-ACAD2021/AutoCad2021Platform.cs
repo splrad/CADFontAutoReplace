@@ -1,4 +1,5 @@
 using AFR.Abstractions;
+using AFR.FontMapping;
 
 namespace AFR;
 
@@ -6,7 +7,7 @@ namespace AFR;
 /// AutoCAD 2021 版本的平台常量定义。
 /// 包含注册表路径、acdb DLL 名称、ldfile 导出符号等版本特定信息。
 /// </summary>
-internal sealed class AutoCad2021Platform : ICadPlatform
+internal sealed class AutoCad2021Platform : ICadPlatform, INativeDecodeHookProfileProvider
 {
     public string BrandName => "AutoCAD";
     public string VersionName => "2021";
@@ -18,4 +19,10 @@ internal sealed class AutoCad2021Platform : ICadPlatform
     public string LdFileExport => "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z"; // C++ 修饰名
     public int PrologueSize => 21;                               // ldfile 函数序言指令长度（字节）
     public bool SupportsLdFileHook => true;                      // 2021 支持 ldfile Hook
+
+    public NativeDecodeHookProfile NativeDecodeHookProfile
+        => AutoCadNativeDecodeHookProfiles.CreateFailClosedProfile(
+            DisplayName,
+            AcDbDllName,
+            "2021 acdb 基线缺少 acdbGetFilerCodePageId 导出且虚表 resolver 未验证，DBText AI native hook fail closed。");
 }

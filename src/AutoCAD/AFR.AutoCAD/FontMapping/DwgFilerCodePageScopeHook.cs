@@ -15,38 +15,18 @@ namespace AFR.FontMapping;
 internal static class DwgFilerCodePageScopeHook
 {
     private const string Tag = "DwgCodePageScope";
-    private const string ReadStringAcStringExport = "?readString@AcDbMemoryDwgFiler@@UEAA?AW4ErrorStatus@Acad@@AEAVAcString@@@Z";
-    private const string ReadStringWideCharPointerExport = "?readString@AcDbMemoryDwgFiler@@UEAA?AW4ErrorStatus@Acad@@PEAPEA_W@Z";
-    private const string GetFilerCodePageIdExport = "?acdbGetFilerCodePageId@@YA?AW4code_page_id@@PEAVAcDbDwgFiler@@@Z";
-    private const string CodePageIdIsDoubleByteExport = "?CodePageIdIsDoubleByte@AcCodePage@@SA_NW4code_page_id@@@Z";
     private const uint MemCommit = 0x1000;
     private const int ScopeLogLimit = 40;
     private const int StringLogLimit = 240;
     private const int DbTextReadStringLogLimit = 120;
     private const int MaxLoggedStringChars = 160;
     private const int MaxReadStringRawBytes = 96;
-    private const int FilerBitOffsetOffset = 0x10;
-    private const int FilerBufferPointerOffset = 0x30;
-    private const int FilerByteOffsetOffset = 0x50;
-
-    private static readonly byte[] ReadStringAcStringPrefix =
-    [
-        0x48, 0x89, 0x5C, 0x24, 0x18, 0x55, 0x56, 0x57,
-        0x41, 0x56, 0x41, 0x57, 0x48, 0x8B, 0xEC, 0x48,
-        0x83, 0xEC, 0x60
-    ];
-
-    private static readonly byte[] ReadStringWideCharPointerPrefix =
-    [
-        0x40, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55,
-        0x41, 0x56, 0x41, 0x57, 0x48, 0x81, 0xEC, 0x00,
-        0x01, 0x00, 0x00
-    ];
 
     private static NativeInlineHook<ReadStringDelegate>? _acStringHook;
     private static NativeInlineHook<ReadStringDelegate>? _wideCharPointerHook;
     private static GetFilerCodePageIdDelegate? _getFilerCodePageId;
     private static CodePageIdIsDoubleByteDelegate? _codePageIdIsDoubleByte;
+    private static DwgFilerCodePageHookProfile? _profile;
     private static IntPtr _moduleBase;
     private static bool _installed;
     private static int _acStringHitCount;
@@ -90,6 +70,9 @@ internal static class DwgFilerCodePageScopeHook
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int GetFilerCodePageIdDelegate(IntPtr filer);
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate IntPtr GetFilerCodePageRecordDelegate(IntPtr filer);
+
     /// <summary>
     /// <c>AcCodePage::CodePageIdIsDoubleByte</c> 委托。
     /// </summary>
@@ -104,8 +87,16 @@ internal static class DwgFilerCodePageScopeHook
     {
         if (_installed) return;
 
-        if (!IsSupportedPlatform())
+        if (!NativeDecodeHookProfileResolver.TryGetCurrent(Tag, out var nativeProfile))
             return;
+
+        var profile = nativeProfile.DwgFilerCodePage;
+        _profile = profile;
+        if (!profile.HasInstallableReadStringHook)
+        {
+            DiagnosticLogger.Log(Tag, $"{nativeProfile.PlatformName}: {profile.ReadStringAcString.DisabledReason ?? profile.ReadStringWideCharPointer.DisabledReason ?? nativeProfile.SupportNote}");
+            return;
+        }
 
         _moduleBase = GetModuleHandle(PlatformManager.Platform.AcDbDllName);
         if (_moduleBase == IntPtr.Zero)
@@ -114,19 +105,17 @@ internal static class DwgFilerCodePageScopeHook
             return;
         }
 
-        if (!TryBindNativeExports(_moduleBase))
+        if (!TryBindNativeExports(_moduleBase, profile))
             return;
 
         bool hasAcString = TryGetExportAddress(
             _moduleBase,
-            ReadStringAcStringExport,
-            "AcDbMemoryDwgFiler.readString(AcString&)",
+            profile.ReadStringAcString,
             out IntPtr acStringAddress,
             out uint acStringRva);
         bool hasWideChar = TryGetExportAddress(
             _moduleBase,
-            ReadStringWideCharPointerExport,
-            "AcDbMemoryDwgFiler.readString(wchar_t**)",
+            profile.ReadStringWideCharPointer,
             out IntPtr wideCharAddress,
             out uint wideCharRva);
 
@@ -141,9 +130,9 @@ internal static class DwgFilerCodePageScopeHook
                 acStringAddress,
                 acStringRva,
                 AcStringReadStringHookHandler,
-                ReadStringAcStringPrefix.Length,
-                64,
-                ReadStringAcStringPrefix);
+                profile.ReadStringAcString.MinPrologueSize,
+                profile.ReadStringAcString.MaxPrologueSize,
+                profile.ReadStringAcString.ExpectedPrefix);
         }
 
         bool wideCharInstalled = false;
@@ -157,9 +146,9 @@ internal static class DwgFilerCodePageScopeHook
                 wideCharAddress,
                 wideCharRva,
                 WideCharPointerReadStringHookHandler,
-                ReadStringWideCharPointerPrefix.Length,
-                64,
-                ReadStringWideCharPointerPrefix);
+                profile.ReadStringWideCharPointer.MinPrologueSize,
+                profile.ReadStringWideCharPointer.MaxPrologueSize,
+                profile.ReadStringWideCharPointer.ExpectedPrefix);
         }
 
         _installed = acStringInstalled || wideCharInstalled;
@@ -175,6 +164,7 @@ internal static class DwgFilerCodePageScopeHook
         _wideCharPointerHook = null;
         _getFilerCodePageId = null;
         _codePageIdIsDoubleByte = null;
+        _profile = null;
         _moduleBase = IntPtr.Zero;
         _currentScope = null;
         lock (LoggedWideCharOutputLock)
@@ -286,65 +276,80 @@ internal static class DwgFilerCodePageScopeHook
         };
     }
 
-    private static bool IsSupportedPlatform()
-    {
-        if (!PlatformManager.Platform.AcDbDllName.Equals("acdb25.dll", StringComparison.OrdinalIgnoreCase)
-            || !PlatformManager.Platform.VersionName.Equals("2025", StringComparison.OrdinalIgnoreCase))
-        {
-            DiagnosticLogger.Log(Tag,
-                $"{PlatformManager.Platform.DisplayName} 未验证 readString/code-page 导出符号，跳过安装。");
-            return false;
-        }
-
-        return true;
-    }
-
-    private static bool TryBindNativeExports(IntPtr module)
+    private static bool TryBindNativeExports(IntPtr module, DwgFilerCodePageHookProfile profile)
     {
         if (!TryGetExportAddress(
                 module,
-                GetFilerCodePageIdExport,
-                "acdbGetFilerCodePageId",
-                out IntPtr getFilerCodePageId,
-                out _)
-            || !TryGetExportAddress(
-                module,
-                CodePageIdIsDoubleByteExport,
-                "AcCodePage::CodePageIdIsDoubleByte",
+                profile.CodePageIdIsDoubleByte,
                 out IntPtr codePageIdIsDoubleByte,
                 out _))
             return false;
 
-        _getFilerCodePageId = Marshal.GetDelegateForFunctionPointer<GetFilerCodePageIdDelegate>(getFilerCodePageId);
         _codePageIdIsDoubleByte = Marshal.GetDelegateForFunctionPointer<CodePageIdIsDoubleByteDelegate>(codePageIdIsDoubleByte);
-        return true;
+
+        if (profile.ResolverKind == FilerCodePageResolverKind.Export)
+        {
+            if (!TryGetExportAddress(
+                    module,
+                    profile.GetFilerCodePageId,
+                    out IntPtr getFilerCodePageId,
+                    out _))
+                return false;
+
+            _getFilerCodePageId = Marshal.GetDelegateForFunctionPointer<GetFilerCodePageIdDelegate>(getFilerCodePageId);
+            return true;
+        }
+
+        if (profile.ResolverKind == FilerCodePageResolverKind.VirtualRecord
+            && profile.VirtualCodePageMethodOffset > 0
+            && profile.VirtualCodePageRecordCodePageOffset >= 0)
+            return true;
+
+        DiagnosticLogger.Log(Tag, "当前 profile 未提供可验证 code-page resolver，跳过 readString 作用域 hook。");
+        return false;
     }
 
     private static bool TryGetExportAddress(
         IntPtr module,
-        string exportName,
-        string displayName,
+        NativeHookTarget target,
         out IntPtr address,
         out uint rva)
     {
-        address = NativeInlineHookInterop.GetProcAddress(module, exportName);
+        string? exportName = target.ExportName;
+        if (!target.IsEnabled || string.IsNullOrWhiteSpace(exportName))
+        {
+            address = IntPtr.Zero;
+            rva = 0;
+            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少导出符号"}");
+            return false;
+        }
+
+        address = NativeInlineHookInterop.GetProcAddress(module, exportName!);
         rva = 0;
         if (address == IntPtr.Zero)
         {
-            DiagnosticLogger.Log(Tag, $"{displayName} 导出符号未找到，跳过。");
+            DiagnosticLogger.Log(Tag, $"{target.Name} 导出符号未找到，跳过。");
             return false;
         }
 
         long delta = address.ToInt64() - module.ToInt64();
         if (delta <= 0 || delta > uint.MaxValue || !IsCommittedMemory(address))
         {
-            DiagnosticLogger.Log(Tag, $"{displayName} 导出地址无效，跳过。Address=0x{address.ToInt64():X}");
+            DiagnosticLogger.Log(Tag, $"{target.Name} 导出地址无效，跳过。Address=0x{address.ToInt64():X}");
             address = IntPtr.Zero;
             return false;
         }
 
         rva = (uint)delta;
-        DiagnosticLogger.Log(Tag, $"{displayName} 导出解析成功。RVA=0x{rva:X}");
+        if (target.Rva.HasValue && target.Rva.Value != rva)
+        {
+            DiagnosticLogger.Log(Tag, $"{target.Name} RVA 不匹配，跳过。Expected=0x{target.Rva.Value:X}, Actual=0x{rva:X}");
+            address = IntPtr.Zero;
+            rva = 0;
+            return false;
+        }
+
+        DiagnosticLogger.Log(Tag, $"{target.Name} 导出解析成功。RVA=0x{rva:X}");
         return true;
     }
 
@@ -437,10 +442,19 @@ internal static class DwgFilerCodePageScopeHook
     {
         try
         {
-            if (filer == IntPtr.Zero || !IsCommittedMemory(filer) || _getFilerCodePageId == null)
+            if (filer == IntPtr.Zero || !IsCommittedMemory(filer))
                 return 0;
 
-            int codePageId = _getFilerCodePageId(filer);
+            int codePageId;
+            if (_getFilerCodePageId != null)
+            {
+                codePageId = _getFilerCodePageId(filer);
+            }
+            else if (!TryGetFilerCodePageIdViaVirtualRecord(filer, out codePageId))
+            {
+                return 0;
+            }
+
             _lastFiler = filer;
             _lastCodePageId = codePageId;
             _lastCodePageIsDoubleByte = IsDoubleByteCodePageId(codePageId);
@@ -450,6 +464,42 @@ internal static class DwgFilerCodePageScopeHook
         {
             DiagnosticLogger.LogError(Tag + ": 读取 filer code page 失败", ex);
             return 0;
+        }
+    }
+
+    private static bool TryGetFilerCodePageIdViaVirtualRecord(IntPtr filer, out int codePageId)
+    {
+        codePageId = 0;
+        var profile = _profile;
+        if (profile == null
+            || profile.ResolverKind != FilerCodePageResolverKind.VirtualRecord
+            || profile.VirtualCodePageMethodOffset <= 0)
+            return false;
+
+        try
+        {
+            IntPtr vtable = Marshal.ReadIntPtr(filer);
+            if (vtable == IntPtr.Zero || !IsCommittedMemory(vtable + profile.VirtualCodePageMethodOffset))
+                return false;
+
+            IntPtr method = Marshal.ReadIntPtr(vtable + profile.VirtualCodePageMethodOffset);
+            if (method == IntPtr.Zero || !IsCommittedMemory(method))
+                return false;
+
+            var resolver = Marshal.GetDelegateForFunctionPointer<GetFilerCodePageRecordDelegate>(method);
+            IntPtr record = resolver(filer);
+            IntPtr codePageAddress = record + profile.VirtualCodePageRecordCodePageOffset;
+            if (record == IntPtr.Zero || !IsCommittedMemory(codePageAddress))
+                return false;
+
+            codePageId = Marshal.ReadInt32(codePageAddress);
+            return codePageId != 0;
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.LogError(Tag + ": 虚表 resolver 读取 filer code page 失败", ex);
+            codePageId = 0;
+            return false;
         }
     }
 
@@ -601,17 +651,21 @@ internal static class DwgFilerCodePageScopeHook
     private static bool TryCaptureFilerPosition(IntPtr filer, out FilerPosition position)
     {
         position = default;
+        var profile = _profile;
+        if (profile == null)
+            return false;
+
         try
         {
             if (filer == IntPtr.Zero
-                || !IsCommittedMemory(filer + FilerBitOffsetOffset)
-                || !IsCommittedMemory(filer + FilerBufferPointerOffset)
-                || !IsCommittedMemory(filer + FilerByteOffsetOffset))
+                || !IsCommittedMemory(filer + profile.FilerBitOffsetOffset)
+                || !IsCommittedMemory(filer + profile.FilerBufferPointerOffset)
+                || !IsCommittedMemory(filer + profile.FilerByteOffsetOffset))
                 return false;
 
-            IntPtr buffer = Marshal.ReadIntPtr(filer + FilerBufferPointerOffset);
-            int byteOffset = Marshal.ReadInt32(filer + FilerByteOffsetOffset);
-            int bitOffset = Marshal.ReadInt32(filer + FilerBitOffsetOffset);
+            IntPtr buffer = Marshal.ReadIntPtr(filer + profile.FilerBufferPointerOffset);
+            int byteOffset = Marshal.ReadInt32(filer + profile.FilerByteOffsetOffset);
+            int bitOffset = Marshal.ReadInt32(filer + profile.FilerBitOffsetOffset);
             if (buffer == IntPtr.Zero || byteOffset < 0 || bitOffset < 0 || bitOffset > 7)
                 return false;
 

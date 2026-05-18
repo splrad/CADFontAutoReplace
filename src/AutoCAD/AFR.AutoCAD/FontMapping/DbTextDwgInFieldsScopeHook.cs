@@ -17,49 +17,16 @@ namespace AFR.FontMapping;
 internal static class DbTextDwgInFieldsScopeHook
 {
     private const string Tag = "DbTextDwgInScope";
-    private const uint AcDbImpTextDwgInFieldsRva = 0x49910;
-    private const uint WideStringAssignRva = 0x4EF44;
-    private const int ImpTextStringConstVtableOffset = 0x560;
-    private const int ImpTextStringPointerOffset = 0x68;
     private const uint MemCommit = 0x1000;
     private const int ProvenanceLogLimit = 80;
     private const int TextSetEventLogLimit = 80;
     private const int MaxNativeWideStringChars = 512;
     private const int MaxDwgInRawBytes = 2048;
-    private const int FilerBitOffsetOffset = 0x10;
-    private const int FilerBufferPointerOffset = 0x30;
-    private const int FilerByteOffsetOffset = 0x50;
-    private const int FilerMethodStatusOffset = 0x40;
-    private const int FilerMethodTextAuxOffset = 0x88;
-    private const int FilerMethodTextReadOffset = 0xB8;
-    private const int FilerMethodReadStringAcStringOffset = 0xC0;
-    private const int FilerMethodReadStringWideOffset = 0xC8;
-    private const int FilerMethodEarly188Offset = 0x188;
-    private const int FilerMethodEarly280Offset = 0x280;
-    private const int FilerMethodPostTextOffset = 0x290;
-
-    private static readonly byte[] AcDbImpTextDwgInFieldsPrefix =
-    [
-        0x40, 0x55,
-        0x56,
-        0x57,
-        0x41, 0x54,
-        0x41, 0x55,
-        0x41, 0x56,
-        0x41, 0x57,
-        0x48, 0x81, 0xEC, 0x00, 0x02, 0x00, 0x00
-    ];
-
-    private static readonly byte[] WideStringAssignPrefix =
-    [
-        0x48, 0x89, 0x5C, 0x24, 0x08,
-        0x48, 0x89, 0x74, 0x24, 0x10,
-        0x57,
-        0x48, 0x83, 0xEC, 0x20
-    ];
 
     private static NativeInlineHook<DwgInFieldsDelegate>? _hook;
     private static NativeInlineHook<WideStringAssignDelegate>? _wideStringAssignHook;
+    private static DbTextDwgInFieldsHookProfile? _profile;
+    private static DwgFilerCodePageHookProfile? _filerProfile;
     private static IntPtr _moduleBase;
     private static bool _installed;
     private static int _hitCount;
@@ -105,8 +72,17 @@ internal static class DbTextDwgInFieldsScopeHook
     {
         if (_installed) return;
 
-        if (!IsSupportedPlatform())
+        if (!NativeDecodeHookProfileResolver.TryGetCurrent(Tag, out var nativeProfile))
             return;
+
+        var profile = nativeProfile.DbTextDwgInFields;
+        _profile = profile;
+        _filerProfile = nativeProfile.DwgFilerCodePage;
+        if (!profile.DwgInFields.IsEnabled && !profile.WideStringAssign.IsEnabled)
+        {
+            DiagnosticLogger.Log(Tag, $"{nativeProfile.PlatformName}: {profile.DwgInFields.DisabledReason ?? nativeProfile.SupportNote}");
+            return;
+        }
 
         _moduleBase = GetModuleHandle(PlatformManager.Platform.AcDbDllName);
         if (_moduleBase == IntPtr.Zero)
@@ -115,27 +91,43 @@ internal static class DbTextDwgInFieldsScopeHook
             return;
         }
 
-        _hook = new NativeInlineHook<DwgInFieldsDelegate>(
-            Tag,
-            "AcDbImpText.dwgInFields",
-            AcDbImpTextDwgInFieldsRva);
-        bool dwgInInstalled = _hook.Install(
-            _moduleBase,
-            HookHandler,
-            AcDbImpTextDwgInFieldsPrefix.Length,
-            64,
-            AcDbImpTextDwgInFieldsPrefix);
+        bool dwgInInstalled = false;
+        if (profile.DwgInFields.IsEnabled && profile.DwgInFields.Rva.HasValue)
+        {
+            _hook = new NativeInlineHook<DwgInFieldsDelegate>(
+                Tag,
+                profile.DwgInFields.Name,
+                profile.DwgInFields.Rva.Value);
+            dwgInInstalled = _hook.Install(
+                _moduleBase,
+                HookHandler,
+                profile.DwgInFields.MinPrologueSize,
+                profile.DwgInFields.MaxPrologueSize,
+                profile.DwgInFields.ExpectedPrefix);
+        }
+        else
+        {
+            DiagnosticLogger.Log(Tag, $"{profile.DwgInFields.Name} 未启用：{profile.DwgInFields.DisabledReason ?? "缺少 RVA"}");
+        }
 
-        _wideStringAssignHook = new NativeInlineHook<WideStringAssignDelegate>(
-            Tag,
-            "DBText wide string assign",
-            WideStringAssignRva);
-        bool assignInstalled = _wideStringAssignHook.Install(
-            _moduleBase,
-            WideStringAssignHookHandler,
-            WideStringAssignPrefix.Length,
-            32,
-            WideStringAssignPrefix);
+        bool assignInstalled = false;
+        if (profile.WideStringAssign.IsEnabled && profile.WideStringAssign.Rva.HasValue)
+        {
+            _wideStringAssignHook = new NativeInlineHook<WideStringAssignDelegate>(
+                Tag,
+                profile.WideStringAssign.Name,
+                profile.WideStringAssign.Rva.Value);
+            assignInstalled = _wideStringAssignHook.Install(
+                _moduleBase,
+                WideStringAssignHookHandler,
+                profile.WideStringAssign.MinPrologueSize,
+                profile.WideStringAssign.MaxPrologueSize,
+                profile.WideStringAssign.ExpectedPrefix);
+        }
+        else
+        {
+            DiagnosticLogger.Log(Tag, $"{profile.WideStringAssign.Name} 未启用：{profile.WideStringAssign.DisabledReason ?? "缺少 RVA"}");
+        }
 
         _installed = dwgInInstalled || assignInstalled;
         DiagnosticLogger.Log(Tag,
@@ -149,6 +141,8 @@ internal static class DbTextDwgInFieldsScopeHook
         _hook?.Uninstall();
         _wideStringAssignHook = null;
         _hook = null;
+        _profile = null;
+        _filerProfile = null;
         _moduleBase = IntPtr.Zero;
         lock (ProvenanceLock)
         {
@@ -283,19 +277,6 @@ internal static class DbTextDwgInFieldsScopeHook
         Interlocked.Increment(ref _readStringEventCount);
         if (readStringEvent.RawBytes.Length > 0)
             Interlocked.Increment(ref _readStringEventWithRawBytesCount);
-
-        return true;
-    }
-
-    private static bool IsSupportedPlatform()
-    {
-        if (!PlatformManager.Platform.AcDbDllName.Equals("acdb25.dll", StringComparison.OrdinalIgnoreCase)
-            || !PlatformManager.Platform.VersionName.Equals("2025", StringComparison.OrdinalIgnoreCase))
-        {
-            DiagnosticLogger.Log(Tag,
-                $"{PlatformManager.Platform.DisplayName} 未验证 AcDbImpText::dwgInFields RVA，跳过安装。");
-            return false;
-        }
 
         return true;
     }
@@ -479,10 +460,11 @@ internal static class DbTextDwgInFieldsScopeHook
 
     private static void TryRecordTextSetSource(IntPtr source, IntPtr destinationPointer)
     {
-        if (_currentImpText == IntPtr.Zero || _currentTextSetSourceEvents == null)
+        var profile = _profile;
+        if (_currentImpText == IntPtr.Zero || _currentTextSetSourceEvents == null || profile == null)
             return;
 
-        long expectedDestination = _currentImpText.ToInt64() + ImpTextStringPointerOffset;
+        long expectedDestination = _currentImpText.ToInt64() + profile.ImpTextStringPointerOffset;
         if (destinationPointer.ToInt64() != expectedDestination)
         {
             Interlocked.Increment(ref _textSetSourceWrongDestinationCount);
@@ -497,7 +479,7 @@ internal static class DbTextDwgInFieldsScopeHook
             GetReturnRva(_wideStringAssignHook?.CapturedReturnAddress ?? IntPtr.Zero),
             source,
             destinationPointer,
-            ImpTextStringPointerOffset,
+            profile.ImpTextStringPointerOffset,
             sourceText,
             truncated);
         _currentTextSetSourceEvents.Add(item);
@@ -507,13 +489,17 @@ internal static class DbTextDwgInFieldsScopeHook
         {
             DiagnosticLogger.Log(Tag,
                 $"DBText text set source: impText=0x{_currentImpText.ToInt64():X}, " +
-                $"return=0x{item.ReturnRva:X}, src=0x{source.ToInt64():X}, dst=+0x{ImpTextStringPointerOffset:X}, " +
+                $"return=0x{item.ReturnRva:X}, src=0x{source.ToInt64():X}, dst=+0x{profile.ImpTextStringPointerOffset:X}, " +
                 $"len={sourceText.Length}{(truncated ? "+" : "")}, text='{EscapeForLog(sourceText)}'");
         }
     }
 
     private static NativeFilerVirtualSnapshot CaptureFilerVirtualSnapshot(IntPtr filer)
     {
+        var profile = _profile;
+        if (profile == null)
+            return NativeFilerVirtualSnapshot.Empty;
+
         try
         {
             if (filer == IntPtr.Zero || !IsCommittedMemory(filer))
@@ -525,14 +511,14 @@ internal static class DbTextDwgInFieldsScopeHook
 
             return new NativeFilerVirtualSnapshot(
                 GetRva(vtable),
-                ReadMethodRva(vtable, FilerMethodStatusOffset),
-                ReadMethodRva(vtable, FilerMethodTextAuxOffset),
-                ReadMethodRva(vtable, FilerMethodTextReadOffset),
-                ReadMethodRva(vtable, FilerMethodReadStringAcStringOffset),
-                ReadMethodRva(vtable, FilerMethodReadStringWideOffset),
-                ReadMethodRva(vtable, FilerMethodEarly188Offset),
-                ReadMethodRva(vtable, FilerMethodEarly280Offset),
-                ReadMethodRva(vtable, FilerMethodPostTextOffset));
+                ReadMethodRva(vtable, profile.ImpTextStringToWideCharMethodOffset),
+                ReadMethodRva(vtable, profile.ImpTextStringLengthMethodOffset),
+                ReadMethodRva(vtable, profile.TextSourceVtableOffset),
+                ReadMethodRva(vtable, profile.TextSourceBufferMethodOffset),
+                ReadMethodRva(vtable, profile.TextSourceLengthMethodOffset),
+                ReadMethodRva(vtable, profile.TextSourceMetadataMethodOffset),
+                ReadMethodRva(vtable, profile.TextSourceReadCodeUnitMethodOffset),
+                ReadMethodRva(vtable, profile.TextSourceReleaseMethodOffset));
         }
         catch
         {
@@ -605,17 +591,21 @@ internal static class DbTextDwgInFieldsScopeHook
     private static bool TryCaptureFilerPosition(IntPtr filer, out FilerPosition position)
     {
         position = default;
+        var profile = _filerProfile;
+        if (profile == null)
+            return false;
+
         try
         {
             if (filer == IntPtr.Zero
-                || !IsCommittedMemory(filer + FilerBitOffsetOffset)
-                || !IsCommittedMemory(filer + FilerBufferPointerOffset)
-                || !IsCommittedMemory(filer + FilerByteOffsetOffset))
+                || !IsCommittedMemory(filer + profile.FilerBitOffsetOffset)
+                || !IsCommittedMemory(filer + profile.FilerBufferPointerOffset)
+                || !IsCommittedMemory(filer + profile.FilerByteOffsetOffset))
                 return false;
 
-            IntPtr buffer = Marshal.ReadIntPtr(filer + FilerBufferPointerOffset);
-            int byteOffset = Marshal.ReadInt32(filer + FilerByteOffsetOffset);
-            int bitOffset = Marshal.ReadInt32(filer + FilerBitOffsetOffset);
+            IntPtr buffer = Marshal.ReadIntPtr(filer + profile.FilerBufferPointerOffset);
+            int byteOffset = Marshal.ReadInt32(filer + profile.FilerByteOffsetOffset);
+            int bitOffset = Marshal.ReadInt32(filer + profile.FilerBitOffsetOffset);
             if (buffer == IntPtr.Zero || byteOffset < 0 || bitOffset < 0 || bitOffset > 7)
                 return false;
 
@@ -672,14 +662,18 @@ internal static class DbTextDwgInFieldsScopeHook
 
     private static string ReadImpTextString(IntPtr impText)
     {
+        var profile = _profile;
+        if (profile == null)
+            return string.Empty;
+
         if (!IsCommittedMemory(impText))
             return string.Empty;
 
         IntPtr vtable = Marshal.ReadIntPtr(impText);
-        if (vtable == IntPtr.Zero || !IsCommittedMemory(vtable + ImpTextStringConstVtableOffset))
+        if (vtable == IntPtr.Zero || !IsCommittedMemory(vtable + profile.ImpTextStringConstVtableOffset))
             return string.Empty;
 
-        IntPtr getter = Marshal.ReadIntPtr(vtable + ImpTextStringConstVtableOffset);
+        IntPtr getter = Marshal.ReadIntPtr(vtable + profile.ImpTextStringConstVtableOffset);
         if (getter == IntPtr.Zero || !IsCommittedMemory(getter))
             return string.Empty;
 

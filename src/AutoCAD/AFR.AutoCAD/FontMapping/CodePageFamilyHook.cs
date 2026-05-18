@@ -15,41 +15,11 @@ namespace AFR.FontMapping;
 internal static class CodePageFamilyHook
 {
     private const string Tag = "CodePageHook";
-    private const int CodePageIdFieldOffset = 0x46C;
     private const uint MemCommit = 0x1000;
     private const int NoScopeLogLimit = 80;
 
-    private static readonly byte[] TargetPrefix =
-    [
-        0x48, 0x89, 0x5C, 0x24, 0x08,
-        0x48, 0x89, 0x6C, 0x24, 0x10,
-        0x48, 0x89, 0x74, 0x24, 0x18,
-        0x57,
-        0x48, 0x83, 0xEC, 0x20
-    ];
-
-    private static readonly int[] TargetSignature =
-    [
-        0x48, 0x89, 0x5C, 0x24, 0x08,
-        0x48, 0x89, 0x6C, 0x24, 0x10,
-        0x48, 0x89, 0x74, 0x24, 0x18,
-        0x57,
-        0x48, 0x83, 0xEC, 0x20,
-        0x33, 0xED,
-        0x89, 0x11,
-        0x48, 0xB8,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x3F,
-        0x66, 0x89, 0x69, 0x04,
-        0x83, 0xCE, 0xFF,
-        0x48, 0x89, 0x41, 0x08,
-        0x89, 0x71, 0x10,
-        0x48, 0x8B, 0xF9,
-        0x89, 0x69, 0x14,
-        0x89, 0x71, 0x18,
-        0x48, 0x83, 0xC1, 0x20
-    ];
-
     private static NativeInlineHook<CodePageFamilyInitDelegate>? _hook;
+    private static CodePageFamilyHookProfile? _profile;
     private static IntPtr _moduleBase;
     private static bool _installed;
     private static int _hitCount;
@@ -80,8 +50,16 @@ internal static class CodePageFamilyHook
     {
         if (_installed) return;
 
-        if (!IsSupportedPlatform())
+        if (!NativeDecodeHookProfileResolver.TryGetCurrent(Tag, out var nativeProfile))
             return;
+
+        var profile = nativeProfile.CodePageFamily;
+        _profile = profile;
+        if (!profile.Target.IsEnabled || profile.Target.Signature == null)
+        {
+            DiagnosticLogger.Log(Tag, $"{nativeProfile.PlatformName}: {profile.Target.DisabledReason ?? nativeProfile.SupportNote}");
+            return;
+        }
 
         _moduleBase = GetModuleHandle(PlatformManager.Platform.AcDbDllName);
         if (_moduleBase == IntPtr.Zero)
@@ -92,18 +70,31 @@ internal static class CodePageFamilyHook
 
         if (!NativeModulePatternScanner.TryFindUniqueTextPattern(
                 _moduleBase,
-                TargetSignature,
+                profile.Target.Signature,
                 Tag,
-                "TextEditor code-page context init",
+                profile.Target.Name,
                 out IntPtr targetAddress,
                 out uint targetRva))
             return;
+
+        if (profile.Target.Rva.HasValue && profile.Target.Rva.Value != targetRva)
+        {
+            DiagnosticLogger.Log(Tag,
+                $"{profile.Target.Name} RVA 不匹配，跳过。Expected=0x{profile.Target.Rva.Value:X}, Actual=0x{targetRva:X}");
+            return;
+        }
 
         _hook = new NativeInlineHook<CodePageFamilyInitDelegate>(
             Tag,
             "TextEditor code-page context init",
             targetRva);
-        _installed = _hook.InstallAtAddress(targetAddress, targetRva, HookHandler, TargetPrefix.Length, 64, TargetPrefix);
+        _installed = _hook.InstallAtAddress(
+            targetAddress,
+            targetRva,
+            HookHandler,
+            profile.Target.MinPrologueSize,
+            profile.Target.MaxPrologueSize,
+            profile.Target.ExpectedPrefix);
     }
 
     /// <summary>卸载 Hook。</summary>
@@ -111,6 +102,7 @@ internal static class CodePageFamilyHook
     {
         _hook?.Uninstall();
         _hook = null;
+        _profile = null;
         _moduleBase = IntPtr.Zero;
         _installed = false;
         DiagnosticLogger.Log(Tag, $"已卸载。HitCount={_hitCount}, MismatchEvidence={_mismatchEvidenceCount}, NoScope={_noScopeCount}");
@@ -131,19 +123,6 @@ internal static class CodePageFamilyHook
             $"LastOriginalCodePageId: {DwgFilerCodePageScopeHook.FormatCodePageId(_lastOriginalCodePageId)}",
             $"LastFilerCodePageId: {DwgFilerCodePageScopeHook.FormatCodePageId(_lastFilerCodePageId)}",
             $"LastEvidenceCodePageId: {DwgFilerCodePageScopeHook.FormatCodePageId(_lastEvidenceCodePageId)}");
-    }
-
-    private static bool IsSupportedPlatform()
-    {
-        if (!PlatformManager.Platform.AcDbDllName.Equals("acdb25.dll", StringComparison.OrdinalIgnoreCase)
-            || !PlatformManager.Platform.VersionName.Equals("2025", StringComparison.OrdinalIgnoreCase))
-        {
-            DiagnosticLogger.Log(Tag,
-                $"{PlatformManager.Platform.DisplayName} 未验证 code-page context 签名，跳过安装。");
-            return false;
-        }
-
-        return true;
     }
 
     private static void HookHandler(IntPtr context, int arg2)
@@ -172,7 +151,11 @@ internal static class CodePageFamilyHook
                 return;
             }
 
-            IntPtr fieldAddr = context + CodePageIdFieldOffset;
+            var profile = _profile;
+            if (profile == null)
+                return;
+
+            IntPtr fieldAddr = context + profile.CodePageIdFieldOffset;
             if (!IsCommittedMemory(fieldAddr))
             {
                 Interlocked.Increment(ref _invalidMemoryCount);

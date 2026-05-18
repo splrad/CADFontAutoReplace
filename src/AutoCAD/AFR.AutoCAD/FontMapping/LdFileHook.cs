@@ -75,7 +75,7 @@ internal static class LdFileHook
         try
         {
             IntPtr module = GetModuleHandle(AcDbDll);
-            if (module == IntPtr.Zero) { DiagnosticLogger.Log("FontMapping", "acdb25.dll 未加载"); return; }
+            if (module == IntPtr.Zero) { DiagnosticLogger.Log("FontMapping", $"{AcDbDll} 未加载"); return; }
 
             _targetAddr = GetProcAddress(module, LdFileExport);
             if (_targetAddr == IntPtr.Zero) { DiagnosticLogger.Log("FontMapping", "未找到 ldfile 导出"); return; }

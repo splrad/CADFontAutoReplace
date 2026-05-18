@@ -26,14 +26,7 @@ internal static class DbTextUpstreamDecodeProbeHook
     private const int MaxUtf16ToWideInputBytes = 4096;
     private const int MaxUtf16ToWideOutputChars = 1024;
     private const int MaxDTextFullInputBytes = 4096;
-    private const uint MultiByteCifToWideCharRva = 0x12965C;
-    private const uint MultibyteToUnicodeDTextFullInputProbeRva = 0x6D1660;
-    private const string MultiByteCifToWideCharExport =
-        "?MultiByteCIFToWideChar@@YAHW4code_page_id@@W4MB2Uni@@PEBDHPEA_WH@Z";
     private const string AcPalDllName = "AcPal.dll";
-    private const uint Utf16ToWideGetWideBufferRva = 0x4F900;
-    private const string Utf16ToWideGetWideBufferExport =
-        "?getWideBuffer@Utf16ToWideCharHelper@UnicodeConvert@PAL@AutoCAD@Autodesk@@QEAA_NPEA_WAEA_K@Z";
 
     private static readonly byte[] DispatcherPrefix =
     [
@@ -96,6 +89,7 @@ internal static class DbTextUpstreamDecodeProbeHook
     private static NativeInlineHook<MultiByteCifToWideCharDelegate>? _multiByteCifToWideCharHook;
     private static NativeInlineHook<Utf16ToWideGetWideBufferDelegate>? _utf16ToWideGetWideBufferHook;
     private static NativeInlineHook<DTextFullInputDelegate>? _dtextFullInputHook;
+    private static DbTextUpstreamDecodeHookProfile? _profile;
     private static IntPtr _moduleBase;
     private static IntPtr _acPalModuleBase;
     private static bool _installed;
@@ -170,39 +164,21 @@ internal static class DbTextUpstreamDecodeProbeHook
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void DTextFullInputDelegate(IntPtr owner, IntPtr sourceBytes, IntPtr inputState);
 
-    private static readonly byte[] MultiByteCifToWideCharPrefix =
-    [
-        0x48, 0x89, 0x5C, 0x24, 0x10,
-        0x55,
-        0x56,
-        0x57,
-        0x41, 0x54,
-        0x41, 0x55,
-        0x41, 0x56
-    ];
-
-    private static readonly byte[] Utf16ToWideGetWideBufferPrefix =
-    [
-        0x48, 0x89, 0x5C, 0x24, 0x08,
-        0x48, 0x89, 0x74, 0x24, 0x10,
-        0x57,
-        0x48, 0x83, 0xEC, 0x20
-    ];
-
-    private static readonly byte[] DTextFullInputPrefix =
-    [
-        0x48, 0x85, 0xD2,
-        0x74, 0x3D,
-        0x48, 0x89, 0x5C, 0x24, 0x08,
-        0x48, 0x89, 0x74, 0x24, 0x10
-    ];
-
     /// <summary>Install read-only upstream decode probes.</summary>
     public static void Install()
     {
         if (_installed) return;
-        if (!IsSupportedPlatform())
+
+        if (!NativeDecodeHookProfileResolver.TryGetCurrent(Tag, out var nativeProfile))
             return;
+
+        var profile = nativeProfile.UpstreamDecode;
+        _profile = profile;
+        if (!profile.HasInstallableHook)
+        {
+            DiagnosticLogger.Log(Tag, $"{nativeProfile.PlatformName}: {profile.MultiByteCifToWideChar.DisabledReason ?? nativeProfile.SupportNote}");
+            return;
+        }
 
         _moduleBase = GetModuleHandle(PlatformManager.Platform.AcDbDllName);
         if (_moduleBase == IntPtr.Zero)
@@ -215,19 +191,25 @@ internal static class DbTextUpstreamDecodeProbeHook
         if (_acPalModuleBase == IntPtr.Zero)
             DiagnosticLogger.Log(Tag, $"{AcPalDllName} 未加载，Utf16ToWide probe 将跳过安装。");
 
-        bool mainInstalled = TryInstallDispatcher(
-            "DBText main dispatcher",
-            MainDispatcherPattern,
-            MainDispatcherHookHandler,
-            out _mainDispatcherHook);
-        bool parallelInstalled = TryInstallDispatcher(
-            "DBText parallel dispatcher",
-            ParallelDispatcherPattern,
-            ParallelDispatcherHookHandler,
-            out _parallelDispatcherHook);
-        bool cifInstalled = TryInstallMultiByteCifToWideChar();
-        bool utf16Installed = TryInstallUtf16ToWideGetWideBuffer();
-        bool dtextFullInputInstalled = TryInstallDTextFullInput();
+        bool mainInstalled = false;
+        bool parallelInstalled = false;
+        if (profile.EnableDispatcherPatterns)
+        {
+            mainInstalled = TryInstallDispatcher(
+                "DBText main dispatcher",
+                MainDispatcherPattern,
+                MainDispatcherHookHandler,
+                out _mainDispatcherHook);
+            parallelInstalled = TryInstallDispatcher(
+                "DBText parallel dispatcher",
+                ParallelDispatcherPattern,
+                ParallelDispatcherHookHandler,
+                out _parallelDispatcherHook);
+        }
+
+        bool cifInstalled = TryInstallMultiByteCifToWideChar(profile.MultiByteCifToWideChar);
+        bool utf16Installed = TryInstallUtf16ToWideGetWideBuffer(profile.Utf16ToWideGetWideBuffer);
+        bool dtextFullInputInstalled = TryInstallDTextFullInput(profile.DTextFullInputProbe);
 
         _installed = mainInstalled || parallelInstalled || cifInstalled || utf16Installed || dtextFullInputInstalled;
         DiagnosticLogger.Log(Tag,
@@ -249,6 +231,7 @@ internal static class DbTextUpstreamDecodeProbeHook
         _dtextFullInputHook = null;
         _parallelDispatcherHook = null;
         _mainDispatcherHook = null;
+        _profile = null;
         _moduleBase = IntPtr.Zero;
         _acPalModuleBase = IntPtr.Zero;
         lock (StateLock)
@@ -418,13 +401,18 @@ internal static class DbTextUpstreamDecodeProbeHook
             DispatcherPrefix);
     }
 
-    private static bool TryInstallMultiByteCifToWideChar()
+    private static bool TryInstallMultiByteCifToWideChar(NativeHookTarget target)
     {
+        if (!target.IsEnabled)
+        {
+            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少导出符号"}");
+            return false;
+        }
+
         if (!TryGetExportAddress(
                 _moduleBase,
                 PlatformManager.Platform.AcDbDllName,
-                MultiByteCifToWideCharExport,
-                MultiByteCifToWideCharRva,
+                target,
                 out IntPtr address,
                 out uint rva))
         {
@@ -433,27 +421,32 @@ internal static class DbTextUpstreamDecodeProbeHook
 
         _multiByteCifToWideCharHook = new NativeInlineHook<MultiByteCifToWideCharDelegate>(
             Tag,
-            "MultiByteCIFToWideChar",
+            target.Name,
             rva);
         return _multiByteCifToWideCharHook.InstallAtAddress(
             address,
             rva,
             MultiByteCifToWideCharHookHandler,
-            MultiByteCifToWideCharPrefix.Length,
-            24,
-            MultiByteCifToWideCharPrefix);
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
     }
 
-    private static bool TryInstallUtf16ToWideGetWideBuffer()
+    private static bool TryInstallUtf16ToWideGetWideBuffer(NativeHookTarget target)
     {
+        if (!target.IsEnabled)
+        {
+            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少导出符号"}");
+            return false;
+        }
+
         if (_acPalModuleBase == IntPtr.Zero)
             return false;
 
         if (!TryGetExportAddress(
                 _acPalModuleBase,
                 AcPalDllName,
-                Utf16ToWideGetWideBufferExport,
-                Utf16ToWideGetWideBufferRva,
+                target,
                 out IntPtr address,
                 out uint rva))
         {
@@ -462,31 +455,37 @@ internal static class DbTextUpstreamDecodeProbeHook
 
         _utf16ToWideGetWideBufferHook = new NativeInlineHook<Utf16ToWideGetWideBufferDelegate>(
             Tag,
-            "Utf16ToWideCharHelper.getWideBuffer",
+            target.Name,
             rva);
         return _utf16ToWideGetWideBufferHook.InstallAtAddress(
             address,
             rva,
             Utf16ToWideGetWideBufferHookHandler,
-            Utf16ToWideGetWideBufferPrefix.Length,
-            24,
-            Utf16ToWideGetWideBufferPrefix);
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
     }
 
-    private static bool TryInstallDTextFullInput()
+    private static bool TryInstallDTextFullInput(NativeHookTarget target)
     {
-        IntPtr address = _moduleBase + (int)MultibyteToUnicodeDTextFullInputProbeRva;
+        if (!target.IsEnabled || !target.Rva.HasValue)
+        {
+            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少 RVA"}");
+            return false;
+        }
+
+        IntPtr address = _moduleBase + (int)target.Rva.Value;
         _dtextFullInputHook = new NativeInlineHook<DTextFullInputDelegate>(
             Tag,
-            "TextEditor.multibyte_to_unicode_dtext full input",
-            MultibyteToUnicodeDTextFullInputProbeRva);
+            target.Name,
+            target.Rva.Value);
         return _dtextFullInputHook.InstallAtAddress(
             address,
-            MultibyteToUnicodeDTextFullInputProbeRva,
+            target.Rva.Value,
             DTextFullInputHookHandler,
-            DTextFullInputPrefix.Length,
-            DTextFullInputPrefix.Length,
-            DTextFullInputPrefix);
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
     }
 
     private static int MultiByteCifToWideCharHookHandler(
@@ -902,13 +901,14 @@ internal static class DbTextUpstreamDecodeProbeHook
         byte[] inputBytes,
         bool inputTruncated)
     {
-        _lastDTextFullInputHookRva = MultibyteToUnicodeDTextFullInputProbeRva;
+        uint hookRva = _profile?.DTextFullInputProbe.Rva ?? 0;
+        _lastDTextFullInputHookRva = hookRva;
         _lastDTextFullInputFilerCodePageId = filerCodePageId;
         _lastDTextFullInputBytes = inputBytes;
         _lastDTextFullInputTruncated = inputTruncated;
 
         string sample =
-            $"dtext-full-input hook=0x{MultibyteToUnicodeDTextFullInputProbeRva:X} imp=0x{impText.ToInt64():X} " +
+            $"dtext-full-input hook=0x{hookRva:X} imp=0x{impText.ToInt64():X} " +
             $"filer={DwgFilerCodePageScopeHook.FormatCodePageId(filerCodePageId)} " +
             $"len={inputBytes.Length}{(inputTruncated ? "+" : "")} bytes={FormatBytes(inputBytes, 64)}";
 
@@ -921,7 +921,7 @@ internal static class DbTextUpstreamDecodeProbeHook
             }
 
             stats.DTextFullInputHitCount++;
-            stats.LastDTextFullInputHookRva = MultibyteToUnicodeDTextFullInputProbeRva;
+            stats.LastDTextFullInputHookRva = hookRva;
             stats.LastDTextFullInputFilerCodePageId = filerCodePageId;
             stats.LastDTextFullInputBytes = inputBytes.ToArray();
             stats.LastDTextFullInputTruncated = inputTruncated;
@@ -961,19 +961,6 @@ internal static class DbTextUpstreamDecodeProbeHook
 
             Samples.Add(sample);
         }
-    }
-
-    private static bool IsSupportedPlatform()
-    {
-        if (!PlatformManager.Platform.AcDbDllName.Equals("acdb25.dll", StringComparison.OrdinalIgnoreCase)
-            || !PlatformManager.Platform.VersionName.Equals("2025", StringComparison.OrdinalIgnoreCase))
-        {
-            DiagnosticLogger.Log(Tag,
-                $"{PlatformManager.Platform.DisplayName} 未验证 upstream decode RVA，跳过安装。");
-            return false;
-        }
-
-        return true;
     }
 
     private static bool IsMeaningfulCodePage(int codePageId)
@@ -1266,8 +1253,7 @@ internal static class DbTextUpstreamDecodeProbeHook
     private static bool TryGetExportAddress(
         IntPtr moduleBase,
         string moduleName,
-        string exportName,
-        uint expectedRva,
+        NativeHookTarget target,
         out IntPtr address,
         out uint actualRva)
     {
@@ -1276,18 +1262,25 @@ internal static class DbTextUpstreamDecodeProbeHook
         if (moduleBase == IntPtr.Zero)
             return false;
 
-        address = NativeInlineHookInterop.GetProcAddress(moduleBase, exportName);
+        string? exportName = target.ExportName;
+        if (!target.IsEnabled || string.IsNullOrWhiteSpace(exportName))
+        {
+            DiagnosticLogger.Log(Tag, $"{moduleName}!{target.Name} 未启用：{target.DisabledReason ?? "缺少导出符号"}");
+            return false;
+        }
+
+        address = NativeInlineHookInterop.GetProcAddress(moduleBase, exportName!);
         if (address == IntPtr.Zero)
         {
-            DiagnosticLogger.Log(Tag, $"{moduleName}!{exportName} 导出缺失，跳过安装。");
+            DiagnosticLogger.Log(Tag, $"{moduleName}!{target.Name} 导出缺失，跳过安装。");
             return false;
         }
 
         actualRva = GetRva(moduleBase, address);
-        if (actualRva != expectedRva)
+        if (target.Rva.HasValue && actualRva != target.Rva.Value)
         {
             DiagnosticLogger.Log(Tag,
-                $"{moduleName}!{exportName} RVA 不匹配，expected=0x{expectedRva:X}, actual=0x{actualRva:X}，跳过安装。");
+                $"{moduleName}!{target.Name} RVA 不匹配，expected=0x{target.Rva.Value:X}, actual=0x{actualRva:X}，跳过安装。");
             address = IntPtr.Zero;
             actualRva = 0;
             return false;

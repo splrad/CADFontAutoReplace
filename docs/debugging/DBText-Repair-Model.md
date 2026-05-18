@@ -18,7 +18,7 @@ DBText 修复由封闭式本地 AI 决策链路负责，不依赖在线服务，
 
 `GlyphCoreNativeDecodeEvidenceStore` 只是内存桥，不会伪造证据；如果当前构建没有 native Hook 生产者注册对象级或簇级证据，DBText 文枢会保持静默。
 
-当前已验证的 DBText native evidence 链路只在 AutoCAD 2025 / `acdb25.dll` 路径启用，其它版本 fail closed。主要组件是：
+DBText native evidence 链路不再在共享 Hook 中写死 AutoCAD 2025 门槛；各版本由 `AutoCad20XXPlatform` 提供 `NativeDecodeHookProfile`，共享安装器按 profile 安装或 fail closed。当前静态基线完整启用 AutoCAD 2022-2027，其中 2027 缺少可命名解析的 `readString(wchar**)` 时只关闭该可选子 hook。AutoCAD 2018-2021 虽可经 RTTI/vtable 定位 `AcDbImpText::dwgInFields`，但缺少完整 readString/code-page resolver 验证，保持 DBText AI native hook fail closed。主要组件是：
 
 - `DwgFilerCodePageScopeHook`：读取 DWG filer 中真实 DBCS code page 作用域。
 - `DbTextDwgInFieldsScopeHook`：建立 DBText 反序列化对象级作用域并记录 `AcDbImpText` provenance。

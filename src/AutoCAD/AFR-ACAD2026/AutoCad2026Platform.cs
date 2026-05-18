@@ -1,4 +1,5 @@
 using AFR.Abstractions;
+using AFR.FontMapping;
 
 namespace AFR;
 
@@ -6,7 +7,7 @@ namespace AFR;
 /// AutoCAD 2026 版本的平台常量定义。
 /// 包含注册表路径、acdb DLL 名称、ldfile 导出符号等版本特定信息。
 /// </summary>
-internal sealed class AutoCad2026Platform : ICadPlatform
+internal sealed class AutoCad2026Platform : ICadPlatform, INativeDecodeHookProfileProvider
 {
     public string BrandName => "AutoCAD";
     public string VersionName => "2026";
@@ -18,4 +19,22 @@ internal sealed class AutoCad2026Platform : ICadPlatform
     public string LdFileExport => "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z"; // C++ 修饰名
     public int PrologueSize => 21;                               // ldfile 函数序言指令长度（字节）
     public bool SupportsLdFileHook => true;                      // 2026 支持 ldfile Hook
+
+    public NativeDecodeHookProfile NativeDecodeHookProfile
+        => AutoCadNativeDecodeHookProfiles.CreateFullProfile(
+            DisplayName,
+            AcDbDllName,
+            readStringAcStringRva: 0x93E70,
+            readStringWideCharPointerRva: 0x93F60,
+            getFilerCodePageIdRva: 0x4478E0,
+            codePageIdIsDoubleByteRva: 0xBCF310,
+            dbTextDwgInFieldsRva: 0x33690,
+            wideStringAssignRva: null,
+            multiByteCifToWideCharRva: 0xD71A8,
+            dTextFullInputProbeRva: 0x6DE5B0,
+            readDoubleByteAnsiRva: 0x6E01F8,
+            multiByteToUnicodeAcStringRva: 0x6B9F04,
+            codePageFamilyRva: 0x6DCDC0,
+            enableDispatcherPatterns: false,
+            enableAcPalUtf16Probe: false);
 }
