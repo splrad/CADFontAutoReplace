@@ -306,6 +306,7 @@ internal static class GlyphCoreTextRepairService
             string current = dbText.TextString ?? string.Empty;
             dbText.UpgradeOpen();
             dbText.TextString = decision.SelectedText;
+            RefreshTextGeometry(dbText);
             item.Context.CurrentText = decision.SelectedText;
             item.Repaired = true;
             item.Evaluated = true;
@@ -323,6 +324,27 @@ internal static class GlyphCoreTextRepairService
             counters.LastDecisionReason = "write-failed";
             counters.LastAiSummary = ex.GetType().Name + ": " + ex.Message;
             DiagnosticLogger.Log("DBText文枢", $"Handle={item.Context.Handle}: 写回失败: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static void RefreshTextGeometry(DBText dbText)
+    {
+        try
+        {
+            dbText.AdjustAlignment(dbText.Database);
+        }
+        catch
+        {
+            // Some DBText objects cannot adjust alignment until AutoCAD regenerates the view.
+        }
+
+        try
+        {
+            dbText.RecordGraphicsModified(true);
+        }
+        catch
+        {
+            // Best-effort display refresh only; the repaired text has already been written.
         }
     }
 
