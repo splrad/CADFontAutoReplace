@@ -164,7 +164,7 @@ export default function TrainingDatasetPage() {
                     onClick={(event) => askDeletePkg(event, pkg)}
                     title="删除数据集"
                     className={`mr-2 mt-2.5 shrink-0 rounded p-1 transition-colors ${
-                      isActive ? 'text-red-300 hover:bg-red-500/20 hover:text-red-100' : 'text-gray-300 hover:bg-red-50 hover:text-red-600'
+                      isActive ? 'bg-red-600 text-white shadow-sm ring-1 ring-red-300/70 hover:bg-red-500' : 'text-red-500 hover:bg-red-50 hover:text-red-700'
                     }`}
                   >
                     <Trash2 size={11} />

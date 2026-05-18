@@ -149,7 +149,10 @@ public abstract class PluginEntryBase : IExtensionApplication
             if (PlatformManager.Platform.SupportsLdFileHook)
                 PlatformManager.FontHook.Install();
 
-            // 第零阶段 B: 预热系统字体索引 — 提前扫描可用字体，加速后续检测
+            // 第零阶段 B: 安装文枢 DBText native evidence Hook，只产强信号，不改 native 文本
+            InstallGlyphCoreNativeDecodeHooks();
+
+            // 第零阶段 C: 预热系统字体索引 — 提前扫描可用字体，加速后续检测
             FontDetector.PrewarmSystemFonts();
 
             // 第二阶段: 注册文档事件 — 监听新建/关闭文档，自动触发字体替换
@@ -170,12 +173,14 @@ public abstract class PluginEntryBase : IExtensionApplication
     /// <summary>AutoCAD 卸载插件时调用（通常在 CAD 退出时）。</summary>
     public void Terminate()
     {
+        UninstallGlyphCoreNativeDecodeHooks();
         DiagnosticLogger.Disable();
         PlatformManager.FontHook.Uninstall();
         UnregisterEvents();
         AppDomain.CurrentDomain.AssemblyResolve -= OnResolveEmbeddedAssembly;
         ResolvedEmbeddedAssemblies.Clear();
         AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDecodeEvidenceStore.Clear();
+        AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDbTextEvidenceProjector.Clear();
         AFR.GlyphCore.TextRepair.GlyphCoreTextRepairScorerFactory.DisposeAndReset();
     }
 
@@ -211,9 +216,11 @@ public abstract class PluginEntryBase : IExtensionApplication
         // 清理 FixedProfile.aws 中带 AFR 所有权标记的弹窗抑制节点。
         try { Diagnostics.AwsHideableDialogPatcher.Cleanup(); } catch { }
 
+        UninstallGlyphCoreNativeDecodeHooks();
         PlatformManager.FontHook.Uninstall();
         DocumentContextManager.Instance.Clear();
         AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDecodeEvidenceStore.Clear();
+        AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDbTextEvidenceProjector.Clear();
         DiagnosticLogger.Disable();
 
         // 注销嵌入程序集解析回调并释放缓存的嵌入程序集。
@@ -238,6 +245,31 @@ public abstract class PluginEntryBase : IExtensionApplication
         catch { }
 
         UnregisterHiddenUnloadCommand();
+    }
+
+    private static void InstallGlyphCoreNativeDecodeHooks()
+    {
+        try
+        {
+            AFR.FontMapping.DwgFilerCodePageScopeHook.Install();
+            AFR.FontMapping.DbTextDwgInFieldsScopeHook.Install();
+            AFR.FontMapping.DbTextUpstreamDecodeProbeHook.Install();
+            AFR.FontMapping.TextEditorDbcsDecodeHook.Install();
+            AFR.FontMapping.CodePageFamilyHook.Install();
+        }
+        catch (System.Exception ex)
+        {
+            DiagnosticLogger.LogError("DBText文枢Hook 安装失败", ex);
+        }
+    }
+
+    private static void UninstallGlyphCoreNativeDecodeHooks()
+    {
+        try { AFR.FontMapping.CodePageFamilyHook.Uninstall(); } catch { }
+        try { AFR.FontMapping.TextEditorDbcsDecodeHook.Uninstall(); } catch { }
+        try { AFR.FontMapping.DbTextUpstreamDecodeProbeHook.Uninstall(); } catch { }
+        try { AFR.FontMapping.DbTextDwgInFieldsScopeHook.Uninstall(); } catch { }
+        try { AFR.FontMapping.DwgFilerCodePageScopeHook.Uninstall(); } catch { }
     }
 
     /// <summary>
@@ -407,6 +439,7 @@ public abstract class PluginEntryBase : IExtensionApplication
             {
                 DocumentContextManager.Instance.Remove(e.Document);
                 AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDecodeEvidenceStore.Clear();
+                AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDbTextEvidenceProjector.Clear();
             }
         }
         catch { }

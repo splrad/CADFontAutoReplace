@@ -7,7 +7,7 @@ namespace AFR.GlyphCore.TextRepair;
 
 internal static class GlyphCoreTextRepairFeatureExtractor
 {
-    public const int FeatureCount = 98;
+    public const int FeatureCount = 101;
 
     public static float[] Extract(GlyphCoreTextRepairContext context, GlyphCoreTextRepairCandidate candidate)
     {
@@ -44,8 +44,8 @@ internal static class GlyphCoreTextRepairFeatureExtractor
         features[23] = NormalizedEditDistance(current, candidateText);
         features[24] = CharacterOverlap(current, candidateText);
         features[25] = Bool(candidate.IsRoundTrip);
-        features[26] = ContainsSource(candidate.Source, "big5");
-        features[27] = ContainsSource(candidate.Source, "gbk");
+        features[26] = SourceFrom(candidate.Source, "big5");
+        features[27] = SourceFrom(candidate.Source, "gbk");
         features[28] = ContainsSource(candidate.Source, "utf8");
         features[29] = ContainsSource(candidate.Source, "current");
         features[30] = ContainsSource(candidate.Source, "safe");
@@ -124,6 +124,9 @@ internal static class GlyphCoreTextRepairFeatureExtractor
         features[95] = Clamp01(context.HookRawConfidence);
         features[96] = Clamp01(context.RippleSeedQuality);
         features[97] = Clamp01(context.RippleDistanceRatio);
+        features[98] = StableHash01(current);
+        features[99] = StableHash01(candidateText);
+        features[100] = StableHash01(current + "\0" + candidateText + "\0" + candidate.Source);
 
         return features;
     }
@@ -639,6 +642,17 @@ internal static class GlyphCoreTextRepairFeatureExtractor
     {
         return Bool(!string.IsNullOrEmpty(source)
                     && source.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    private static float SourceFrom(string source, string family)
+    {
+        if (string.IsNullOrEmpty(source) || string.IsNullOrEmpty(family))
+            return 0f;
+
+        string prefix = family + "-carrier-to-";
+        string infix = "+" + prefix;
+        return Bool(source.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    || source.IndexOf(infix, StringComparison.OrdinalIgnoreCase) >= 0);
     }
 
     private static float Bool(bool value) => value ? 1f : 0f;

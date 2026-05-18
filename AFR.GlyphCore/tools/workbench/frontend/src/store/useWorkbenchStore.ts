@@ -527,28 +527,31 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
           if (!group) return acc;
           const edit = state.reviewEdits[id] || {};
           const saved = reviewedForGroup(group, reviewed);
+          const labelAction =
+            edit.labelAction ||
+            saved?.labelAction ||
+            group.recommendedAction ||
+            'repair';
           acc.push({
             reviewGroupId: id,
             representativeGroupId:
               group.representativeRecords?.[0]?.groupId ||
               group.sampleRecords?.[0]?.groupId ||
               group.recordIds?.[0],
-            labelAction:
-              edit.labelAction ||
-              saved?.labelAction ||
-              group.recommendedAction ||
-              'repair',
+            labelAction,
             labelText:
               edit.labelText ??
               saved?.labelText ??
-              group.candidateText ??
-              group.currentText ??
+              (labelAction === 'keep'
+                ? group.rawCurrentText ?? group.currentText
+                : group.candidateText ?? group.currentText) ??
               '',
             candidateIndex:
-              edit.candidateIndex ??
-              saved?.selectedCandidateIndex ??
-              group.recommendedCandidateIndex ??
-              0
+              edit.candidateIndex !== undefined
+                ? edit.candidateIndex
+                : saved?.selectedCandidateIndex ??
+                  group.recommendedCandidateIndex ??
+                  0
           });
           return acc;
         }, []);

@@ -27,6 +27,9 @@ internal static class GlyphCoreTextRepairService
 
         using var tr = db.TransactionManager.StartTransaction();
         CollectItems(db, tr, drawing, items, counters);
+        int promotedRawEvidence = GlyphCoreNativeDbTextEvidenceProjector.PromotePendingRawEquivalentEvidence(drawing, counters.Scanned);
+        if (promotedRawEvidence > 0)
+            RefreshNativeEvidenceDetections(drawing, items);
 
         List<GlyphCoreTextRepairItem> directEvidenceItems = items
             .Where(item => item.Detection.HasProblem)
@@ -50,7 +53,7 @@ internal static class GlyphCoreTextRepairService
         DiagnosticLogger.Log(
             "DBText文枢",
             $"扫描={counters.Scanned}, Hook强信号={counters.Problems}, 候选={counters.Candidates}, AI评分簇={counters.AiScored}, AI状态={counters.AiStatus}, " +
-            $"阻塞={counters.Blocked}, 实际修复={counters.Repaired}, 错误={counters.Errors}");
+            $"阻塞={counters.Blocked}, 实际修复={counters.Repaired}, 错误={counters.Errors}, NativeEvidence={GlyphCoreNativeDbTextEvidenceProjector.GetSummary()}");
         _lastRunSummary = new GlyphCoreTextRepairRunSummary(
             counters.Scanned,
             counters.Problems,
@@ -113,6 +116,17 @@ internal static class GlyphCoreTextRepairService
                     DiagnosticLogger.Log("DBText文枢", $"对象处理失败: {ex.GetType().Name}: {ex.Message}");
                 }
             }
+        }
+    }
+
+    private static void RefreshNativeEvidenceDetections(
+        GlyphCoreDrawingIdentity drawing,
+        IReadOnlyList<GlyphCoreTextRepairItem> items)
+    {
+        foreach (GlyphCoreTextRepairItem item in items)
+        {
+            GlyphCoreNativeDecodeEvidenceStore.ApplyEvidence(drawing, item.Context);
+            item.Detection = GlyphCoreTextRepairProblemDetector.Detect(item.Context);
         }
     }
 

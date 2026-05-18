@@ -38,6 +38,57 @@ DEFAULT_TRAINING_OPTIONS = {
 }
 
 
+def display_text_for_record(record: dict) -> str:
+    context = record.get("context") or {}
+    explicit = str(record.get("displayText") or context.get("displayText") or "")
+    if explicit:
+        return explicit
+    return normalize_shx_display_aliases(raw_current_text(record))
+
+
+def raw_current_text(record: dict) -> str:
+    return str(record.get("currentText") or (record.get("context") or {}).get("currentText") or "")
+
+
+def display_candidate_text(record: dict, candidate: dict) -> str:
+    text = str(candidate.get("text") or candidate.get("candidateText") or "")
+    if DatasetStore._is_noop_candidate(candidate) or text == raw_current_text(record):
+        return display_text_for_record(record)
+    return text
+
+
+def normalize_shx_display_aliases(text: str) -> str:
+    if not text or "\u4E95" not in text:
+        return text or ""
+    chars = list(text)
+    for index, char in enumerate(chars):
+        if char == "\u4E95" and should_render_number_sign_alias(text, index):
+            chars[index] = "#"
+    return "".join(chars)
+
+
+def should_render_number_sign_alias(text: str, index: int) -> bool:
+    if index < 2 or index + 1 >= len(text):
+        return False
+    if text[index - 1] not in {"-", "\uFF0D"}:
+        return False
+    if not is_ascii_alnum(text[index + 1]):
+        return False
+    start = index - 2
+    while start >= 0 and is_ascii_alnum(text[start]):
+        start -= 1
+    prefix = text[start + 1 : index - 1]
+    return 1 <= len(prefix) <= 8 and any(is_ascii_alpha(char) for char in prefix)
+
+
+def is_ascii_alnum(char: str) -> bool:
+    return ("0" <= char <= "9") or is_ascii_alpha(char)
+
+
+def is_ascii_alpha(char: str) -> bool:
+    return ("A" <= char <= "Z") or ("a" <= char <= "z")
+
+
 class DatasetStore:
     def __init__(self, dataset_root: Path, model_root: Path, package_dir: Path) -> None:
         self.dataset_root = dataset_root.resolve()
@@ -203,7 +254,7 @@ class DatasetStore:
 
         return {
             "schema": REVIEWED_SCHEMA,
-            "featureSchema": first.get("feature_schema") or "dbtext-ai-features-v4",
+            "featureSchema": first.get("feature_schema") or "dbtext-ai-features-v6",
             "groupId": group_id,
             "currentText": first.get("current_text") or source_record.get("currentText") or "",
             "labelAction": first.get("label_action") or "repair",
@@ -1023,6 +1074,9 @@ class DatasetStore:
                         "unsafeText": False,
                     }
                 )
+        elif action == "keep":
+            label_text = current_text
+            selected_index = self._find_noop_candidate(candidates)
         else:
             label_text = label_text or current_text
             selected_index = self._find_noop_candidate(candidates)
@@ -1088,6 +1142,9 @@ class DatasetStore:
         first = records[0]
         context = first.get("context") or {}
         candidate_index, candidate = self._review_candidate_with_index(first)
+        current_text = raw_current_text(first)
+        display_text = display_text_for_record(first)
+        candidate_text = display_candidate_text(first, candidate)
         group_type = "noop" if self._is_noop_candidate(candidate) else "encoding"
         action = self._recommended_action(candidate)
         group_id = uuid.uuid5(uuid.NAMESPACE_URL, REVIEW_GROUP_RULE_VERSION + "\0" + "\0".join(map(str, self._review_group_key(first)))).hex
@@ -1143,10 +1200,13 @@ class DatasetStore:
             "warnings": warnings,
             "recommendedAction": action,
             "recommendedCandidateIndex": candidate_index,
-            "currentText": str(first.get("currentText") or ""),
-            "sourcePatternLabel": f"{len(source_variants)} 种原文模式" if len(source_variants) > 1 else str(first.get("currentText") or ""),
+            "currentText": display_text,
+            "rawCurrentText": current_text,
+            "displayText": display_text,
+            "sourcePatternLabel": f"{len(source_variants)} 种原文模式" if len(source_variants) > 1 else display_text,
             "sourceTextVariants": source_variants,
-            "candidateText": str(candidate.get("text") or ""),
+            "candidateText": candidate_text,
+            "rawCandidateText": str(candidate.get("text") or ""),
             "candidateSource": str(candidate.get("source") or ""),
             "candidateReason": str(candidate.get("reason") or ""),
             "isRoundTrip": bool(candidate.get("isRoundTrip")),
@@ -1213,13 +1273,16 @@ class DatasetStore:
         return {
             "groupId": record.get("groupId"),
             "handle": context.get("handle"),
-            "currentText": record.get("currentText"),
+            "currentText": display_text_for_record(record),
+            "rawCurrentText": raw_current_text(record),
+            "displayText": display_text_for_record(record),
             "layer": context.get("layer"),
             "textStyleName": context.get("textStyleName"),
             "textStyleFileName": context.get("textStyleFileName"),
             "textStyleBigFontFileName": context.get("textStyleBigFontFileName"),
             "ownerBlockName": context.get("ownerBlockName"),
-            "candidateText": candidate.get("text"),
+            "candidateText": display_candidate_text(record, candidate),
+            "rawCandidateText": candidate.get("text"),
             "candidateSource": candidate.get("source"),
             "candidateReason": candidate.get("reason"),
             "isRoundTrip": bool(candidate.get("isRoundTrip")),
@@ -1240,10 +1303,15 @@ class DatasetStore:
         context = record.get("context") or {}
         selected = self._selected_candidate(record)
         drawing = self.manifest.get("drawing") or {}
+        display_text = display_text_for_record(record)
+        display_label = display_text if record.get("labelAction") == "keep" else record.get("labelText")
         return {
             "groupId": record.get("groupId"),
-            "currentText": record.get("currentText"),
-            "labelText": record.get("labelText"),
+            "currentText": display_text,
+            "rawCurrentText": raw_current_text(record),
+            "displayText": display_text,
+            "labelText": display_label,
+            "rawLabelText": record.get("labelText"),
             "labelAction": record.get("labelAction"),
             "reviewer": record.get("reviewer"),
             "reviewedUtc": record.get("reviewedUtc"),
@@ -1261,7 +1329,8 @@ class DatasetStore:
             "bigFont": context.get("textStyleBigFontFileName"),
             "ownerBlockName": context.get("ownerBlockName"),
             "isFromExternalReference": bool(context.get("isFromExternalReference")),
-            "candidateText": selected.get("text"),
+            "candidateText": display_candidate_text(record, selected),
+            "rawCandidateText": selected.get("text"),
             "candidateSource": selected.get("source"),
             "candidateReason": selected.get("reason"),
             "selectedCandidateIndex": record.get("selectedCandidateIndex"),
@@ -1619,7 +1688,7 @@ class DatasetStore:
     def _source_text_variants(records: list[dict]) -> list[dict]:
         counts: dict[str, int] = {}
         for record in records:
-            text = str(record.get("currentText") or "")
+            text = display_text_for_record(record)
             counts[text] = counts.get(text, 0) + 1
         return [
             {"text": text, "count": count}

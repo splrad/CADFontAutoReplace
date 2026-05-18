@@ -18,6 +18,45 @@ from server import DatasetStore, ProcessJob, WorkbenchState
 
 
 class ReviewClusterTests(unittest.TestCase):
+    def test_shx_number_sign_alias_is_display_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = self._create_store(root, [self._display_alias_record("FL-井1")])
+
+            cluster = store.review_clusters_payload()["clusters"][0]
+            self.assertEqual("FL-#1", cluster["currentText"])
+            self.assertEqual("FL-井1", cluster["rawCurrentText"])
+            self.assertEqual("FL-#1", cluster["candidateText"])
+
+            result = store.confirm_cluster(
+                {
+                    "reviewClusterId": cluster["id"],
+                    "labelAction": "keep",
+                    "labelText": "FL-#1",
+                    "reviewer": "unit",
+                    "representativeGroupId": cluster["representativeRecords"][0]["groupId"],
+                }
+            )
+
+            self.assertEqual(1, result["written"])
+            training_record = next(iter(store.training_dataset.values()))
+            self.assertEqual("FL-井1", training_record["currentText"])
+            self.assertEqual("FL-井1", training_record["labelText"])
+
+            digest = store.training_dataset_payload()["records"][0]
+            self.assertEqual("FL-#1", digest["currentText"])
+            self.assertEqual("FL-#1", digest["labelText"])
+            self.assertEqual("FL-井1", digest["rawCurrentText"])
+
+    def test_shx_number_sign_alias_does_not_rewrite_chinese_well_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = self._create_store(root, [self._display_alias_record("检查井1")])
+
+            cluster = store.review_clusters_payload()["clusters"][0]
+            self.assertEqual("检查井1", cluster["currentText"])
+            self.assertEqual("检查井1", cluster["rawCurrentText"])
+
     def test_repeated_text_forms_one_cluster_and_propagates_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -532,7 +571,7 @@ class ReviewClusterTests(unittest.TestCase):
             records.append(
                 {
                     "schema": "dbtext-ai-candidates-v1",
-                    "featureSchema": "dbtext-ai-features-v4",
+                    "featureSchema": FEATURE_SCHEMA_VERSION,
                     "groupId": f"r{index:04d}",
                     "currentText": "重复文本",
                     "context": {
@@ -576,7 +615,7 @@ class ReviewClusterTests(unittest.TestCase):
             records.append(
                 {
                     "schema": "dbtext-ai-candidates-v1",
-                    "featureSchema": "dbtext-ai-features-v4",
+                    "featureSchema": FEATURE_SCHEMA_VERSION,
                     "groupId": f"{prefix}{index:04d}",
                     "currentText": text,
                     "context": {
@@ -622,6 +661,47 @@ class ReviewClusterTests(unittest.TestCase):
         return records
 
     @staticmethod
+    def _display_alias_record(text: str) -> dict:
+        return {
+            "schema": "dbtext-ai-candidate-group-v1",
+            "featureSchema": FEATURE_SCHEMA_VERSION,
+            "exportId": "pkg",
+            "groupId": "alias0000",
+            "currentText": text,
+            "context": {
+                "currentText": text,
+                "handle": "A1",
+                "layer": "SYMBOL",
+                "textStyleName": "HZTXT",
+                "textStyleFileName": "txt.shx",
+                "textStyleBigFontFileName": "tssdchn.shx",
+                "ownerBlockName": "*Model_Space",
+                "isFromExternalReference": False,
+            },
+            "risk": {
+                "highRisk": False,
+                "candidateConflict": False,
+                "hasNonRoundTrip": False,
+                "currentUnsafe": False,
+                "candidateUnsafe": False,
+            },
+            "problemGate": {
+                "hasProblem": False,
+                "reason": "no-suspicious-dbtext",
+            },
+            "candidates": [
+                {
+                    "index": 0,
+                    "text": text,
+                    "source": "current-noop",
+                    "reason": "current text",
+                    "isRoundTrip": True,
+                    "isNoOp": True,
+                }
+            ],
+        }
+
+    @staticmethod
     def _repair_like_records(prefix: str, count: int) -> list[dict]:
         records: list[dict] = []
         current = "潰党韌800遵X500詢,階善褽菁"
@@ -630,7 +710,7 @@ class ReviewClusterTests(unittest.TestCase):
             records.append(
                 {
                     "schema": "dbtext-ai-candidates-v1",
-                    "featureSchema": "dbtext-ai-features-v4",
+                    "featureSchema": FEATURE_SCHEMA_VERSION,
                     "groupId": f"{prefix}{index:04d}",
                     "currentText": current,
                     "context": {

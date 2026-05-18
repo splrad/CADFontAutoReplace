@@ -8,23 +8,10 @@ export type TrainingStatus = 'idle' | 'running' | 'completed' | 'failed';
 export type PackageStatus = 'active' | 'archived' | 'processing';
 export type PublishStatus = 'draft' | 'published' | 'deprecated';
 
-export interface DwgCoord {
-  x: number;
-  y: number;
-}
-
-export interface DwgNearbyText {
-  id: string;
-  text: string;
-  x: number;
-  y: number;
-  layer: string;
-  isGarbled: boolean;
-}
-
 export interface DBTextCluster {
   id: string;
   originalText: string;
+  rawOriginalText: string;
   candidateTexts: string[];
   selectedCandidate: string;
   action: ActionType;
@@ -37,11 +24,8 @@ export interface DBTextCluster {
   confidence: number;
   dwgFile: string;
   reviewedAt?: string;
-  sourceGroupId?: string;
   correctTextMode: CorrectTextMode;
   manualText: string;
-  coord: DwgCoord;
-  nearbyTexts: DwgNearbyText[];
 }
 
 export interface TrainingRecord {

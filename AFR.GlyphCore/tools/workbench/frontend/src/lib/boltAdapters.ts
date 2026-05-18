@@ -25,8 +25,6 @@ import type {
   CorrectTextMode,
   DataPackage,
   DBTextCluster,
-  DwgCoord,
-  DwgNearbyText,
   ModelReport,
   PublishStatus,
   RiskLevel as BoltRiskLevel,
@@ -102,23 +100,27 @@ export function reviewClusterViews(
     const source = sourceRecordForGroup(group, recordsById);
     const options = candidateOptionsForGroup(group, saved, recordsById);
     const edit = edits[group.id] || {};
-    const originalText = String(group.currentText || source?.currentText || '');
-    const finalText = String(edit.labelText ?? saved?.labelText ?? group.candidateText ?? source?.candidateText ?? originalText);
+    const rawOriginalText = String(group.rawCurrentText || source?.rawCurrentText || source?.currentText || group.currentText || '');
+    const originalText = String(group.displayText || group.currentText || source?.displayText || source?.currentText || '');
+    const savedLabelText = saved?.labelAction === 'keep' ? originalText : saved?.labelText;
+    const finalText = String(edit.labelText ?? savedLabelText ?? group.candidateText ?? source?.candidateText ?? originalText);
     const mode = correctTextModeForReview(originalText, finalText, edit, saved, group);
     const candidateTexts = nonEmptyUnique([
-      ...options.map((option) => option.text),
-      group.candidateText,
-      source?.candidateText,
+      ...options.map((option) => displayCandidateOptionText(option.text, option.isNoOp, rawOriginalText, originalText)),
+      displayCandidateOptionText(group.candidateText, false, rawOriginalText, originalText),
+      displayCandidateOptionText(source?.candidateText, false, rawOriginalText, originalText),
+      finalText,
       originalText
     ]);
-    const selectedCandidate = candidateTexts.includes(finalText) ? finalText : candidateTexts[0] || finalText;
+    const selectedCandidate = selectedCandidateForMode(mode, finalText, originalText, candidateTexts);
+    const candidateSources = candidateSourceMap(options, group, source, originalText, rawOriginalText);
     const context = source?.context || group.context || group.contextSummary || {};
-    const coord = pointForRecord(source, group.id || originalText);
     const dwgFile = drawingName(source, group, app);
 
     return {
       id: group.id,
       originalText,
+      rawOriginalText,
       candidateTexts,
       selectedCandidate,
       action: actionToBolt(edit.labelAction || saved?.labelAction || group.recommendedAction),
@@ -126,16 +128,13 @@ export function reviewClusterViews(
       riskLevel: riskLevel(group) as BoltRiskLevel,
       layer: String(context.layer || 'MISC'),
       font: String(context.textStyleName || context.textStyleFileName || context.textStyleBigFontFileName || '--'),
-      encodingPath: String(group.encodingPath || group.candidateSource || source?.candidates?.[0]?.source || '--'),
+      encodingPath: encodingPathForMode(mode, selectedCandidate, candidateSources),
       count: Number(group.impactCount || group.count || group.recordIds?.length || 1),
       confidence: Number(source?.candidates?.[0]?.targetScore || 0),
       dwgFile,
       reviewedAt: saved?.reviewedUtc,
-      sourceGroupId: source?.groupId,
       correctTextMode: mode,
-      manualText: mode === 'manual' ? finalText : '',
-      coord,
-      nearbyTexts: []
+      manualText: mode === 'manual' ? finalText : ''
     };
   });
 
@@ -168,8 +167,12 @@ export function trainingRecordViews(app: BootstrapPayload | null): TrainingRecor
     return {
       id: String(record.groupId || record.handle || `${record.currentText}-${record.enteredTrainingUtc}`),
       action: actionToBolt(record.labelAction),
-      originalText: String(record.currentText || ''),
-      correctText: String(record.labelText || record.candidateText || record.currentText || ''),
+      originalText: String(record.displayText || record.currentText || ''),
+      correctText: String(
+        record.labelAction === 'keep'
+          ? record.displayText || record.currentText || ''
+          : record.labelText || record.candidateText || record.currentText || ''
+      ),
       correctTextMode: mode,
       source: String(record.trainingSource || record.labelAction || mode),
       font: String(record.font || record.bigFont || record.textStyleName || '--'),
@@ -179,14 +182,6 @@ export function trainingRecordViews(app: BootstrapPayload | null): TrainingRecor
   });
   trainingRecordsCache = { source: records, packages, value };
   return value;
-}
-
-export function clusterWithNearbyTexts(app: BootstrapPayload | null, cluster: DBTextCluster | null): DBTextCluster | null {
-  if (!cluster) return null;
-  return {
-    ...cluster,
-    nearbyTexts: nearbyTextViews(app?.data?.records || [], cluster.sourceGroupId || cluster.id)
-  };
 }
 
 export function trainingRunView(app: BootstrapPayload | null, packages: DataPackage[]): TrainingRun {
@@ -215,6 +210,7 @@ export function trainingRunView(app: BootstrapPayload | null, packages: DataPack
 export function modelReportView(app: BootstrapPayload | null): ModelReport {
   const report = app?.report || {};
   const summary = report.testReport?.summary || report.blindReport?.summary || {};
+  const testDetails = report.testReport?.details || report.errorSamples || [];
   const overfitScore = Math.max(
     Math.abs(Number(report.overfitting?.recallGap || 0)),
     Math.abs(Number(report.overfitting?.accuracyGap || 0))
@@ -227,7 +223,7 @@ export function modelReportView(app: BootstrapPayload | null): ModelReport {
     recall: numberFromSummary(summary, 'repairRecall'),
     precision: precisionFromSummary(summary),
     overfitScore,
-    wrongFixes: Number(summary.falseRepairs || 0),
+    wrongFixes: visibleFalseRepairCount(testDetails, Number(summary.falseRepairs || 0)),
     bestEpoch: Number(report.trainingConfig?.bestIteration || report.trainingConfig?.actualIterations || 0),
     simulatedTests: simulationRows(report.errorSamples || report.testReport?.details || [])
   };
@@ -235,12 +231,13 @@ export function modelReportView(app: BootstrapPayload | null): ModelReport {
 
 export function reviewEditForPatch(cluster: DBTextCluster, patch: Partial<Pick<DBTextCluster, 'correctTextMode' | 'selectedCandidate' | 'manualText'>>) {
   const mode = patch.correctTextMode || cluster.correctTextMode;
-  const selectedCandidate = patch.selectedCandidate || cluster.selectedCandidate || cluster.candidateTexts[0] || cluster.originalText;
+  const currentCandidate = cluster.selectedCandidate !== cluster.originalText ? cluster.selectedCandidate : '';
+  const selectedCandidate = patch.selectedCandidate || currentCandidate || firstRepairCandidate(cluster.originalText, cluster.candidateTexts);
   const manualText = patch.manualText ?? cluster.manualText;
   if (mode === 'original') {
     return {
       labelAction: 'keep' as LabelAction,
-      labelText: cluster.originalText,
+      labelText: cluster.rawOriginalText || cluster.originalText,
       candidateKey: '__original__',
       candidateIndex: null
     };
@@ -253,11 +250,12 @@ export function reviewEditForPatch(cluster: DBTextCluster, patch: Partial<Pick<D
       candidateIndex: null
     };
   }
+  const candidateIndex = cluster.candidateTexts.indexOf(selectedCandidate);
   return {
     labelAction: 'repair' as LabelAction,
     labelText: selectedCandidate,
     candidateKey: selectedCandidate,
-    candidateIndex: Math.max(0, cluster.candidateTexts.indexOf(selectedCandidate))
+    candidateIndex: candidateIndex >= 0 ? candidateIndex : null
   };
 }
 
@@ -315,6 +313,81 @@ function correctTextModeForReview(
   if (action === 'keep' || finalText === originalText) return 'original';
   if (saved?.origin === 'manual' || saved?.originDetail === 'manual') return 'manual';
   return 'candidate';
+}
+
+function selectedCandidateForMode(
+  mode: CorrectTextMode,
+  finalText: string,
+  originalText: string,
+  candidateTexts: string[]
+): string {
+  if (mode === 'candidate' && finalText !== originalText && candidateTexts.includes(finalText)) {
+    return finalText;
+  }
+  return firstRepairCandidate(originalText, candidateTexts);
+}
+
+function firstRepairCandidate(originalText: string, candidateTexts: string[]): string {
+  return candidateTexts.find((text) => text && text !== originalText) || candidateTexts[0] || originalText;
+}
+
+function displayCandidateOptionText(
+  value: unknown,
+  isNoOp: boolean,
+  rawOriginalText: string | undefined,
+  originalText: string
+): string {
+  const text = String(value || '');
+  if (!text) return '';
+  if (isNoOp || (rawOriginalText && text === rawOriginalText)) return originalText;
+  return text;
+}
+
+function candidateSourceMap(
+  options: ReturnType<typeof candidateOptionsForGroup>,
+  group: ReviewCluster,
+  source: CandidateRecord | null,
+  originalText: string,
+  rawOriginalText?: string
+): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const option of options) {
+    const text = displayCandidateOptionText(option.text, option.isNoOp, rawOriginalText, originalText);
+    if (text && option.source) result.set(text, option.isNoOp ? '原文' : option.source);
+  }
+
+  const groupCandidateText = String(group.candidateText || '');
+  const groupSource = String(group.candidateSource || group.encodingPath || '');
+  if (groupCandidateText && groupSource && !result.has(groupCandidateText)) {
+    result.set(groupCandidateText, groupSource);
+  }
+
+  for (const candidate of source?.candidates || []) {
+    const text = displayCandidateOptionText(
+      candidate.text || candidate.candidateText,
+      Boolean(candidate.isNoOp),
+      rawOriginalText,
+      originalText
+    );
+    const sourceText = String(candidate.source || candidate.candidateSource || candidate.reason || '');
+    if (text && sourceText && !result.has(text)) {
+      result.set(text, candidate.isNoOp ? '原文' : sourceText);
+    }
+  }
+
+  result.set(originalText, '原文');
+  if (rawOriginalText) result.set(rawOriginalText, '原文');
+  return result;
+}
+
+function encodingPathForMode(
+  mode: CorrectTextMode,
+  selectedCandidate: string,
+  candidateSources: Map<string, string>
+): string {
+  if (mode === 'original') return '原文';
+  if (mode === 'manual') return '手动';
+  return candidateSources.get(selectedCandidate) || '--';
 }
 
 function correctTextModeForTraining(record: TrainingDatasetRecord): CorrectTextMode {
@@ -379,10 +452,27 @@ function simulationRows(details: ValidationDetail[]): SimulatedTestResult[] {
 function hasMismatch(detail: ValidationDetail): boolean {
   const action = String(detail.labelAction || '');
   if (action === 'repair' && detail.bestText !== undefined && detail.labelText !== undefined) {
-    return String(detail.bestText) !== String(detail.labelText);
+    return normalizedVisibleText(detail.bestText) !== normalizedVisibleText(detail.labelText);
   }
   if (detail.decision !== undefined && action) return String(detail.decision) !== action;
   return true;
+}
+
+function visibleFalseRepairCount(details: ValidationDetail[], fallback: number): number {
+  if (!Array.isArray(details) || details.length === 0) return fallback;
+  return details.filter((detail) => {
+    const severity = String(detail.severity || '');
+    const falseRepair = Boolean((detail as Record<string, unknown>).falseRepair);
+    return (falseRepair || severity === 'false-repair' || severity === 'wrong-repair') && hasMismatch(detail);
+  }).length;
+}
+
+function normalizedVisibleText(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function trainingRecordPackageId(record: TrainingDatasetRecord, packages: PackageSummary[]): string {
@@ -405,37 +495,6 @@ function drawingName(source: CandidateRecord | null, group: ReviewCluster, app: 
       group.packageId ||
       'DWG'
   );
-}
-
-function nearbyTextViews(records: CandidateRecord[], activeGroupId: string): DwgNearbyText[] {
-  const nearby: DwgNearbyText[] = [];
-  for (const record of records) {
-    if (record.groupId === activeGroupId || !record.currentText) continue;
-    const point = pointForRecord(record, record.groupId || record.currentText || '');
-    nearby.push({
-      id: String(record.groupId || `${point.x}-${point.y}`),
-      text: String(record.currentText || ''),
-      x: point.x,
-      y: point.y,
-      layer: String(record.context?.layer || 'MISC'),
-      isGarbled: Boolean(record.problemGate?.hasProblem || record.risk?.highRisk)
-    });
-    if (nearby.length >= 24) break;
-  }
-  return nearby;
-}
-
-function pointForRecord(record: CandidateRecord | null | undefined, fallback: string): DwgCoord {
-  const geometry = record?.geometry as { position?: { x?: number; y?: number } } | undefined;
-  const position = geometry?.position;
-  const x = Number(position?.x);
-  const y = Number(position?.y);
-  if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
-  const hash = fallback.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return {
-    x: 1000 + (hash % 900),
-    y: 600 + ((hash * 17) % 500)
-  };
 }
 
 function nonEmptyUnique(values: Array<string | undefined>): string[] {

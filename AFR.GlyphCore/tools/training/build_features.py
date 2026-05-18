@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import sys
+import unicodedata
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,6 +91,7 @@ def build_rows(input_path: Path):
             context = dict(record.get("context") or {})
             context["currentText"] = record.get("currentText") or context.get("currentText") or ""
             evidence = context.get("nativeDecodeEvidence") if isinstance(context.get("nativeDecodeEvidence"), dict) else {}
+            target_scores = candidate_target_scores(record)
 
             for index, candidate_row in enumerate(record["candidates"]):
                 candidate = Candidate(
@@ -104,8 +107,8 @@ def build_rows(input_path: Path):
                     "group_id": record["groupId"],
                     "candidate_index": index,
                     "label_action": record["labelAction"],
-                    "target_score": float(candidate_row.get("targetScore", 0.0)),
-                    "is_positive": 1 if float(candidate_row.get("targetScore", 0.0)) >= 1.0 else 0,
+                    "target_score": target_scores[index],
+                    "is_positive": 1 if target_scores[index] >= 1.0 else 0,
                     "is_noop": 1 if candidate.is_noop else 0,
                     "is_roundtrip": 1 if candidate.is_roundtrip else 0,
                     "source": candidate.source,
@@ -153,6 +156,41 @@ def validate_record(record: dict, line_number: int) -> None:
         raise ValueError(f"line {line_number}: unsupported labelAction")
     if not isinstance(record.get("candidates"), list) or not record["candidates"]:
         raise ValueError(f"line {line_number}: candidates must be a non-empty array")
+
+
+def candidate_target_scores(record: dict) -> list[float]:
+    candidates = list(record.get("candidates") or [])
+    scores = [float(candidate.get("targetScore", 0.0) or 0.0) for candidate in candidates]
+    label_action = str(record.get("labelAction") or "")
+    label_text = str(record.get("labelText") or "")
+    if label_action != "repair" or not label_text:
+        return scores
+
+    visible_matches = [
+        index
+        for index, candidate in enumerate(candidates)
+        if not is_manual_review_candidate(candidate)
+        and visible_text_equal(candidate.get("text") or "", label_text)
+    ]
+    if not visible_matches:
+        return scores
+
+    return [1.0 if index in visible_matches else 0.0 for index in range(len(candidates))]
+
+
+def is_manual_review_candidate(candidate: dict) -> bool:
+    return str(candidate.get("source") or "").lower() == "manual-review"
+
+
+def normalize_visible_text(value: str) -> str:
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    text = re.sub(r"[\u200b-\u200d\ufeff]", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def visible_text_equal(left: str, right: str) -> bool:
+    return normalize_visible_text(left) == normalize_visible_text(right)
 
 
 def bool_value(context: dict, evidence: dict, flat_key: str, nested_key: str) -> bool:

@@ -12,10 +12,16 @@
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrCommands.cs" Link="Commands\AfrCommands.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrUnloadCommand.cs" Link="Commands\AfrUnloadCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\AutoCadFontHook.cs" Link="FontMapping\AutoCadFontHook.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\CodePageFamilyHook.cs" Link="FontMapping\CodePageFamilyHook.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextDwgInFieldsScopeHook.cs" Link="FontMapping\DbTextDwgInFieldsScopeHook.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextUpstreamDecodeProbeHook.cs" Link="FontMapping\DbTextUpstreamDecodeProbeHook.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DwgFilerCodePageScopeHook.cs" Link="FontMapping\DwgFilerCodePageScopeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\LdFileHook.cs" Link="FontMapping\LdFileHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextFontParser.cs" Link="FontMapping\MTextFontParser.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontReplacer.cs" Link="FontMapping\MTextInlineFontReplacer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontScanner.cs" Link="FontMapping\MTextInlineFontScanner.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeInlineHook.cs" Link="FontMapping\NativeInlineHook.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\TextEditorDbcsDecodeHook.cs" Link="FontMapping\TextEditorDbcsDecodeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AppInitializer.cs" Link="Hosting\AppInitializer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AutoCadHost.cs" Link="Hosting\AutoCadHost.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\CadDialogSystemVariableScope.cs" Link="Hosting\CadDialogSystemVariableScope.cs" />
@@ -28,6 +34,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetector.cs" Link="Services\FontDetector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontReplacer.cs" Link="Services\FontReplacer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreDrawingIdentity.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreDrawingIdentity.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreNativeDbTextEvidenceProjector.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreNativeDbTextEvidenceProjector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreNativeDecodeEvidenceStore.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreNativeDecodeEvidenceStore.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreTextRepairEntitySnapshotBuilder.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreTextRepairEntitySnapshotBuilder.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreTextRepairAdvisor.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreTextRepairAdvisor.cs" />

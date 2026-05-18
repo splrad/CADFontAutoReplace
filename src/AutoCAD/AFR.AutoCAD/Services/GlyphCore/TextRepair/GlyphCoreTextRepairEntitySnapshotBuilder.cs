@@ -35,6 +35,7 @@ internal static class GlyphCoreTextRepairEntitySnapshotBuilder
             IsFromExternalReference = IsFromExternalReference(dbText, tr),
             HasLdFileFontEvidence = HasLdFileFontEvidence(style)
         };
+        GlyphCoreNativeDbTextEvidenceProjector.TryRegister(dbText, drawing, context);
         GlyphCoreNativeDecodeEvidenceStore.ApplyEvidence(drawing, context);
         return context;
     }

@@ -380,6 +380,8 @@ internal sealed class GlyphCoreDatasetExporter
         bool hasNonRoundTrip,
         bool candidateConflict)
     {
+        string displayText = BuildDisplayText(context.CurrentText);
+        bool hasDisplayAlias = !string.Equals(displayText, context.CurrentText, StringComparison.Ordinal);
         return new
         {
             schema = CandidateGroupSchema,
@@ -390,6 +392,13 @@ internal sealed class GlyphCoreDatasetExporter
             context = BuildContextObject(context),
             geometry,
             currentText = context.CurrentText,
+            rawCurrentText = context.CurrentText,
+            displayText,
+            displayAlias = new
+            {
+                normalized = hasDisplayAlias,
+                kind = hasDisplayAlias ? "shx-number-sign-token" : string.Empty
+            },
             problemGate = new
             {
                 hasProblem = detection.HasProblem,
@@ -435,6 +444,8 @@ internal sealed class GlyphCoreDatasetExporter
 
     private static object BuildContextObject(GlyphCoreTextRepairContext context)
     {
+        string displayText = BuildDisplayText(context.CurrentText);
+        bool hasDisplayAlias = !string.Equals(displayText, context.CurrentText, StringComparison.Ordinal);
         return new
         {
             drawingPath = context.DrawingPath,
@@ -452,6 +463,13 @@ internal sealed class GlyphCoreDatasetExporter
             textStyleBigFontFileName = context.TextStyleBigFontFileName,
             textStyleTypeFace = context.TextStyleTypeFace,
             currentText = context.CurrentText,
+            rawCurrentText = context.CurrentText,
+            displayText,
+            displayAlias = new
+            {
+                normalized = hasDisplayAlias,
+                kind = hasDisplayAlias ? "shx-number-sign-token" : string.Empty
+            },
             isFromExternalReference = context.IsFromExternalReference,
             nativeDecodeEvidence = new
             {
@@ -525,11 +543,13 @@ internal sealed class GlyphCoreDatasetExporter
         GlyphCoreTextRepairProblemDetection detection,
         GlyphCoreTextRepairGeometrySnapshot geometry)
     {
+        string displayText = BuildDisplayText(context.CurrentText);
         return new
         {
             groupId,
             handle = context.Handle,
-            text = Trim(context.CurrentText, 80),
+            text = Trim(displayText, 80),
+            rawText = context.CurrentText,
             layer = context.Layer,
             ownerBlockName = context.OwnerBlockName,
             textStyleName = context.TextStyleName,
@@ -575,6 +595,8 @@ internal sealed class GlyphCoreDatasetExporter
             "hook_raw_confidence",
             "candidate_count",
             "current_text",
+            "display_text",
+            "display_alias",
             "position_x",
             "position_y",
             "position_z"
@@ -589,6 +611,8 @@ internal sealed class GlyphCoreDatasetExporter
         IReadOnlyList<GlyphCoreTextRepairCandidate> candidates,
         GlyphCoreTextRepairGeometrySnapshot geometry)
     {
+        string displayText = BuildDisplayText(context.CurrentText);
+        bool hasDisplayAlias = !string.Equals(displayText, context.CurrentText, StringComparison.Ordinal);
         writer.WriteLine(string.Join("\t", new[]
         {
             EscapeTsv(groupId),
@@ -611,6 +635,8 @@ internal sealed class GlyphCoreDatasetExporter
             Number(context.HookRawConfidence),
             candidates.Count.ToString(CultureInfo.InvariantCulture),
             EscapeTsv(context.CurrentText),
+            EscapeTsv(displayText),
+            hasDisplayAlias ? "shx-number-sign-token" : string.Empty,
             Number(geometry.Position.X),
             Number(geometry.Position.Y),
             Number(geometry.Position.Z)
@@ -724,6 +750,63 @@ internal sealed class GlyphCoreDatasetExporter
             return text ?? string.Empty;
         return text[..maxLength] + "...";
     }
+
+    private static string BuildDisplayText(string text)
+    {
+        if (string.IsNullOrEmpty(text) || text.IndexOf('\u4E95') < 0)
+            return text ?? string.Empty;
+
+        StringBuilder? builder = null;
+        for (int index = 0; index < text.Length; index++)
+        {
+            if (text[index] != '\u4E95' || !ShouldRenderNumberSignAlias(text, index))
+                continue;
+
+            builder ??= new StringBuilder(text);
+            builder[index] = '#';
+        }
+
+        return builder?.ToString() ?? text;
+    }
+
+    private static bool ShouldRenderNumberSignAlias(string text, int index)
+    {
+        if (index < 2 || index + 1 >= text.Length)
+            return false;
+
+        char previous = text[index - 1];
+        if (previous != '-' && previous != '\uFF0D')
+            return false;
+
+        if (!IsAsciiLetterOrDigit(text[index + 1]))
+            return false;
+
+        int start = index - 2;
+        while (start >= 0 && IsAsciiLetterOrDigit(text[start]))
+            start--;
+
+        int length = index - start - 2;
+        if (length < 1 || length > 8)
+            return false;
+
+        bool hasAsciiLetter = false;
+        for (int scan = start + 1; scan <= index - 2; scan++)
+        {
+            if (IsAsciiLetter(text[scan]))
+            {
+                hasAsciiLetter = true;
+                break;
+            }
+        }
+
+        return hasAsciiLetter;
+    }
+
+    private static bool IsAsciiLetterOrDigit(char value)
+        => IsAsciiLetter(value) || (value >= '0' && value <= '9');
+
+    private static bool IsAsciiLetter(char value)
+        => (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z');
 
     private static T Safe<T>(Func<T> read, T fallback)
     {

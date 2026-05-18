@@ -1,4 +1,4 @@
 """AFR GlyphCore DBText training helpers."""
 
-FEATURE_SCHEMA_VERSION = "dbtext-ai-features-v4"
-FEATURE_COUNT = 98
+FEATURE_SCHEMA_VERSION = "dbtext-ai-features-v6"
+FEATURE_COUNT = 101

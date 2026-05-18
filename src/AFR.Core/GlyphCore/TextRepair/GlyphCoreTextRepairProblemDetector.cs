@@ -43,6 +43,9 @@ internal static class GlyphCoreTextRepairProblemDetector
         if (!context.HasNativeDecodeEvidence || !context.NativeDecodeFamilyMismatch)
             return false;
 
+        if (!IsScope(context, "ripple") && !IsHookHitType(context, "dbtext"))
+            return false;
+
         if (context.NativeDecodeObjectCorrelation > 0)
             return true;
 
@@ -66,5 +69,8 @@ internal static class GlyphCoreTextRepairProblemDetector
 
     private static bool IsScope(GlyphCoreTextRepairContext context, string scope)
         => string.Equals(context.NativeDecodeEvidenceScope, scope, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsHookHitType(GlyphCoreTextRepairContext context, string hookHitType)
+        => string.Equals(context.NativeDecodeHookHitType, hookHitType, StringComparison.OrdinalIgnoreCase);
 }
 

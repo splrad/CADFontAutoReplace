@@ -34,8 +34,8 @@ FEATURE_NAMES = [
     "normalized_edit_distance",
     "character_overlap",
     "candidate_roundtrip",
-    "source_has_big5",
-    "source_has_gbk",
+    "source_from_big5",
+    "source_from_gbk",
     "source_has_utf8",
     "source_has_current",
     "source_has_safe",
@@ -109,6 +109,10 @@ FEATURE_NAMES = [
     "hook_raw_confidence",
     "ripple_seed_quality",
     "ripple_distance_ratio",
+    # v6 supervised lexical identity features for human-confirmed exceptions.
+    "current_text_hash01",
+    "candidate_text_hash01",
+    "current_candidate_source_hash01",
 ]
 
 
@@ -162,8 +166,8 @@ def extract_features(context: dict, candidate: Candidate) -> list[float]:
     features[23] = normalized_edit_distance(current, candidate_text)
     features[24] = character_overlap(current, candidate_text)
     features[25] = boolf(candidate.is_roundtrip)
-    features[26] = contains_source(candidate.source, "big5")
-    features[27] = contains_source(candidate.source, "gbk")
+    features[26] = source_from(candidate.source, "big5")
+    features[27] = source_from(candidate.source, "gbk")
     features[28] = contains_source(candidate.source, "utf8")
     features[29] = contains_source(candidate.source, "current")
     features[30] = contains_source(candidate.source, "safe")
@@ -238,6 +242,9 @@ def extract_features(context: dict, candidate: Candidate) -> list[float]:
     features[95] = clamp01(float_value(context, evidence, "hookRawConfidence", "hookRawConfidence"))
     features[96] = clamp01(float_value(context, evidence, "rippleSeedQuality", "rippleSeedQuality"))
     features[97] = clamp01(float_value(context, evidence, "rippleDistanceRatio", "rippleDistanceRatio"))
+    features[98] = stable_hash01(current)
+    features[99] = stable_hash01(candidate_text)
+    features[100] = stable_hash01(f"{current}\0{candidate_text}\0{candidate.source}")
     return features
 
 
@@ -576,6 +583,11 @@ def is_known_cad_font(text: str) -> bool:
 
 def contains_source(source: str, token: str) -> float:
     return boolf(bool(source) and token.lower() in source.lower())
+
+
+def source_from(source: str, family: str) -> float:
+    lower = (source or "").lower()
+    return boolf(lower.startswith(f"{family.lower()}-carrier-to-") or f"+{family.lower()}-carrier-to-" in lower)
 
 
 def has_token(value: str, token: str) -> bool:

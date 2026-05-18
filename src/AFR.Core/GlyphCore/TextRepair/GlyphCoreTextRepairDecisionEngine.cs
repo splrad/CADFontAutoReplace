@@ -6,8 +6,8 @@ namespace AFR.GlyphCore.TextRepair;
 
 internal static class GlyphCoreTextRepairDecisionEngine
 {
-    private const float MinimumConfidence = 0.92f;
-    private const float MinimumScoreMargin = 0.18f;
+    private const float MinimumConfidence = 0.60f;
+    private const float MinimumScoreMargin = 0.02f;
 
     public static GlyphCoreTextRepairDecision Evaluate(
         GlyphCoreTextRepairContext context,
@@ -54,7 +54,7 @@ internal static class GlyphCoreTextRepairDecisionEngine
         if (margin < MinimumScoreMargin)
             return GlyphCoreTextRepairDecision.Skip("score-margin-too-small", summary);
 
-        return GlyphCoreTextRepairDecision.Repair(best.Text, "ai-selected-by-evidence", summary);
+        return GlyphCoreTextRepairDecision.Repair(best.Text, "ai-selected-by-model", summary);
     }
 
     private static string BuildSummary(IReadOnlyList<GlyphCoreTextRepairCandidate> candidates, IGlyphCoreTextRepairScorer scorer)

@@ -61,7 +61,10 @@ export interface RiskSummary {
 export interface CandidateRecord {
   groupId: string;
   currentText?: string;
+  rawCurrentText?: string;
+  displayText?: string;
   candidateText?: string;
+  rawCandidateText?: string;
   candidates?: Candidate[];
   labelText?: string;
   labelAction?: LabelAction;
@@ -79,8 +82,11 @@ export interface ReviewedRecord {
   schema?: string;
   groupId?: string;
   currentText?: string;
+  rawCurrentText?: string;
+  displayText?: string;
   labelAction?: LabelAction;
   labelText?: string;
+  rawLabelText?: string;
   selectedCandidateIndex?: number;
   candidates?: Candidate[];
   reviewer?: string;
@@ -96,7 +102,10 @@ export interface ReviewCluster {
   ruleVersion?: string;
   sourcePatternLabel?: string;
   currentText?: string;
+  rawCurrentText?: string;
+  displayText?: string;
   candidateText?: string;
+  rawCandidateText?: string;
   candidateSource?: string;
   encodingPath?: string;
   recommendedAction?: LabelAction;
@@ -295,8 +304,12 @@ export interface ReportPayload {
 export interface TrainingDatasetRecord {
   groupId?: string;
   currentText?: string;
+  rawCurrentText?: string;
+  displayText?: string;
   labelText?: string;
+  rawLabelText?: string;
   candidateText?: string;
+  rawCandidateText?: string;
   labelAction?: LabelAction;
   layer?: string;
   font?: string;

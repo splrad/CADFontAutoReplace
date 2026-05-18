@@ -7,15 +7,13 @@ import {
   Database,
   Filter,
   Info,
-  Map,
   Pencil,
   RefreshCw,
   Search,
   Trash2,
   X
 } from 'lucide-react';
-import DwgContextViewer from '@/components/DwgContextViewer';
-import { clusterWithNearbyTexts, packageViews, reviewClusterViews, reviewEditForPatch } from '@/lib/boltAdapters';
+import { packageViews, reviewClusterViews, reviewEditForPatch } from '@/lib/boltAdapters';
 import { useVirtualRows } from '@/hooks/useVirtualRows';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
 import type { CorrectTextMode, DataPackage, DBTextCluster, ReviewStatus } from '@/types/bolt';
@@ -36,27 +34,31 @@ export default function AnnotationPage() {
   const [confirmDel, setConfirmDel] = useState<ConfirmDeletePkg | null>(null);
   const [search, setSearch] = useState('');
   const [fStatus, setFStatus] = useState<ReviewStatus | 'all'>('all');
+  const [fEncoding, setFEncoding] = useState('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [activeClusterId, setActiveClusterId] = useState<string | null>(null);
-  const [showViewer, setShowViewer] = useState(true);
   const deferredSearch = useDeferredValue(search);
 
   const packages = useMemo(() => packageViews(app), [app]);
   const clusters = useMemo(() => reviewClusterViews(app, groups, reviewEdits), [app, groups, reviewEdits]);
   const activePkg = app?.data?.packageId || null;
   const activeClusterBase = useMemo(() => clusters.find((cluster) => cluster.id === activeClusterId) ?? clusters[0] ?? null, [clusters, activeClusterId]);
-  const activeCluster = useMemo(() => clusterWithNearbyTexts(app, activeClusterBase), [activeClusterBase, app]);
 
   const filtered = useMemo(
     () =>
       clusters.filter((cluster) => {
         if (deferredSearch && !cluster.originalText.includes(deferredSearch) && !cluster.candidateTexts.some((text) => text.includes(deferredSearch))) return false;
         if (fStatus !== 'all' && cluster.status !== fStatus) return false;
+        if (fEncoding !== 'all' && cluster.encodingPath !== fEncoding) return false;
         return true;
       }),
-    [clusters, deferredSearch, fStatus]
+    [clusters, deferredSearch, fEncoding, fStatus]
   );
   const virtualRows = useVirtualRows(filtered, TABLE_ROW_HEIGHT, 12);
+  const encodingOptions = useMemo(() => {
+    const values = clusters.map((cluster) => cluster.encodingPath).filter(Boolean);
+    return [...new Set(values)].sort((left, right) => left.localeCompare(right, 'zh-Hans-CN'));
+  }, [clusters]);
   const statusCounts = useMemo(() => {
     const counts: Record<ReviewStatus, number> = { pending: 0, confirmed: 0 };
     for (const cluster of clusters) {
@@ -76,6 +78,7 @@ export default function AnnotationPage() {
     setSelected(new Set());
     setSearch('');
     setFStatus('all');
+    setFEncoding('all');
     setActiveClusterId(null);
   };
 
@@ -102,6 +105,7 @@ export default function AnnotationPage() {
   };
 
   const updateCluster = (cluster: DBTextCluster, patch: Partial<Pick<DBTextCluster, 'correctTextMode' | 'selectedCandidate' | 'manualText'>>) => {
+    setActiveClusterId(cluster.id);
     updateReviewEdit(cluster.id, reviewEditForPatch(cluster, patch));
   };
 
@@ -153,7 +157,7 @@ export default function AnnotationPage() {
                     onClick={(event) => askDeletePkg(event, pkg)}
                     title="删除数据集"
                     className={`mr-2 mt-2.5 shrink-0 rounded p-1 transition-colors ${
-                      isActive ? 'text-red-300 hover:bg-red-500/20 hover:text-red-100' : 'text-gray-300 hover:bg-red-50 hover:text-red-600'
+                      isActive ? 'bg-red-600 text-white shadow-sm ring-1 ring-red-300/70 hover:bg-red-500' : 'text-red-500 hover:bg-red-50 hover:text-red-700'
                     }`}
                   >
                     <Trash2 size={11} />
@@ -165,12 +169,6 @@ export default function AnnotationPage() {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-hidden">
-          {showViewer && (
-            <div className="h-64 shrink-0 overflow-hidden">
-              <DwgContextViewer cluster={activeCluster} />
-            </div>
-          )}
-
           <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
             <div className="flex shrink-0 items-center gap-2 rounded border border-gray-200 bg-white px-3 py-2">
               <div className="relative">
@@ -189,8 +187,17 @@ export default function AnnotationPage() {
                 <option value="confirmed">已确认</option>
               </FSel>
 
-              {(search || fStatus !== 'all') && (
-                <button type="button" onClick={() => { setSearch(''); setFStatus('all'); }} className="whitespace-nowrap text-xs text-gray-400 transition-colors hover:text-gray-600">
+              <FSel value={fEncoding} onChange={setFEncoding} className="w-40 truncate">
+                <option value="all">全部编码路径</option>
+                {encodingOptions.map((encoding) => (
+                  <option key={encoding} value={encoding}>
+                    {encoding}
+                  </option>
+                ))}
+              </FSel>
+
+              {(search || fStatus !== 'all' || fEncoding !== 'all') && (
+                <button type="button" onClick={() => { setSearch(''); setFStatus('all'); setFEncoding('all'); }} className="whitespace-nowrap text-xs text-gray-400 transition-colors hover:text-gray-600">
                   清除
                 </button>
               )}
@@ -213,18 +220,6 @@ export default function AnnotationPage() {
                 <Filter size={10} />
                 <strong className="text-gray-800">{filtered.length}</strong> 条
               </span>
-
-              <button
-                type="button"
-                onClick={() => setShowViewer((value) => !value)}
-                title={showViewer ? '隐藏图纸预览' : '显示图纸预览'}
-                className={`flex shrink-0 items-center gap-1 rounded px-2 py-0.5 text-xs font-medium transition-colors ${
-                  showViewer ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                }`}
-              >
-                <Map size={10} />
-                图纸预览
-              </button>
 
               <div className="flex items-center gap-3 border-l border-gray-200 pl-3">
                 {(['pending', 'confirmed'] as ReviewStatus[]).map((status) => {
@@ -374,9 +369,13 @@ type CorrectTextPatch = {
 };
 
 function CorrectTextCell({ cluster, onChange }: { cluster: DBTextCluster; onChange: (patch: CorrectTextPatch) => void }) {
-  const { correctTextMode, originalText, candidateTexts, selectedCandidate, manualText } = cluster;
+  const { id, correctTextMode, originalText, candidateTexts, selectedCandidate, manualText } = cluster;
   const [draft, setDraft] = useState(manualText);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setDraft(manualText);
+  }, [id, manualText]);
 
   useEffect(() => {
     if (correctTextMode === 'manual') inputRef.current?.focus();
@@ -419,7 +418,11 @@ function CorrectTextCell({ cluster, onChange }: { cluster: DBTextCluster; onChan
           <input
             ref={inputRef}
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              const next = event.target.value;
+              setDraft(next);
+              onChange({ manualText: next });
+            }}
             onBlur={commitManual}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
@@ -440,19 +443,18 @@ function CorrectTextCell({ cluster, onChange }: { cluster: DBTextCluster; onChan
 
 function ModeBtns({ mode, onChange }: { mode: CorrectTextMode; onChange: (mode: CorrectTextMode) => void }) {
   return (
-    <div className="flex items-center gap-0.5">
+    <div className="inline-flex items-center gap-1">
       {(['original', 'candidate', 'manual'] as CorrectTextMode[]).map((item) => {
         const active = mode === item;
-        const cls = active
-          ? item === 'original'
-            ? 'bg-gray-700 text-white'
-            : item === 'candidate'
-              ? 'bg-blue-600 text-white'
-              : 'bg-amber-500 text-white'
-          : 'bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-gray-600';
+        const cls = active ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-gray-600';
         const label = item === 'original' ? '原文' : item === 'candidate' ? '候选' : '手动';
         return (
-          <button key={item} type="button" onClick={() => onChange(item)} className={`rounded px-1.5 py-0.5 text-xs font-medium transition-colors ${cls}`}>
+          <button
+            key={item}
+            type="button"
+            onClick={() => onChange(item)}
+            className={`flex h-8 min-w-11 items-center justify-center rounded-lg px-2 text-base font-semibold leading-none transition-colors ${cls}`}
+          >
             {label}
           </button>
         );
@@ -461,13 +463,13 @@ function ModeBtns({ mode, onChange }: { mode: CorrectTextMode; onChange: (mode: 
   );
 }
 
-function FSel({ value, onChange, children }: { value: string; onChange: (value: string) => void; children: ReactNode }) {
+function FSel({ value, onChange, children, className = '' }: { value: string; onChange: (value: string) => void; children: ReactNode; className?: string }) {
   return (
     <div className="relative">
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="appearance-none rounded border border-gray-200 bg-white px-2 py-1 pr-6 text-xs text-gray-700 focus:border-gray-400 focus:outline-none"
+        className={`appearance-none rounded border border-gray-200 bg-white px-2 py-1 pr-6 text-xs text-gray-700 focus:border-gray-400 focus:outline-none ${className}`}
       >
         {children}
       </select>

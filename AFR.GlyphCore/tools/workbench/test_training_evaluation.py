@@ -68,6 +68,36 @@ class TrainingEvaluationTests(unittest.TestCase):
         self.assertEqual("false-repair", severities["false"])
         self.assertEqual("missed-repair", severities["missed"])
 
+    def test_evaluate_groups_treats_visible_equal_text_as_match(self) -> None:
+        rows = [
+            self._scored_row("normalized", "repair", "概口抑 1.40MPa", "阀前压力\u200b1.40ＭＰａ", "阀前压力1.40MPa", "big5-carrier-to-gbk", 0.99, False, True),
+            self._scored_row("normalized", "repair", "概口抑 1.40MPa", "概口抑 1.40MPa", "阀前压力1.40MPa", "current-noop", 0.10, True, True),
+        ]
+
+        report = evaluate_groups(pd.DataFrame(rows))
+        summary = report["summary"]
+        detail = report["details"][0]
+
+        self.assertEqual(1, summary["correctRepairs"])
+        self.assertEqual(0, summary["falseRepairs"])
+        self.assertEqual("ok", detail["severity"])
+
+    def test_evaluate_groups_repairs_confirmed_single_character_label(self) -> None:
+        rows = [
+            self._scored_row("confirmed", "repair", "棒", "堵", "堵", "gbk-carrier-to-big5", 0.99, False, True),
+            self._scored_row("confirmed", "repair", "棒", "次", "堵", "big5-carrier-to-gbk", 0.20, False, True),
+            self._scored_row("confirmed", "repair", "棒", "棒", "堵", "current-noop", 0.10, True, True),
+        ]
+
+        report = evaluate_groups(pd.DataFrame(rows))
+        summary = report["summary"]
+        detail = report["details"][0]
+
+        self.assertEqual("repair", detail["decision"])
+        self.assertEqual("ok", detail["severity"])
+        self.assertEqual(1, summary["correctRepairs"])
+        self.assertEqual(0, summary["falseRepairs"])
+
     def test_full_simulation_uses_every_group(self) -> None:
         rows = [
             self._feature_row("g1", "乱码1", "修正1", "big5-carrier-to-gbk"),
@@ -146,6 +176,9 @@ class TrainingEvaluationTests(unittest.TestCase):
             "f12_candidate_replacement_ratio",
             "f37_candidate_has_suspicious_unicode",
             "f38_current_has_suspicious_unicode",
+            "f62_native_decode_evidence_present",
+            "f75_ripple_seed_count_norm",
+            "f92_hook_raw_payload_present",
         ]:
             row[column] = 0.0
         return row

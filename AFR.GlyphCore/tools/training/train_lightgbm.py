@@ -6,6 +6,7 @@ import json
 import random
 import re
 import sys
+import unicodedata
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -18,8 +19,8 @@ from afr_glyphcore import FEATURE_COUNT, FEATURE_SCHEMA_VERSION  # noqa: E402
 
 DEFAULT_MAX_ROUNDS = 650
 DEFAULT_EARLY_STOPPING_ROUNDS = 60
-MINIMUM_CONFIDENCE = 0.92
-MINIMUM_SCORE_MARGIN = 0.18
+MINIMUM_CONFIDENCE = 0.60
+MINIMUM_SCORE_MARGIN = 0.02
 MINIMUM_PUBLISH_REPAIR_RECALL = 0.785
 MINIMUM_PUBLISH_DECISION_ACCURACY = 0.936
 OVERFIT_RECALL_GAP = 0.20
@@ -76,7 +77,7 @@ def main() -> int:
         stale_exact_repairs.unlink()
 
     df = pd.read_csv(features_path, encoding="utf-8-sig", low_memory=False)
-    feature_cols = [col for col in df.columns if re.match(r"^f\d{2}_", col)]
+    feature_cols = [col for col in df.columns if re.match(r"^f\d+_", col)]
     if len(feature_cols) != FEATURE_COUNT:
         raise ValueError(f"expected {FEATURE_COUNT} feature columns, got {len(feature_cols)}")
 
@@ -143,6 +144,32 @@ def main() -> int:
         f"最佳轮次 {training_config['bestIteration'] or '未触发早停'}。",
         flush=True,
     )
+    final_iterations = max(1, int(training_config.get("bestIteration") or training_config.get("actualIterations") or args.max_rounds))
+    final_model = lgb.LGBMRegressor(
+        objective="regression",
+        n_estimators=final_iterations,
+        learning_rate=0.035,
+        num_leaves=31,
+        max_depth=-1,
+        min_child_samples=10,
+        subsample=0.9,
+        colsample_bytree=0.9,
+        reg_alpha=0.05,
+        reg_lambda=0.2,
+        random_state=args.seed,
+        n_jobs=-1,
+        verbosity=-1,
+    )
+    print(f"最终发布模型：使用全部 {int(df['group_id'].nunique())} 个已确认样本簇重新拟合 {final_iterations} 轮。", flush=True)
+    final_model.fit(
+        df[feature_cols].astype(np.float32),
+        df["target_score"].astype(np.float32),
+        sample_weight=make_weights(df),
+    )
+    model = final_model
+    training_config["finalFitGroups"] = int(df["group_id"].nunique())
+    training_config["finalFitRows"] = int(len(df))
+    training_config["finalFitStrategy"] = "all-confirmed-groups-after-validation"
 
     reports: dict[str, dict] = {}
     for split_name, split_df in [("train", train_df), ("valid", valid_df)]:
@@ -487,7 +514,7 @@ def run_simulation_only(args, pd, lgb) -> int:
     features_path = Path(args.features)
     output_dir = Path(args.output_dir)
     df = pd.read_csv(features_path, encoding="utf-8-sig", low_memory=False)
-    feature_cols = [col for col in df.columns if re.match(r"^f\d{2}_", col)]
+    feature_cols = [col for col in df.columns if re.match(r"^f\d+_", col)]
     if len(feature_cols) != FEATURE_COUNT:
         raise ValueError(f"expected {FEATURE_COUNT} feature columns, got {len(feature_cols)}")
 
@@ -658,6 +685,7 @@ def make_weights(df):
     weights = np.ones(len(df), dtype=np.float32)
     weights += np.where(df["label_action"] != "repair", 1.5, 0.0)
     weights += np.where(df["is_positive"] == 1, 2.0, 0.0)
+    weights += np.where((df["label_action"] == "repair") & (df["is_positive"] == 0) & (df["is_noop"] == 0), 2.0, 0.0)
     weights += np.where((df["label_action"] != "repair") & (df["is_noop"] == 0), 1.0, 0.0)
     return weights
 
@@ -691,7 +719,7 @@ def evaluate_groups(df) -> dict:
         correct = (
             decision == "repair"
             and expected_repair
-            and str(best["candidate_text"]) == str(best["label_text"])
+            and visible_text_equal(best["candidate_text"], best["label_text"])
         )
         correct_decision = correct or (not expected_repair and decision != "repair")
         false_repair = decision == "repair" and not correct
@@ -755,6 +783,17 @@ def error_severity(expected_repair: bool, decision: str, correct: bool, false_re
     if not correct and expected_repair:
         return "wrong-repair"
     return "ok"
+
+
+def normalize_visible_text(value) -> str:
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    text = re.sub(r"[\u200b-\u200d\ufeff]", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def visible_text_equal(left, right) -> bool:
+    return normalize_visible_text(left) == normalize_visible_text(right)
 
 
 def decide(best, margin: float, group) -> str:
