@@ -200,6 +200,27 @@ class V4FeatureAndCandidateTests(unittest.TestCase):
         self.assertTrue(cleanup[0].is_roundtrip)
         self.assertNotIn(expected_text, [candidate.text for candidate in build_candidates(current_text, {})])
 
+    def test_private_use_prefix_cleanup_does_not_mask_preferred_decode(self) -> None:
+        current_text = "\uf708\u6781\u93e2\u9cf6"
+        context = {
+            "currentText": current_text,
+            "hasNativeDecodeEvidence": True,
+            "nativeDecodeFamilyMismatch": True,
+            "nativeDecodeEvidenceScope": "object",
+            "nativeDecodeSourceCodePageFamily": "big5",
+            "nativeDecodeAppliedCodePageFamily": "gbk",
+        }
+
+        candidates = build_candidates(current_text, context)
+        candidate_texts = [candidate.text for candidate in candidates]
+
+        self.assertIn("\u6c14\u4f53\u706d\u706b", candidate_texts)
+        self.assertNotIn(" \u6781\u93e2\u9cf6", candidate_texts)
+        decoded = [candidate for candidate in candidates if candidate.text == "\u6c14\u4f53\u706d\u706b"]
+        self.assertEqual(1, len(decoded))
+        self.assertIn("big5-carrier-to-gbk", decoded[0].source)
+        self.assertTrue(decoded[0].is_roundtrip)
+
     def test_private_use_punctuation_carryover_requires_native_mismatch(self) -> None:
         current_text = "\u56e5\u00b7\u8de4"
         decoded_text = "\u65bd\ue4d6\u7ed9"

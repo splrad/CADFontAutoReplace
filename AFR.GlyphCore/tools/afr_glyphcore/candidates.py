@@ -29,13 +29,6 @@ def build_candidates(current_text: str, context: dict | None = None) -> list[Can
     actual_context = context or {}
     preferred_source = _evidence_preferred_source(actual_context)
     allow_private_use_prefix_cleanup = _has_native_decode_mismatch(actual_context)
-    _add_private_use_prefix_cleanup_candidate(
-        candidates,
-        current_text,
-        "private-use-prefix-space-fill",
-        "native-evidence-leading-private-use-placeholder",
-        allow_private_use_prefix_cleanup,
-    )
     _add_hook_raw_candidate(candidates, current_text, actual_context, allow_private_use_prefix_cleanup)
     _add_preferred_conversion(candidates, current_text, preferred_source, allow_private_use_prefix_cleanup)
 
@@ -47,6 +40,14 @@ def build_candidates(current_text: str, context: dict | None = None) -> list[Can
         _try_add_conversion(candidates, current_text, "utf-8", "gbk", "utf8-carrier-to-gbk", allow_private_use_prefix_cleanup)
     if preferred_source != "gbk-carrier-to-utf8":
         _try_add_conversion(candidates, current_text, "gbk", "utf-8", "gbk-carrier-to-utf8", allow_private_use_prefix_cleanup)
+    if not _has_strong_decoded_repair_candidate(candidates, preferred_source):
+        _add_private_use_prefix_cleanup_candidate(
+            candidates,
+            current_text,
+            "private-use-prefix-space-fill",
+            "native-evidence-leading-private-use-placeholder",
+            allow_private_use_prefix_cleanup,
+        )
     return sorted(candidates, key=lambda c: (1 if c.is_noop else 0, _source_priority(c.source, preferred_source), c.text))
 
 
@@ -74,7 +75,7 @@ def _try_add_conversion(
         return
 
     try:
-        carrier_bytes = current_text.encode(carrier_encoding, errors="strict")
+        carrier_bytes = _encode_carrier(current_text, carrier_encoding)
         decoded = carrier_bytes.decode(target_encoding, errors="strict")
         if not decoded or decoded == current_text:
             return
@@ -82,7 +83,7 @@ def _try_add_conversion(
         candidate_bytes = decoded.encode(target_encoding, errors="strict")
         roundtrip = (
             carrier_bytes == candidate_bytes
-            and candidate_bytes.decode(carrier_encoding, errors="strict") == current_text
+            and _decode_carrier(candidate_bytes, carrier_encoding) == current_text
         )
         reason = "roundtrip-ok" if roundtrip else "roundtrip-failed"
     except UnicodeError:
@@ -143,6 +144,83 @@ def _source_priority(source: str, preferred_source: str) -> int:
     if not preferred_source:
         return 1
     return 0 if preferred_source.lower() in (source or "").lower() else 1
+
+
+def _has_strong_decoded_repair_candidate(candidates: list[Candidate], preferred_source: str) -> bool:
+    for candidate in candidates:
+        source = (candidate.source or "").lower()
+        if candidate.is_noop or not candidate.is_roundtrip:
+            continue
+        if "hook-raw-stream" in source:
+            return True
+        if preferred_source and preferred_source.lower() in source:
+            return True
+    return False
+
+
+def _encode_carrier(text: str, encoding: str) -> bytes:
+    if encoding.lower() != "cp950":
+        return text.encode(encoding, errors="strict")
+
+    payload = bytearray()
+    for char in text:
+        mapped = _encode_windows_cp950_private_use(char)
+        if mapped is not None:
+            payload.extend(mapped)
+            continue
+        payload.extend(char.encode(encoding, errors="strict"))
+    return bytes(payload)
+
+
+def _decode_carrier(payload: bytes, encoding: str) -> str:
+    if encoding.lower() != "cp950":
+        return payload.decode(encoding, errors="strict")
+
+    parts: list[str] = []
+    segment = bytearray()
+    index = 0
+
+    def flush_segment() -> None:
+        if not segment:
+            return
+        parts.append(bytes(segment).decode(encoding, errors="strict"))
+        segment.clear()
+
+    while index < len(payload):
+        if index + 1 < len(payload):
+            mapped = _decode_windows_cp950_private_use_pair(payload[index], payload[index + 1])
+            if mapped:
+                flush_segment()
+                parts.append(mapped)
+                index += 2
+                continue
+
+        segment.append(payload[index])
+        index += 1
+
+    flush_segment()
+    return "".join(parts)
+
+
+def _encode_windows_cp950_private_use(char: str) -> bytes | None:
+    code = ord(char)
+    # Windows/.NET CP950 maps the ETEN private-use range U+F6B1..U+F7CA
+    # onto Big5 bytes C6A1..C8FE. Python's cp950 codec does not expose
+    # that mapping, but CAD/.NET uses it during runtime candidate generation.
+    if code < 0xF6B1 or code > 0xF7CA:
+        return None
+
+    offset = code - 0xF6B1
+    lead = 0xC6 + offset // 94
+    trail = 0xA1 + offset % 94
+    return bytes((lead, trail))
+
+
+def _decode_windows_cp950_private_use_pair(lead: int, trail: int) -> str:
+    if lead < 0xC6 or lead > 0xC8 or trail < 0xA1 or trail > 0xFE:
+        return ""
+
+    return chr(0xF6B1 + ((lead - 0xC6) * 94) + (trail - 0xA1))
 
 
 def _add_hook_raw_candidate(

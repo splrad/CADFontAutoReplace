@@ -33,6 +33,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetectionContext.cs" Link="Services\FontDetectionContext.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetector.cs" Link="Services\FontDetector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontReplacer.cs" Link="Services\FontReplacer.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\ShxMathSymbolDisplayOverrule.cs" Link="Services\ShxMathSymbolDisplayOverrule.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreDrawingIdentity.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreDrawingIdentity.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreNativeDbTextEvidenceProjector.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreNativeDbTextEvidenceProjector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreNativeDecodeEvidenceStore.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreNativeDecodeEvidenceStore.cs" />

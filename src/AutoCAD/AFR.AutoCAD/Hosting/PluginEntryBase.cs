@@ -152,7 +152,10 @@ public abstract class PluginEntryBase : IExtensionApplication
             // 第零阶段 B: 安装文枢 DBText native evidence Hook，只产强信号，不改 native 文本
             InstallGlyphCoreNativeDecodeHooks();
 
-            // 第零阶段 C: 预热系统字体索引 — 提前扫描可用字体，加速后续检测
+            // 第零阶段 C: 安装显示层补绘，仅处理 SHX 缺失的单字符数学符号，不改图纸文字内容
+            ShxMathSymbolDisplayOverrule.Install();
+
+            // 第零阶段 D: 预热系统字体索引 — 提前扫描可用字体，加速后续检测
             FontDetector.PrewarmSystemFonts();
 
             // 第二阶段: 注册文档事件 — 监听新建/关闭文档，自动触发字体替换
@@ -174,6 +177,7 @@ public abstract class PluginEntryBase : IExtensionApplication
     public void Terminate()
     {
         UninstallGlyphCoreNativeDecodeHooks();
+        ShxMathSymbolDisplayOverrule.Uninstall();
         DiagnosticLogger.Disable();
         PlatformManager.FontHook.Uninstall();
         UnregisterEvents();
@@ -217,6 +221,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         try { Diagnostics.AwsHideableDialogPatcher.Cleanup(); } catch { }
 
         UninstallGlyphCoreNativeDecodeHooks();
+        ShxMathSymbolDisplayOverrule.Uninstall();
         PlatformManager.FontHook.Uninstall();
         DocumentContextManager.Instance.Clear();
         AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDecodeEvidenceStore.Clear();

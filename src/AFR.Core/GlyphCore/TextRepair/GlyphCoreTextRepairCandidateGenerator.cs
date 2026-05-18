@@ -25,7 +25,6 @@ internal static class GlyphCoreTextRepairCandidateGenerator
 
         string preferredSource = GetEvidencePreferredSource(context);
         bool allowPrivateUsePrefixCleanup = HasNativeDecodeMismatch(context);
-        AddPrivateUsePrefixSpaceFillCandidate(candidates, currentText, "private-use-prefix-space-fill", "native-evidence-leading-private-use-placeholder", allowPrivateUsePrefixCleanup);
         AddHookRawCandidate(candidates, currentText, context, allowPrivateUsePrefixCleanup);
         AddPreferredConversion(candidates, currentText, preferredSource, allowPrivateUsePrefixCleanup);
 
@@ -37,6 +36,9 @@ internal static class GlyphCoreTextRepairCandidateGenerator
             TryAddConversion(candidates, currentText, Encoding.UTF8.CodePage, 936, "utf8-carrier-to-gbk", allowPrivateUsePrefixCleanup);
         if (!string.Equals(preferredSource, "gbk-carrier-to-utf8", StringComparison.OrdinalIgnoreCase))
             TryAddConversion(candidates, currentText, 936, Encoding.UTF8.CodePage, "gbk-carrier-to-utf8", allowPrivateUsePrefixCleanup);
+
+        if (!HasStrongDecodedRepairCandidate(candidates, preferredSource))
+            AddPrivateUsePrefixSpaceFillCandidate(candidates, currentText, "private-use-prefix-space-fill", "native-evidence-leading-private-use-placeholder", allowPrivateUsePrefixCleanup);
 
         return candidates
             .OrderBy(c => c.IsNoOp ? 1 : 0)
@@ -92,6 +94,25 @@ internal static class GlyphCoreTextRepairCandidateGenerator
             return 1;
 
         return ContainsSource(source, preferredSource) ? 0 : 1;
+    }
+
+    private static bool HasStrongDecodedRepairCandidate(
+        IReadOnlyList<GlyphCoreTextRepairCandidate> candidates,
+        string preferredSource)
+    {
+        foreach (GlyphCoreTextRepairCandidate candidate in candidates)
+        {
+            if (candidate.IsNoOp || !candidate.IsRoundTrip)
+                continue;
+
+            if (ContainsSource(candidate.Source, "hook-raw-stream"))
+                return true;
+
+            if (!string.IsNullOrEmpty(preferredSource) && ContainsSource(candidate.Source, preferredSource))
+                return true;
+        }
+
+        return false;
     }
 
     private static void AddHookRawCandidate(
