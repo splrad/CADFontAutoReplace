@@ -467,7 +467,7 @@ function hasMismatch(detail: ValidationDetail): boolean {
   const decision = String(detail.decision || '');
   const finalText = decision === 'repair' ? detail.bestText : detail.currentText;
   if (action === 'repair' && detail.bestText !== undefined && detail.labelText !== undefined) {
-    return normalizedVisibleText(finalText) !== normalizedVisibleText(detail.labelText);
+    return !visibleTextEqual(finalText, detail.labelText);
   }
   if (detail.decision !== undefined && action) return String(detail.decision) !== action;
   return true;
@@ -491,9 +491,19 @@ function validationDetails(errorSamples?: ValidationDetail[], fullDetails?: Vali
 function normalizedVisibleText(value: unknown): string {
   return normalizeShxNumberSignAliases(String(value ?? ''))
     .normalize('NFKC')
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/[\u200B-\u200D\uFEFF]/g, '');
+}
+
+function visibleTextEqual(left: unknown, right: unknown): boolean {
+  const leftText = normalizedVisibleText(left);
+  const rightText = normalizedVisibleText(right);
+  if (leftText === rightText) return true;
+  if (startsWithPlaceholderSpaceRun(leftText) || startsWithPlaceholderSpaceRun(rightText)) return false;
+  return leftText.trim() === rightText.trim();
+}
+
+function startsWithPlaceholderSpaceRun(value: string): boolean {
+  return value.length >= 2 && /^\s\s/.test(value);
 }
 
 function normalizeShxNumberSignAliases(value: string): string {

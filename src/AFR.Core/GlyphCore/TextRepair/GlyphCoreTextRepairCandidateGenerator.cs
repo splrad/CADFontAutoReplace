@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -23,17 +24,19 @@ internal static class GlyphCoreTextRepairCandidateGenerator
         AddCandidate(candidates, currentText, "current-noop", "当前文本", isRoundTrip: true);
 
         string preferredSource = GetEvidencePreferredSource(context);
-        AddHookRawCandidate(candidates, currentText, context);
-        AddPreferredConversion(candidates, currentText, preferredSource);
+        bool allowPrivateUsePrefixCleanup = HasNativeDecodeMismatch(context);
+        AddPrivateUsePrefixSpaceFillCandidate(candidates, currentText, "private-use-prefix-space-fill", "native-evidence-leading-private-use-placeholder", allowPrivateUsePrefixCleanup);
+        AddHookRawCandidate(candidates, currentText, context, allowPrivateUsePrefixCleanup);
+        AddPreferredConversion(candidates, currentText, preferredSource, allowPrivateUsePrefixCleanup);
 
         if (!string.Equals(preferredSource, "big5-carrier-to-gbk", StringComparison.OrdinalIgnoreCase))
-            TryAddConversion(candidates, currentText, 950, 936, "big5-carrier-to-gbk");
+            TryAddConversion(candidates, currentText, 950, 936, "big5-carrier-to-gbk", allowPrivateUsePrefixCleanup);
         if (!string.Equals(preferredSource, "gbk-carrier-to-big5", StringComparison.OrdinalIgnoreCase))
-            TryAddConversion(candidates, currentText, 936, 950, "gbk-carrier-to-big5");
+            TryAddConversion(candidates, currentText, 936, 950, "gbk-carrier-to-big5", allowPrivateUsePrefixCleanup);
         if (!string.Equals(preferredSource, "utf8-carrier-to-gbk", StringComparison.OrdinalIgnoreCase))
-            TryAddConversion(candidates, currentText, Encoding.UTF8.CodePage, 936, "utf8-carrier-to-gbk");
+            TryAddConversion(candidates, currentText, Encoding.UTF8.CodePage, 936, "utf8-carrier-to-gbk", allowPrivateUsePrefixCleanup);
         if (!string.Equals(preferredSource, "gbk-carrier-to-utf8", StringComparison.OrdinalIgnoreCase))
-            TryAddConversion(candidates, currentText, 936, Encoding.UTF8.CodePage, "gbk-carrier-to-utf8");
+            TryAddConversion(candidates, currentText, 936, Encoding.UTF8.CodePage, "gbk-carrier-to-utf8", allowPrivateUsePrefixCleanup);
 
         return candidates
             .OrderBy(c => c.IsNoOp ? 1 : 0)
@@ -45,19 +48,20 @@ internal static class GlyphCoreTextRepairCandidateGenerator
     private static void AddPreferredConversion(
         List<GlyphCoreTextRepairCandidate> candidates,
         string currentText,
-        string preferredSource)
+        string preferredSource,
+        bool allowPrivateUsePrefixCleanup)
     {
         if (string.IsNullOrEmpty(preferredSource))
             return;
 
         if (string.Equals(preferredSource, "big5-carrier-to-gbk", StringComparison.OrdinalIgnoreCase))
-            TryAddConversion(candidates, currentText, 950, 936, preferredSource);
+            TryAddConversion(candidates, currentText, 950, 936, preferredSource, allowPrivateUsePrefixCleanup);
         else if (string.Equals(preferredSource, "gbk-carrier-to-big5", StringComparison.OrdinalIgnoreCase))
-            TryAddConversion(candidates, currentText, 936, 950, preferredSource);
+            TryAddConversion(candidates, currentText, 936, 950, preferredSource, allowPrivateUsePrefixCleanup);
         else if (string.Equals(preferredSource, "utf8-carrier-to-gbk", StringComparison.OrdinalIgnoreCase))
-            TryAddConversion(candidates, currentText, Encoding.UTF8.CodePage, 936, preferredSource);
+            TryAddConversion(candidates, currentText, Encoding.UTF8.CodePage, 936, preferredSource, allowPrivateUsePrefixCleanup);
         else if (string.Equals(preferredSource, "gbk-carrier-to-utf8", StringComparison.OrdinalIgnoreCase))
-            TryAddConversion(candidates, currentText, 936, Encoding.UTF8.CodePage, preferredSource);
+            TryAddConversion(candidates, currentText, 936, Encoding.UTF8.CodePage, preferredSource, allowPrivateUsePrefixCleanup);
     }
 
     private static string GetEvidencePreferredSource(GlyphCoreTextRepairContext? context)
@@ -93,7 +97,8 @@ internal static class GlyphCoreTextRepairCandidateGenerator
     private static void AddHookRawCandidate(
         List<GlyphCoreTextRepairCandidate> candidates,
         string currentText,
-        GlyphCoreTextRepairContext? context)
+        GlyphCoreTextRepairContext? context,
+        bool allowPrivateUsePrefixCleanup)
     {
         if (context == null || !context.HasHookRawDecodeEvidence)
             return;
@@ -115,6 +120,19 @@ internal static class GlyphCoreTextRepairCandidateGenerator
             reason += $"; raw-len={context.HookRawPayloadLength}";
 
         AddCandidate(candidates, text, source, reason, context.HookRawRoundTrip);
+        AddPrivateUsePunctuationCarryoverCandidate(
+            candidates,
+            currentText,
+            text,
+            source + "+private-use-punctuation-carryover",
+            reason + "; private-use-punctuation-carryover",
+            allowPrivateUsePrefixCleanup && context.HookRawRoundTrip);
+        AddPrivateUsePrefixSpaceFillCandidate(
+            candidates,
+            text,
+            source + "+private-use-prefix-space-fill",
+            reason + "; leading-private-use-placeholder",
+            allowPrivateUsePrefixCleanup && context.HookRawRoundTrip);
     }
 
     private static void TryAddConversion(
@@ -122,7 +140,8 @@ internal static class GlyphCoreTextRepairCandidateGenerator
         string currentText,
         int carrierCodePage,
         int targetCodePage,
-        string source)
+        string source,
+        bool allowPrivateUsePrefixCleanup)
     {
         if (string.IsNullOrEmpty(currentText))
             return;
@@ -131,6 +150,168 @@ internal static class GlyphCoreTextRepairCandidateGenerator
             return;
 
         AddCandidate(candidates, candidate, source, reason, roundTrip);
+        AddPrivateUsePunctuationCarryoverCandidate(
+            candidates,
+            currentText,
+            candidate,
+            source + "+private-use-punctuation-carryover",
+            reason + "; private-use-punctuation-carryover",
+            allowPrivateUsePrefixCleanup && roundTrip);
+        AddPrivateUsePrefixSpaceFillCandidate(
+            candidates,
+            candidate,
+            source + "+private-use-prefix-space-fill",
+            reason + "; leading-private-use-placeholder",
+            allowPrivateUsePrefixCleanup && roundTrip);
+    }
+
+    private static void AddPrivateUsePrefixSpaceFillCandidate(
+        List<GlyphCoreTextRepairCandidate> candidates,
+        string text,
+        string source,
+        string reason,
+        bool allowPrivateUsePrefixCleanup)
+    {
+        if (!allowPrivateUsePrefixCleanup)
+            return;
+
+        if (!TryReplaceLeadingPrivateUsePlaceholdersWithSpaces(text, out string candidate))
+            return;
+
+        AddCandidate(candidates, candidate, source, reason, isRoundTrip: true);
+    }
+
+    private static void AddPrivateUsePunctuationCarryoverCandidate(
+        List<GlyphCoreTextRepairCandidate> candidates,
+        string currentText,
+        string text,
+        string source,
+        string reason,
+        bool allowPrivateUsePunctuationCarryover)
+    {
+        if (!allowPrivateUsePunctuationCarryover)
+            return;
+
+        if (!TryReplaceInteriorPrivateUseWithCurrentPunctuation(currentText, text, out string candidate))
+            return;
+
+        AddCandidate(candidates, candidate, source, reason, isRoundTrip: true);
+    }
+
+    private static bool TryReplaceLeadingPrivateUsePlaceholdersWithSpaces(string text, out string candidate)
+    {
+        candidate = string.Empty;
+        if (string.IsNullOrEmpty(text))
+            return false;
+
+        int prefixLength = 0;
+        while (prefixLength < text.Length
+               && prefixLength < 4
+               && IsPrivateUse(text[prefixLength]))
+        {
+            prefixLength++;
+        }
+
+        if (prefixLength == 0 || prefixLength >= text.Length)
+            return false;
+
+        if (prefixLength < text.Length && IsPrivateUse(text[prefixLength]))
+            return false;
+
+        string visibleText = text.Substring(prefixLength);
+        if (string.IsNullOrWhiteSpace(visibleText) || !HasMeaningfulVisibleText(visibleText))
+            return false;
+
+        candidate = new string(' ', prefixLength) + visibleText;
+        return true;
+    }
+
+    private static bool TryReplaceInteriorPrivateUseWithCurrentPunctuation(string currentText, string text, out string candidate)
+    {
+        candidate = string.Empty;
+        if (string.IsNullOrEmpty(currentText)
+            || string.IsNullOrEmpty(text)
+            || currentText.Length != text.Length
+            || IsPrivateUse(text[0]))
+            return false;
+
+        char[] chars = text.ToCharArray();
+        int replacements = 0;
+        for (int i = 0; i < chars.Length; i++)
+        {
+            if (!IsPrivateUse(chars[i]))
+                continue;
+
+            char carryover = currentText[i];
+            if (!IsCarryoverPunctuation(carryover))
+                return false;
+
+            chars[i] = carryover;
+            replacements++;
+        }
+
+        if (replacements == 0)
+            return false;
+
+        string repaired = new string(chars);
+        if (!HasMeaningfulVisibleText(repaired))
+            return false;
+
+        candidate = repaired;
+        return true;
+    }
+
+    private static bool IsCarryoverPunctuation(char ch)
+    {
+        if (char.IsWhiteSpace(ch)
+            || char.IsControl(ch)
+            || IsPrivateUse(ch)
+            || char.IsLetterOrDigit(ch))
+            return false;
+
+        UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(ch);
+        return category == UnicodeCategory.OtherPunctuation
+               || category == UnicodeCategory.ConnectorPunctuation
+               || category == UnicodeCategory.DashPunctuation
+               || category == UnicodeCategory.OpenPunctuation
+               || category == UnicodeCategory.ClosePunctuation
+               || category == UnicodeCategory.InitialQuotePunctuation
+               || category == UnicodeCategory.FinalQuotePunctuation
+               || category == UnicodeCategory.MathSymbol
+               || category == UnicodeCategory.ModifierSymbol
+               || category == UnicodeCategory.OtherSymbol;
+    }
+
+    private static bool HasMeaningfulVisibleText(string text)
+    {
+        bool sawVisible = false;
+        foreach (char ch in text)
+        {
+            if (char.IsWhiteSpace(ch) || char.IsControl(ch))
+                continue;
+
+            UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(ch);
+            if (category == UnicodeCategory.PrivateUse
+                || category == UnicodeCategory.Surrogate
+                || category == UnicodeCategory.OtherNotAssigned)
+                return false;
+
+            sawVisible = true;
+            if (char.IsLetterOrDigit(ch)
+                || category == UnicodeCategory.OtherLetter
+                || category == UnicodeCategory.LetterNumber
+                || category == UnicodeCategory.DecimalDigitNumber)
+                return true;
+        }
+
+        return sawVisible && text.Length <= 2;
+    }
+
+    private static bool HasNativeDecodeMismatch(GlyphCoreTextRepairContext? context)
+    {
+        return context != null
+               && context.HasNativeDecodeEvidence
+               && context.NativeDecodeFamilyMismatch;
     }
 
     private static bool TryConvertCarrier(
@@ -222,6 +403,13 @@ internal static class GlyphCoreTextRepairCandidateGenerator
     {
         return !string.IsNullOrEmpty(value)
                && value.IndexOf(family, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool IsPrivateUse(char ch)
+    {
+        UnicodeCategory category = CharUnicodeInfo.GetUnicodeCategory(ch);
+        return category == UnicodeCategory.PrivateUse
+               || (ch >= '\uE000' && ch <= '\uF8FF');
     }
 }
 

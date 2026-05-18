@@ -714,6 +714,17 @@ def make_weights(df):
     weights = np.ones(len(df), dtype=np.float32)
     native_evidence = numeric_column(df, "native_decode_evidence")
     short_punctuation = df["candidate_text"].fillna("").astype(str).map(is_short_punctuation_text).to_numpy()
+    source = df["source"].fillna("").astype(str).str.lower()
+    private_use_prefix_space_fill = (
+        source.str.contains("private-use-prefix-space-fill", regex=False)
+        | source.str.contains("private-use-prefix-trim", regex=False)
+    ).to_numpy()
+    private_use_punctuation_carryover = source.str.contains("private-use-punctuation-carryover", regex=False).to_numpy()
+    candidate_private_use = numeric_column(df, "f14_candidate_private_use_ratio")
+    if not candidate_private_use.any():
+        candidate_private_use = numeric_column(df, "f36_candidate_has_private_use")
+    candidate_leading_private_use = df["candidate_text"].fillna("").astype(str).map(has_leading_private_use_placeholder).to_numpy()
+    current_private_use = numeric_column(df, "f13_current_private_use_ratio")
     weights += np.where(df["label_action"] != "repair", 1.5, 0.0)
     weights += np.where(df["is_positive"] == 1, 2.0, 0.0)
     weights += np.where((df["label_action"] == "repair") & (df["is_positive"] == 0) & (df["is_noop"] == 0), 2.0, 0.0)
@@ -721,6 +732,11 @@ def make_weights(df):
     weights += np.where((df["label_action"] == "repair") & (df["is_positive"] == 1) & (native_evidence > 0), 2.0, 0.0)
     weights += np.where((df["label_action"] == "repair") & (df["is_positive"] == 1) & (native_evidence > 0) & short_punctuation, 4.0, 0.0)
     weights += np.where((df["label_action"] == "repair") & (df["is_noop"] == 1) & (native_evidence > 0), 3.0, 0.0)
+    weights += np.where((df["label_action"] == "repair") & (df["is_positive"] == 1) & private_use_prefix_space_fill, 8.0, 0.0)
+    weights += np.where((df["label_action"] == "repair") & (df["is_positive"] == 1) & private_use_punctuation_carryover, 8.0, 0.0)
+    weights += np.where((df["label_action"] == "repair") & (df["is_positive"] == 1) & (candidate_private_use > 0) & ~candidate_leading_private_use, 4.0, 0.0)
+    weights += np.where((df["label_action"] == "repair") & (df["is_positive"] == 0) & candidate_leading_private_use, 5.0, 0.0)
+    weights += np.where((df["label_action"] == "repair") & (df["is_positive"] == 1) & (current_private_use > 0) & (candidate_private_use == 0), 3.0, 0.0)
     weights += np.where((df["label_action"] != "repair") & (df["is_noop"] == 0), 1.0, 0.0)
     return weights
 
@@ -738,6 +754,18 @@ def is_short_punctuation_text(text: str) -> bool:
     if not normalized or len(normalized) > 2:
         return False
     return all(unicodedata.category(char).startswith("P") for char in normalized)
+
+
+def has_leading_private_use_placeholder(text: str) -> bool:
+    if not text:
+        return False
+    text = str(text)
+    if unicodedata.category(text[0]) != "Co":
+        return False
+    prefix_length = 0
+    while prefix_length < len(text) and prefix_length < 4 and unicodedata.category(text[prefix_length]) == "Co":
+        prefix_length += 1
+    return 0 < prefix_length < len(text)
 
 
 def clip01(values):
@@ -947,12 +975,21 @@ def normalize_visible_text(value) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
     text = normalize_shx_number_sign_aliases(text)
     text = re.sub(r"[\u200b-\u200d\ufeff]", "", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    return text
 
 
 def visible_text_equal(left, right) -> bool:
-    return normalize_visible_text(left) == normalize_visible_text(right)
+    left_text = normalize_visible_text(left)
+    right_text = normalize_visible_text(right)
+    if left_text == right_text:
+        return True
+    if starts_with_placeholder_space_run(left_text) or starts_with_placeholder_space_run(right_text):
+        return False
+    return left_text.strip() == right_text.strip()
+
+
+def starts_with_placeholder_space_run(text: str) -> bool:
+    return len(text) >= 2 and text[0].isspace() and text[1].isspace()
 
 
 def normalize_shx_number_sign_aliases(text: str) -> str:
@@ -1105,6 +1142,7 @@ def row_has_candidate_unsafe(row) -> bool:
     return (
         row_float(row, "f10_candidate_control_ratio") > 0
         or row_float(row, "f12_candidate_replacement_ratio") > 0
+        or has_leading_private_use_placeholder(str(row.get("candidate_text") or ""))
         or row_float(row, "f37_candidate_has_suspicious_unicode") > 0
     )
 

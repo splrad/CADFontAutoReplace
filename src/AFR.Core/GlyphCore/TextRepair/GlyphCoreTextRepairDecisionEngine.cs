@@ -43,7 +43,7 @@ internal static class GlyphCoreTextRepairDecisionEngine
         if (string.IsNullOrEmpty(best.Text))
             return GlyphCoreTextRepairDecision.Unsafe("candidate-empty", summary);
 
-        if (GlyphCoreTextRepairFeatureExtractor.HasUnsafeText(best.Text))
+        if (GlyphCoreTextRepairFeatureExtractor.HasUnsafeRepairCandidateText(best.Text))
             return GlyphCoreTextRepairDecision.Unsafe("unsafe-candidate-text", summary);
 
         if (!best.IsRoundTrip)

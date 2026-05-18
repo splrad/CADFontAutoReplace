@@ -139,6 +139,27 @@ internal static class GlyphCoreTextRepairFeatureExtractor
                || HasSuspiciousUnicode(text);
     }
 
+    public static bool HasUnsafeRepairCandidateText(string text)
+    {
+        TextStats stats = Analyze(text);
+        return stats.ControlRatio > 0
+               || stats.ReplacementRatio > 0
+               || HasLeadingPrivateUsePlaceholder(text)
+               || HasSuspiciousUnicode(text);
+    }
+
+    private static bool HasLeadingPrivateUsePlaceholder(string text)
+    {
+        if (string.IsNullOrEmpty(text) || !IsPrivateUse(text[0]))
+            return false;
+
+        int prefixLength = 0;
+        while (prefixLength < text.Length && prefixLength < 4 && IsPrivateUse(text[prefixLength]))
+            prefixLength++;
+
+        return prefixLength > 0 && prefixLength < text.Length;
+    }
+
     private static TextStats Analyze(string text)
     {
         if (string.IsNullOrEmpty(text))

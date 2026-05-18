@@ -194,12 +194,21 @@ def normalize_visible_text(value: str) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
     text = normalize_shx_number_sign_aliases(text)
     text = re.sub(r"[\u200b-\u200d\ufeff]", "", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    return text
 
 
 def visible_text_equal(left: str, right: str) -> bool:
-    return normalize_visible_text(left) == normalize_visible_text(right)
+    left_text = normalize_visible_text(left)
+    right_text = normalize_visible_text(right)
+    if left_text == right_text:
+        return True
+    if starts_with_placeholder_space_run(left_text) or starts_with_placeholder_space_run(right_text):
+        return False
+    return left_text.strip() == right_text.strip()
+
+
+def starts_with_placeholder_space_run(text: str) -> bool:
+    return len(text) >= 2 and text[0].isspace() and text[1].isspace()
 
 
 def normalize_shx_number_sign_aliases(text: str) -> str:

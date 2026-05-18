@@ -162,6 +162,91 @@ class V4FeatureAndCandidateTests(unittest.TestCase):
         self.assertEqual(0.0, rows[1]["target_score"])
         self.assertEqual(0, rows[1]["is_positive"])
 
+    def test_private_use_prefix_cleanup_requires_native_mismatch(self) -> None:
+        current_text = "\ue4de\ue4de\u5bb9\u79ef\u4fee\u6b63\u7cfb\u6570\u3002"
+        expected_text = "  \u5bb9\u79ef\u4fee\u6b63\u7cfb\u6570\u3002"
+        context = {
+            "currentText": current_text,
+            "hasNativeDecodeEvidence": True,
+            "nativeDecodeFamilyMismatch": True,
+            "nativeDecodeEvidenceScope": "object",
+        }
+
+        candidates = build_candidates(current_text, context)
+        cleanup = [candidate for candidate in candidates if candidate.text == expected_text]
+
+        self.assertEqual(1, len(cleanup))
+        self.assertIn("private-use-prefix-space-fill", cleanup[0].source)
+        self.assertTrue(cleanup[0].is_roundtrip)
+        self.assertNotIn(expected_text, [candidate.text for candidate in build_candidates(current_text, {})])
+
+    def test_private_use_punctuation_carryover_requires_native_mismatch(self) -> None:
+        current_text = "\u56e5\u00b7\u8de4"
+        decoded_text = "\u65bd\ue4d6\u7ed9"
+        expected_text = "\u65bd\u00b7\u7ed9"
+        context = {
+            "currentText": current_text,
+            "hasNativeDecodeEvidence": True,
+            "nativeDecodeFamilyMismatch": True,
+            "nativeDecodeEvidenceScope": "object",
+            "hasHookRawDecodeEvidence": True,
+            "hookPreferredDecodedText": decoded_text,
+            "hookRawRoundTrip": True,
+            "hookRawCandidateSource": "hook-raw-stream",
+        }
+
+        candidates = build_candidates(current_text, context)
+        carryover = [
+            candidate
+            for candidate in candidates
+            if candidate.text == expected_text and "private-use-punctuation-carryover" in candidate.source
+        ]
+
+        self.assertEqual(1, len(carryover))
+        self.assertTrue(carryover[0].is_roundtrip)
+        self.assertNotIn(
+            "private-use-punctuation-carryover",
+            "+".join(candidate.source for candidate in build_candidates(current_text, {"hookPreferredDecodedText": decoded_text})),
+        )
+
+    def test_private_use_prefixed_noop_is_not_visible_label_match(self) -> None:
+        current_text = "\ue4de\ue4de\u5bb9\u79ef\u4fee\u6b63\u7cfb\u6570\u3002"
+        label_text = "  \u5bb9\u79ef\u4fee\u6b63\u7cfb\u6570\u3002"
+        record = {
+            "schema": "dbtext-ai-reviewed-label-v1",
+            "featureSchema": FEATURE_SCHEMA_VERSION,
+            "groupId": "private-use-prefix-1",
+            "currentText": current_text,
+            "labelAction": "repair",
+            "labelText": label_text,
+            "context": {"currentText": current_text},
+            "candidates": [
+                {
+                    "text": current_text,
+                    "source": "current-noop",
+                    "reason": "current text",
+                    "isRoundTrip": True,
+                    "targetScore": 1.0,
+                },
+                {
+                    "text": label_text,
+                    "source": "private-use-prefix-space-fill",
+                    "reason": "native-evidence-leading-private-use-placeholder",
+                    "isRoundTrip": True,
+                    "targetScore": 0.0,
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "reviewed.jsonl"
+            input_path.write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
+            rows = list(build_rows(input_path))
+
+        self.assertEqual(0.0, rows[0]["target_score"])
+        self.assertEqual(0, rows[0]["is_positive"])
+        self.assertEqual(1.0, rows[1]["target_score"])
+        self.assertEqual(1, rows[1]["is_positive"])
+
 
 if __name__ == "__main__":
     unittest.main()
