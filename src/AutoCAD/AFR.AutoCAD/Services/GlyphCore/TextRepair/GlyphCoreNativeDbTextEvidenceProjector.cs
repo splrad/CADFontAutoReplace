@@ -33,6 +33,8 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
     private static int _rawAppliedDecodeMismatchCount;
     private static int _rawAlternateDecodeMissCount;
     private static int _rawPolicyRejectedCount;
+    private static int _rawTextCarrierPendingCount;
+    private static int _rawTextCarrierPromotedCount;
     private static int _rawPendingPromotedCount;
     private static int _rawPendingSuppressedCount;
     private static int _errorCount;
@@ -91,7 +93,8 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
                 {
                     Interlocked.Increment(ref _familyMismatchMissCount);
                     IncrementRawReject(rawRejectReason);
-                    if (rawRejectReason == RawEquivalentRejectReason.PolicyRejected)
+                    if (rawRejectReason == RawEquivalentRejectReason.PolicyRejected
+                        || rawRejectReason == RawEquivalentRejectReason.TextCarrierPending)
                     {
                         StorePendingRawEquivalentEvidence(
                             drawing,
@@ -100,7 +103,8 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
                             appliedFamily,
                             rawPayload,
                             preferredDecodedText,
-                            rawRoundTrip);
+                            rawRoundTrip,
+                            rawRejectReason == RawEquivalentRejectReason.TextCarrierPending);
                     }
 
                     return;
@@ -156,6 +160,7 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
            $"rawEquivalent={_rawEquivalentEvidenceCount}, rawUnsupportedCp={_rawUnsupportedCodePageCount}, " +
            $"rawNoBytes={_rawNoBytesCount}, rawAppliedMismatch={_rawAppliedDecodeMismatchCount}, " +
            $"rawAltMiss={_rawAlternateDecodeMissCount}, rawPolicyRejected={_rawPolicyRejectedCount}, " +
+           $"rawTextCarrierPending={_rawTextCarrierPendingCount}, rawTextCarrierPromoted={_rawTextCarrierPromotedCount}, " +
            $"rawPendingPromoted={_rawPendingPromotedCount}, rawPendingSuppressed={_rawPendingSuppressedCount}, errors={_errorCount}";
 
     public static int PromotePendingRawEquivalentEvidence(GlyphCoreDrawingIdentity drawing, int scannedCount)
@@ -176,7 +181,7 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
             PendingRawEvidenceByDrawing.Remove(drawingKey);
         }
 
-        if (!ShouldPromotePendingRawEquivalentEvidence(records.Length, scannedCount))
+        if (!ShouldPromotePendingRawEquivalentEvidence(records, scannedCount))
         {
             Interlocked.Add(ref _rawPendingSuppressedCount, records.Length);
             TryLog($"pending-raw-suppressed: drawing={drawing.FileName}, count={records.Length}, scanned={scannedCount}");
@@ -196,12 +201,13 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
                 record.RawPayload,
                 record.PreferredDecodedText,
                 record.RawRoundTrip,
-                0.75f);
+                record.TextCarrierOnly ? 0.72f : 0.75f);
         }
 
         Interlocked.Add(ref _registerCount, records.Length);
         Interlocked.Add(ref _rawEquivalentEvidenceCount, records.Length);
         Interlocked.Add(ref _rawPendingPromotedCount, records.Length);
+        Interlocked.Add(ref _rawTextCarrierPromotedCount, CountTextCarrierOnly(records));
         TryLog($"pending-raw-promoted: drawing={drawing.FileName}, count={records.Length}, scanned={scannedCount}");
         return records.Length;
     }
@@ -219,6 +225,8 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
         Interlocked.Exchange(ref _rawAppliedDecodeMismatchCount, 0);
         Interlocked.Exchange(ref _rawAlternateDecodeMissCount, 0);
         Interlocked.Exchange(ref _rawPolicyRejectedCount, 0);
+        Interlocked.Exchange(ref _rawTextCarrierPendingCount, 0);
+        Interlocked.Exchange(ref _rawTextCarrierPromotedCount, 0);
         Interlocked.Exchange(ref _rawPendingPromotedCount, 0);
         Interlocked.Exchange(ref _rawPendingSuppressedCount, 0);
         Interlocked.Exchange(ref _errorCount, 0);
@@ -376,7 +384,22 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
         byte[] textBytes = SelectUpstreamTextBytes(hasUpstream, upstream);
         if (textBytes.Length == 0)
         {
-            rejectReason = RawEquivalentRejectReason.NoBytes;
+            if (TryBuildCurrentTextCarrierEquivalentEvidence(
+                    currentText,
+                    appliedWindowsCodePage,
+                    alternateWindowsCodePage,
+                    out sourceFamily,
+                    out appliedFamily,
+                    out preferredDecodedText,
+                    out rawRoundTrip))
+            {
+                rejectReason = RawEquivalentRejectReason.TextCarrierPending;
+            }
+            else
+            {
+                rejectReason = RawEquivalentRejectReason.NoBytes;
+            }
+
             return false;
         }
 
@@ -418,13 +441,13 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
         string appliedFamily,
         byte[] rawPayload,
         string preferredDecodedText,
-        bool rawRoundTrip)
+        bool rawRoundTrip,
+        bool textCarrierOnly = false)
     {
         if (string.IsNullOrWhiteSpace(context.Handle)
             || string.IsNullOrWhiteSpace(sourceFamily)
             || string.IsNullOrWhiteSpace(appliedFamily)
             || string.Equals(sourceFamily, appliedFamily, StringComparison.OrdinalIgnoreCase)
-            || rawPayload.Length == 0
             || string.IsNullOrWhiteSpace(preferredDecodedText))
             return;
 
@@ -441,7 +464,8 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
             appliedFamily,
             rawPayload,
             preferredDecodedText,
-            rawRoundTrip);
+            rawRoundTrip,
+            textCarrierOnly);
 
         lock (PendingRawLock)
         {
@@ -455,8 +479,12 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
         }
     }
 
-    private static bool ShouldPromotePendingRawEquivalentEvidence(int pendingCount, int scannedCount)
+    private static bool ShouldPromotePendingRawEquivalentEvidence(PendingRawEquivalentEvidence[] records, int scannedCount)
     {
+        int pendingCount = records.Length;
+        if (pendingCount == 1 && scannedCount == 1 && records[0].TextCarrierOnly)
+            return true;
+
         if (pendingCount < MinimumPendingRawEvidenceCount)
             return false;
 
@@ -489,6 +517,9 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
                 break;
             case RawEquivalentRejectReason.PolicyRejected:
                 Interlocked.Increment(ref _rawPolicyRejectedCount);
+                break;
+            case RawEquivalentRejectReason.TextCarrierPending:
+                Interlocked.Increment(ref _rawTextCarrierPendingCount);
                 break;
         }
     }
@@ -571,6 +602,87 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
         return candidateDisallowed == 0
                && candidatePrivateUse == 0
                && candidateSimplifiedCjk > 0;
+    }
+
+    private static bool TryBuildCurrentTextCarrierEquivalentEvidence(
+        string currentText,
+        int appliedWindowsCodePage,
+        int alternateWindowsCodePage,
+        out string sourceFamily,
+        out string appliedFamily,
+        out string preferredDecodedText,
+        out bool rawRoundTrip)
+    {
+        sourceFamily = WindowsCodePageToFamily(alternateWindowsCodePage);
+        appliedFamily = WindowsCodePageToFamily(appliedWindowsCodePage);
+        preferredDecodedText = string.Empty;
+        rawRoundTrip = false;
+
+        if (string.IsNullOrWhiteSpace(sourceFamily)
+            || string.IsNullOrWhiteSpace(appliedFamily)
+            || string.Equals(sourceFamily, appliedFamily, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (!TryConvertCarrier(currentText, sourceFamily, appliedFamily, out string candidate, out rawRoundTrip)
+            || !rawRoundTrip)
+            return false;
+
+        if (!TryAcceptSimplifiedChineseEngineeringPolicyCandidate(currentText, candidate)
+            || !HasStrongCarrierArtifact(currentText, candidate))
+            return false;
+
+        preferredDecodedText = candidate;
+        return true;
+    }
+
+    private static bool HasStrongCarrierArtifact(string currentText, string candidate)
+    {
+        AnalyzeSimplifiedChineseEngineeringText(
+            currentText,
+            out int currentDisallowed,
+            out _,
+            out int currentPrivateUse);
+        AnalyzeSimplifiedChineseEngineeringText(
+            candidate,
+            out _,
+            out int candidateSimplifiedCjk,
+            out int candidatePrivateUse);
+
+        if (currentPrivateUse > 0 && candidatePrivateUse == 0)
+            return true;
+
+        if (ContainsDbcsCarrierPunctuation(currentText))
+            return true;
+
+        int currentCjk = CountCjkUnifiedIdeographs(currentText);
+        return currentCjk >= 3
+               && currentDisallowed >= Math.Max(2, (int)Math.Ceiling(currentCjk * 0.6))
+               && candidateSimplifiedCjk >= Math.Max(2, (int)Math.Ceiling(currentCjk * 0.5));
+    }
+
+    private static bool ContainsDbcsCarrierPunctuation(string text)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            char ch = text[i];
+            if ((ch >= '\u3100' && ch <= '\u312F')
+                || (ch >= '\uFE50' && ch <= '\uFE6F'))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static int CountCjkUnifiedIdeographs(string text)
+    {
+        int count = 0;
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (IsCjkUnifiedIdeograph(text[i]))
+                count++;
+        }
+
+        return count;
     }
 
     private static string ExtractAsciiSkeleton(string text)
@@ -780,6 +892,18 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
             DiagnosticLogger.Log(Tag, message);
     }
 
+    private static int CountTextCarrierOnly(PendingRawEquivalentEvidence[] records)
+    {
+        int count = 0;
+        for (int i = 0; i < records.Length; i++)
+        {
+            if (records[i].TextCarrierOnly)
+                count++;
+        }
+
+        return count;
+    }
+
     private enum RawEquivalentRejectReason
     {
         None,
@@ -787,7 +911,8 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
         NoBytes,
         AppliedDecodeMismatch,
         AlternateDecodeMissingOrSame,
-        PolicyRejected
+        PolicyRejected,
+        TextCarrierPending
     }
 
     private readonly record struct PendingRawEquivalentEvidence(
@@ -799,5 +924,6 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
         string AppliedFamily,
         byte[] RawPayload,
         string PreferredDecodedText,
-        bool RawRoundTrip);
+        bool RawRoundTrip,
+        bool TextCarrierOnly);
 }
