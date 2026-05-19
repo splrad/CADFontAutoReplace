@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
+using System.Threading;
 using AFR.Platform;
 using AFR.Services;
 
@@ -26,6 +27,18 @@ internal static class MTextInlineFontHook
     private static readonly ConcurrentDictionary<string, IntPtr> NativeTypefaceCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, IntPtr> NativeFileNameCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, InlineFontType> InlineFontCandidates = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, byte> LoadStyleRecRedirectLogSeen = new(StringComparer.OrdinalIgnoreCase);
+    private static long _explodeFragmentsHitCount;
+    private static long _explodeFragmentsCallbackHitCount;
+    private static long _explodeFragmentsWorldDrawHitCount;
+    private static long _loadStyleRecInlineHitCount;
+    private static long _loadStyleRecInlineApplyCount;
+    private static long _setFontHitCount;
+    private static long _setFileNameHitCount;
+    private static long _setBigFontFileNameHitCount;
+    private static long _fileNameCtorHitCount;
+    private static long _suppressedSetterHitCount;
 
     [ThreadStatic] private static bool _inSetFontHook;
     [ThreadStatic] private static bool _inFileNameCtorHook;
@@ -33,6 +46,7 @@ internal static class MTextInlineFontHook
     [ThreadStatic] private static bool _inSetBigFontFileNameHook;
     [ThreadStatic] private static bool _inInlineFontRedirect;
     [ThreadStatic] private static bool _inExplodeFragmentsHook;
+    [ThreadStatic] private static bool _suppressInlineRuntimeMapping;
     [ThreadStatic] private static int _mTextScopeDepth;
 
     internal static bool IsInsideInlineFontHook
@@ -54,6 +68,86 @@ internal static class MTextInlineFontHook
         || _setBigFontFileNameHook?.IsInstalled == true
         || _explodeFragmentsHook?.IsInstalled == true
         ;
+
+    internal static IDisposable SuppressInlineRuntimeMapping()
+        => new InlineRuntimeMappingSuppressionScope();
+
+    internal static string GetDiagnosticsSummary()
+        => $"ExplodeFragmentsHits={Interlocked.Read(ref _explodeFragmentsHitCount)}, "
+           + $"CallbackHits={Interlocked.Read(ref _explodeFragmentsCallbackHitCount)}, "
+           + $"WorldDrawHits={Interlocked.Read(ref _explodeFragmentsWorldDrawHitCount)}, "
+           + $"LoadStyleRecInlineHits={Interlocked.Read(ref _loadStyleRecInlineHitCount)}, "
+           + $"LoadStyleRecInlineApplies={Interlocked.Read(ref _loadStyleRecInlineApplyCount)}, "
+           + $"SetFontHits={Interlocked.Read(ref _setFontHitCount)}, "
+           + $"SetFileNameHits={Interlocked.Read(ref _setFileNameHitCount)}, "
+           + $"SetBigFontFileNameHits={Interlocked.Read(ref _setBigFontFileNameHitCount)}, "
+           + $"CtorHits={Interlocked.Read(ref _fileNameCtorHitCount)}, "
+           + $"SuppressedSetterHits={Interlocked.Read(ref _suppressedSetterHitCount)}";
+
+    internal static void ReplaceInlineFontCandidates(IReadOnlyDictionary<string, InlineFontType> inlineFonts)
+    {
+        InlineFontCandidates.Clear();
+
+        foreach (var (fontName, inlineType) in inlineFonts)
+        {
+            string key = inlineType == InlineFontType.TrueType
+                ? FontRedirectResolver.NormalizeInputName(fontName)
+                : NormalizeInlineShxName(fontName);
+
+            if (!string.IsNullOrWhiteSpace(key))
+                InlineFontCandidates[key] = inlineType;
+        }
+    }
+
+    internal static bool TryApplyInlineLoadStyleRecMappings(
+        IntPtr self,
+        string styleName,
+        string fileName,
+        string bigFontFileName,
+        Func<string, IntPtr> getNativeString,
+        Action<IntPtr, IntPtr>? setFileName,
+        Action<IntPtr, IntPtr>? setBigFontFileName)
+    {
+        if (!string.IsNullOrWhiteSpace(styleName) || InlineFontCandidates.IsEmpty)
+            return false;
+
+        bool hasCandidate = IsInlineCandidate(fileName, InlineFontType.ShxMain)
+                            || IsInlineCandidate(bigFontFileName, InlineFontType.ShxBigFont);
+        if (!hasCandidate)
+            return false;
+
+        Interlocked.Increment(ref _loadStyleRecInlineHitCount);
+        bool applied = false;
+
+        if (setFileName != null)
+        {
+            applied |= TryApplyInlineLoadStyleRecShxMapping(
+                self,
+                fileName,
+                bigFont: false,
+                InlineFontType.ShxMain,
+                getNativeString,
+                setFileName,
+                "SHX主字体");
+        }
+
+        if (setBigFontFileName != null)
+        {
+            applied |= TryApplyInlineLoadStyleRecShxMapping(
+                self,
+                bigFontFileName,
+                bigFont: true,
+                InlineFontType.ShxBigFont,
+                getNativeString,
+                setBigFontFileName,
+                "SHX大字体");
+        }
+
+        if (applied)
+            Interlocked.Increment(ref _loadStyleRecInlineApplyCount);
+
+        return applied;
+    }
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int AcGiTextStyleSetFontDelegate(
@@ -122,6 +216,10 @@ internal static class MTextInlineFontHook
 
     internal static void Uninstall()
     {
+        DiagnosticLogger.Log(Tag,
+            "已卸载。"
+            + GetDiagnosticsSummary());
+
         _explodeFragmentsHook?.Uninstall();
         _explodeFragmentsHook = null;
         _explodeFragmentsHookDelegate = null;
@@ -139,6 +237,18 @@ internal static class MTextInlineFontHook
         _setBigFontFileNameHook = null;
         _setBigFontFileNameHookDelegate = null;
         RedirectLogSeen.Clear();
+        LoadStyleRecRedirectLogSeen.Clear();
+        InlineFontCandidates.Clear();
+        Interlocked.Exchange(ref _explodeFragmentsHitCount, 0);
+        Interlocked.Exchange(ref _explodeFragmentsCallbackHitCount, 0);
+        Interlocked.Exchange(ref _explodeFragmentsWorldDrawHitCount, 0);
+        Interlocked.Exchange(ref _loadStyleRecInlineHitCount, 0);
+        Interlocked.Exchange(ref _loadStyleRecInlineApplyCount, 0);
+        Interlocked.Exchange(ref _setFontHitCount, 0);
+        Interlocked.Exchange(ref _setFileNameHitCount, 0);
+        Interlocked.Exchange(ref _setBigFontFileNameHitCount, 0);
+        Interlocked.Exchange(ref _fileNameCtorHitCount, 0);
+        Interlocked.Exchange(ref _suppressedSetterHitCount, 0);
     }
 
     private static void TryInstallSetFontHook(IntPtr module, string exportName)
@@ -254,13 +364,24 @@ internal static class MTextInlineFontHook
         if (trampoline == null)
             return 0;
 
-        if (_inSetFontHook || !IsInsideMTextScope || StyleTextStyleHook.IsInsideStyleRuntimeOperation)
-            return trampoline(self, typeface, bold, italic, charset, pitch, family);
+        string scopedFontName = ReadNativeString(typeface);
+        bool inlineCandidate = IsInlineCandidate(scopedFontName, InlineFontType.TrueType);
+        if (_inSetFontHook
+            || _suppressInlineRuntimeMapping
+            || (!IsInsideMTextScope && !inlineCandidate)
+            || (StyleTextStyleHook.IsInsideStyleRuntimeOperation && !inlineCandidate))
+        {
+            if (_suppressInlineRuntimeMapping)
+                Interlocked.Increment(ref _suppressedSetterHitCount);
 
+            return trampoline(self, typeface, bold, italic, charset, pitch, family);
+        }
+
+        Interlocked.Increment(ref _setFontHitCount);
         _inSetFontHook = true;
         try
         {
-            string fontName = Marshal.PtrToStringUni(typeface) ?? string.Empty;
+            string fontName = scopedFontName;
             string? replacement = ResolveMissingTrueTypeReplacement(fontName);
             if (replacement != null)
             {
@@ -335,14 +456,23 @@ internal static class MTextInlineFontHook
         if (trampoline == null)
             return;
 
-        if (_inFileNameCtorHook || !IsInsideMTextScope || StyleTextStyleHook.IsInsideStyleRuntimeOperation)
+        bool inlineCandidate = IsInlineCandidate(ReadNativeString(fontName), InlineFontType.ShxMain)
+                               || IsInlineCandidate(ReadNativeString(bigFontName), InlineFontType.ShxBigFont);
+        if (_inFileNameCtorHook
+            || _suppressInlineRuntimeMapping
+            || (!IsInsideMTextScope && !inlineCandidate)
+            || (StyleTextStyleHook.IsInsideStyleRuntimeOperation && !inlineCandidate))
         {
+            if (_suppressInlineRuntimeMapping)
+                Interlocked.Increment(ref _suppressedSetterHitCount);
+
             trampoline(
                 self, fontName, bigFontName, textSize, xScale, obliqueAngle, trackingPercent,
                 isBackward, isUpsideDown, isVertical, isOverlined, isUnderlined, isStrikethrough, styleName);
             return;
         }
 
+        Interlocked.Increment(ref _fileNameCtorHitCount);
         _inFileNameCtorHook = true;
         try
         {
@@ -427,16 +557,29 @@ internal static class MTextInlineFontHook
         if (trampoline == null)
             return;
 
-        if (inHook || !IsInsideMTextScope || StyleTextStyleHook.IsInsideStyleRuntimeOperation)
+        string originalForScope = ReadNativeString(fontName);
+        bool inlineCandidate = IsInlineCandidate(originalForScope, inlineType);
+        if (inHook
+            || _suppressInlineRuntimeMapping
+            || (!IsInsideMTextScope && !inlineCandidate)
+            || (StyleTextStyleHook.IsInsideStyleRuntimeOperation && !inlineCandidate))
         {
+            if (_suppressInlineRuntimeMapping)
+                Interlocked.Increment(ref _suppressedSetterHitCount);
+
             trampoline(self, fontName);
             return;
         }
 
+        if (bigFont)
+            Interlocked.Increment(ref _setBigFontFileNameHitCount);
+        else
+            Interlocked.Increment(ref _setFileNameHitCount);
+
         inHook = true;
         try
         {
-            string original = Marshal.PtrToStringUni(fontName) ?? string.Empty;
+            string original = originalForScope;
             string? replacement = ResolveMissingShxReplacement(original, bigFont, out string sourceKey);
             if (replacement != null)
             {
@@ -663,6 +806,62 @@ internal static class MTextInlineFontHook
             : normalized + ".shx";
     }
 
+    private static bool IsInlineCandidate(string fontName, InlineFontType expectedType)
+    {
+        if (string.IsNullOrWhiteSpace(fontName))
+            return false;
+
+        string key = expectedType == InlineFontType.TrueType
+            ? FontRedirectResolver.NormalizeInputName(fontName)
+            : NormalizeInlineShxName(fontName);
+        return InlineFontCandidates.TryGetValue(key, out InlineFontType actualType)
+               && actualType == expectedType;
+    }
+
+    private static string ReadNativeString(IntPtr value)
+    {
+        if (value == IntPtr.Zero)
+            return string.Empty;
+
+        try
+        {
+            return Marshal.PtrToStringUni(value) ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static bool TryApplyInlineLoadStyleRecShxMapping(
+        IntPtr self,
+        string original,
+        bool bigFont,
+        InlineFontType inlineType,
+        Func<string, IntPtr> getNativeString,
+        Action<IntPtr, IntPtr> setter,
+        string logCategory)
+    {
+        if (!IsInlineCandidate(original, inlineType))
+            return false;
+
+        string? replacement = ResolveMissingShxReplacement(original, bigFont, out string sourceKey);
+        if (replacement == null)
+            return false;
+
+        setter(self, getNativeString(replacement));
+        FontRuntimeMappingStore.RecordInlineMapping(sourceKey, replacement, inlineType);
+
+        string redirectKey = $"loadStyleRec|{sourceKey}|{replacement}|{logCategory}";
+        if (LoadStyleRecRedirectLogSeen.TryAdd(redirectKey, 0))
+        {
+            DiagnosticLogger.Log(Tag,
+                $"AcGiTextStyle.loadStyleRec MText内联{logCategory}重定向: '{original}' → '{replacement}'");
+        }
+
+        return true;
+    }
+
     private static void ExplodeFragmentsHookHandler(
         IntPtr self,
         IntPtr callback,
@@ -673,11 +872,17 @@ internal static class MTextInlineFontHook
         if (trampoline == null)
             return;
 
-        if (_inExplodeFragmentsHook || callback == IntPtr.Zero)
+        if (_inExplodeFragmentsHook)
         {
             trampoline(self, callback, callbackParam, worldDraw);
             return;
         }
+
+        Interlocked.Increment(ref _explodeFragmentsHitCount);
+        if (callback != IntPtr.Zero)
+            Interlocked.Increment(ref _explodeFragmentsCallbackHitCount);
+        if (worldDraw != IntPtr.Zero)
+            Interlocked.Increment(ref _explodeFragmentsWorldDrawHitCount);
 
         _inExplodeFragmentsHook = true;
         _mTextScopeDepth++;
@@ -719,4 +924,20 @@ internal static class MTextInlineFontHook
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string lpModuleName);
+
+    private sealed class InlineRuntimeMappingSuppressionScope : IDisposable
+    {
+        private readonly bool _previous;
+
+        internal InlineRuntimeMappingSuppressionScope()
+        {
+            _previous = _suppressInlineRuntimeMapping;
+            _suppressInlineRuntimeMapping = true;
+        }
+
+        public void Dispose()
+        {
+            _suppressInlineRuntimeMapping = _previous;
+        }
+    }
 }

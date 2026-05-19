@@ -221,6 +221,7 @@ internal static class StyleTextStyleHook
         try
         {
             ApplyRegisteredStyleMappings(self);
+            ApplyMTextInlineLoadStyleRecMappings(self);
             int result = trampoline(self, db);
             LogStyleLoad(self, db, result);
             return result;
@@ -427,6 +428,22 @@ internal static class StyleTextStyleHook
                 ApplyShxMapping(self, styleName, mapping, bigFont: false);
             }
         }
+    }
+
+    private static void ApplyMTextInlineLoadStyleRecMappings(IntPtr self)
+    {
+        string styleName = ReadString(_styleNameGetter, self);
+        string fileName = ReadString(_fileNameGetter, self);
+        string bigFontFileName = ReadString(_bigFontFileNameGetter, self);
+
+        MTextInlineFontHook.TryApplyInlineLoadStyleRecMappings(
+            self,
+            styleName,
+            fileName,
+            bigFontFileName,
+            GetNativeString,
+            _setFileName == null ? null : _setFileName.Invoke,
+            _setBigFontFileName == null ? null : _setBigFontFileName.Invoke);
     }
 
     private static void ApplyTrueTypeMapping(IntPtr self, string styleName, RuntimeFontMappingRecord mapping)

@@ -179,8 +179,8 @@ public abstract class PluginEntryBase : IExtensionApplication
     {
         UninstallGlyphCoreNativeDecodeHooks();
         ShxMathSymbolDisplayOverrule.Uninstall();
-        DiagnosticLogger.Disable();
         PlatformManager.FontHook.Uninstall();
+        DiagnosticLogger.Disable();
         UnregisterEvents();
         AppDomain.CurrentDomain.AssemblyResolve -= OnResolveEmbeddedAssembly;
         ResolvedEmbeddedAssemblies.Clear();
