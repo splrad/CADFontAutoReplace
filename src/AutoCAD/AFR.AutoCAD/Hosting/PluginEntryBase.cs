@@ -275,7 +275,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         {
             Assembly owner = typeof(PluginEntryBase).Assembly;
             if (AFR.GlyphCore.TextRepair.GlyphCoreTextRepairRuntimeResources.EnsureNativeRuntimeExtracted(owner, out string error))
-                DiagnosticLogger.Log("DBText文枢AI", "ONNX 原生运行库已预释放。");
+                DiagnosticLogger.Log("DBText文枢AI", "ONNX 原生运行库 ABI 目录已就绪。");
             else
                 DiagnosticLogger.Log("DBText文枢AI", "ONNX 原生运行库预释放失败：" + error);
         }

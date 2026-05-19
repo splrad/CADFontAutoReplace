@@ -176,6 +176,7 @@ AFR.GlyphCore/models/
 
 - `src/AutoCAD/Directory.Build.targets` 默认从仓库中的 `AFR.GlyphCore/models/AFR.GlyphCore.Model.onnx` 和 `AFR.GlyphCore.ModelManifest.json` 嵌入当前发布模型。
 - `GlyphCoreModelPath`、`GlyphCoreModelManifestPath`、`GlyphCoreRuntimeDirectory` 只用于需要覆盖默认模型或运行时目录的私有构建。
+- ONNX Runtime 原生依赖按 ABI 共享到插件 DLL 同级的 `OnnxRuntime/<abiKey>/`，由插件启动和部署器安装流程共同检查/补齐，不按 AFR 插件版本号隔离。
 - GitHub Release 工作流和公开仓库不得包含真实训练数据、用户 DWG、ReviewedLabels、TrainingSets、Reports、候选模型、训练状态或验证报告。
 - 普通用户不能训练、导入样本、替换模型、修改参数、人工标注或上传反馈包。
 

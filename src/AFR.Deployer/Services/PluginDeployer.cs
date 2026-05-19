@@ -32,12 +32,15 @@ internal static class PluginDeployer
     /// <param name="installation">目标 CAD 版本（来自最新一次扫描结果）。</param>
     /// <param name="targetDirectory">DLL 的释放目录。</param>
     /// <param name="errorMessage">失败原因，成功时为 null。</param>
+    /// <param name="warningMessage">非阻断警告，成功且无警告时为 null。</param>
     /// <returns>true 表示安装成功。</returns>
     internal static bool TryInstall(
         CadInstallation installation,
         string targetDirectory,
-        out string? errorMessage)
+        out string? errorMessage,
+        out string? warningMessage)
     {
+        warningMessage = null;
         var descriptor = installation.Descriptor;
         var fileName   = $"{descriptor.AppName}.dll";
 
@@ -58,6 +61,8 @@ internal static class PluginDeployer
         {
             return false;
         }
+
+        GlyphCoreRuntimeExtractor.TryExtract(dllPath, out warningMessage);
 
         // 3. 写入注册表（幂等）
         try

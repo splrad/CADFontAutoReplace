@@ -1451,9 +1451,11 @@ HKCU\<CadRegistryBasePath>\<Profile>\Applications\<AppName>
 - 开发者以为 `AFRGLYPHCOREEXPORT` 可用，但 CAD 中不可用。
 - 训练数据导出流程被阻塞。
 
-### 16.3 `GlyphCoreRuntimeExtractor` 当前调用状态待确认
+### 16.3 `GlyphCoreRuntimeExtractor` 与 ONNX Runtime ABI 目录
 
-`src/AFR.Deployer/Services/GlyphCoreRuntimeExtractor.cs` 存在，但当前搜索未确认部署器主流程调用它。插件侧有运行时预提取逻辑。部署器侧是否应预提取 ONNX Runtime，需要确认。
+`src/AFR.Deployer/Services/GlyphCoreRuntimeExtractor.cs` 已接入部署器安装流程。部署器释放插件 DLL 后，会从目标 DLL 嵌入资源读取 `AFR.GlyphCore.OnnxRuntimeManifest.json`，并按 `<dllDirectory>\OnnxRuntime\<abiKey>\` 预释放 ONNX Runtime 原生依赖。插件侧启动时仍会走同一 ABI 目录规则再次检查并补齐。
+
+该目录按 ONNX Runtime ABI 隔离，例如 `OnnxRuntime\ort-1.18.0-win-x64\`，不按 AFR 插件版本号隔离；部署器预释放失败只作为安装警告，不阻断注册表写入或非 AI 功能。
 
 ### 16.4 Native Hook 对 CAD 版本高度敏感
 
@@ -1700,9 +1702,9 @@ AI 禁止：
    - `CommandClass` 当前只注册 `AfrCommands`。
    - Debug 命令是否可被 AutoCAD 发现需要真实环境验证。
 
-3. 确认 `GlyphCoreRuntimeExtractor` 是否应接入部署器主流程。
-   - 当前类存在。
-   - 当前未确认调用点。
+3. 验证 ONNX Runtime ABI 目录在真实安装器中的升级覆盖行为。
+   - 同 ABI manifest/hash 不匹配时应覆盖对应 ABI 子目录。
+   - 不同 ABI 应并存于 `OnnxRuntime\<abiKey>\` 下，不互相覆盖。
 
 4. 确认 `.github/copilot-instructions.md` 是否应纳入 Git。
    - 该文件对长期维护很重要。

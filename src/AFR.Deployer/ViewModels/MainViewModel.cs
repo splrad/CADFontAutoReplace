@@ -493,6 +493,7 @@ internal sealed partial class MainViewModel : ObservableObject
         StatusText = "正在安装……";
 
         var errors    = new List<string>();
+        var warnings  = new List<string>();
         var successes = 0;
 
         await Task.Run(() =>
@@ -505,19 +506,21 @@ internal sealed partial class MainViewModel : ObservableObject
                 var key = entry.Installation.Descriptor.AppName;
                 var fresh = freshResults.GetValueOrDefault(key, entry.Installation);
 
-                if (!PluginDeployer.TryInstall(fresh, DeployPath, out var err))
+                if (!PluginDeployer.TryInstall(fresh, DeployPath, out var err, out var installWarning))
                     errors.Add($"{fresh.Descriptor.DisplayName}：{err}");
                 else
                 {
                     successes++;
                     patchedDescriptors.Add(fresh.Descriptor);
+                    if (!string.IsNullOrWhiteSpace(installWarning))
+                        warnings.Add($"{fresh.Descriptor.DisplayName}：{installWarning}");
 
                     // 释放内嵌 SHX 字体到当前实例对应的 <AcadLocation>\Fonts。
                     // 失败仅记录警告，不阻断安装主流程。
                     try
                     {
                         if (!EmbeddedFontPatcher.Apply(fresh))
-                            errors.Add($"{fresh.Descriptor.DisplayName}：默认 SHX 字体释放失败，请手动在CAD中运行AFR插件进行字体配置");
+                            warnings.Add($"{fresh.Descriptor.DisplayName}：默认 SHX 字体释放失败，请手动在CAD中运行AFR插件进行字体配置");
                     }
                     catch { /* 字体释放失败不影响安装主流程 */ }
                 }
@@ -536,9 +539,22 @@ internal sealed partial class MainViewModel : ObservableObject
         ClearSelection();
 
         if (errors.Count > 0)
+        {
+            string message = $"以下版本安装失败：\n\n{string.Join("\n", errors)}";
+            if (warnings.Count > 0)
+                message += $"\n\n以下项目已安装但存在警告：\n\n{string.Join("\n", warnings)}";
+
             await _dialog.ShowWarningAsync(
-                $"以下版本安装失败：\n\n{string.Join("\n", errors)}",
+                message,
                 "AFR 部署工具 — 安装错误");
+        }
+        else if (warnings.Count > 0)
+        {
+            StatusText = $"✓ 已成功安装 {successes} 个 CAD 版本，但存在非阻断警告";
+            await _dialog.ShowWarningAsync(
+                $"插件已安装完成，但以下非 AI/预释放项目需要注意：\n\n{string.Join("\n", warnings)}",
+                "AFR 部署工具 — 安装完成（含警告）");
+        }
         else
             StatusText = $"✓ 已成功安装 {successes} 个 CAD 版本并应用 SHX 缺失弹窗抑制，启动 CAD 时插件生效";
     }
