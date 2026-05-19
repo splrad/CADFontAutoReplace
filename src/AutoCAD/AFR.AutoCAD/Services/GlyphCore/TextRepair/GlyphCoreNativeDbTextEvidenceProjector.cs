@@ -482,7 +482,7 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
     private static bool ShouldPromotePendingRawEquivalentEvidence(PendingRawEquivalentEvidence[] records, int scannedCount)
     {
         int pendingCount = records.Length;
-        if (pendingCount == 1 && scannedCount == 1 && records[0].TextCarrierOnly)
+        if (pendingCount == scannedCount && scannedCount > 0 && AllTextCarrierOnly(records))
             return true;
 
         if (pendingCount < MinimumPendingRawEvidenceCount)
@@ -492,6 +492,20 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
             return true;
 
         return pendingCount / (float)Math.Max(1, scannedCount) >= MinimumPendingRawEvidenceRatio;
+    }
+
+    private static bool AllTextCarrierOnly(PendingRawEquivalentEvidence[] records)
+    {
+        if (records.Length == 0)
+            return false;
+
+        for (int i = 0; i < records.Length; i++)
+        {
+            if (!records[i].TextCarrierOnly)
+                return false;
+        }
+
+        return true;
     }
 
     private static string BuildDrawingKey(GlyphCoreDrawingIdentity drawing)
