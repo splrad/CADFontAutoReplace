@@ -1,9 +1,9 @@
 import { useDeferredValue, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { AlertTriangle, Archive, ChevronDown, Database, Download, Info, Search, Trash2, Upload, X } from 'lucide-react';
-import { modeClass, modeLabel, packageViews, trainingRecordViews } from '@/lib/boltAdapters';
+import { modeClass, modeLabel, packageViews, trainingRecordViews } from '@/lib/viewAdapters';
 import { useVirtualRows } from '@/hooks/useVirtualRows';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
-import type { CorrectTextMode, DataPackage } from '@/types/bolt';
+import type { CorrectTextMode, DataPackage } from '@/types/view';
 
 interface ConfirmModal {
   type: 'pkg' | 'records';

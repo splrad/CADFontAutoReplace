@@ -13,10 +13,10 @@ import {
   Trash2,
   X
 } from 'lucide-react';
-import { packageViews, reviewClusterViews, reviewEditForPatch } from '@/lib/boltAdapters';
+import { packageViews, reviewClusterViews, reviewEditForPatch } from '@/lib/viewAdapters';
 import { useVirtualRows } from '@/hooks/useVirtualRows';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
-import type { CorrectTextMode, DataPackage, DBTextCluster, ReviewStatus } from '@/types/bolt';
+import type { CorrectTextMode, DataPackage, DBTextCluster, ReviewStatus } from '@/types/view';
 
 const STATUS_CFG: Record<ReviewStatus, { label: string; icon: ReactNode; cls: string }> = {
   pending: { label: '待标注', icon: <RefreshCw size={10} />, cls: 'text-orange-500' },

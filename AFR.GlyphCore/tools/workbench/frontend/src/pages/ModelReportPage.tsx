@@ -1,8 +1,8 @@
 import { AlertTriangle, BarChart2, CheckCircle, RefreshCw, Upload, XCircle } from 'lucide-react';
-import { modelReportView } from '@/lib/boltAdapters';
+import { modelReportView } from '@/lib/viewAdapters';
 import { formatDateTime } from '@/lib/utils';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
-import type { SimulatedTestResult } from '@/types/bolt';
+import type { SimulatedTestResult } from '@/types/view';
 
 export default function ModelReportPage() {
   const { app, busy, startSimulationTest, resetModel } = useWorkbenchStore();

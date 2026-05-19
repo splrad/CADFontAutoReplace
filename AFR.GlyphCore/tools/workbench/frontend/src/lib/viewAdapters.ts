@@ -27,14 +27,14 @@ import type {
   DBTextCluster,
   ModelReport,
   PublishStatus,
-  RiskLevel as BoltRiskLevel,
+  RiskLevel as ViewRiskLevel,
   ReviewStatus,
   SimulatedTestResult,
   TabId,
   TrainingRecord,
   TrainingRun,
   TrainingStatus
-} from '@/types/bolt';
+} from '@/types/view';
 
 export const PAGE_STATUS: Record<TabId, string> = {
   annotation: '数据标注 · 点击行查看参考项',
@@ -43,7 +43,7 @@ export const PAGE_STATUS: Record<TabId, string> = {
   report: '模型报告'
 };
 
-export function toBoltTab(tab: ApiTabId): TabId {
+export function toViewTab(tab: ApiTabId): TabId {
   if (tab === 'dataset' || tab === 'training' || tab === 'report') return tab;
   return 'annotation';
 }
@@ -125,7 +125,7 @@ export function reviewClusterViews(
       selectedCandidate,
       action: actionToBolt(edit.labelAction || saved?.labelAction || group.recommendedAction),
       status: reviewStatus(group, saved),
-      riskLevel: riskLevel(group) as BoltRiskLevel,
+      riskLevel: riskLevel(group) as ViewRiskLevel,
       layer: String(context.layer || 'MISC'),
       font: String(context.textStyleName || context.textStyleFileName || context.textStyleBigFontFileName || '--'),
       encodingPath: encodingPathForMode(mode, selectedCandidate, candidateSources),

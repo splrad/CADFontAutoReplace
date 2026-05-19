@@ -18,7 +18,7 @@ from afr_glyphcore.features import FEATURE_NAMES, extract_features, has_unsafe_r
 from build_features import build_rows  # noqa: E402
 
 
-class V4FeatureAndCandidateTests(unittest.TestCase):
+class FeatureAndCandidateTests(unittest.TestCase):
     def test_hook_raw_candidate_is_prioritized_and_featured(self) -> None:
         context = {
             "currentText": "潰党韌800遵X500詢,階善褽菁",

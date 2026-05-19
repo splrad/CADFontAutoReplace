@@ -12,9 +12,9 @@ import {
   StopCircle,
   XCircle
 } from 'lucide-react';
-import { packageViews, trainingRecordViews, trainingRunView } from '@/lib/boltAdapters';
+import { packageViews, trainingRecordViews, trainingRunView } from '@/lib/viewAdapters';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
-import type { DataPackage } from '@/types/bolt';
+import type { DataPackage } from '@/types/view';
 
 const STATUS_CFG = {
   idle: { label: '未训练', cls: 'bg-gray-100 text-gray-500', icon: <Clock size={12} /> },

@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import NavBar from '@/components/NavBar';
 import StatusBar from '@/components/StatusBar';
-import { lastSavedAt, PAGE_STATUS, toApiTab, toBoltTab } from '@/lib/boltAdapters';
+import { lastSavedAt, PAGE_STATUS, toApiTab, toViewTab } from '@/lib/viewAdapters';
 import { useWorkbenchStore } from '@/store/useWorkbenchStore';
 import AnnotationPage from '@/pages/AnnotationPage';
 import ModelReportPage from '@/pages/ModelReportPage';
@@ -10,7 +10,7 @@ import TrainingDatasetPage from '@/pages/TrainingDatasetPage';
 
 export function App() {
   const { activeTab, setActiveTab, refresh, refreshTrainingStatus, message, error, busy, app } = useWorkbenchStore();
-  const tab = toBoltTab(activeTab);
+  const tab = toViewTab(activeTab);
 
   useEffect(() => {
     void refresh();

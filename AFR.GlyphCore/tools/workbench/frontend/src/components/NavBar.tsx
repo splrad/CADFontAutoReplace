@@ -1,6 +1,6 @@
 import { BarChart2, CheckSquare, Layers, PlayCircle, Table2 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import type { TabId } from '@/types/bolt';
+import type { TabId } from '@/types/view';
 
 interface Tab {
   id: TabId;
