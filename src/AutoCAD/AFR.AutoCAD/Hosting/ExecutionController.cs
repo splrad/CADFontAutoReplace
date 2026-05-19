@@ -136,19 +136,12 @@ internal sealed class ExecutionController
                 if (repairedDbTextCount > 0)
                     doc.Editor.Regen();
 
-                // 统计汇总 — Regen 之后输出，确保统计信息是最后一行实质内容
-                if (replacedStyleCount > 0)
-                    log.Info($"样式表缺失字体永久替换 {replacedStyleCount} 项。");
-                if (actualStyleRuntimeMappings.Count > 0)
-                    log.Info($"样式表 @ 字体临时映射 {actualStyleRuntimeMappings.Count} 项，样式表保持原值。");
-                if (inlineFixResults.Count > 0)
-                    log.Info($"MText 内联字体映射 {inlineFixResults.Count} 项。");
-                if (replacedStyleCount == 0
-                    && actualStyleRuntimeMappings.Count == 0
-                    && inlineFixResults.Count == 0)
-                {
-                    log.Info("未检测到缺失字体。");
-                }
+                // 统计汇总 — Regen 之后输出，确保字体修复汇总来自同一个统计出口。
+                log.AddStatistics(
+                    missingFonts,
+                    stillMissing,
+                    dbTextMappingCount: actualStyleRuntimeMappings.Count,
+                    mtextMappingCount: inlineFixResults.Count);
                 DiagnosticLogger.WriteSummary();
                 summarized = true;
                 log.Flush();

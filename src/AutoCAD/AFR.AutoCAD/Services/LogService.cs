@@ -61,36 +61,27 @@ internal sealed class LogService : ILogService
     /// </para>
     /// </summary>
     /// <param name="missingFonts">字体检查结果列表，包含每个字体样式的缺失情况。</param>
-    /// <param name="stillMissingCount">替换后仍然缺失的字体数量，为 0 表示全部替换成功。</param>
+    /// <param name="stillMissingFonts">替换后仍然缺失的字体列表，为 null 或空表示全部替换成功。</param>
+    /// <param name="dbTextMappingCount">DBText 样式字体运行时映射命中数量。</param>
     /// <param name="mtextMappingCount">MText 多行文字中通过内联字体映射修复的数量。</param>
-    public void AddStatistics(IReadOnlyList<FontCheckResult> missingFonts, int stillMissingCount = 0, int mtextMappingCount = 0)
+    public void AddStatistics(
+        IReadOnlyList<FontCheckResult> missingFonts,
+        IReadOnlyList<FontCheckResult>? stillMissingFonts = null,
+        int dbTextMappingCount = 0,
+        int mtextMappingCount = 0)
     {
-        // --- 第一步：遍历检查结果，按字体类型分别计数 ---
-        int trueTypeCount = 0, shxCount = 0, bigFontCount = 0;
-        for (int i = 0; i < missingFonts.Count; i++)
-        {
-            var item = missingFonts[i];
-            // 主字体缺失时，根据字体类型计入 TrueType 或 SHX 计数
-            if (item.IsMainFontMissing)
-            {
-                if (item.IsTrueType) trueTypeCount++;
-                else shxCount++;
-            }
-            // 大字体是 SHX 特有概念，TrueType 样式不支持大字体，因此排除 TrueType
-            if (item.IsBigFontMissing && !item.IsTrueType) bigFontCount++;
-        }
+        // --- 第一步：遍历检查结果，按字体类型分别统计原始缺失和替换后仍缺失 ---
+        var missing = CountMissingSlots(missingFonts);
+        var stillMissing = CountMissingSlots(stillMissingFonts ?? Array.Empty<FontCheckResult>());
+
+        int trueTypeCount = Math.Max(0, missing.TrueType - stillMissing.TrueType);
+        int shxCount = Math.Max(0, missing.ShxMain - stillMissing.ShxMain);
+        int bigFontCount = Math.Max(0, missing.ShxBig - stillMissing.ShxBig);
         int total = trueTypeCount + shxCount + bigFontCount;
-        int replaced = total - stillMissingCount;
 
-        // --- 第二步：根据替换结果生成不同措辞的汇总消息 ---
-        string msg;
-        if (stillMissingCount > 0)
-            msg = $"[字体修复]检测到缺失字体 {total} 个，已替换 {replaced} 个(SHX主字体:{shxCount},SHX大字体:{bigFontCount},TrueType:{trueTypeCount})";
-        else
-            msg = $"[字体修复]已替换缺失字体 {total} 个(SHX主字体:{shxCount},SHX大字体:{bigFontCount},TrueType:{trueTypeCount})";
-
-        // MText 内联字体映射统计始终追加到汇总消息末尾
-        msg += $" | MText内联字体映射：{mtextMappingCount}";
+        // --- 第二步：生成唯一的字体修复汇总消息 ---
+        string msg = $"[字体修复]已替换缺失字体 {total} 个(SHX主字体:{shxCount},SHX大字体:{bigFontCount},TrueType:{trueTypeCount})";
+        msg += $" | DBText字体映射: {dbTextMappingCount} | MText内联字体映射：{mtextMappingCount}";
 
         // --- 第三步：将汇总消息写入缓冲区 ---
         lock (_lock)
@@ -99,8 +90,29 @@ internal sealed class LogService : ILogService
         }
 
         // 如果仍有未替换的字体，额外记录一条警告提醒用户手动处理
-        if (stillMissingCount > 0)
-            AddEntry(LogCategory.Warning, $"仍有 {stillMissingCount} 个字体未成功替换，请执行 AFRLOG 手动指定替换字体");
+        int stillMissingTotal = stillMissing.TrueType + stillMissing.ShxMain + stillMissing.ShxBig;
+        if (stillMissingTotal > 0)
+            AddEntry(LogCategory.Warning, $"仍有 {stillMissingTotal} 个字体未成功替换，请执行 AFRLOG 手动指定替换字体");
+    }
+
+    private static (int ShxMain, int ShxBig, int TrueType) CountMissingSlots(
+        IReadOnlyList<FontCheckResult> missingFonts)
+    {
+        int trueTypeCount = 0, shxCount = 0, bigFontCount = 0;
+        for (int i = 0; i < missingFonts.Count; i++)
+        {
+            var item = missingFonts[i];
+            if (item.IsMainFontMissing)
+            {
+                if (item.IsTrueType) trueTypeCount++;
+                else shxCount++;
+            }
+
+            if (item.IsBigFontMissing && !item.IsTrueType)
+                bigFontCount++;
+        }
+
+        return (shxCount, bigFontCount, trueTypeCount);
     }
 
     /// <summary>
