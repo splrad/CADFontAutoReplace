@@ -29,9 +29,11 @@
     <File Path="AFR.GlyphCore/tools/workbench/frontend/index.html" />
     <File Path="AFR.GlyphCore/tools/workbench/frontend/package.json" />
     <File Path="AFR.GlyphCore/tools/workbench/frontend/package-lock.json" />
-    <File Path="AFR.GlyphCore/tools/workbench/frontend/vite.config.js" />
-    <File Path="AFR.GlyphCore/tools/workbench/frontend/src/main.jsx" />
-    <File Path="AFR.GlyphCore/tools/workbench/frontend/src/styles.css" />
+    <File Path="AFR.GlyphCore/tools/workbench/frontend/vite.config.ts" />
+    <File Path="AFR.GlyphCore/tools/workbench/frontend/src/App.tsx" />
+    <File Path="AFR.GlyphCore/tools/workbench/frontend/src/main.tsx" />
+    <File Path="AFR.GlyphCore/tools/workbench/frontend/src/styles/globals.css" />
+    <File Path="AFR.GlyphCore/tools/workbench/frontend/src/styles/tokens.css" />
   </Folder>
 
   <Folder Name="/AFR GlyphCore/Training/">
@@ -49,7 +51,7 @@
   <Folder Name="/AFR GlyphCore/Schemas/">
     <File Path="AFR.GlyphCore/tools/schemas/candidate_group_v1.schema.json" />
     <File Path="AFR.GlyphCore/tools/schemas/export_package_v1.schema.json" />
-    <File Path="AFR.GlyphCore/tools/schemas/feature_schema_v3.json" />
+    <File Path="AFR.GlyphCore/tools/schemas/feature_schema_v7.json" />
     <File Path="AFR.GlyphCore/tools/schemas/reviewed_label_v1.schema.json" />
   </Folder>
 
@@ -63,7 +65,6 @@
   </Folder>
 
   <Folder Name="/GitHub/">
-    <File Path=".github/copilot-instructions.md" />
     <File Path=".github/deepseek-model.txt" />
   </Folder>
 

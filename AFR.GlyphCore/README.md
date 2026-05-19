@@ -40,4 +40,4 @@ substitution rules.
 
 - [GlyphCore tools README](tools/README.md)
 - [DBText runtime repair guide](../docs/debugging/DBText-Repair-Model.md)
-- [Repository memory](../.github/copilot-instructions.md)
+- Local repository memory: `.github/copilot-instructions.md` (not tracked)
