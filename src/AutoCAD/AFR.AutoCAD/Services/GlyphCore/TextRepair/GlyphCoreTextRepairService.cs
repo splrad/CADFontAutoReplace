@@ -65,11 +65,13 @@ internal static class GlyphCoreTextRepairService
         DiagnosticLogger.Log(
             "DBText文枢",
             $"扫描={counters.Scanned}, Hook强信号={counters.Problems}, 候选={counters.Candidates}, AI评分簇={counters.AiScored}, AI状态={counters.AiStatus}, " +
-            $"阻塞={counters.Blocked}, 实际修复={counters.Repaired}, 等效强信号={counters.DocumentFamilyPromoted}, 错误={counters.Errors}, NativeEvidence={GlyphCoreNativeDbTextEvidenceProjector.GetSummary()}");
+            $"保留原文={counters.KeptCurrent}, 阻塞={counters.Blocked}, 实际修复={counters.Repaired}, 等效强信号={counters.DocumentFamilyPromoted}, 错误={counters.Errors}, NativeEvidence={GlyphCoreNativeDbTextEvidenceProjector.GetSummary()}");
         _lastRunSummary = new GlyphCoreTextRepairRunSummary(
             counters.Scanned,
             counters.Problems,
             counters.Repaired,
+            counters.KeptCurrent,
+            counters.Blocked,
             counters.ModelUnavailable,
             counters.AiStatus,
             counters.LastDecisionReason,
@@ -185,9 +187,24 @@ internal static class GlyphCoreTextRepairService
 
             if (decision.IsBlocked || !decision.ShouldRepair)
             {
-                counters.Blocked += groupedItems.Count;
                 MarkEvaluated(groupedItems);
-                string action = decision.IsBlocked ? "阻断" : "未写回";
+                string action;
+                if (decision.IsBlocked)
+                {
+                    counters.Blocked += groupedItems.Count;
+                    action = "阻断";
+                }
+                else if (IsKeepCurrentDecision(decision))
+                {
+                    counters.KeptCurrent += groupedItems.Count;
+                    action = "保留原文";
+                }
+                else
+                {
+                    counters.Blocked += groupedItems.Count;
+                    action = "未写回";
+                }
+
                 DiagnosticLogger.Log(
                     "DBText文枢",
                     $"簇={groupedItems.Count}, Hook强信号={representative.Detection.Reason}, current='{Trim(representative.Context.CurrentText)}', {action}={decision.Reason}, AI={decision.AiSummary}");
@@ -531,6 +548,9 @@ internal static class GlyphCoreTextRepairService
             item.Evaluated = true;
     }
 
+    private static bool IsKeepCurrentDecision(GlyphCoreTextRepairDecision decision)
+        => string.Equals(decision.Reason, "ai-selected-current", StringComparison.Ordinal);
+
     private static Point3d SafePosition(DBText dbText)
     {
         try { return dbText.Position; }
@@ -560,13 +580,15 @@ internal static class GlyphCoreTextRepairService
         }
         else if (summary.Repaired > 0)
             message = $"[AFR 文枢] 检测到 DBText native 解码强信号；文枢 已完成 AI 决策并成功修复 {summary.Repaired} 项。";
+        else if (summary.KeptCurrent > 0 && summary.Blocked <= 0)
+            message = $"[AFR 文枢] 检测到 DBText native 解码强信号；文枢 AI 判断无需写回，已保留原文 {summary.KeptCurrent} 项。";
         else
         {
             string detail = BuildDecisionDetail(summary);
             message = "[AFR 文枢] 检测到 DBText native 解码强信号；文枢 AI 选择不写回" + detail + "。";
         }
 
-        string summaryLine = $"扫描={summary.Scanned}, Hook强信号={summary.Problems}, 修复={summary.Repaired}, 未修复={summary.Unrepaired}";
+        string summaryLine = $"扫描={summary.Scanned}, Hook强信号={summary.Problems}, 修复={summary.Repaired}, 保留原文={summary.KeptCurrent}, 阻塞={summary.Blocked}";
 
         DiagnosticLogger.Log("DBText文枢", summaryLine);
         DiagnosticLogger.Log("DBText文枢", message);
@@ -602,6 +624,7 @@ internal static class GlyphCoreTextRepairService
         public int AiScored;
         public int Problems;
         public int Repaired;
+        public int KeptCurrent;
         public int Blocked;
         public int Errors;
         public int DocumentFamilyPromoted;
@@ -642,11 +665,13 @@ internal readonly record struct GlyphCoreTextRepairRunSummary(
     int Scanned,
     int Problems,
     int Repaired,
+    int KeptCurrent,
+    int Blocked,
     bool ModelUnavailable,
     string AiStatus,
     string DecisionReason,
     string AiSummary)
 {
-    public int Unrepaired => Math.Max(0, Problems - Repaired);
+    public int Pending => Math.Max(0, Problems - Repaired - KeptCurrent - Blocked);
 }
 
