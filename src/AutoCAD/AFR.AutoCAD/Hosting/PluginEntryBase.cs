@@ -118,6 +118,7 @@ public abstract class PluginEntryBase : IExtensionApplication
 
         // 注册嵌入程序集解析回调，使 HandyControl 等打包在 DLL 资源中的依赖可被加载
         AppDomain.CurrentDomain.AssemblyResolve += OnResolveEmbeddedAssembly;
+        PreExtractGlyphCoreNativeRuntime();
 
         // 隐藏卸载入口必须在首次 NETLOAD、自动加载和部署加载场景下都可用。
         // 它不进入 CommandMethod/命令栈，只由 UnknownCommand 的完整名称匹配触发。
@@ -265,6 +266,22 @@ public abstract class PluginEntryBase : IExtensionApplication
         catch (System.Exception ex)
         {
             DiagnosticLogger.LogError("DBText文枢Hook 安装失败", ex);
+        }
+    }
+
+    private static void PreExtractGlyphCoreNativeRuntime()
+    {
+        try
+        {
+            Assembly owner = typeof(PluginEntryBase).Assembly;
+            if (AFR.GlyphCore.TextRepair.GlyphCoreTextRepairRuntimeResources.EnsureNativeRuntimeExtracted(owner, out string error))
+                DiagnosticLogger.Log("DBText文枢AI", "ONNX 原生运行库已预释放。");
+            else
+                DiagnosticLogger.Log("DBText文枢AI", "ONNX 原生运行库预释放失败：" + error);
+        }
+        catch (System.Exception ex)
+        {
+            DiagnosticLogger.LogError("DBText文枢AI 预释放失败", ex);
         }
     }
 

@@ -22,6 +22,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)GlyphCore\TextRepair\GlyphCoreTextRepairModels.cs" Link="GlyphCore\TextRepair\GlyphCoreTextRepairModels.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)GlyphCore\TextRepair\GlyphCoreTextRepairProblemDetector.cs" Link="GlyphCore\TextRepair\GlyphCoreTextRepairProblemDetector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)GlyphCore\TextRepair\GlyphCoreTextRepairScorerFactory.cs" Link="GlyphCore\TextRepair\GlyphCoreTextRepairScorerFactory.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)GlyphCore\TextRepair\GlyphCoreTextRepairRuntimeResources.cs" Link="GlyphCore\TextRepair\GlyphCoreTextRepairRuntimeResources.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)GlyphCore\TextRepair\GlyphCoreTextRepairEmbeddedOnnxScorer.cs" Link="GlyphCore\TextRepair\GlyphCoreTextRepairEmbeddedOnnxScorer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\FontCheckResult.cs" Link="Models\FontCheckResult.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Models\InlineFontFixRecord.cs" Link="Models\InlineFontFixRecord.cs" />
