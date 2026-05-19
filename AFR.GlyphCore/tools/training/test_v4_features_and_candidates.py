@@ -14,7 +14,7 @@ sys.path.insert(0, str(TRAINING_ROOT))
 
 from afr_glyphcore import FEATURE_COUNT, FEATURE_SCHEMA_VERSION  # noqa: E402
 from afr_glyphcore.candidates import Candidate, build_candidates  # noqa: E402
-from afr_glyphcore.features import FEATURE_NAMES, extract_features  # noqa: E402
+from afr_glyphcore.features import FEATURE_NAMES, extract_features, has_unsafe_repair_candidate_text  # noqa: E402
 from build_features import build_rows  # noqa: E402
 
 
@@ -153,6 +153,26 @@ class V4FeatureAndCandidateTests(unittest.TestCase):
             self.assertEqual(0.0, base_features[index])
             self.assertEqual(0.0, variant_features[index])
         self.assertEqual(base_features, variant_features)
+
+    def test_repair_candidate_safety_allows_engineering_symbols(self) -> None:
+        safe_candidates = [
+            "2.一般阀门的选用：管径＜DN50，采用铜质截止阀。管径≥DN50，采用优质闸阀。",
+            "3.压力表测量范围应为工作压力的 2~2.5 倍。",
+            "量程0~50L/s，精度0.5级",
+            "六~十六层喷淋平面布置图",
+            "1)依据《建筑抗震设计规范》GB50011-2010 第3.7.1条：¨非结构构件。",
+        ]
+        unsafe_candidates = [
+            " ふ",
+            "ㄅ",
+            "⌒",
+            "\ue4de容积修正系数。",
+        ]
+
+        for text in safe_candidates:
+            self.assertFalse(has_unsafe_repair_candidate_text(text), text)
+        for text in unsafe_candidates:
+            self.assertTrue(has_unsafe_repair_candidate_text(text), text)
 
     def test_native_evidence_direction_prefers_matching_conversion(self) -> None:
         context = {

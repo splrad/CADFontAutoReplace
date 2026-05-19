@@ -170,7 +170,7 @@ internal static class GlyphCoreTextRepairService
                 MarkEvaluated(groupedItems);
                 DiagnosticLogger.Log(
                     "DBText文枢",
-                    $"簇={groupedItems.Count}, Hook强信号={representative.Detection.Reason}, 文枢模型不可用, AI状态={advisor.AiStatus}");
+                    $"簇={groupedItems.Count}, Hook强信号={representative.Detection.Reason}, current='{Trim(representative.Context.CurrentText)}', 文枢模型不可用, AI状态={advisor.AiStatus}");
                 continue;
             }
 
@@ -190,7 +190,7 @@ internal static class GlyphCoreTextRepairService
                 string action = decision.IsBlocked ? "阻断" : "未写回";
                 DiagnosticLogger.Log(
                     "DBText文枢",
-                    $"簇={groupedItems.Count}, Hook强信号={representative.Detection.Reason}, {action}={decision.Reason}, AI={decision.AiSummary}");
+                    $"簇={groupedItems.Count}, Hook强信号={representative.Detection.Reason}, current='{Trim(representative.Context.CurrentText)}', {action}={decision.Reason}, AI={decision.AiSummary}");
                 continue;
             }
 

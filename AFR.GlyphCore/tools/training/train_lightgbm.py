@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from afr_glyphcore import FEATURE_COUNT, FEATURE_SCHEMA_VERSION  # noqa: E402
+from afr_glyphcore.features import has_unsafe_repair_candidate_text  # noqa: E402
 
 DEFAULT_MAX_ROUNDS = 650
 DEFAULT_EARLY_STOPPING_ROUNDS = 60
@@ -1109,7 +1110,7 @@ def row_has_candidate_unsafe(row) -> bool:
     return (
         row_float(row, "f10_candidate_control_ratio") > 0
         or row_float(row, "f12_candidate_replacement_ratio") > 0
-        or has_leading_private_use_placeholder(str(row.get("candidate_text") or ""))
+        or has_unsafe_repair_candidate_text(str(row.get("candidate_text") or ""))
         or row_float(row, "f37_candidate_has_suspicious_unicode") > 0
     )
 

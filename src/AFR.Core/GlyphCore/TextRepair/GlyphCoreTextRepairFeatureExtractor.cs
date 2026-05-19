@@ -192,7 +192,7 @@ internal static class GlyphCoreTextRepairFeatureExtractor
             && category != UnicodeCategory.OtherSymbol)
             return false;
 
-        const string allowed = "+-()./×xXΦφ%#@=<>≤≥±°℃㎡³ⅡⅢⅣⅤ";
+        const string allowed = "+-()./×xXΦφ%#@=<>＜＞≤≥±≈≠~～°℃㎡㎥³ⅡⅢⅣⅤ‰′″¨";
         return allowed.IndexOf(ch) < 0;
     }
 

@@ -8,6 +8,8 @@ internal static class GlyphCoreTextRepairDecisionEngine
 {
     private const float MinimumConfidence = 0.75f;
     private const float MinimumScoreMargin = 0.02f;
+    private const float NativeEvidenceMinimumConfidence = 0.55f;
+    private const float NativeEvidenceMinimumMargin = 0.10f;
 
     public static GlyphCoreTextRepairDecision Evaluate(
         GlyphCoreTextRepairContext context,
@@ -50,12 +52,85 @@ internal static class GlyphCoreTextRepairDecisionEngine
             return GlyphCoreTextRepairDecision.Skip("candidate-not-roundtrip", summary);
 
         if (best.AiScore < MinimumConfidence)
+        {
+            if (CanConservativelyAcceptNativeEvidence(context, best, margin))
+                return GlyphCoreTextRepairDecision.Repair(best.Text, "ai-selected-by-native-evidence", summary);
+
             return GlyphCoreTextRepairDecision.Skip("low-confidence", summary);
+        }
 
         if (margin < MinimumScoreMargin)
+        {
+            if (CanConservativelyAcceptNativeEvidence(context, best, margin))
+                return GlyphCoreTextRepairDecision.Repair(best.Text, "ai-selected-by-native-evidence", summary);
+
             return GlyphCoreTextRepairDecision.Skip("score-margin-too-small", summary);
+        }
 
         return GlyphCoreTextRepairDecision.Repair(best.Text, "ai-selected-by-model", summary);
+    }
+
+    private static bool CanConservativelyAcceptNativeEvidence(
+        GlyphCoreTextRepairContext context,
+        GlyphCoreTextRepairCandidate best,
+        float margin)
+    {
+        if (!HasStrongNativeDecodeEvidence(context))
+            return false;
+
+        if (!IsEvidenceAlignedCandidate(context, best.Source))
+            return false;
+
+        if (best.AiScore < NativeEvidenceMinimumConfidence)
+            return false;
+
+        if (margin < NativeEvidenceMinimumMargin)
+            return false;
+
+        return true;
+    }
+
+    private static bool HasStrongNativeDecodeEvidence(GlyphCoreTextRepairContext context)
+    {
+        if (!context.HasNativeDecodeEvidence || !context.NativeDecodeFamilyMismatch)
+            return false;
+
+        if (!IsEvidenceScope(context, "ripple")
+            && !IsEvidenceScope(context, "document-family")
+            && !IsHookHitType(context.NativeDecodeHookHitType, "dbtext"))
+            return false;
+
+        if (context.NativeDecodeObjectCorrelation > 0)
+            return true;
+
+        return context.NativeDecodeClusterCorrelation > 0
+               && (IsEvidenceScope(context, "cluster")
+                   || IsEvidenceScope(context, "ripple")
+                   || IsEvidenceScope(context, "document-family"));
+    }
+
+    private static bool IsEvidenceAlignedCandidate(GlyphCoreTextRepairContext context, string candidateSource)
+    {
+        if (string.IsNullOrEmpty(candidateSource) || !context.NativeDecodeFamilyMismatch)
+            return false;
+
+        if (IsCodePageFamily(context.NativeDecodeSourceCodePageFamily, "big5")
+            && IsCodePageFamily(context.NativeDecodeAppliedCodePageFamily, "gbk"))
+            return ContainsToken(candidateSource, "big5-carrier-to-gbk");
+
+        if (IsCodePageFamily(context.NativeDecodeSourceCodePageFamily, "gbk")
+            && IsCodePageFamily(context.NativeDecodeAppliedCodePageFamily, "big5"))
+            return ContainsToken(candidateSource, "gbk-carrier-to-big5");
+
+        if (IsCodePageFamily(context.NativeDecodeSourceCodePageFamily, "utf8")
+            && IsCodePageFamily(context.NativeDecodeAppliedCodePageFamily, "gbk"))
+            return ContainsToken(candidateSource, "utf8-carrier-to-gbk");
+
+        if (IsCodePageFamily(context.NativeDecodeSourceCodePageFamily, "gbk")
+            && IsCodePageFamily(context.NativeDecodeAppliedCodePageFamily, "utf8"))
+            return ContainsToken(candidateSource, "gbk-carrier-to-utf8");
+
+        return false;
     }
 
     private static string BuildSummary(IReadOnlyList<GlyphCoreTextRepairCandidate> candidates, IGlyphCoreTextRepairScorer scorer)
@@ -106,6 +181,21 @@ internal static class GlyphCoreTextRepairDecisionEngine
     private static string Trim(string text)
     {
         return text.Length <= 40 ? text : text.Substring(0, 40) + "...";
+    }
+
+    private static bool IsEvidenceScope(GlyphCoreTextRepairContext context, string scope)
+        => ContainsToken(context.NativeDecodeEvidenceScope, scope);
+
+    private static bool IsCodePageFamily(string value, string family)
+        => ContainsToken(value, family);
+
+    private static bool IsHookHitType(string value, string token)
+        => ContainsToken(value, token);
+
+    private static bool ContainsToken(string value, string token)
+    {
+        return !string.IsNullOrEmpty(value)
+               && value.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }
 

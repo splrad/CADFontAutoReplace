@@ -377,6 +377,55 @@ def has_unsafe_text(text: str) -> bool:
     return stats.control_ratio > 0 or stats.replacement_ratio > 0 or has_suspicious_unicode(text)
 
 
+def has_unsafe_repair_candidate_text(text: str) -> bool:
+    stats = analyze(text)
+    return (
+        stats.control_ratio > 0
+        or stats.replacement_ratio > 0
+        or has_leading_private_use_placeholder(text)
+        or has_disallowed_repair_candidate_unicode(text)
+        or has_suspicious_unicode(text)
+    )
+
+
+def has_leading_private_use_placeholder(text: str) -> bool:
+    if not text or not is_private_use(text[0]):
+        return False
+
+    prefix_length = 0
+    for ch in text[:4]:
+        if not is_private_use(ch):
+            break
+        prefix_length += 1
+
+    return 0 < prefix_length < len(text)
+
+
+def has_disallowed_repair_candidate_unicode(text: str) -> bool:
+    for ch in text or "":
+        category = unicodedata.category(ch)
+        if (
+            category in {"Cc", "Cs", "Cn"}
+            or ch == "\uFFFD"
+            or is_private_use(ch)
+            or is_bopomofo_or_kana(ch)
+        ):
+            return True
+
+        if is_non_engineering_symbol(ch, category):
+            return True
+
+    return False
+
+
+def is_non_engineering_symbol(ch: str, category: str) -> bool:
+    if category not in {"Sm", "Sc", "Sk", "So"}:
+        return False
+
+    allowed = "+-()./×xXΦφ%#@=<>＜＞≤≥±≈≠~～°℃㎡㎥³ⅡⅢⅣⅤ‰′″¨"
+    return ch not in allowed
+
+
 def cad_keyword_ratio(text: str) -> float:
     if not text:
         return 0.0
@@ -633,4 +682,5 @@ __all__ = [
     "FEATURE_SCHEMA_VERSION",
     "extract_features",
     "has_unsafe_text",
+    "has_unsafe_repair_candidate_text",
 ]
