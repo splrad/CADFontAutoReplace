@@ -7,7 +7,7 @@ namespace AFR.Services;
 /// <summary>
 /// AutoCAD 运行环境配置，提供统一的字体搜索路径。
 /// <para>
-/// 作为唯一的路径来源，供 <see cref="AutoCadFontScanner"/> 和 LdFileHook 共用，
+/// 作为唯一的路径来源，供 <see cref="AutoCadFontScanner"/> 和字体 Hook 缓存共用，
 /// 避免两处分别硬编码目录导致扫描范围不一致。
 /// </para>
 /// </summary>

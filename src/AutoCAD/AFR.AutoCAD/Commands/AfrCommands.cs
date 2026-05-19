@@ -131,10 +131,10 @@ public class AfrCommands
                 // 每次 AFRLOG 命令使用全新检测上下文，避免缓存导致结果不准确
                 var context = new FontDetectionContext(doc.Database);
 
-                // 重新检测当前文档中的缺失字体（反映替换或 ST 命令修改后的最新状态）
+                // 重新检测当前文档中的缺失字体（反映替换或 ST 命令修改后的最新状态）。
+                // 运行时映射只显示 Hook 实际命中的业务结果，不在 AFRLOG 中重新推导候选映射。
                 var currentMissing = FontDetector.DetectMissingFonts(context);
-                runtimeFontMappings = FontDetector.CollectRuntimeFontMappings(context, config.TrueTypeFont);
-                DocumentContextManager.Instance.StoreRuntimeFontMappingResults(doc, runtimeFontMappings);
+                runtimeFontMappings = DocumentContextManager.Instance.GetRuntimeFontMappingResults(doc);
 
                 // 合并策略：以存储的原始检测结果（自动替换时保存的）为基础，
                 // 用当前检测结果标记哪些样式仍然缺失，这样已替换的字体也能在日志中显示
@@ -216,8 +216,7 @@ public class AfrCommands
                 {
                     var freshContext = new FontDetectionContext(doc.Database);
                     var currentMissing = FontDetector.DetectMissingFonts(freshContext);
-                    freshRuntimeMappings = FontDetector.CollectRuntimeFontMappings(freshContext, config.TrueTypeFont);
-                    DocumentContextManager.Instance.StoreRuntimeFontMappingResults(doc, freshRuntimeMappings);
+                    freshRuntimeMappings = DocumentContextManager.Instance.GetRuntimeFontMappingResults(doc);
 
                     var stored = DocumentContextManager.Instance.GetDetectionResults(doc);
                     if (stored != null && stored.Count > 0)

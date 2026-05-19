@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using Autodesk.AutoCAD.DatabaseServices;
-using AFR.FontMapping;
 using AFR.GlyphCore.TextRepair;
 
 namespace AFR.Services.GlyphCore.TextRepair;
@@ -33,7 +31,7 @@ internal static class GlyphCoreTextRepairEntitySnapshotBuilder
             TextStyleTypeFace = style.TypeFace,
             CurrentText = dbText.TextString ?? string.Empty,
             IsFromExternalReference = IsFromExternalReference(dbText, tr),
-            HasLdFileFontEvidence = HasLdFileFontEvidence(style)
+            HasLdFileFontEvidence = false
         };
         GlyphCoreNativeDbTextEvidenceProjector.TryRegister(dbText, drawing, context);
         GlyphCoreNativeDecodeEvidenceStore.ApplyEvidence(drawing, context);
@@ -93,35 +91,6 @@ internal static class GlyphCoreTextRepairEntitySnapshotBuilder
         }
 
         return new TextStyleIdentity(string.Empty, string.Empty, string.Empty, string.Empty);
-    }
-
-    private static bool HasLdFileFontEvidence(TextStyleIdentity style)
-    {
-        var redirectLog = LdFileHook.GetRawRedirectLog();
-        return ContainsFontEvidence(redirectLog, style.FileName)
-               || ContainsFontEvidence(redirectLog, style.BigFontFileName)
-               || ContainsFontEvidence(redirectLog, style.TypeFace);
-    }
-
-    private static bool ContainsFontEvidence(
-        IReadOnlyDictionary<string, (string Replacement, int FontType)> redirectLog,
-        string fontName)
-    {
-        if (string.IsNullOrWhiteSpace(fontName))
-            return false;
-
-        string normalized = System.IO.Path.GetFileName(fontName.TrimStart('@'));
-        if (string.IsNullOrWhiteSpace(normalized))
-            return false;
-
-        if (redirectLog.ContainsKey(normalized))
-            return true;
-
-        if (!normalized.EndsWith(".shx", StringComparison.OrdinalIgnoreCase)
-            && redirectLog.ContainsKey(normalized + ".shx"))
-            return true;
-
-        return false;
     }
 
     private static string SafeObjectId(ObjectId id)

@@ -146,8 +146,8 @@ public abstract class PluginEntryBase : IExtensionApplication
 
             // ── 以下仅在非首次加载（注册表自动启动）时执行 ──
 
-            // 第零阶段 A: 安装字体 Hook — 在字体加载前就位，才能拦截缺失字体请求
-            if (PlatformManager.Platform.SupportsLdFileHook)
+            // 第零阶段 A: 安装字体 Hook — 在字体解析前就位，才能拦截缺失字体请求
+            if (PlatformManager.Platform.SupportsNativeFontHooks)
                 PlatformManager.FontHook.Install();
 
             // 第零阶段 B: 安装文枢 DBText native evidence Hook，只产强信号，不改 native 文本

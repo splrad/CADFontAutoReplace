@@ -6,7 +6,7 @@ namespace AFR.Services;
 /// SHX 字体类型全局缓存管理器。
 /// <para>
 /// 维护一个进程级的 <see cref="FontCache"/> 字典，记录每个 SHX 文件名是否为大字体。
-/// 缓存由 AutoCadFontScanner（按需懒加载）和 LdFileHook（Hook 安装时同步扫描）填充。
+/// 缓存由 AutoCadFontScanner（按需懒加载）和字体可用性索引（Hook 安装时同步扫描）填充。
 /// 作为全局唯一的 SHX 类型缓存源，替代各模块中分散的局部缓存。
 /// </para>
 /// </summary>

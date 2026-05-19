@@ -103,7 +103,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
     public string TrueTypeLabel => $"TrueType  {TrueTypeCount}";
     public string BigFontLabel => $"SHX大字体  {BigFontCount}";
     public string InlineFixLabel => $"MText映射  {InlineFixCount}";
-    public string RuntimeMappingLabel => $"竖排TT  {RuntimeMappingCount}";
+    public string RuntimeMappingLabel => $"临时映射  {RuntimeMappingCount}";
     public string FailedLabel => $"未替换  {FailedCount}";
     public bool HasShx => ShxCount > 0;
     public bool HasTrueType => TrueTypeCount > 0;
@@ -410,9 +410,9 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
             RuntimeMappingCount = runtimeMappingResults.Count;
 
             if (Items.Count == 0 && RuntimeMappingCount > 0)
-                SummaryText = $"竖排 TrueType 映射 {RuntimeMappingCount} 项";
+                SummaryText = $"样式表 @ 字体临时映射 {RuntimeMappingCount} 项";
             else if (RuntimeMappingCount > 0)
-                SummaryText += $" · 竖排映射 {RuntimeMappingCount} 项";
+                SummaryText += $" · 临时映射 {RuntimeMappingCount} 项";
         }
 
         // 内联字体修复记录（按类型排序：SHX主字体 → SHX大字体 → TrueType）
@@ -422,7 +422,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
             {
                 "SHX主字体" => 0,
                 "SHX大字体" => 1,
-                _ => 2   // TrueType、TrueType→SHX 等
+                _ => 2   // TrueType、TrueType映射 等
             }))
                 InlineFixItems.Add(r);
             InlineFixCount = inlineFixResults.Count;

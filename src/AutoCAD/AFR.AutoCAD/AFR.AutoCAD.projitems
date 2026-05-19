@@ -16,12 +16,15 @@
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextDwgInFieldsScopeHook.cs" Link="FontMapping\DbTextDwgInFieldsScopeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextUpstreamDecodeProbeHook.cs" Link="FontMapping\DbTextUpstreamDecodeProbeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DwgFilerCodePageScopeHook.cs" Link="FontMapping\DwgFilerCodePageScopeHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\LdFileHook.cs" Link="FontMapping\LdFileHook.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontAvailabilityIndex.cs" Link="FontMapping\FontAvailabilityIndex.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontRedirectResolver.cs" Link="FontMapping\FontRedirectResolver.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontRuntimeMappingStore.cs" Link="FontMapping\FontRuntimeMappingStore.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextFontParser.cs" Link="FontMapping\MTextFontParser.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontReplacer.cs" Link="FontMapping\MTextInlineFontReplacer.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontHook.cs" Link="FontMapping\MTextInlineFontHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontScanner.cs" Link="FontMapping\MTextInlineFontScanner.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeDecodeHookProfile.cs" Link="FontMapping\NativeDecodeHookProfile.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeInlineHook.cs" Link="FontMapping\NativeInlineHook.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\StyleTextStyleHook.cs" Link="FontMapping\StyleTextStyleHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\TextEditorDbcsDecodeHook.cs" Link="FontMapping\TextEditorDbcsDecodeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AppInitializer.cs" Link="Hosting\AppInitializer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AutoCadHost.cs" Link="Hosting\AutoCadHost.cs" />

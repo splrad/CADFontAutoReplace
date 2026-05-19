@@ -56,24 +56,48 @@ Debug 命令：
 
 主链路在 `ExecutionController.Execute`：
 
-1. 使用 `FontDetector` 检测样式表缺失字体。
-2. 使用 `FontReplacer` 替换 SHX 主字体、SHX 大字体与 TrueType。
-3. 扫描 MText 内联字体。
-4. 将 MText 内联缺失 TrueType 转换为 SHX `\F`，并用 `LdFileHook` 重定向记录与 MText 正向扫描结果交叉生成修复记录。
-5. 执行文枢 DBText 本地 AI 修复。
-6. 输出摘要并刷新显示。
+1. 使用 `FontDetector` 检测样式表普通缺失字体，并由 `FontReplacer.ReplaceMissingFonts()` 执行永久替换。
+2. 替换后重新检测并存储仍缺失结果，供 `AFRLOG` 标记当前状态。
+3. 使用 `StyleTextStyleHook` 只对样式表带 `@` 的缺失字体执行临时运行时映射。
+4. 扫描 MText 内联字体；`MTextInlineFontHook` 只在 MText 作用域内处理全部内联缺失字体，并直接记录实际映射结果。
+5. 执行文枢 DBText 本地 AI 修复，最后输出摘要并刷新显示。
+
+当前 Hook 职责边界：
+
+- `StyleTextStyleHook` 只负责样式表带 `@` 的缺失字体运行时映射。它 Hook `AcGiTextStyle::loadStyleRec`，并解析/调用 `styleName`、`fileName`、`bigFontFileName`、`isVertical`、`setFont`、`setFileName`、`setBigFontFileName`、`setVertical`。
+- `MTextInlineFontHook` 只负责 MText 内联缺失字体运行时映射。它 Hook `AcDbMText::explodeFragments` 建立 MText 作用域，在该作用域内处理 `AcGiTextStyle::setFont`、`AcGiTextStyle(font,bigFont)`、`setFileName`、`setBigFontFileName`。
+- `LdFileHook` 已从 Release 主链路删除；字体存在性与 SHX 类型判断统一由 `FontAvailabilityIndex` 提供，运行时命中记录统一由 `FontRuntimeMappingStore` 提供。
+- 样式表运行时操作必须进入 `StyleTextStyleHook.EnterStyleRuntimeOperation()` 作用域；`MTextInlineFontHook` 在 `StyleTextStyleHook.IsInsideStyleRuntimeOperation` 为 true 时必须旁路，避免样式表主动加载触发 MText Hook 日志或重定向。
+- MText Hook 不能处理样式表字体；样式表 Hook 不能处理 MText 内联字体。两者都可以使用同一套字体可用性、`@` 前缀剥离和配置兜底规则，但不能混用触发来源。
+
+样式表运行时映射规则：
+
+- 样式表非 `@` 缺失字体必须走 `FontReplacer.ReplaceMissingFonts()` 永久替换；只有带 `@` 的样式表缺失字体由 `StyleTextStyleHook` 做运行时映射，样式表原始 `FileName`、`BigFontFileName`、`Font.TypeFace` 保持不变。
+- 带一个或多个 `@` 前缀的样式表字体必须一次性去除所有连续前缀后优先检查本机真实字体；本机存在时映射到去 `@` 后字体，本机不存在时映射到配置替换字体。
+- 样式表 `@TrueType` 去 `@` 后本机字体存在时跳过映射，交给 CAD 原生显示；样式表 `@SHX` 去 `@` 后本机字体存在且主/大字体类型匹配时临时映射到真实 SHX。
+- 带 `@` 前缀的样式表字体只能运行时临时映射，不允许永久替换。
+- `StyleTextStyleHook` 必须在原始 `loadStyleRec` 执行前应用登记映射；登记后主动对相关样式执行 managed `Autodesk.AutoCAD.GraphicsInterface.TextStyle.FromTextStyleTableRecord(id)` 与 `LoadStyleRec`，确保未自然触发显示加载的 SHX 样式也能命中 Hook。
+- 已验证日志证据：`AFR_Diag_20260520_020305.log` 中 `10_TrueType竖写字体格式.dwg` 的对账结果为 `主动加载样式完成: attempted=5, loaded=5`，`样式表Hook对账: 替换逻辑缺失槽位=5, 运行时登记=6, Hook总命中=6, Hook命中缺失槽位=5, 字体名一致=True, 未命中=0, 额外命中=1`。额外 1 项是 `黑体竖写:@黑体`，属于预期 @TrueType 运行时映射。
+
+MText 内联运行时映射规则：
+
+- MText 内联缺失字体不再通过 `MTextInlineFontReplacer` 改写 `MText.Contents`，不要恢复缺失 TrueType 内联字体 `TrueType -> SHX \F` 的内容转换器。
+- MText 内联 TrueType 缺失必须保持 TrueType -> TrueType 运行时映射；MText 内联 SHX 主字体和 SHX 大字体按 SHX 类型映射。
+- MText 内联字体名带一个或多个 `@` 前缀时，先一次性去除所有连续 `@` 得到真实字体名；本机存在真实字体时优先映射到真实字体，本机不存在时映射到配置替换字体。
+- MText 内联扫描结果用于触发显示刷新和辅助展示；AFRLOG 展示记录必须来自 `MTextInlineFontHook` 实际命中的业务映射结果，不能靠盲猜或直接改写内容制造记录。
 
 注意事项：
 
-- `AFRLOG` 不是通用 DiagnosticLogger 查看器；它主要展示字体表替换和内联字体替换的 UI。
+- `AFRLOG` 不是通用 DiagnosticLogger 查看器；它主要展示样式表字体运行时映射、保留的手动样式调整入口，以及 MText 内联字体映射记录。
 - TrueType 样式表替换必须继续使用 TrueType，避免污染 AutoCAD 字体缓存。
-- MText 内联缺失 TrueType 可转换为 SHX `\F` 格式，让后续渲染走 SHX/Hook 路径。
+- 样式表缺失字体运行时映射后，样式表仍保留原值；AFRLOG 应显示为“运行时已映射 / 样式表保持原值”，不能继续按普通“未替换”理解。
+- MText 内联缺失 TrueType 不允许再转换为 SHX `\F` 格式。
 - 文枢 DBText 修复必须位于样式表替换和 MText 内联处理之后，让 DBText 决策运行在更稳定的字体上下文中。
 - SHX 字形缺笔、字体形状不正确，与 DBText 编码修复是两类问题，不要混在同一修复策略里。
 
 ## 文枢 DBText 本地 AI 修复
 
-当前代码不再使用读取到的文字外观作为 DBText 乱码强信号；文枢介入必须来自 native DBCS/code page Hook evidence，或由已修复强证据种子产生的涟漪/同文档等同强信号。DBText native Hook 与 `LdFileHook` 是两条独立链路：`LdFileHook` 只服务字体加载/字体重定向，不得作为 DBText AI 启动条件。
+当前代码不再使用读取到的文字外观作为 DBText 乱码强信号；文枢介入必须来自 native DBCS/code page Hook evidence，或由已修复强证据种子产生的涟漪/同文档等同强信号。DBText native Hook 与字体运行时映射是两条独立链路；字体缺失或字体映射记录不得作为 DBText AI 启动条件。
 
 当前实现：
 
@@ -94,7 +118,7 @@ Debug 命令：
 
 - 未检测到 native DBCS/code page Hook 强证据时保持静默，不加载文枢模型、不评分、不提示。
 - `GlyphCoreNativeDecodeEvidenceStore` 只消费内存证据，不伪造证据；没有 native Hook 生产者或等同强信号种子时 DBText 文枢不会触发。
-- `LdFileHook` 字体重定向记录只能作为辅助字体上下文，不得作为 DBText 错解码强信号。
+- 字体运行时映射记录只能作为辅助字体上下文，不得作为 DBText 错解码强信号。
 - 检测到强证据后，候选来自原文、Big5/GBK/UTF-8 carrier 转换，并按 Hook 证据方向优先排序。
 - 同类文本簇共享一次 AI 判断；涟漪和同文档 family 扩散只能从已修复且有 native family mismatch 强证据的 DBText 种子产生，不能从文本外观、字体缺失、训练集命中或候选转换成功产生。
 - 文枢只使用嵌入 ONNX 模型评分，不再使用精确修复表或训练集查表短路。

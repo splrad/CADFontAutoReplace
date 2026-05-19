@@ -8,6 +8,31 @@ internal interface INativeDecodeHookProfileProvider
     NativeDecodeHookProfile NativeDecodeHookProfile { get; }
 }
 
+internal interface INativeFontHookExportsProvider
+{
+    string AcGiTextStyleLoadStyleRecExport { get; }
+
+    string AcGiTextStyleStyleNameExport { get; }
+
+    string AcGiTextStyleFileNameExport { get; }
+
+    string AcGiTextStyleBigFontFileNameExport { get; }
+
+    string AcGiTextStyleIsVerticalExport { get; }
+
+    string AcGiTextStyleSetVerticalExport { get; }
+
+    string AcGiTextStyleSetFontExport { get; }
+
+    string AcGiTextStyleSetFileNameExport { get; }
+
+    string AcGiTextStyleSetBigFontFileNameExport { get; }
+
+    string AcGiTextStyleFileNameCtorExport { get; }
+
+    string AcDbMTextExplodeFragmentsExport { get; }
+}
+
 internal enum FilerCodePageResolverKind
 {
     None,
@@ -324,16 +349,6 @@ internal static class NativeDecodeHookProfileResolver
 
 internal static class AutoCadNativeDecodeHookProfiles
 {
-    private const string ReadStringAcStringExport = "?readString@AcDbMemoryDwgFiler@@UEAA?AW4ErrorStatus@Acad@@AEAVAcString@@@Z";
-    private const string ReadStringWideCharPointerExport = "?readString@AcDbMemoryDwgFiler@@UEAA?AW4ErrorStatus@Acad@@PEAPEA_W@Z";
-    private const string GetFilerCodePageIdExport = "?acdbGetFilerCodePageId@@YA?AW4code_page_id@@PEAVAcDbDwgFiler@@@Z";
-    private const string CodePageIdIsDoubleByteExport = "?CodePageIdIsDoubleByte@AcCodePage@@SA_NW4code_page_id@@@Z";
-    private const string MultiByteCifToWideCharExport = "?MultiByteCIFToWideChar@@YAHW4code_page_id@@W4MB2Uni@@PEBDHPEA_WH@Z";
-    private const string Utf16ToWideGetWideBufferExport = "?getWideBuffer@Utf16ToWideCharHelper@UnicodeConvert@PAL@AutoCAD@Autodesk@@QEAA_NPEA_WAEA_K@Z";
-    private const string ReadDoubleByteAnsiExport = "?read_doublebyte@TextEditor@@CA_NPEBDAEA_WW4code_page_id@@@Z";
-    private const string MultiByteToUnicodeAcStringExport = "?MultiByteToUnicode@TextEditor@@SA_NPEBDHW4code_page_id@@AEAVAcString@@@Z";
-    private const string AcutUpdStringName = "acutUpdString(wchar_t const*, wchar_t**)";
-
     private static readonly byte[] ReadStringAcStringPrefix =
     [
         0x48, 0x89, 0x5C, 0x24, 0x18, 0x55, 0x56, 0x57,
@@ -471,6 +486,15 @@ internal static class AutoCadNativeDecodeHookProfiles
     public static NativeDecodeHookProfile CreateFullProfile(
         string platformName,
         string acDbDllName,
+        string readStringAcStringExport,
+        string? readStringWideCharPointerExport,
+        string getFilerCodePageIdExport,
+        string codePageIdIsDoubleByteExport,
+        string multiByteCifToWideCharExport,
+        string? utf16ToWideGetWideBufferExport,
+        string readDoubleByteAnsiExport,
+        string multiByteToUnicodeAcStringExport,
+        string acutUpdStringName,
         uint readStringAcStringRva,
         uint? readStringWideCharPointerRva,
         uint getFilerCodePageIdRva,
@@ -501,14 +525,16 @@ internal static class AutoCadNativeDecodeHookProfiles
             acDbDllName,
             "baseline acdb profile with DBText strong-evidence hooks enabled",
             new DwgFilerCodePageHookProfile(
-                NativeHookTarget.Export("AcDbMemoryDwgFiler::readString(AcString)", ReadStringAcStringExport, readStringAcStringRva, readStringAcStringPrefix ?? ReadStringAcStringPrefix, maxPrologueSize: 64),
+                NativeHookTarget.Export("AcDbMemoryDwgFiler::readString(AcString)", readStringAcStringExport, readStringAcStringRva, readStringAcStringPrefix ?? ReadStringAcStringPrefix, maxPrologueSize: 64),
                 readStringWideCharPointerRva.HasValue
                     ? readStringWideCharPointerUseRvaOnly
                         ? NativeHookTarget.RvaOnly("AcDbMemoryDwgFiler::readString(wchar**)", readStringWideCharPointerRva.Value, readStringWideCharPointerPrefix ?? ReadStringWideCharPointerPrefix, maxPrologueSize: 64)
-                        : NativeHookTarget.Export("AcDbMemoryDwgFiler::readString(wchar**)", ReadStringWideCharPointerExport, readStringWideCharPointerRva.Value, readStringWideCharPointerPrefix ?? ReadStringWideCharPointerPrefix, maxPrologueSize: 64)
+                        : !string.IsNullOrWhiteSpace(readStringWideCharPointerExport)
+                            ? NativeHookTarget.Export("AcDbMemoryDwgFiler::readString(wchar**)", readStringWideCharPointerExport!, readStringWideCharPointerRva.Value, readStringWideCharPointerPrefix ?? ReadStringWideCharPointerPrefix, maxPrologueSize: 64)
+                            : NativeHookTarget.Disabled("AcDbMemoryDwgFiler::readString(wchar**)", "当前版本未提供 readString(wchar**) 导出名，跳过该可选 readString 子 hook。")
                     : NativeHookTarget.Disabled("AcDbMemoryDwgFiler::readString(wchar**)", "当前版本缺少 readString(wchar**) 导出，跳过该可选 readString 子 hook。"),
-                NativeHookTarget.Export("AcCodePage::CodePageIdIsDoubleByte", CodePageIdIsDoubleByteExport, codePageIdIsDoubleByteRva, [0x40, 0x53, 0x48, 0x83, 0xEC, 0x20], 6),
-                NativeHookTarget.Export("acdbGetFilerCodePageId", GetFilerCodePageIdExport, getFilerCodePageIdRva, [0x48, 0x83, 0xEC, 0x28], 4),
+                NativeHookTarget.Export("AcCodePage::CodePageIdIsDoubleByte", codePageIdIsDoubleByteExport, codePageIdIsDoubleByteRva, [0x40, 0x53, 0x48, 0x83, 0xEC, 0x20], 6),
+                NativeHookTarget.Export("acdbGetFilerCodePageId", getFilerCodePageIdExport, getFilerCodePageIdRva, [0x48, 0x83, 0xEC, 0x28], 4),
                 FilerCodePageResolverKind.Export,
                 virtualCodePageMethodOffset: 0,
                 virtualCodePageRecordCodePageOffset: 0,
@@ -518,8 +544,8 @@ internal static class AutoCadNativeDecodeHookProfiles
             new DbTextDwgInFieldsHookProfile(
                 NativeHookTarget.RvaOnly("AcDbImpText::dwgInFields", dbTextDwgInFieldsRva, dbTextDwgInFieldsPrefix ?? DbTextDwgInFieldsPrefix, maxPrologueSize: 64),
                 wideStringAssignRva.HasValue
-                    ? NativeHookTarget.RvaOnly(AcutUpdStringName, wideStringAssignRva.Value, WideStringAssignPrefix, maxPrologueSize: 32)
-                    : NativeHookTarget.Disabled(AcutUpdStringName, "当前版本未静态确认唯一 RVA，跳过可选文本写入来源 hook。"),
+                    ? NativeHookTarget.RvaOnly(acutUpdStringName, wideStringAssignRva.Value, WideStringAssignPrefix, maxPrologueSize: 32)
+                    : NativeHookTarget.Disabled(acutUpdStringName, "当前版本未静态确认唯一 RVA，跳过可选文本写入来源 hook。"),
                 impTextStringConstVtableOffset: 0x560,
                 impTextStringPointerOffset: 0x68,
                 impTextStringToWideCharMethodOffset: 0x40,
@@ -531,10 +557,10 @@ internal static class AutoCadNativeDecodeHookProfiles
                 textSourceReadCodeUnitMethodOffset: 0x280,
                 textSourceReleaseMethodOffset: 0x290),
             new DbTextUpstreamDecodeHookProfile(
-                NativeHookTarget.Export("MultiByteCIFToWideChar", MultiByteCifToWideCharExport, multiByteCifToWideCharRva, multiByteCifToWideCharPrefix ?? MultiByteCifToWideCharPrefix, maxPrologueSize: 24),
+                NativeHookTarget.Export("MultiByteCIFToWideChar", multiByteCifToWideCharExport, multiByteCifToWideCharRva, multiByteCifToWideCharPrefix ?? MultiByteCifToWideCharPrefix, maxPrologueSize: 24),
                 NativeHookTarget.RvaOnly("DText full-input multibyte decode probe", dTextFullInputProbeRva, DTextFullInputProbePrefix, DTextFullInputProbePrefix.Length, DTextFullInputProbePrefix.Length),
-                enableAcPalUtf16Probe
-                    ? NativeHookTarget.Export("Utf16ToWideCharHelper::getWideBuffer", Utf16ToWideGetWideBufferExport, acPalUtf16ToWideGetWideBufferRva ?? 0x4F900, acPalUtf16ToWideGetWideBufferPrefix ?? Utf16ToWideGetWideBufferPrefix, maxPrologueSize: 24)
+                enableAcPalUtf16Probe && !string.IsNullOrWhiteSpace(utf16ToWideGetWideBufferExport)
+                    ? NativeHookTarget.Export("Utf16ToWideCharHelper::getWideBuffer", utf16ToWideGetWideBufferExport!, acPalUtf16ToWideGetWideBufferRva ?? 0x4F900, acPalUtf16ToWideGetWideBufferPrefix ?? Utf16ToWideGetWideBufferPrefix, maxPrologueSize: 24)
                     : NativeHookTarget.Disabled("Utf16ToWideCharHelper::getWideBuffer", "未提供当前 CAD 版本 AcPal.dll 基线，跳过可选 AcPal 子 hook。"),
                 enableDispatcherPatterns
                     ? CreateDispatcherTarget("DBText main dispatcher", mainDispatcherRva, mainDispatcherPattern ?? MainDispatcherPattern)
@@ -543,8 +569,8 @@ internal static class AutoCadNativeDecodeHookProfiles
                     ? CreateDispatcherTarget("DBText parallel dispatcher", parallelDispatcherRva, parallelDispatcherPattern ?? ParallelDispatcherPattern)
                     : NativeHookTarget.Disabled("DBText parallel dispatcher", "当前版本未静态确认唯一 dispatcher 签名，跳过可选 dispatcher hook。")),
             new TextEditorDbcsDecodeHookProfile(
-                NativeHookTarget.Export("TextEditor::read_doublebyte", ReadDoubleByteAnsiExport, readDoubleByteAnsiRva, readDoubleByteAnsiPrefix ?? ReadDoubleByteAnsiPrefix, maxPrologueSize: 64),
-                NativeHookTarget.Export("TextEditor::MultiByteToUnicode(AcString)", MultiByteToUnicodeAcStringExport, multiByteToUnicodeAcStringRva, MultiByteToUnicodeAcStringPrefix, maxPrologueSize: 64)),
+                NativeHookTarget.Export("TextEditor::read_doublebyte", readDoubleByteAnsiExport, readDoubleByteAnsiRva, readDoubleByteAnsiPrefix ?? ReadDoubleByteAnsiPrefix, maxPrologueSize: 64),
+                NativeHookTarget.Export("TextEditor::MultiByteToUnicode(AcString)", multiByteToUnicodeAcStringExport, multiByteToUnicodeAcStringRva, MultiByteToUnicodeAcStringPrefix, maxPrologueSize: 64)),
             new CodePageFamilyHookProfile(
                 NativeHookTarget.Pattern("code-page family context", codePageFamilyRva, CodePageFamilySignature, CodePageFamilyPrefix, maxPrologueSize: 64),
                 codePageIdFieldOffset: 0x46C));
@@ -570,7 +596,7 @@ internal static class AutoCadNativeDecodeHookProfiles
             disabledDwgFiler,
             new DbTextDwgInFieldsHookProfile(
                 NativeHookTarget.Disabled("AcDbImpText::dwgInFields", reason),
-                NativeHookTarget.Disabled(AcutUpdStringName, reason),
+                NativeHookTarget.Disabled("acutUpdString(wchar_t const*, wchar_t**)", reason),
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             new DbTextUpstreamDecodeHookProfile(
                 NativeHookTarget.Disabled("MultiByteCIFToWideChar", reason),

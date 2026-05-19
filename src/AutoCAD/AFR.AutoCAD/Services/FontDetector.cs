@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.GraphicsInterface;
+using AFR.FontMapping;
 using System.Windows.Media;
 using AFR.Models;
 
@@ -102,27 +103,50 @@ internal static class FontDetector
                 if (isTrueType)
                 {
                     var typeFace = safeFont!.Value.TypeFace!;
-                    if (IsTrueTypeFontAvailable(typeFace, fileName, context))
+                    if (FontRedirectResolver.HasAtPrefix(typeFace)
+                        || FontRedirectResolver.HasAtPrefix(fileName))
                     {
-                        DiagnosticLogger.LogFontAvailability(typeFace, "TrueType", true);
+                        DiagnosticLogger.Log("检测",
+                            $"样式 '{styleName}' 使用 @TrueType '{typeFace}'，交由样式表运行时 Hook 处理，跳过样式表永久替换");
                         continue;
                     }
 
-                    if (typeFace.Length > 1 && typeFace[0] == '@')
+                    if (IsTrueTypeFontAvailable(typeFace, fileName, context))
                     {
-                        DiagnosticLogger.Log("检测",
-                            $"样式 '{styleName}' 使用竖排 TrueType '{typeFace}'，交由 LdFileHook 运行时映射，跳过样式表替换");
+                        DiagnosticLogger.LogFontAvailability(typeFace, "TrueType", true);
                         continue;
                     }
                 }
                 bool isMainMissing = false;
                 bool isBigMissing = false;
                 if (isTrueType)
+                {
                     isMainMissing = true;
+                }
                 else if (!string.IsNullOrWhiteSpace(fileName))
-                    isMainMissing = !IsShxFontAvailable(fileName, context) || IsShxTypeMismatch(fileName, context, expectBigFont: false);
+                {
+                    if (FontRedirectResolver.HasAtPrefix(fileName))
+                    {
+                        DiagnosticLogger.Log("检测",
+                            $"样式 '{styleName}' 使用 @SHX 主字体 '{fileName}'，交由样式表运行时 Hook 处理，跳过样式表永久替换");
+                    }
+                    else
+                    {
+                        isMainMissing = !IsShxFontAvailable(fileName, context) || IsShxTypeMismatch(fileName, context, expectBigFont: false);
+                    }
+                }
                 if (!isTrueType && !string.IsNullOrWhiteSpace(bigFontName))
-                    isBigMissing = !IsShxFontAvailable(bigFontName, context) || IsShxTypeMismatch(bigFontName, context, expectBigFont: true);
+                {
+                    if (FontRedirectResolver.HasAtPrefix(bigFontName))
+                    {
+                        DiagnosticLogger.Log("检测",
+                            $"样式 '{styleName}' 使用 @SHX 大字体 '{bigFontName}'，交由样式表运行时 Hook 处理，跳过样式表永久替换");
+                    }
+                    else
+                    {
+                        isBigMissing = !IsShxFontAvailable(bigFontName, context) || IsShxTypeMismatch(bigFontName, context, expectBigFont: true);
+                    }
+                }
                 if (isMainMissing || isBigMissing)
                 {
                     DiagnosticLogger.LogMissing(styleName, isMainMissing, isBigMissing, isTrueType);
@@ -136,14 +160,16 @@ internal static class FontDetector
     }
 
     /// <summary>
-    /// 收集样式表中由 LdFileHook 运行时兜底显示的字体映射。
-    /// 当前仅记录竖排 TrueType（@xxx）：样式表保持原值，不进入缺失字体替换列表。
+    /// 收集样式表中由运行时 Hook 临时兜底显示的 @ 前缀字体映射。
+    /// 非 @ 缺失字体继续走样式表永久替换流程。
     /// </summary>
     public static List<RuntimeFontMappingRecord> CollectRuntimeFontMappings(
         FontDetectionContext context,
         string configuredTrueTypeFont)
     {
         var results = new List<RuntimeFontMappingRecord>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         using var tr = context.Db.TransactionManager.StartTransaction();
         var styleTable = (TextStyleTable)tr.GetObject(context.Db.TextStyleTableId, OpenMode.ForRead);
 
@@ -155,28 +181,48 @@ internal static class FontDetector
                 if (style.IsShapeFile) continue;
 
                 var fileName = Path.GetFileName(style.FileName ?? string.Empty);
+                var bigFontName = Path.GetFileName(style.BigFontFileName ?? string.Empty);
                 FontDescriptor? safeFont = null;
                 try { safeFont = style.Font; }
                 catch { }
 
-                if (!safeFont.HasValue) continue;
-
-                string typeFace = safeFont.Value.TypeFace ?? string.Empty;
-                if (typeFace.Length <= 1 || typeFace[0] != '@') continue;
-
+                string typeFace = safeFont?.TypeFace ?? string.Empty;
                 bool hasFile = !string.IsNullOrWhiteSpace(fileName);
                 bool fileIsTrueType = hasFile && IsTrueTypeFontFile(fileName);
                 bool isTrueType = !string.IsNullOrWhiteSpace(typeFace) && (!hasFile || fileIsTrueType);
-                if (!isTrueType) continue;
 
-                if (IsTrueTypeFontAvailable(typeFace, fileName, context))
-                    continue;
+                if (isTrueType
+                    && (FontRedirectResolver.HasAtPrefix(typeFace)
+                        || FontRedirectResolver.HasAtPrefix(fileName)))
+                {
+                    string original = FontRedirectResolver.HasAtPrefix(typeFace) ? typeFace : fileName;
+                    AddRuntimeFontRecord(results, seen, CreateRuntimeFontRecord(
+                        style.Name,
+                        original,
+                        FontRedirectKind.TrueType,
+                        configuredTrueTypeFont,
+                        context));
+                }
 
-                results.Add(CreateVerticalTrueTypeRuntimeRecord(
-                    style.Name,
-                    typeFace,
-                    configuredTrueTypeFont,
-                    context));
+                if (!isTrueType && FontRedirectResolver.HasAtPrefix(fileName))
+                {
+                    AddRuntimeFontRecord(results, seen, CreateRuntimeFontRecord(
+                        style.Name,
+                        fileName,
+                        FontRedirectKind.ShxMain,
+                        configuredTrueTypeFont,
+                        context));
+                }
+
+                if (!isTrueType && FontRedirectResolver.HasAtPrefix(bigFontName))
+                {
+                    AddRuntimeFontRecord(results, seen, CreateRuntimeFontRecord(
+                        style.Name,
+                        bigFontName,
+                        FontRedirectKind.ShxBigFont,
+                        configuredTrueTypeFont,
+                        context));
+                }
             }
             catch (Exception ex)
             {
@@ -188,41 +234,119 @@ internal static class FontDetector
         return results;
     }
 
-    private static RuntimeFontMappingRecord CreateVerticalTrueTypeRuntimeRecord(
+    private static void AddRuntimeFontRecord(
+        List<RuntimeFontMappingRecord> results,
+        HashSet<string> seen,
+        RuntimeFontMappingRecord? record)
+    {
+        if (record == null)
+            return;
+
+        RuntimeFontMappingRecord value = record;
+        if (string.IsNullOrWhiteSpace(value.StyleName)
+            || string.IsNullOrWhiteSpace(value.OriginalFont))
+        {
+            return;
+        }
+
+        string key = GetRuntimeFontRecordKey(value);
+        if (seen.Add(key))
+            results.Add(value);
+    }
+
+    private static string GetRuntimeFontRecordKey(RuntimeFontMappingRecord record)
+        => string.Concat(
+            record.StyleName,
+            "\u001F",
+            record.OriginalFont,
+            "\u001F",
+            record.MappingCategory);
+
+    private static RuntimeFontMappingRecord? CreateRuntimeFontRecord(
         string styleName,
         string originalFont,
+        FontRedirectKind kind,
         string configuredTrueTypeFont,
         FontDetectionContext context)
     {
-        string baseName = originalFont.TrimStart('@');
-        if (!string.IsNullOrWhiteSpace(baseName) && IsTrueTypeFontAvailable(baseName, context))
+        string original = FontRedirectResolver.NormalizeInputName(originalFont);
+        if (!FontRedirectResolver.HasAtPrefix(original))
+            return null;
+
+        string baseName = FontRedirectResolver.StripLeadingAtPrefix(original);
+        if (!string.IsNullOrWhiteSpace(baseName)
+            && IsRuntimeBaseFontAvailable(baseName, kind, context))
         {
+            if (kind == FontRedirectKind.TrueType)
+            {
+                DiagnosticLogger.Log("检测",
+                    $"样式 '{styleName}' 的 @TrueType '{original}' 去 @ 后基础字体 '{baseName}' 可用，跳过样式表运行时映射");
+                return null;
+            }
+
             return new RuntimeFontMappingRecord(
                 styleName,
-                originalFont,
-                "@" + baseName,
-                "竖排TrueType",
+                original,
+                NormalizeRuntimeReplacement(baseName, kind),
+                GetRuntimeMappingCategory(kind),
                 "基础字体可用");
         }
 
-        string configured = (configuredTrueTypeFont ?? string.Empty).TrimStart('@');
-        if (!string.IsNullOrWhiteSpace(configured) && IsTrueTypeFontAvailable(configured, context))
+        string configured = kind == FontRedirectKind.TrueType
+            ? configuredTrueTypeFont ?? string.Empty
+            : kind == FontRedirectKind.ShxBigFont
+                ? ConfigService.Instance.BigFont ?? string.Empty
+                : ConfigService.Instance.MainFont ?? string.Empty;
+        configured = FontRedirectResolver.NormalizeInputName(configured).TrimStart('@');
+        if (!string.IsNullOrWhiteSpace(configured)
+            && IsRuntimeBaseFontAvailable(configured, kind, context))
         {
             return new RuntimeFontMappingRecord(
                 styleName,
-                originalFont,
-                "@" + configured,
-                "竖排TrueType",
+                original,
+                NormalizeRuntimeReplacement(configured, kind),
+                GetRuntimeMappingCategory(kind),
                 "配置字体兜底");
         }
 
         return new RuntimeFontMappingRecord(
             styleName,
-            originalFont,
-            "未找到可用 TrueType",
-            "竖排TrueType",
+            original,
+            kind == FontRedirectKind.TrueType ? "未找到可用 TrueType" : "未找到可用 SHX",
+            GetRuntimeMappingCategory(kind),
             "需重新配置");
     }
+
+    private static bool IsRuntimeBaseFontAvailable(
+        string fontName,
+        FontRedirectKind kind,
+        FontDetectionContext context)
+    {
+        if (kind == FontRedirectKind.TrueType)
+            return FontRedirectResolver.IsAvailableTrueType(fontName)
+                   || IsTrueTypeFontAvailable(fontName, context);
+
+        string shxName = FontRedirectResolver.EnsureShx(fontName);
+        if (!IsShxFontAvailable(shxName, context))
+            return false;
+
+        return !IsShxTypeMismatch(
+            shxName,
+            context,
+            expectBigFont: kind == FontRedirectKind.ShxBigFont);
+    }
+
+    private static string NormalizeRuntimeReplacement(string fontName, FontRedirectKind kind)
+        => kind == FontRedirectKind.TrueType
+            ? FontRedirectResolver.NormalizeInputName(fontName).TrimStart('@')
+            : FontRedirectResolver.EnsureShx(fontName);
+
+    private static string GetRuntimeMappingCategory(FontRedirectKind kind) => kind switch
+    {
+        FontRedirectKind.ShxBigFont => "样式表SHX大字体临时映射",
+        FontRedirectKind.ShxMain => "样式表SHX主字体临时映射",
+        _ => "样式表TrueType临时映射"
+    };
 
     /// <summary>
     /// 收集数据库样式表中所有被引用的字体文件名（FileName + BigFontFileName）。

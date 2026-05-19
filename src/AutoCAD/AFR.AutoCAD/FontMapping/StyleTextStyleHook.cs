@@ -1,0 +1,666 @@
+using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
+using AFR.Models;
+using AFR.Platform;
+using AFR.Services;
+
+namespace AFR.FontMapping;
+
+/// <summary>
+/// 处理样式表 @ 前缀缺失字体临时映射的 AcGiTextStyle Hook。
+/// <para>
+/// 它不改写样式表，只在样式加载时对已登记的 @ 字体做运行时映射。
+/// </para>
+/// </summary>
+internal static class StyleTextStyleHook
+{
+    private const string Tag = "StyleTextStyleHook";
+    private const int MaxStyleLoadLogRecords = 128;
+
+    private static NativeInlineHook<AcGiTextStyleLoadStyleRecDelegate>? _loadStyleRecHook;
+    private static AcGiTextStyleLoadStyleRecDelegate? _loadStyleRecHookDelegate;
+    private static AcGiTextStyleLoadStyleRecDelegate? _loadStyleRecThunkTrampolineDelegate;
+    private static AcGiTextStyleStringGetterDelegate? _styleNameGetter;
+    private static AcGiTextStyleStringGetterDelegate? _fileNameGetter;
+    private static AcGiTextStyleStringGetterDelegate? _bigFontFileNameGetter;
+    private static AcGiTextStyleBoolGetterDelegate? _isVerticalGetter;
+    private static AcGiTextStyleSetVerticalDelegate? _setVertical;
+    private static AcGiTextStyleSetFontDelegate? _setFont;
+    private static AcGiTextStyleSetFileNameDelegate? _setFileName;
+    private static AcGiTextStyleSetFileNameDelegate? _setBigFontFileName;
+    private static IntPtr _loadStyleRecThunkTarget;
+    private static IntPtr _loadStyleRecThunkTrampoline;
+    private static byte[]? _loadStyleRecThunkSavedBytes;
+    private static bool _loadStyleRecThunkInstalled;
+    private static readonly ConcurrentDictionary<string, RuntimeFontMappingRecord[]> RuntimeMappingsByStyle =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, RuntimeFontMappingRecord> RuntimeApplyHits =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, byte> StyleLoadLogSeen =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, byte> RuntimeApplyLogSeen =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, IntPtr> NativeStringCache =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static int _styleLoadLogCount;
+
+    [ThreadStatic] private static bool _inLoadStyleRecHook;
+    [ThreadStatic] private static int _styleRuntimeScopeDepth;
+
+    internal static bool IsInstalled => _loadStyleRecHook?.IsInstalled == true || _loadStyleRecThunkInstalled;
+
+    internal static bool IsInsideStyleLoad => _inLoadStyleRecHook;
+
+    internal static bool IsInsideStyleRuntimeOperation
+        => _inLoadStyleRecHook || _styleRuntimeScopeDepth > 0;
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int AcGiTextStyleLoadStyleRecDelegate(IntPtr self, IntPtr db);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate IntPtr AcGiTextStyleStringGetterDelegate(IntPtr self);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private delegate bool AcGiTextStyleBoolGetterDelegate(IntPtr self);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void AcGiTextStyleSetVerticalDelegate(IntPtr self, byte isVertical);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int AcGiTextStyleSetFontDelegate(
+        IntPtr self,
+        IntPtr typeface,
+        byte bold,
+        byte italic,
+        int charset,
+        int pitch,
+        int family);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void AcGiTextStyleSetFileNameDelegate(IntPtr self, IntPtr fileName);
+
+    internal static IDisposable EnterStyleRuntimeOperation()
+    {
+        _styleRuntimeScopeDepth++;
+        return new StyleRuntimeScope();
+    }
+
+    private sealed class StyleRuntimeScope : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+
+            _disposed = true;
+            if (_styleRuntimeScopeDepth > 0)
+                _styleRuntimeScopeDepth--;
+        }
+    }
+
+    internal static void Install()
+    {
+        if (_loadStyleRecHook?.IsInstalled == true)
+            return;
+
+        if (PlatformManager.Platform is not INativeFontHookExportsProvider exports)
+        {
+            DiagnosticLogger.Log(Tag, $"{PlatformManager.Platform.DisplayName} 未提供字体 Hook 导出定义，跳过样式表字体 Hook。");
+            return;
+        }
+
+        IntPtr module = GetModuleHandle(PlatformManager.Platform.AcDbDllName);
+        if (module == IntPtr.Zero)
+        {
+            DiagnosticLogger.Log(Tag, $"{PlatformManager.Platform.AcDbDllName} 未加载，跳过样式表字体 Hook。");
+            return;
+        }
+
+        TryResolveStringGetter(module, exports.AcGiTextStyleStyleNameExport, out _styleNameGetter);
+        TryResolveStringGetter(module, exports.AcGiTextStyleFileNameExport, out _fileNameGetter);
+        TryResolveStringGetter(module, exports.AcGiTextStyleBigFontFileNameExport, out _bigFontFileNameGetter);
+        TryResolveBoolGetter(module, exports.AcGiTextStyleIsVerticalExport, out _isVerticalGetter);
+        TryResolveSetVertical(module, exports.AcGiTextStyleSetVerticalExport, out _setVertical);
+        TryResolveSetFont(module, exports.AcGiTextStyleSetFontExport, out _setFont);
+        TryResolveSetFileName(module, exports.AcGiTextStyleSetFileNameExport, out _setFileName);
+        TryResolveSetFileName(module, exports.AcGiTextStyleSetBigFontFileNameExport, out _setBigFontFileName);
+        DiagnosticLogger.Log(Tag,
+            $"AcGiTextStyle getter 状态: styleName={_styleNameGetter != null}, fileName={_fileNameGetter != null}, " +
+            $"bigFontFileName={_bigFontFileNameGetter != null}, isVertical={_isVerticalGetter != null}, " +
+            $"setFont={_setFont != null}, setFileName={_setFileName != null}, setBigFontFileName={_setBigFontFileName != null}, setVertical={_setVertical != null}");
+
+        if (!TryGetExportAddress(module, exports.AcGiTextStyleLoadStyleRecExport, out var address, out uint rva))
+        {
+            DiagnosticLogger.Log(Tag, "AcGiTextStyle::loadStyleRec 导出未找到，跳过样式表字体 Hook。");
+            return;
+        }
+
+        _loadStyleRecHookDelegate = LoadStyleRecHookHandler;
+        if (TryInstallLoadStyleRecThunkHook(address, rva, _loadStyleRecHookDelegate))
+            return;
+
+        _loadStyleRecHook = new NativeInlineHook<AcGiTextStyleLoadStyleRecDelegate>(
+            Tag,
+            "AcGiTextStyle::loadStyleRec",
+            rva);
+
+        _loadStyleRecHook.InstallAtAddress(address, rva, _loadStyleRecHookDelegate, 14, 64);
+    }
+
+    internal static void Uninstall()
+    {
+        _loadStyleRecHook?.Uninstall();
+        _loadStyleRecHook = null;
+        UninstallLoadStyleRecThunkHook();
+        _loadStyleRecHookDelegate = null;
+        _loadStyleRecThunkTrampolineDelegate = null;
+        _styleNameGetter = null;
+        _fileNameGetter = null;
+        _bigFontFileNameGetter = null;
+        _isVerticalGetter = null;
+        _setVertical = null;
+        _setFont = null;
+        _setFileName = null;
+        _setBigFontFileName = null;
+        RuntimeMappingsByStyle.Clear();
+        RuntimeApplyHits.Clear();
+        FontRuntimeMappingStore.ClearStyleMappings();
+        StyleLoadLogSeen.Clear();
+        RuntimeApplyLogSeen.Clear();
+        foreach (IntPtr ptr in NativeStringCache.Values)
+        {
+            try { Marshal.FreeHGlobal(ptr); } catch { }
+        }
+        NativeStringCache.Clear();
+        _styleLoadLogCount = 0;
+    }
+
+    internal static void ReplaceStyleRuntimeFontMappings(IEnumerable<RuntimeFontMappingRecord> mappings)
+    {
+        RuntimeMappingsByStyle.Clear();
+        RuntimeApplyHits.Clear();
+
+        var grouped = new Dictionary<string, List<RuntimeFontMappingRecord>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (RuntimeFontMappingRecord mapping in mappings)
+        {
+            if (!string.IsNullOrWhiteSpace(mapping.StyleName))
+            {
+                if (!grouped.TryGetValue(mapping.StyleName, out var list))
+                {
+                    list = new List<RuntimeFontMappingRecord>();
+                    grouped.Add(mapping.StyleName, list);
+                }
+
+                list.Add(mapping);
+            }
+        }
+
+        foreach (var (styleName, list) in grouped)
+        {
+            RuntimeMappingsByStyle[styleName] = list.ToArray();
+        }
+    }
+
+    internal static IReadOnlyList<RuntimeFontMappingRecord> GetRuntimeApplyHits()
+        => RuntimeApplyHits.Values.ToArray();
+
+    private static int LoadStyleRecHookHandler(IntPtr self, IntPtr db)
+    {
+        var trampoline = _loadStyleRecHook?.TrampolineDelegate ?? _loadStyleRecThunkTrampolineDelegate;
+        if (trampoline == null)
+            return -1;
+
+        if (_inLoadStyleRecHook)
+            return trampoline(self, db);
+
+        _inLoadStyleRecHook = true;
+        try
+        {
+            ApplyRegisteredStyleMappings(self);
+            int result = trampoline(self, db);
+            LogStyleLoad(self, db, result);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.LogError(Tag + ": AcGiTextStyle::loadStyleRec Hook 异常", ex);
+            return -1;
+        }
+        finally
+        {
+            _inLoadStyleRecHook = false;
+        }
+    }
+
+    private static bool TryInstallLoadStyleRecThunkHook(
+        IntPtr address,
+        uint rva,
+        AcGiTextStyleLoadStyleRecDelegate hookDelegate)
+    {
+        const int patchSize = 16;
+
+        if (!IsLoadStyleRecThunk(address))
+            return false;
+
+        try
+        {
+            int rel32 = Marshal.ReadInt32(address + 9);
+            IntPtr jumpTarget = address + 13 + rel32;
+
+            _loadStyleRecThunkSavedBytes = new byte[patchSize];
+            Marshal.Copy(address, _loadStyleRecThunkSavedBytes, 0, patchSize);
+
+            _loadStyleRecThunkTrampoline = NativeInlineHookInterop.VirtualAlloc(
+                IntPtr.Zero,
+                32,
+                0x3000,
+                0x40);
+            if (_loadStyleRecThunkTrampoline == IntPtr.Zero)
+            {
+                DiagnosticLogger.Log(Tag, "AcGiTextStyle::loadStyleRec thunk trampoline 分配失败。");
+                _loadStyleRecThunkSavedBytes = null;
+                return false;
+            }
+
+            byte[] trampolineBytes = new byte[22];
+            Array.Copy(_loadStyleRecThunkSavedBytes, 0, trampolineBytes, 0, 8);
+            WriteAbsoluteJumpBytes(trampolineBytes, 8, jumpTarget);
+            Marshal.Copy(trampolineBytes, 0, _loadStyleRecThunkTrampoline, trampolineBytes.Length);
+            _loadStyleRecThunkTrampolineDelegate =
+                Marshal.GetDelegateForFunctionPointer<AcGiTextStyleLoadStyleRecDelegate>(_loadStyleRecThunkTrampoline);
+
+            IntPtr hookPtr = Marshal.GetFunctionPointerForDelegate(hookDelegate);
+            byte[] patch = new byte[patchSize];
+            for (int i = 0; i < patch.Length; i++) patch[i] = 0x90;
+            WriteAbsoluteJumpBytes(patch, 0, hookPtr);
+
+            NativeInlineHookInterop.VirtualProtect(address, patchSize, 0x40, out uint oldProtect);
+            Marshal.Copy(patch, 0, address, patch.Length);
+            NativeInlineHookInterop.VirtualProtect(address, patchSize, oldProtect, out _);
+
+            _loadStyleRecThunkTarget = address;
+            _loadStyleRecThunkInstalled = true;
+            DiagnosticLogger.Log(Tag,
+                $"AcGiTextStyle::loadStyleRec thunk Hook 安装成功。RVA=0x{rva:X}, JumpTarget=0x{jumpTarget.ToInt64():X}, PrologueSize={patchSize}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.LogError(Tag + ": AcGiTextStyle::loadStyleRec thunk Hook 安装失败", ex);
+            UninstallLoadStyleRecThunkHook();
+            return false;
+        }
+    }
+
+    private static void UninstallLoadStyleRecThunkHook()
+    {
+        try
+        {
+            if (_loadStyleRecThunkInstalled
+                && _loadStyleRecThunkTarget != IntPtr.Zero
+                && _loadStyleRecThunkSavedBytes != null)
+            {
+                NativeInlineHookInterop.VirtualProtect(
+                    _loadStyleRecThunkTarget,
+                    (uint)_loadStyleRecThunkSavedBytes.Length,
+                    0x40,
+                    out uint oldProtect);
+                Marshal.Copy(_loadStyleRecThunkSavedBytes, 0, _loadStyleRecThunkTarget, _loadStyleRecThunkSavedBytes.Length);
+                NativeInlineHookInterop.VirtualProtect(
+                    _loadStyleRecThunkTarget,
+                    (uint)_loadStyleRecThunkSavedBytes.Length,
+                    oldProtect,
+                    out _);
+            }
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.LogError(Tag + ": AcGiTextStyle::loadStyleRec thunk Hook 卸载失败", ex);
+        }
+        finally
+        {
+            if (_loadStyleRecThunkTrampoline != IntPtr.Zero)
+            {
+                try { NativeInlineHookInterop.VirtualFree(_loadStyleRecThunkTrampoline, 0, 0x8000); } catch { }
+            }
+
+            _loadStyleRecThunkInstalled = false;
+            _loadStyleRecThunkTarget = IntPtr.Zero;
+            _loadStyleRecThunkTrampoline = IntPtr.Zero;
+            _loadStyleRecThunkSavedBytes = null;
+            _loadStyleRecThunkTrampolineDelegate = null;
+        }
+    }
+
+    private static bool IsLoadStyleRecThunk(IntPtr address)
+    {
+        try
+        {
+            return Marshal.ReadByte(address) == 0x48
+                   && Marshal.ReadByte(address + 1) == 0x8B
+                   && Marshal.ReadByte(address + 2) == 0x41
+                   && Marshal.ReadByte(address + 3) == 0x08
+                   && Marshal.ReadByte(address + 4) == 0x48
+                   && Marshal.ReadByte(address + 5) == 0x8B
+                   && Marshal.ReadByte(address + 6) == 0x48
+                   && Marshal.ReadByte(address + 7) == 0x08
+                   && Marshal.ReadByte(address + 8) == 0xE9;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void WriteAbsoluteJumpBytes(byte[] buffer, int offset, IntPtr target)
+    {
+        buffer[offset] = 0xFF;
+        buffer[offset + 1] = 0x25;
+        buffer[offset + 2] = 0x00;
+        buffer[offset + 3] = 0x00;
+        buffer[offset + 4] = 0x00;
+        buffer[offset + 5] = 0x00;
+        BitConverter.GetBytes(target.ToInt64()).CopyTo(buffer, offset + 6);
+    }
+
+    private static void LogStyleLoad(IntPtr self, IntPtr db, int result)
+    {
+        string styleName = ReadString(_styleNameGetter, self);
+        string fileName = ReadString(_fileNameGetter, self);
+        string bigFontFileName = ReadString(_bigFontFileNameGetter, self);
+        bool? isVertical = ReadBool(_isVerticalGetter, self);
+
+        RuntimeFontMappingRecord? mapping = null;
+        bool registered = false;
+        if (!string.IsNullOrWhiteSpace(styleName)
+            && RuntimeMappingsByStyle.TryGetValue(styleName, out RuntimeFontMappingRecord[]? foundMappings)
+            && foundMappings is { Length: > 0 })
+        {
+            registered = true;
+            mapping = foundMappings[0];
+        }
+        bool hasAtFont = FontRedirectResolver.HasAtPrefix(fileName)
+                         || FontRedirectResolver.HasAtPrefix(bigFontFileName);
+
+        if (!ShouldLogStyleLoad(styleName, fileName, bigFontFileName, result, registered || hasAtFont))
+            return;
+
+        string mappingText = registered && mapping != null
+            ? $" original='{mapping.OriginalFont}' target='{mapping.ReplacementFont}' category='{mapping.MappingCategory}' status='{mapping.Status}'"
+            : string.Empty;
+        string verticalText = isVertical.HasValue ? isVertical.Value.ToString() : "unknown";
+
+        DiagnosticLogger.Log(Tag,
+            $"AcGiTextStyle.loadStyleRec: style='{styleName}' result={result} file='{fileName}' " +
+            $"big='{bigFontFileName}' vertical={verticalText} registered={registered}{mappingText} db=0x{db.ToInt64():X}");
+    }
+
+    private static void ApplyRegisteredStyleMappings(IntPtr self)
+    {
+        string styleName = ReadString(_styleNameGetter, self);
+        if (string.IsNullOrWhiteSpace(styleName)
+            || !RuntimeMappingsByStyle.TryGetValue(styleName, out RuntimeFontMappingRecord[]? mappings)
+            || mappings.Length == 0)
+        {
+            return;
+        }
+
+        foreach (RuntimeFontMappingRecord mapping in mappings)
+        {
+            if (!IsUsableMapping(mapping))
+                continue;
+
+            if (IsTrueTypeMapping(mapping))
+            {
+                ApplyTrueTypeMapping(self, styleName, mapping);
+            }
+            else if (IsBigFontMapping(mapping))
+            {
+                ApplyShxMapping(self, styleName, mapping, bigFont: true);
+            }
+            else
+            {
+                ApplyShxMapping(self, styleName, mapping, bigFont: false);
+            }
+        }
+    }
+
+    private static void ApplyTrueTypeMapping(IntPtr self, string styleName, RuntimeFontMappingRecord mapping)
+    {
+        bool vertical = FontRedirectResolver.HasAtPrefix(mapping.OriginalFont);
+        string replacement = FontRedirectResolver.NormalizeInputName(mapping.ReplacementFont).TrimStart('@');
+        if (string.IsNullOrWhiteSpace(replacement))
+            return;
+
+        bool shouldSetFont = !mapping.Status.Contains("基础字体可用", StringComparison.OrdinalIgnoreCase)
+                             || !vertical;
+        bool fontApplied = false;
+        bool verticalApplied = false;
+
+        if (shouldSetFont && _setFont != null)
+        {
+            IntPtr replacementPtr = GetNativeString(replacement);
+            _setFont(self, replacementPtr, 0, 0, 134, 2, 0);
+            fontApplied = true;
+        }
+
+        if (_setVertical != null)
+        {
+            _setVertical(self, vertical ? (byte)1 : (byte)0);
+            verticalApplied = true;
+        }
+
+        if (shouldSetFont && !fontApplied)
+            return;
+        if (!fontApplied && !verticalApplied)
+            return;
+
+        RecordRuntimeApplyHit(styleName, mapping);
+
+        string action = fontApplied && verticalApplied
+            ? "setFont+setVertical(TrueType)"
+            : fontApplied
+                ? "setFont(TrueType)"
+                : "setVertical(TrueType)";
+        LogRuntimeApply(styleName, mapping, action, replacement);
+    }
+
+    private static void ApplyShxMapping(
+        IntPtr self,
+        string styleName,
+        RuntimeFontMappingRecord mapping,
+        bool bigFont)
+    {
+        string replacement = FontRedirectResolver.EnsureShx(mapping.ReplacementFont);
+        if (string.IsNullOrWhiteSpace(replacement))
+            return;
+
+        var setter = bigFont ? _setBigFontFileName : _setFileName;
+        if (setter == null)
+            return;
+
+        setter(self, GetNativeString(replacement));
+        RecordRuntimeApplyHit(styleName, mapping);
+        LogRuntimeApply(styleName, mapping, bigFont ? "setBigFontFileName" : "setFileName", replacement);
+    }
+
+    private static void RecordRuntimeApplyHit(string styleName, RuntimeFontMappingRecord mapping)
+    {
+        string key = GetRuntimeMappingKey(styleName, mapping.OriginalFont, mapping.MappingCategory);
+        RuntimeApplyHits[key] = mapping;
+        FontRuntimeMappingStore.RecordStyleMapping(mapping);
+    }
+
+    private static string GetRuntimeMappingKey(string styleName, string originalFont, string category)
+        => string.Concat(styleName, "\u001F", originalFont, "\u001F", category);
+
+    private static bool IsUsableMapping(RuntimeFontMappingRecord mapping)
+    {
+        return !string.IsNullOrWhiteSpace(mapping.ReplacementFont)
+               && !mapping.Status.Contains("需重新配置", StringComparison.OrdinalIgnoreCase)
+               && !mapping.ReplacementFont.StartsWith("未找到", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsTrueTypeMapping(RuntimeFontMappingRecord mapping)
+        => mapping.MappingCategory.Contains("TrueType", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsBigFontMapping(RuntimeFontMappingRecord mapping)
+        => mapping.MappingCategory.Contains("SHX大", StringComparison.OrdinalIgnoreCase);
+
+    private static void LogRuntimeApply(
+        string styleName,
+        RuntimeFontMappingRecord mapping,
+        string action,
+        string appliedTarget)
+    {
+        string key = $"{styleName}|{mapping.OriginalFont}|{appliedTarget}|{action}";
+        if (!RuntimeApplyLogSeen.TryAdd(key, 0))
+            return;
+
+        DiagnosticLogger.Log(Tag,
+            $"样式表运行时映射: style='{styleName}' action={action} original='{mapping.OriginalFont}' " +
+            $"target='{mapping.ReplacementFont}' applied='{appliedTarget}' category='{mapping.MappingCategory}' status='{mapping.Status}'");
+    }
+
+    private static IntPtr GetNativeString(string value)
+        => NativeStringCache.GetOrAdd(value, static text => Marshal.StringToHGlobalUni(text));
+
+    private static bool ShouldLogStyleLoad(
+        string styleName,
+        string fileName,
+        string bigFontFileName,
+        int result,
+        bool important)
+    {
+        string key = $"{styleName}|{fileName}|{bigFontFileName}|{result}|{important}";
+        if (!StyleLoadLogSeen.TryAdd(key, 0))
+            return false;
+
+        if (important)
+            return true;
+
+        return System.Threading.Interlocked.Increment(ref _styleLoadLogCount) <= MaxStyleLoadLogRecords;
+    }
+
+    private static string ReadString(AcGiTextStyleStringGetterDelegate? getter, IntPtr self)
+    {
+        if (getter == null || self == IntPtr.Zero)
+            return string.Empty;
+
+        try
+        {
+            IntPtr value = getter(self);
+            return value == IntPtr.Zero ? string.Empty : Marshal.PtrToStringUni(value) ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static bool? ReadBool(AcGiTextStyleBoolGetterDelegate? getter, IntPtr self)
+    {
+        if (getter == null || self == IntPtr.Zero)
+            return null;
+
+        try { return getter(self); }
+        catch { return null; }
+    }
+
+    private static bool TryResolveStringGetter(
+        IntPtr module,
+        string exportName,
+        out AcGiTextStyleStringGetterDelegate? getter)
+    {
+        getter = null;
+        IntPtr address = NativeInlineHookInterop.GetProcAddress(module, exportName);
+        if (address == IntPtr.Zero)
+            return false;
+
+        getter = Marshal.GetDelegateForFunctionPointer<AcGiTextStyleStringGetterDelegate>(address);
+        return true;
+    }
+
+    private static bool TryResolveBoolGetter(
+        IntPtr module,
+        string exportName,
+        out AcGiTextStyleBoolGetterDelegate? getter)
+    {
+        getter = null;
+        IntPtr address = NativeInlineHookInterop.GetProcAddress(module, exportName);
+        if (address == IntPtr.Zero)
+            return false;
+
+        getter = Marshal.GetDelegateForFunctionPointer<AcGiTextStyleBoolGetterDelegate>(address);
+        return true;
+    }
+
+    private static bool TryResolveSetVertical(
+        IntPtr module,
+        string exportName,
+        out AcGiTextStyleSetVerticalDelegate? setter)
+    {
+        setter = null;
+        IntPtr address = NativeInlineHookInterop.GetProcAddress(module, exportName);
+        if (address == IntPtr.Zero)
+            return false;
+
+        setter = Marshal.GetDelegateForFunctionPointer<AcGiTextStyleSetVerticalDelegate>(address);
+        return true;
+    }
+
+    private static bool TryResolveSetFont(
+        IntPtr module,
+        string exportName,
+        out AcGiTextStyleSetFontDelegate? setter)
+    {
+        setter = null;
+        IntPtr address = NativeInlineHookInterop.GetProcAddress(module, exportName);
+        if (address == IntPtr.Zero)
+            return false;
+
+        setter = Marshal.GetDelegateForFunctionPointer<AcGiTextStyleSetFontDelegate>(address);
+        return true;
+    }
+
+    private static bool TryResolveSetFileName(
+        IntPtr module,
+        string exportName,
+        out AcGiTextStyleSetFileNameDelegate? setter)
+    {
+        setter = null;
+        IntPtr address = NativeInlineHookInterop.GetProcAddress(module, exportName);
+        if (address == IntPtr.Zero)
+            return false;
+
+        setter = Marshal.GetDelegateForFunctionPointer<AcGiTextStyleSetFileNameDelegate>(address);
+        return true;
+    }
+
+    private static bool TryGetExportAddress(IntPtr module, string exportName, out IntPtr address, out uint rva)
+    {
+        address = NativeInlineHookInterop.GetProcAddress(module, exportName);
+        if (address == IntPtr.Zero)
+        {
+            rva = 0;
+            return false;
+        }
+
+        long delta = address.ToInt64() - module.ToInt64();
+        if (delta <= 0 || delta > uint.MaxValue)
+        {
+            rva = 0;
+            return false;
+        }
+
+        rva = (uint)delta;
+        return true;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern IntPtr GetModuleHandle(string lpModuleName);
+}

@@ -153,7 +153,7 @@ internal sealed class DocumentContextManager
     /// </summary>
     public void StoreInlineFontFixResults(Document doc, List<InlineFontFixRecord> results)
     {
-        if (doc == null || results.Count == 0) return;
+        if (doc == null) return;
         var key = GetDocumentKey(doc);
         if (key == null) return;
         lock (_lock)

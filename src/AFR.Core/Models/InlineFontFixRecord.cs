@@ -7,7 +7,7 @@ namespace AFR.Models;
 /// <param name="MissingFont">缺失的原始字体名称。</param>
 /// <param name="ReplacementFont">用于替换的目标字体名称。</param>
 /// <param name="FixMethod">修复方式的描述（如 "SHX映射"、"TrueType映射"）。</param>
-/// <param name="FontCategory">字体分类（如 "SHX"、"TrueType"），用于统计和日志输出。</param>
+/// <param name="FontCategory">字体分类（如 "SHX主字体"、"SHX大字体"、"TrueType映射"），用于统计和日志输出。</param>
 public sealed record InlineFontFixRecord(
     string MissingFont,
     string ReplacementFont,

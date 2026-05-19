@@ -58,100 +58,77 @@ internal sealed class ExecutionController
             {
                 // 创建独立的字体检测上下文 — 缓存生命周期与本次执行绑定，结束后由 GC 自动回收
                 var context = new FontDetectionContext(doc.Database);
+                FontRuntimeMappingStore.Clear();
+                StyleTextStyleHook.ReplaceStyleRuntimeFontMappings(Array.Empty<RuntimeFontMappingRecord>());
 
                 DiagnosticLogger.BeginDocument(doc.Name, config.MainFont, config.BigFont, config.TrueTypeFont);
 
                 // 第一阶段: 检测缺失字体（读取样式表原始状态，判断哪些字体在系统中不可用）
                 DiagnosticLogger.BeginPhase("检测缺失字体");
                 var missingFonts = FontDetector.DetectMissingFonts(context);
-                var runtimeFontMappings = FontDetector.CollectRuntimeFontMappings(context, config.TrueTypeFont);
 
                 // 存储检测结果供 AFRLOG 命令使用
                 contextMgr.StoreDetectionResults(doc, missingFonts);
-                contextMgr.StoreRuntimeFontMappingResults(doc, runtimeFontMappings);
-                DiagnosticLogger.EndPhase($"缺失: {missingFonts.Count}个, 运行时映射: {runtimeFontMappings.Count}个");
+                DiagnosticLogger.EndPhase($"缺失: {missingFonts.Count}个");
 
-                int stillMissingSlotCount = 0;
-
-                // 第二阶段: 将缺失字体替换为用户配置的替换字体（仅在有缺失时执行）
+                // 第二阶段: 恢复样式表永久替换。FontDetector 已排除 @ 前缀样式字体，
+                // 因此这里仅会写回普通缺失字体；@ 字体保留给 StyleTextStyleHook 做临时映射。
+                int replacedStyleCount = 0;
                 if (missingFonts.Count > 0)
                 {
-                    DiagnosticLogger.BeginPhase("替换缺失字体");
-                    int replaceCount = FontReplacer.ReplaceMissingFonts(
-                        missingFonts, config.MainFont, config.BigFont, config.TrueTypeFont, context);
-                    DiagnosticLogger.EndPhase($"替换: {replaceCount}个");
+                    DiagnosticLogger.BeginPhase("替换样式表缺失字体");
+                    replacedStyleCount = FontReplacer.ReplaceMissingFonts(
+                        missingFonts,
+                        config.MainFont,
+                        config.BigFont,
+                        config.TrueTypeFont,
+                        context);
+                    DiagnosticLogger.EndPhase($"替换: {replacedStyleCount}项");
 
-                    // 替换后二次检测：重新检测确认哪些字体仍然缺失
-                    // （当用户配置的替换字体本身也不可用时会出现此情况）
-                    // 复用原 context — 同一次 Execute 内磁盘字体文件和系统字体注册未变化，
-                    // FindFileCache 和 FontMetricsCache 仍然有效，避免重复的 FindFile/GDI 调用
-                    var stillMissing = FontDetector.DetectMissingFonts(context);
-                    contextMgr.StoreStillMissingResults(doc, stillMissing);
-                    DiagnosticLogger.Log("验证", $"替换后仍缺失: {stillMissing.Count}个");
-
-                    // 计算未替换的字体槽位数（一个样式可能同时缺失主字体和大字体，各算一个槽位）
-                    for (int i = 0; i < stillMissing.Count; i++)
-                    {
-                        if (stillMissing[i].IsMainFontMissing) stillMissingSlotCount++;
-                        if (stillMissing[i].IsBigFontMissing && !stillMissing[i].IsTrueType) stillMissingSlotCount++;
-                    }
-
-                    // 清理 Hook 可能导致的陈旧 SHX 引用（仅在 Hook 启用时需要）
-                    FontReplacer.CleanupStaleShxReferences(context);
-
-#if DEBUG
-                    // 诊断: 在 Regen 前读回样式表，验证替换是否已持久化到数据库
-                    DiagnosticLogger.BeginPhase("验证替换结果");
-                    VerifyStyleTableAfterReplace(doc.Database, missingFonts);
-                    DiagnosticLogger.EndPhase();
-#endif
-
-                    // Regen 刷新显示 — 使替换后的字体立即可见
-                    doc.Editor.Regen();
+                    if (replacedStyleCount > 0)
+                        doc.Editor.Regen();
                 }
 
-                // 第三阶段: 扫描 MText 内联字体，交叉比对 Hook 重定向记录
-                // 始终执行：即使文字样式表无缺失，MText 内联字体仍可能引用缺失字体
-                // 正向扫描法: 解析 MText.Contents 中的 \F/\f 格式代码，
-                // 与 Hook 重定向记录交叉比对，精确识别被修复的内联字体。
+                // 第三阶段: 二次检测替换后的样式表状态，供 AFRLOG 标记仍缺失样式。
+                DiagnosticLogger.BeginPhase("替换后二次检测");
+                var postContext = new FontDetectionContext(doc.Database);
+                var stillMissing = FontDetector.DetectMissingFonts(postContext);
+                contextMgr.StoreStillMissingResults(doc, stillMissing);
+                DiagnosticLogger.EndPhase($"仍缺失: {stillMissing.Count}个");
+
+                // 第四阶段: 仅登记样式表 @ 前缀缺失字体的临时运行时映射。
+                var runtimeFontMappings = FontDetector.CollectRuntimeFontMappings(postContext, config.TrueTypeFont);
+                List<RuntimeFontMappingRecord> actualStyleRuntimeMappings = [];
+                if (runtimeFontMappings.Count > 0)
+                {
+                    DiagnosticLogger.BeginPhase("样式表运行时映射");
+                    ActivateStyleRuntimeFontMappings(runtimeFontMappings);
+                    ForceLoadStyleRuntimeMappings(doc.Database, runtimeFontMappings);
+
+                    // Regen 刷新显示并触发 AcGiTextStyle::loadStyleRec，让 Hook 对样式表 @ 字体做临时映射。
+                    doc.Editor.Regen();
+
+                    actualStyleRuntimeMappings = FontRuntimeMappingStore.GetStyleMappings();
+                    contextMgr.StoreRuntimeFontMappingResults(doc, actualStyleRuntimeMappings);
+                    DiagnosticLogger.EndPhase($"登记: {runtimeFontMappings.Count}项, 命中: {actualStyleRuntimeMappings.Count}项");
+                }
+                else
+                {
+                    contextMgr.StoreRuntimeFontMappingResults(doc, actualStyleRuntimeMappings);
+                }
+
+                // 第五阶段: 只读扫描 MText 内联字体；实际映射结果由 MText Hook 自身记录。
+                // 不改写 MText.Contents，避免接管 CAD 原生内联格式解析。
                 DiagnosticLogger.BeginPhase("扫描MText内联字体");
                 var inlineFonts = MTextInlineFontScanner.ScanInlineFonts(doc.Database);
-
-                // 将缺失 TrueType \f 转换为 SHX \F，使后续渲染走 ldfile → Hook 统一管理
-                // 排除编码乱码字体名（DWG 旧版编码产生的 U+FE00+ 无效字符）
-                var ttfFixRecords = MTextInlineFontReplacer.ConvertMissingTrueTypeToShx(
-                    doc.Database, inlineFonts, context,
-                    config.MainFont, config.BigFont);
-
-                var redirectLog = LdFileHook.GetRawRedirectLog();
-
-                #if DEBUG
                 if (inlineFonts.Count > 0)
-                {
-                    foreach (var (name, type) in inlineFonts)
-                        DiagnosticLogger.Log("MText内联", $"扫描到: '{name}' 类型={type}");
-                }
-                if (redirectLog.Count > 0)
-                {
-                    foreach (var (key, (rep, ft)) in redirectLog)
-                        DiagnosticLogger.Log("MText内联", $"重定向记录: '{key}' → '{rep}' param2={ft}");
-                }
-#endif
-
-                // SHX 修复记录来自 Hook 重定向日志，TrueType 修复记录来自 \f→\F 转换
-                var shxFixRecords = BuildInlineFixRecords(inlineFonts, redirectLog);
-                var inlineFixResults = new List<InlineFontFixRecord>(shxFixRecords.Count + ttfFixRecords.Count);
-                inlineFixResults.AddRange(shxFixRecords);
-                inlineFixResults.AddRange(ttfFixRecords);
-
-                contextMgr.StoreInlineFontFixResults(doc, inlineFixResults);
-                DiagnosticLogger.EndPhase($"内联字体: {inlineFonts.Count}个, 修复: {inlineFixResults.Count}个");
-
-                // TrueType→SHX 转换修改了 MText.Contents，需要 Regen 刷新
-                if (ttfFixRecords.Count > 0)
                     doc.Editor.Regen();
 
-                // DBText 单行文字在样式表与 MText 内联字体处理完成后，再读取 native 解码证据并懒加载文枢模型。
+                var inlineFixResults = FontRuntimeMappingStore.GetInlineMappings();
+                contextMgr.StoreInlineFontFixResults(doc, inlineFixResults);
+                DiagnosticLogger.EndPhase($"内联字体: {inlineFonts.Count}个, 映射: {inlineFixResults.Count}个");
+
+                // DBText 单行文字在样式表与运行时字体映射处理完成后，再读取 native 解码证据并懒加载文枢模型。
                 DiagnosticLogger.BeginPhase("DBText文枢修复");
                 int repairedDbTextCount = GlyphCoreTextRepairService.Repair(doc.Database);
                 GlyphCoreTextRepairRunSummary dbTextRepairSummary = GlyphCoreTextRepairService.LastRunSummary;
@@ -160,12 +137,18 @@ internal sealed class ExecutionController
                     doc.Editor.Regen();
 
                 // 统计汇总 — Regen 之后输出，确保统计信息是最后一行实质内容
-                if (missingFonts.Count > 0 || inlineFixResults.Count > 0)
-                    log.AddStatistics(missingFonts, stillMissingSlotCount, inlineFixResults.Count);
-                else if (runtimeFontMappings.Count > 0)
-                    log.Info($"竖排 TrueType 运行时映射 {runtimeFontMappings.Count} 项，样式表保持原值。");
-                else
+                if (replacedStyleCount > 0)
+                    log.Info($"样式表缺失字体永久替换 {replacedStyleCount} 项。");
+                if (actualStyleRuntimeMappings.Count > 0)
+                    log.Info($"样式表 @ 字体临时映射 {actualStyleRuntimeMappings.Count} 项，样式表保持原值。");
+                if (inlineFixResults.Count > 0)
+                    log.Info($"MText 内联字体映射 {inlineFixResults.Count} 项。");
+                if (replacedStyleCount == 0
+                    && actualStyleRuntimeMappings.Count == 0
+                    && inlineFixResults.Count == 0)
+                {
                     log.Info("未检测到缺失字体。");
+                }
                 DiagnosticLogger.WriteSummary();
                 summarized = true;
                 log.Flush();
@@ -187,56 +170,66 @@ internal sealed class ExecutionController
         }
     }
 
-    /// <summary>
-    /// 交叉比对 MText 内联字体引用与 Hook 重定向记录，
-    /// 构建精确的内联字体修复记录。
-    /// 仅返回同时满足以下条件的记录:
-    ///   1. 在 MText 内联字体引用中出现（正向识别）
-    ///   2. 在 Hook 重定向记录中存在（确认被修复）
-    /// </summary>
-    private static List<InlineFontFixRecord> BuildInlineFixRecords(
-        Dictionary<string, InlineFontType> inlineFonts,
-        IReadOnlyDictionary<string, (string Replacement, int FontType)> redirectLog)
+    private static void ActivateStyleRuntimeFontMappings(
+        IReadOnlyList<RuntimeFontMappingRecord> runtimeFontMappings)
     {
-        var records = new List<InlineFontFixRecord>();
+        if (runtimeFontMappings.Count == 0)
+            return;
 
-        foreach (var (fontName, inlineType) in inlineFonts)
+        StyleTextStyleHook.ReplaceStyleRuntimeFontMappings(runtimeFontMappings);
+        DiagnosticLogger.Log("FontMapping", $"AcGiTextStyle 样式表字体 Hook 已登记: {runtimeFontMappings.Count}项");
+    }
+
+    private static void ForceLoadStyleRuntimeMappings(
+        Database db,
+        IReadOnlyList<RuntimeFontMappingRecord> runtimeFontMappings)
+    {
+        if (runtimeFontMappings.Count == 0)
+            return;
+
+        var styleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < runtimeFontMappings.Count; i++)
         {
-            if (!redirectLog.TryGetValue(fontName, out var redirect))
-            {
-                // @ 前缀兼容: Hook 以 baseName（去 @）为 key 存储重定向记录，
-                // 但 MText 解析器保留了原始的 @ 前缀（如 \Fmain,@big|）。
-                // 去掉 @ 后重试匹配，匹配成功时记录仍使用原始带 @ 的字体名。
-                if (fontName.Length > 1 && fontName[0] == '@'
-                    && redirectLog.TryGetValue(fontName.TrimStart('@'), out redirect))
-                {
-                    // 匹配成功，继续处理
-                }
-                else
-                {
-                    continue;
-                }
-            }
-
-            // 过滤自重定向: Hook 处理 @big.shx 时以 baseName（big.shx）为 key 存入 redirect log，
-            // 解析结果为 big.shx → big.shx（字体文件本身存在）。若 MText 同时包含无 @ 的引用
-            // （如 \Fmain,big|），该引用会匹配到这条自重定向记录，产生误报。
-            // 仅过滤无 @ 前缀的自重定向；@ 变体的重定向是有意义的（Hook 剥离 @ 后定位到文件）。
-            if (fontName[0] != '@'
-                && string.Equals(fontName, redirect.Replacement, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            string category = inlineType switch
-            {
-                InlineFontType.ShxBigFont => "SHX大字体",
-                InlineFontType.TrueType => "TrueType",
-                _ => "SHX主字体"
-            };
-
-            records.Add(new InlineFontFixRecord(fontName, redirect.Replacement, "MText内联", category));
+            if (!string.IsNullOrWhiteSpace(runtimeFontMappings[i].StyleName))
+                styleNames.Add(runtimeFontMappings[i].StyleName);
         }
 
-        return records;
+        if (styleNames.Count == 0)
+            return;
+
+        int attempted = 0;
+        int loaded = 0;
+        using var tr = db.TransactionManager.StartOpenCloseTransaction();
+        var styleTable = (TextStyleTable)tr.GetObject(db.TextStyleTableId, OpenMode.ForRead);
+
+        foreach (ObjectId id in styleTable)
+        {
+            try
+            {
+                if (tr.GetObject(id, OpenMode.ForRead, false, true) is not TextStyleTableRecord style)
+                    continue;
+                if (!styleNames.Contains(style.Name))
+                    continue;
+
+                attempted++;
+                var giStyle = new Autodesk.AutoCAD.GraphicsInterface.TextStyle();
+                using (StyleTextStyleHook.EnterStyleRuntimeOperation())
+                {
+                    giStyle.FromTextStyleTableRecord(id);
+                    _ = giStyle.LoadStyleRec;
+                }
+                loaded++;
+                DiagnosticLogger.Log("样式表运行时映射",
+                    $"主动加载样式: style='{style.Name}' file='{style.FileName}' big='{style.BigFontFileName}'");
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLogger.Log("样式表运行时映射", $"主动加载样式失败 {id}: {ex.Message}");
+            }
+        }
+
+        tr.Commit();
+        DiagnosticLogger.Log("样式表运行时映射", $"主动加载样式完成: attempted={attempted}, loaded={loaded}");
     }
 
     /// <summary>

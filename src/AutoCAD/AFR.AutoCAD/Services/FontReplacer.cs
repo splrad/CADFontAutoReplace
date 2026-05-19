@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows.Media;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.GraphicsInterface;
+using AFR.FontMapping;
 using AFR.Models;
 
 
@@ -131,13 +132,26 @@ internal static class FontReplacer
                             style.Font = new FontDescriptor("", false, false, 0, 0);
                             style.FileName = mainFont;
 
-                            // 始终重建 BigFont 状态，避免旧值残留或与新主字体不匹配
-                            style.BigFontFileName = bigFontValid ? bigFont : string.Empty;
+                            // @ 前缀大字体属于运行时临时映射，不能因为主字体缺失而被永久写成配置字体。
+                            bool preserveRuntimeBigFont =
+                                FontRedirectResolver.HasAtPrefix(style.BigFontFileName ?? string.Empty)
+                                || FontRedirectResolver.HasAtPrefix(missing.BigFontFileName);
+                            if (!preserveRuntimeBigFont)
+                                style.BigFontFileName = bigFontValid ? bigFont : string.Empty;
 
                             DiagnosticLogger.LogReplacement(style.Name, "FileName",
                                 missing.FileName, mainFont ?? "");
-                            DiagnosticLogger.LogReplacement(style.Name, "BigFontFileName",
-                                missing.BigFontFileName, bigFontValid ? bigFont ?? "" : "");
+                            if (preserveRuntimeBigFont)
+                            {
+                                DiagnosticLogger.LogSkipped(
+                                    style.Name,
+                                    $"BigFontFileName='{missing.BigFontFileName}' 为 @ 前缀，保留给样式表运行时 Hook 临时映射");
+                            }
+                            else
+                            {
+                                DiagnosticLogger.LogReplacement(style.Name, "BigFontFileName",
+                                    missing.BigFontFileName, bigFontValid ? bigFont ?? "" : "");
+                            }
 
                             changed = true;
                         }
@@ -152,10 +166,20 @@ internal static class FontReplacer
                 else if (!missing.IsTrueType && missing.IsBigFontMissing
                          && !string.IsNullOrEmpty(style.FileName))
                 {
-                    style.BigFontFileName = bigFontValid ? bigFont : string.Empty;
-                    DiagnosticLogger.LogReplacement(style.Name, "BigFontFileName",
-                        missing.BigFontFileName, bigFontValid ? bigFont ?? "" : "");
-                    changed = true;
+                    if (FontRedirectResolver.HasAtPrefix(style.BigFontFileName ?? string.Empty)
+                        || FontRedirectResolver.HasAtPrefix(missing.BigFontFileName))
+                    {
+                        DiagnosticLogger.LogSkipped(
+                            style.Name,
+                            $"BigFontFileName='{missing.BigFontFileName}' 为 @ 前缀，保留给样式表运行时 Hook 临时映射");
+                    }
+                    else
+                    {
+                        style.BigFontFileName = bigFontValid ? bigFont : string.Empty;
+                        DiagnosticLogger.LogReplacement(style.Name, "BigFontFileName",
+                            missing.BigFontFileName, bigFontValid ? bigFont ?? "" : "");
+                        changed = true;
+                    }
                 }
 
                 if (changed) replaceCount++;
