@@ -35,6 +35,9 @@ internal static class GlyphCoreTextRepairProblemDetector
         if (!HasStrongNativeDecodeEvidence(context))
             return GlyphCoreTextRepairProblemDetection.NoProblem(candidates);
 
+        if (!HasAlignedCarrierRepairCandidate(context, candidates, current))
+            return GlyphCoreTextRepairProblemDetection.NoProblem(candidates);
+
         return GlyphCoreTextRepairProblemDetection.Problem(BuildNativeDecodeReason(context), candidates);
     }
 
@@ -57,6 +60,51 @@ internal static class GlyphCoreTextRepairProblemDetector
                    || IsScope(context, "document-family"));
     }
 
+    private static bool HasAlignedCarrierRepairCandidate(
+        GlyphCoreTextRepairContext context,
+        IReadOnlyList<GlyphCoreTextRepairCandidate> candidates,
+        string current)
+    {
+        string preferredSource = GetEvidencePreferredSource(context);
+        if (string.IsNullOrWhiteSpace(preferredSource))
+            return false;
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            GlyphCoreTextRepairCandidate candidate = candidates[i];
+            if (candidate.IsNoOp
+                || !candidate.IsRoundTrip
+                || string.IsNullOrWhiteSpace(candidate.Text)
+                || string.Equals(candidate.Text, current, StringComparison.Ordinal)
+                || !ContainsToken(candidate.Source, preferredSource)
+                || GlyphCoreTextRepairFeatureExtractor.HasUnsafeRepairCandidateText(candidate.Text))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string GetEvidencePreferredSource(GlyphCoreTextRepairContext context)
+    {
+        string source = context.NativeDecodeSourceCodePageFamily ?? string.Empty;
+        string applied = context.NativeDecodeAppliedCodePageFamily ?? string.Empty;
+
+        if (ContainsToken(source, "big5") && ContainsToken(applied, "gbk"))
+            return "big5-carrier-to-gbk";
+        if (ContainsToken(source, "gbk") && ContainsToken(applied, "big5"))
+            return "gbk-carrier-to-big5";
+        if (ContainsToken(source, "utf8") && ContainsToken(applied, "gbk"))
+            return "utf8-carrier-to-gbk";
+        if (ContainsToken(source, "gbk") && ContainsToken(applied, "utf8"))
+            return "gbk-carrier-to-utf8";
+
+        return string.Empty;
+    }
+
     private static string BuildNativeDecodeReason(GlyphCoreTextRepairContext context)
     {
         string scope = string.IsNullOrWhiteSpace(context.NativeDecodeEvidenceScope)
@@ -76,5 +124,9 @@ internal static class GlyphCoreTextRepairProblemDetector
 
     private static bool IsHookHitType(GlyphCoreTextRepairContext context, string hookHitType)
         => (context.NativeDecodeHookHitType ?? string.Empty).IndexOf(hookHitType, StringComparison.OrdinalIgnoreCase) >= 0;
+
+    private static bool ContainsToken(string value, string token)
+        => !string.IsNullOrEmpty(value)
+           && value.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
 }
 
