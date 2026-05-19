@@ -65,13 +65,20 @@ artifacts/
 /output/
 /output/**
 
-# GlyphCore tools are trackable; AI training assets and model outputs stay local-only.
+# GlyphCore tools and final runtime model files are trackable; training assets stay local-only.
 /AFR.GlyphCore/raw-dwg/
 /data/DbTextRepairModel*.jsonl
 /AFR.GlyphCore/datasets/
 /AFR.GlyphCore/datasets/**
-/AFR.GlyphCore/models/
-/AFR.GlyphCore/models/**
+/AFR.GlyphCore/models/.trash/
+/AFR.GlyphCore/models/.trash/**
+/AFR.GlyphCore/models/candidates/
+/AFR.GlyphCore/models/candidates/**
+/AFR.GlyphCore/models/AFR.GlyphCore.Model.txt
+/AFR.GlyphCore/models/AFR.GlyphCore.TrainingState.json
+/AFR.GlyphCore/models/*_validation_report.json
+/AFR.GlyphCore/models/training_history.jsonl
+/AFR.GlyphCore/models/training_summary.json
 /AFR.GlyphCore/tools/workbench/frontend/dist/
 /AFR.GlyphCore/tools/workbench/frontend/dist/**
 /AFR.GlyphCore/tools/workbench/frontend/.npm-cache/
@@ -398,3 +405,4 @@ FodyWeavers.xsd
 *.png
 /chore/project-bolt-sb1-yrdzmnib.zip
 /chore/project-bolt-sb1-yrdzmnib (1).zip
+/.github/copilot-instructions.md

@@ -80,7 +80,7 @@ dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
 3. 从标准构建输出直接嵌入插件资源并发布自包含单文件部署器；
 4. 将版本化 EXE、纯 DLL 压缩包与字体包生成到 `artifacts/ReleaseAssets/`。
 
-如需发布带官方 DBText AI 的 DLL，在开发者私有环境中额外传入模型、清单和 ONNX Runtime 目录：
+发布带官方 DBText AI 的 DLL 时，默认会从仓库的 `AFR.GlyphCore/models` 自动嵌入当前模型和清单。需要覆盖为私有替代模型时，可额外传入模型、清单和 ONNX Runtime 目录：
 
 ```powershell
 ./tools/Publish-ReleaseAssets.ps1 `

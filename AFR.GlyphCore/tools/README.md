@@ -2,9 +2,11 @@
 
 This folder contains the public GlyphCore DBText training tools: browser workbench,
 schema files, feature builders, LightGBM training scripts, and helper package.
-Training assets under `AFR.GlyphCore/datasets` and model artifacts under
-`AFR.GlyphCore/models` are developer-private local files and must not be
-committed or uploaded to GitHub.
+Training assets under `AFR.GlyphCore/datasets` are developer-private local
+files and must not be committed or uploaded to GitHub. The current runtime
+model files under `AFR.GlyphCore/models` are build inputs and should be
+committed, while candidate models, validation reports, training state, and
+archived model copies remain local-only.
 
 Raw DWG files remain local-only under `AFR.GlyphCore/raw-dwg`.
 
@@ -28,9 +30,12 @@ AFR.GlyphCore/datasets/
   Reports/                # local-only
 
 AFR.GlyphCore/models/
-  AFR.GlyphCore.Model.onnx             # local-only
-  AFR.GlyphCore.ModelManifest.json     # local-only
+  AFR.GlyphCore.Model.onnx             # tracked build input
+  AFR.GlyphCore.ModelManifest.json     # tracked build input
   AFR.GlyphCore.Model.txt              # local-only
+  AFR.GlyphCore.TrainingState.json     # local-only
+  candidates/                          # local-only
+  .trash/                              # local-only
   *_validation_report.json            # local-only
 ```
 
@@ -233,8 +238,9 @@ For smoke testing, omit `-ReviewedInput` to generate synthetic seed labels:
 4. Review and train from the browser workbench.
 
 Release builds do not expose `AFRGLYPHCOREEXPORT` or the training workbench.
-Release model embedding should point at a private local model directory such as
-`AFR.GlyphCore/models`; the model files are not part of the GitHub repo.
+Release model embedding defaults to the tracked model files in
+`AFR.GlyphCore/models`. Override `GlyphCoreModelPath` and
+`GlyphCoreModelManifestPath` only when a private replacement model is required.
 
 The export package writes `manifest.json`, `candidate_groups.jsonl`,
 `preview.json`, and `audit.tsv`. Candidate groups carry native decode evidence,
