@@ -7,16 +7,22 @@ using AFR.Services;
 namespace AFR.FontMapping;
 
 /// <summary>
-/// Bridges @-prefixed font-load requests without changing the AcGiTextStyle
-/// font name that AutoCAD uses to decode vertical TrueType or MText big-font
-/// content.
-/// Redirects are executed only after a higher-level style or MText hook has
-/// registered the original font name and replacement.
+/// 只处理 AutoCAD ldfile 阶段的运行时字体加载重定向。
+/// <para>
+/// 上层 Hook 先按 Style/MText 各自规则判断是否需要交给 LdFileHook；
+/// 这里不负责样式表永久替换，也不决定哪些 @ 字体应该映射。
+/// </para>
+/// <para>
+/// 登记后仅在 ldfile 实际请求同一个 @ 字体时替换加载文件名，
+/// 保留 AcGiTextStyle/MText 原始字体名，避免破坏竖排 TrueType 和大字体解码语义。
+/// </para>
 /// </summary>
 internal static class LdFileHook
 {
     private const string Tag = "LdFileHook";
     private const string LdFileExport = "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z";
+
+    // ldfile 的 param2 用于区分普通字体、ShapeFile 和大字体；ShapeFile 不参与字体兜底。
     private const int FontTypeRegular = 0;
     private const int FontTypeShape = 2;
     private const int FontTypeBigFont = 4;
@@ -52,45 +58,6 @@ internal static class LdFileHook
         RedirectLogSeen.Clear();
     }
 
-    internal static bool RegisterRedirect(
-        string originalFont,
-        string replacementFont,
-        FontRedirectKind kind,
-        string source,
-        InlineFontType? inlineType = null)
-    {
-        string original = NormalizeLoadFontName(originalFont, kind);
-        if (!IsRegisteredAtFontName(original, kind))
-            return false;
-
-        string replacement = NormalizeReplacementFontName(replacementFont, kind, original);
-        if (string.IsNullOrWhiteSpace(replacement))
-            return false;
-
-        if (string.Equals(original, replacement, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        string normalizedSource = string.IsNullOrWhiteSpace(source) ? "unknown" : source.Trim();
-        var request = new RegisteredRedirect(original, replacement, kind, normalizedSource, inlineType);
-        string key = GetRedirectKey(original, kind);
-
-        RegisteredRedirects.AddOrUpdate(
-            key,
-            static (_, incoming) => incoming,
-            static (_, existing, incoming) => MergeRegisteredRedirect(existing, incoming),
-            request);
-
-        string logKey = $"register|{key}|{replacement}|{normalizedSource}|{inlineType}";
-        if (RedirectLogSeen.TryAdd(logKey, 0))
-        {
-            DiagnosticLogger.Log(Tag,
-                $"登记@字体加载映射: source={normalizedSource} kind={kind} " +
-                $"'{original}' → '{replacement}' inline={inlineType?.ToString() ?? "none"}");
-        }
-
-        return true;
-    }
-
     internal static bool TryRegisterResolvedAtFont(
         string originalFont,
         FontRedirectKind kind,
@@ -102,6 +69,7 @@ internal static class LdFileHook
         sourceKey = string.Empty;
         replacement = string.Empty;
 
+        // 是否交给 LdFileHook 由调用方决定；这里只负责解析目标字体并登记运行时加载映射。
         string original = NormalizeLoadFontName(originalFont, kind);
         if (!IsRegisteredAtFontName(original, kind))
             return false;
@@ -116,8 +84,23 @@ internal static class LdFileHook
             return false;
         }
 
-        if (!RegisterRedirect(original, resolved, kind, source, inlineType))
-            return false;
+        string normalizedSource = string.IsNullOrWhiteSpace(source) ? "unknown" : source.Trim();
+        var request = new RegisteredRedirect(original, resolved, kind, normalizedSource, inlineType);
+        string key = GetRedirectKey(original, kind);
+
+        RegisteredRedirects.AddOrUpdate(
+            key,
+            static (_, incoming) => incoming,
+            static (_, existing, incoming) => MergeRegisteredRedirect(existing, incoming),
+            request);
+
+        string logKey = $"register|{key}|{resolved}|{normalizedSource}|{inlineType}";
+        if (RedirectLogSeen.TryAdd(logKey, 0))
+        {
+            DiagnosticLogger.Log(Tag,
+                $"登记@字体加载映射: source={normalizedSource} kind={kind} " +
+                $"'{original}' → '{resolved}' inline={inlineType?.ToString() ?? "none"}");
+        }
 
         sourceKey = original;
         replacement = resolved;
@@ -188,6 +171,7 @@ internal static class LdFileHook
             Interlocked.Increment(ref _hitCount);
 
             string original = ReadFontName(fileName);
+            // 未登记的字体请求必须原样放行，避免 ldfile 抢走样式表替换或普通字体缺失处理。
             if (!TryGetRegisteredRedirect(original, param2, out RegisteredRedirect? request, out string normalized)
                 || request == null)
             {
@@ -240,6 +224,7 @@ internal static class LdFileHook
         request = null;
         normalized = string.Empty;
 
+        // TrueType 和 SHX 使用不同归一化规则，必须按注册类型和 ldfile 参数分别匹配。
         string trueTypeName = NormalizeLoadTrueTypeName(fontName);
         if (param2 != FontTypeShape
             && IsRegisteredAtFontName(trueTypeName, FontRedirectKind.TrueType)
@@ -298,6 +283,7 @@ internal static class LdFileHook
         string normalized,
         out RegisteredRedirect? request)
     {
+        // 部分 DWG 的 ldfile 参数不稳定；只有主/大字体注册唯一时才允许按 SHX 名称兜底。
         request = null;
         bool foundMain = RegisteredRedirects.TryGetValue(
             GetRedirectKey(normalized, FontRedirectKind.ShxMain),
@@ -351,6 +337,7 @@ internal static class LdFileHook
         FontRedirectKind kind,
         string original)
     {
+        // TrueType 替换保留 @ 前缀以保留竖排语义；SHX 替换交给 ldfile 加载基础 shx 文件。
         if (kind != FontRedirectKind.TrueType)
             return FontRedirectResolver.EnsureShx(fontName);
 
