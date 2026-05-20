@@ -11,12 +11,7 @@ internal sealed class MTextInlineFontScanResult
         int fragmentExpansionAttempts,
         int fragmentExpansionSuccesses,
         int fragmentExpansionFailures,
-        int fragmentCount,
-        int graphicsInvalidatedCount,
-        bool graphicsFlushQueued,
-        int drawAttempts,
-        int drawSuccesses,
-        int drawFailures)
+        int fragmentCount)
     {
         InlineFonts = inlineFonts;
         MTextCount = mTextCount;
@@ -24,11 +19,6 @@ internal sealed class MTextInlineFontScanResult
         FragmentExpansionSuccesses = fragmentExpansionSuccesses;
         FragmentExpansionFailures = fragmentExpansionFailures;
         FragmentCount = fragmentCount;
-        GraphicsInvalidatedCount = graphicsInvalidatedCount;
-        GraphicsFlushQueued = graphicsFlushQueued;
-        DrawAttempts = drawAttempts;
-        DrawSuccesses = drawSuccesses;
-        DrawFailures = drawFailures;
     }
 
     internal Dictionary<string, InlineFontType> InlineFonts { get; }
@@ -37,11 +27,6 @@ internal sealed class MTextInlineFontScanResult
     internal int FragmentExpansionSuccesses { get; }
     internal int FragmentExpansionFailures { get; }
     internal int FragmentCount { get; }
-    internal int GraphicsInvalidatedCount { get; }
-    internal bool GraphicsFlushQueued { get; }
-    internal int DrawAttempts { get; }
-    internal int DrawSuccesses { get; }
-    internal int DrawFailures { get; }
 }
 
 /// <summary>
@@ -51,6 +36,7 @@ internal sealed class MTextInlineFontScanResult
 /// 对每个 MText 实体调用 <see cref="MTextFontParser.ParseInlineFonts"/> 解析其 Contents 属性；
 /// 发现内联字体后再调用 <see cref="MText.ExplodeFragments(MTextFragmentCallback)"/>，
 /// 但不把这次扫描枚举产生的临时 fragment 计入实际运行时映射结果。
+/// 扫描阶段必须保持只读，不主动失效图形缓存或调用 Entity.Draw，避免污染块定义的图形状态。
 /// 无法访问的实体或块表记录会被静默跳过。
 /// </para>
 /// </summary>
@@ -69,9 +55,6 @@ internal static class MTextInlineFontScanner
         int fragmentExpansionSuccesses = 0;
         int fragmentExpansionFailures = 0;
         int fragmentCount = 0;
-        int graphicsInvalidatedCount = 0;
-        bool graphicsFlushQueued = false;
-        var redrawTargets = new List<ObjectId>();
 
         using (var tr = db.TransactionManager.StartOpenCloseTransaction())
         {
@@ -98,21 +81,6 @@ internal static class MTextInlineFontScanner
 
                                 if (entityFonts.Count > 0)
                                 {
-                                    redrawTargets.Add(entId);
-
-                                    try
-                                    {
-                                        mtext.UpgradeOpen();
-                                        mtext.RecordGraphicsModified(true);
-                                        graphicsInvalidatedCount++;
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        DiagnosticLogger.Log(
-                                            "MTextInlineFontScanner",
-                                            $"MText 图形缓存失效失败 ObjectId={entId}: {ex.Message}");
-                                    }
-
                                     fragmentExpansionAttempts++;
                                     var state = new FragmentExpansionState();
                                     try
@@ -147,26 +115,10 @@ internal static class MTextInlineFontScanner
                 }
             }
 
-            if (graphicsInvalidatedCount > 0)
-            {
-                try
-                {
-                    db.TransactionManager.QueueForGraphicsFlush();
-                    graphicsFlushQueued = true;
-                }
-                catch (Exception ex)
-                {
-                    DiagnosticLogger.Log(
-                        "MTextInlineFontScanner",
-                        $"MText 图形刷新队列提交失败: {ex.Message}");
-                }
-            }
-
             tr.Commit();
         }
 
         MTextInlineFontHook.ReplaceInlineFontCandidates(result);
-        (int drawAttempts, int drawSuccesses, int drawFailures) = ForceDrawInlineMTexts(db, redrawTargets);
 
         return new MTextInlineFontScanResult(
             result,
@@ -174,48 +126,7 @@ internal static class MTextInlineFontScanner
             fragmentExpansionAttempts,
             fragmentExpansionSuccesses,
             fragmentExpansionFailures,
-            fragmentCount,
-            graphicsInvalidatedCount,
-            graphicsFlushQueued,
-            drawAttempts,
-            drawSuccesses,
-            drawFailures);
-    }
-
-    private static (int Attempts, int Successes, int Failures) ForceDrawInlineMTexts(
-        Database db,
-        IReadOnlyList<ObjectId> targets)
-    {
-        if (targets.Count == 0)
-            return (0, 0, 0);
-
-        int attempts = 0;
-        int successes = 0;
-        int failures = 0;
-
-        using var tr = db.TransactionManager.StartOpenCloseTransaction();
-        foreach (ObjectId id in targets)
-        {
-            try
-            {
-                if (tr.GetObject(id, OpenMode.ForRead, false, true) is not Entity entity)
-                    continue;
-
-                attempts++;
-                entity.Draw();
-                successes++;
-            }
-            catch (Exception ex)
-            {
-                failures++;
-                DiagnosticLogger.Log(
-                    "MTextInlineFontScanner",
-                    $"MText 实体重绘触发失败 ObjectId={id}: {ex.Message}");
-            }
-        }
-
-        tr.Commit();
-        return (attempts, successes, failures);
+            fragmentCount);
     }
 
     private static MTextFragmentCallbackStatus CountFragment(MTextFragment fragment, object userData)

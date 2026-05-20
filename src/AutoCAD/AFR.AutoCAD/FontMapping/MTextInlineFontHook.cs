@@ -108,6 +108,9 @@ internal static class MTextInlineFontHook
         Action<IntPtr, IntPtr>? setFileName,
         Action<IntPtr, IntPtr>? setBigFontFileName)
     {
+        if (!IsInsideInlineFontHook)
+            return false;
+
         if (!string.IsNullOrWhiteSpace(styleName) || InlineFontCandidates.IsEmpty)
             return false;
 

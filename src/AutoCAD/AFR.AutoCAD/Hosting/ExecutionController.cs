@@ -4,7 +4,6 @@ using AFR.FontMapping;
 using AFR.Models;
 using AFR.Services;
 using AFR.Services.GlyphCore.TextRepair;
-using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
 namespace AFR.Hosting;
 
@@ -122,34 +121,34 @@ internal sealed class ExecutionController
                 // 第五阶段: 只读扫描 MText 内联字体；实际映射结果由 MText Hook 自身记录。
                 // 不改写 MText.Contents，避免接管 CAD 原生内联格式解析。
                 DiagnosticLogger.BeginPhase("扫描MText内联字体");
-                string hookStatsBeforeInlineScan = MTextInlineFontHook.GetDiagnosticsSummary();
-                var inlineScanResult = MTextInlineFontScanner.ScanInlineFonts(doc.Database);
-                if (inlineScanResult.InlineFonts.Count > 0)
+                MTextInlineFontScanResult inlineScanResult;
+                List<InlineFontFixRecord> inlineFixResults;
+                string hookStatsBeforeInlineScan;
+                string hookStatsAfterInlineRegen;
+                MTextInlineFontHook.Install();
+                try
                 {
-                    doc.Editor.Regen();
+                    hookStatsBeforeInlineScan = MTextInlineFontHook.GetDiagnosticsSummary();
+                    inlineScanResult = MTextInlineFontScanner.ScanInlineFonts(doc.Database);
+                    if (inlineScanResult.InlineFonts.Count > 0)
+                    {
+                        doc.Editor.Regen();
+                    }
 
-                    try
-                    {
-                        AcadApp.UpdateScreen();
-                    }
-                    catch (Exception ex)
-                    {
-                        DiagnosticLogger.Log("扫描MText内联字体", $"UpdateScreen 失败: {ex.Message}");
-                    }
+                    inlineFixResults = FontRuntimeMappingStore.GetInlineMappings();
+                    hookStatsAfterInlineRegen = MTextInlineFontHook.GetDiagnosticsSummary();
+                }
+                finally
+                {
+                    MTextInlineFontHook.Uninstall();
                 }
 
-                var inlineFixResults = FontRuntimeMappingStore.GetInlineMappings();
-                string hookStatsAfterInlineRegen = MTextInlineFontHook.GetDiagnosticsSummary();
                 contextMgr.StoreInlineFontFixResults(doc, inlineFixResults);
                 DiagnosticLogger.EndPhase(
                     $"MText: {inlineScanResult.MTextCount}个, " +
                     $"内联字体: {inlineScanResult.InlineFonts.Count}个, " +
                     $"fragment展开: {inlineScanResult.FragmentExpansionSuccesses}/{inlineScanResult.FragmentExpansionAttempts}个, " +
                     $"片段: {inlineScanResult.FragmentCount}个, " +
-                    $"图形失效: {inlineScanResult.GraphicsInvalidatedCount}个, " +
-                    $"图形队列: {inlineScanResult.GraphicsFlushQueued}, " +
-                    $"实体重绘: {inlineScanResult.DrawSuccesses}/{inlineScanResult.DrawAttempts}个, " +
-                    $"重绘失败: {inlineScanResult.DrawFailures}个, " +
                     $"失败: {inlineScanResult.FragmentExpansionFailures}个, " +
                     $"映射: {inlineFixResults.Count}个, " +
                     $"HookBefore=[{hookStatsBeforeInlineScan}], " +
