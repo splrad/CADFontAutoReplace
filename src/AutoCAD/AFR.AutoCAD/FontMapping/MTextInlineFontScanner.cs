@@ -73,9 +73,12 @@ internal static class MTextInlineFontScanner
                             if (tr.GetObject(entId, OpenMode.ForRead) is MText mtext)
                             {
                                 mTextCount++;
+                                string contents = mtext.Contents ?? string.Empty;
+                                if (!ContainsInlineFontMarker(contents))
+                                    continue;
 
                                 var entityFonts = new Dictionary<string, InlineFontType>(StringComparer.OrdinalIgnoreCase);
-                                MTextFontParser.ParseInlineFonts(mtext.Contents, entityFonts);
+                                MTextFontParser.ParseInlineFonts(contents, entityFonts);
                                 foreach (var pair in entityFonts)
                                     result.TryAdd(pair.Key, pair.Value);
 
@@ -128,6 +131,9 @@ internal static class MTextInlineFontScanner
             fragmentExpansionFailures,
             fragmentCount);
     }
+
+    private static bool ContainsInlineFontMarker(string contents)
+        => contents.IndexOf("\\F", StringComparison.OrdinalIgnoreCase) >= 0;
 
     private static MTextFragmentCallbackStatus CountFragment(MTextFragment fragment, object userData)
     {

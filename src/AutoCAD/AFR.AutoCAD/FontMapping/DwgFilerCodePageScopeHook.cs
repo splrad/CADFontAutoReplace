@@ -16,9 +16,9 @@ internal static class DwgFilerCodePageScopeHook
 {
     private const string Tag = "DwgCodePageScope";
     private const uint MemCommit = 0x1000;
-    private const int ScopeLogLimit = 40;
-    private const int StringLogLimit = 240;
-    private const int DbTextReadStringLogLimit = 120;
+    private const int ScopeLogLimit = 16;
+    private const int StringLogLimit = 48;
+    private const int DbTextReadStringLogLimit = 40;
     private const int MaxLoggedStringChars = 160;
     private const int MaxReadStringRawBytes = 96;
 

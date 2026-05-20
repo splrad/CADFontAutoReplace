@@ -123,31 +123,22 @@ internal static class LdFileHook
             return;
         }
 
-        IntPtr address = NativeInlineHookInterop.GetProcAddress(module, exports.LdFileExport);
-        if (address == IntPtr.Zero)
+        NativeHookTarget target = exports.NativeFontHookProfile.LdFile;
+        if (!TryGetExportAddress(module, target, out IntPtr address, out uint resolvedRva))
         {
-            DiagnosticLogger.Log(Tag, "ldfile 导出未找到，跳过 @ 字体加载桥接。");
-            return;
-        }
-
-        long delta = address.ToInt64() - module.ToInt64();
-        if (delta <= 0 || delta > uint.MaxValue)
-        {
-            DiagnosticLogger.Log(Tag, "ldfile RVA 解析失败，跳过 @ 字体加载桥接。");
-            return;
-        }
-
-        uint resolvedRva = (uint)delta;
-        if (exports.LdFileRva.HasValue && exports.LdFileRva.Value != resolvedRva)
-        {
-            DiagnosticLogger.Log(Tag,
-                $"ldfile RVA 不匹配，跳过。Expected=0x{exports.LdFileRva.Value:X}, Actual=0x{resolvedRva:X}");
+            DiagnosticLogger.Log(Tag, "ldfile 入口未通过强校验，跳过 @ 字体加载桥接。");
             return;
         }
 
         _hookDelegate = HookHandler;
-        _hook = new NativeInlineHook<LdFileDelegate>(Tag, "ldfile", exports.LdFileRva ?? resolvedRva);
-        _hook.InstallAtAddress(address, resolvedRva, _hookDelegate, 14, 64);
+        _hook = new NativeInlineHook<LdFileDelegate>(Tag, target.Name, target.Rva ?? resolvedRva);
+        _hook.InstallAtAddress(
+            address,
+            resolvedRva,
+            _hookDelegate,
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
     }
 
     internal static void Uninstall()
@@ -177,11 +168,13 @@ internal static class LdFileHook
         if (_inHook)
             return trampoline(fileName, param2, db, desc);
 
+        Interlocked.Increment(ref _hitCount);
+        if (RegisteredRedirects.IsEmpty)
+            return trampoline(fileName, param2, db, desc);
+
         _inHook = true;
         try
         {
-            Interlocked.Increment(ref _hitCount);
-
             string original = ReadFontName(fileName);
             // 未登记的字体请求必须原样放行，避免 ldfile 抢走样式表替换或普通字体缺失处理。
             if (!TryGetRegisteredRedirect(original, param2, out RegisteredRedirect? request, out string normalized)
@@ -322,6 +315,51 @@ internal static class LdFileHook
         }
 
         return incoming;
+    }
+
+    private static bool TryGetExportAddress(
+        IntPtr module,
+        NativeHookTarget target,
+        out IntPtr address,
+        out uint rva)
+    {
+        address = IntPtr.Zero;
+        rva = 0;
+
+        if (!target.IsEnabled || string.IsNullOrWhiteSpace(target.ExportName))
+        {
+            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少导出符号"}");
+            return false;
+        }
+
+        string exportName = target.ExportName!;
+        address = NativeInlineHookInterop.GetProcAddress(module, exportName);
+        if (address == IntPtr.Zero)
+        {
+            DiagnosticLogger.Log(Tag, $"{target.Name} 导出未找到，跳过。");
+            return false;
+        }
+
+        long delta = address.ToInt64() - module.ToInt64();
+        if (delta <= 0 || delta > uint.MaxValue)
+        {
+            DiagnosticLogger.Log(Tag, $"{target.Name} RVA 解析失败，跳过。Address=0x{address.ToInt64():X}");
+            address = IntPtr.Zero;
+            return false;
+        }
+
+        rva = (uint)delta;
+        if (target.Rva.HasValue && target.Rva.Value != rva)
+        {
+            DiagnosticLogger.Log(Tag,
+                $"{target.Name} RVA 不匹配，跳过。Expected=0x{target.Rva.Value:X}, Actual=0x{rva:X}");
+            address = IntPtr.Zero;
+            rva = 0;
+            return false;
+        }
+
+        DiagnosticLogger.Log(Tag, $"{target.Name} 导出解析成功。RVA=0x{rva:X}");
+        return true;
     }
 
     private static string GetRedirectKey(string normalized, FontRedirectKind kind)

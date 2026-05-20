@@ -10,6 +10,8 @@ internal interface INativeDecodeHookProfileProvider
 
 internal interface INativeFontHookExportsProvider
 {
+    NativeFontHookProfile NativeFontHookProfile { get; }
+
     string AcGiTextStyleLoadStyleRecExport { get; }
 
     string AcGiTextStyleStyleNameExport { get; }
@@ -35,6 +37,41 @@ internal interface INativeFontHookExportsProvider
     string LdFileExport { get; }
 
     uint? LdFileRva { get; }
+}
+
+internal sealed class NativeFontHookProfile
+{
+    public NativeFontHookProfile(
+        NativeHookTarget acGiTextStyleLoadStyleRec,
+        NativeHookTarget acGiTextStyleSetFont,
+        NativeHookTarget acGiTextStyleSetFileName,
+        NativeHookTarget acGiTextStyleSetBigFontFileName,
+        NativeHookTarget acGiTextStyleFileNameCtor,
+        NativeHookTarget acDbMTextExplodeFragments,
+        NativeHookTarget ldFile)
+    {
+        AcGiTextStyleLoadStyleRec = acGiTextStyleLoadStyleRec;
+        AcGiTextStyleSetFont = acGiTextStyleSetFont;
+        AcGiTextStyleSetFileName = acGiTextStyleSetFileName;
+        AcGiTextStyleSetBigFontFileName = acGiTextStyleSetBigFontFileName;
+        AcGiTextStyleFileNameCtor = acGiTextStyleFileNameCtor;
+        AcDbMTextExplodeFragments = acDbMTextExplodeFragments;
+        LdFile = ldFile;
+    }
+
+    public NativeHookTarget AcGiTextStyleLoadStyleRec { get; }
+
+    public NativeHookTarget AcGiTextStyleSetFont { get; }
+
+    public NativeHookTarget AcGiTextStyleSetFileName { get; }
+
+    public NativeHookTarget AcGiTextStyleSetBigFontFileName { get; }
+
+    public NativeHookTarget AcGiTextStyleFileNameCtor { get; }
+
+    public NativeHookTarget AcDbMTextExplodeFragments { get; }
+
+    public NativeHookTarget LdFile { get; }
 }
 
 internal enum FilerCodePageResolverKind

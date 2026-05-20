@@ -16,7 +16,7 @@ internal static class CodePageFamilyHook
 {
     private const string Tag = "CodePageHook";
     private const uint MemCommit = 0x1000;
-    private const int NoScopeLogLimit = 80;
+    private const int NoScopeLogLimit = 16;
 
     private static NativeInlineHook<CodePageFamilyInitDelegate>? _hook;
     private static CodePageFamilyHookProfile? _profile;

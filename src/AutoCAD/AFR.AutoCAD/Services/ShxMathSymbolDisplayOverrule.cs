@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.Geometry;
@@ -20,9 +21,15 @@ internal static class ShxMathSymbolDisplayOverrule
     };
 
     private static readonly object SyncRoot = new();
+    private static readonly ConcurrentDictionary<ObjectId, bool> StyleRequirementCache = new();
     private static DrawableOverrule? _overrule;
     private static RXClass? _dbTextClass;
     private static bool _installed;
+
+    public static void ClearCache()
+    {
+        StyleRequirementCache.Clear();
+    }
 
     public static void Install()
     {
@@ -31,6 +38,7 @@ internal static class ShxMathSymbolDisplayOverrule
             if (_installed)
                 return;
 
+            ClearCache();
             _dbTextClass = RXClass.GetClass(typeof(DBText));
             _overrule = new GreaterEqualDbTextOverrule();
             _overrule.SetCustomFilter();
@@ -58,6 +66,7 @@ internal static class ShxMathSymbolDisplayOverrule
             }
             finally
             {
+                ClearCache();
                 _overrule = null;
                 _dbTextClass = null;
                 _installed = false;
@@ -92,13 +101,22 @@ internal static class ShxMathSymbolDisplayOverrule
 
     private static bool RequiresSupplementalGreaterEqualGlyph(DBText dbText)
     {
+        if (dbText.TextStyleId.IsNull || dbText.Database == null)
+            return false;
+
+        ObjectId styleId = dbText.TextStyleId;
+        Database db = dbText.Database;
+        return StyleRequirementCache.GetOrAdd(
+            styleId,
+            _ => ComputeSupplementalGreaterEqualRequirement(db, styleId));
+    }
+
+    private static bool ComputeSupplementalGreaterEqualRequirement(Database db, ObjectId styleId)
+    {
         try
         {
-            if (dbText.TextStyleId.IsNull || dbText.Database == null)
-                return false;
-
-            using Transaction tr = dbText.Database.TransactionManager.StartOpenCloseTransaction();
-            if (tr.GetObject(dbText.TextStyleId, OpenMode.ForRead, false, true) is not TextStyleTableRecord style)
+            using Transaction tr = db.TransactionManager.StartOpenCloseTransaction();
+            if (tr.GetObject(styleId, OpenMode.ForRead, false, true) is not TextStyleTableRecord style)
                 return false;
 
             if (style.IsShapeFile)

@@ -1,4 +1,5 @@
 using AFR.Abstractions;
+using AFR.Services;
 
 namespace AFR.FontMapping;
 
@@ -28,5 +29,9 @@ internal sealed class AutoCadFontHook : IFontHook
     }
 
     /// <summary>更新 Hook 使用的替换字体配置（用户通过 AFR 命令修改后调用）。</summary>
-    public void UpdateConfig() => FontAvailabilityIndex.Initialize();
+    public void UpdateConfig()
+    {
+        FontAvailabilityIndex.Initialize();
+        ShxMathSymbolDisplayOverrule.ClearCache();
+    }
 }

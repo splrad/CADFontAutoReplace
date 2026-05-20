@@ -56,6 +56,7 @@ internal sealed class ExecutionController
             // 获取文档写入锁 — 修改样式表需要写锁
             using (doc.LockDocument())
             {
+                bool needsVisualRegen = false;
                 // 创建独立的字体检测上下文 — 缓存生命周期与本次执行绑定，结束后由 GC 自动回收
                 var context = new FontDetectionContext(doc.Database);
                 FontRuntimeMappingStore.Clear();
@@ -87,7 +88,10 @@ internal sealed class ExecutionController
                     DiagnosticLogger.EndPhase($"替换: {replacedStyleCount}项");
 
                     if (replacedStyleCount > 0)
-                        doc.Editor.Regen();
+                    {
+                        ShxMathSymbolDisplayOverrule.ClearCache();
+                        needsVisualRegen = true;
+                    }
                 }
 
                 // 第三阶段: 二次检测替换后的样式表状态，供 AFRLOG 标记仍缺失样式。
@@ -108,6 +112,7 @@ internal sealed class ExecutionController
 
                     // Regen 刷新显示并触发 AcGiTextStyle::loadStyleRec，让 Hook 对样式表 @ 字体做临时映射。
                     doc.Editor.Regen();
+                    needsVisualRegen = false;
 
                     actualStyleRuntimeMappings = FontRuntimeMappingStore.GetStyleMappings();
                     contextMgr.StoreRuntimeFontMappingResults(doc, actualStyleRuntimeMappings);
@@ -133,6 +138,7 @@ internal sealed class ExecutionController
                     if (inlineScanResult.InlineFonts.Count > 0)
                     {
                         doc.Editor.Regen();
+                        needsVisualRegen = false;
                     }
 
                     inlineFixResults = FontRuntimeMappingStore.GetInlineMappings();
@@ -160,9 +166,12 @@ internal sealed class ExecutionController
                 GlyphCoreTextRepairRunSummary dbTextRepairSummary = GlyphCoreTextRepairService.LastRunSummary;
                 DiagnosticLogger.EndPhase($"DBText实际修复: {repairedDbTextCount}个");
                 if (repairedDbTextCount > 0)
-                    doc.Editor.Regen();
+                    needsVisualRegen = true;
 
                 // 统计汇总 — Regen 之后输出，确保字体修复汇总来自同一个统计出口。
+                if (needsVisualRegen)
+                    doc.Editor.Regen();
+
                 log.AddStatistics(
                     missingFonts,
                     stillMissing,

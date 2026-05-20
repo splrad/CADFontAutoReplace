@@ -104,7 +104,7 @@ internal static class StyleTextStyleHook
 
     internal static void Install()
     {
-        if (_loadStyleRecHook?.IsInstalled == true)
+        if (IsInstalled)
             return;
 
         if (PlatformManager.Platform is not INativeFontHookExportsProvider exports)
@@ -133,14 +133,15 @@ internal static class StyleTextStyleHook
             $"bigFontFileName={_bigFontFileNameGetter != null}, isVertical={_isVerticalGetter != null}, " +
             $"setFont={_setFont != null}, setFileName={_setFileName != null}, setBigFontFileName={_setBigFontFileName != null}, setVertical={_setVertical != null}");
 
-        if (!TryGetExportAddress(module, exports.AcGiTextStyleLoadStyleRecExport, out var address, out uint rva))
+        NativeHookTarget loadStyleRecTarget = exports.NativeFontHookProfile.AcGiTextStyleLoadStyleRec;
+        if (!TryGetExportAddress(module, loadStyleRecTarget, out var address, out uint rva))
         {
-            DiagnosticLogger.Log(Tag, "AcGiTextStyle::loadStyleRec 导出未找到，跳过样式表字体 Hook。");
+            DiagnosticLogger.Log(Tag, "AcGiTextStyle::loadStyleRec 入口未通过强校验，跳过样式表字体 Hook。");
             return;
         }
 
         _loadStyleRecHookDelegate = LoadStyleRecHookHandler;
-        if (TryInstallLoadStyleRecThunkHook(address, rva, _loadStyleRecHookDelegate))
+        if (TryInstallLoadStyleRecThunkHook(address, rva, _loadStyleRecHookDelegate, loadStyleRecTarget.ExpectedPrefix))
             return;
 
         _loadStyleRecHook = new NativeInlineHook<AcGiTextStyleLoadStyleRecDelegate>(
@@ -148,7 +149,13 @@ internal static class StyleTextStyleHook
             "AcGiTextStyle::loadStyleRec",
             rva);
 
-        _loadStyleRecHook.InstallAtAddress(address, rva, _loadStyleRecHookDelegate, 14, 64);
+        _loadStyleRecHook.InstallAtAddress(
+            address,
+            rva,
+            _loadStyleRecHookDelegate,
+            loadStyleRecTarget.MinPrologueSize,
+            loadStyleRecTarget.MaxPrologueSize,
+            loadStyleRecTarget.ExpectedPrefix);
     }
 
     internal static void Uninstall()
@@ -218,14 +225,24 @@ internal static class StyleTextStyleHook
         if (_inLoadStyleRecHook)
             return trampoline(self, db);
 
+        bool hasStyleMappings = !RuntimeMappingsByStyle.IsEmpty;
+        bool hasInlineScope = MTextInlineFontHook.IsInsideInlineFontHook;
+        bool inStyleRuntimeScope = _styleRuntimeScopeDepth > 0;
+        if (!hasStyleMappings && !hasInlineScope && !inStyleRuntimeScope)
+            return trampoline(self, db);
+
         _inLoadStyleRecHook = true;
         try
         {
-            RegisterObservedAtFontLoadMappings(self);
-            ApplyRegisteredStyleMappings(self);
-            ApplyMTextInlineLoadStyleRecMappings(self);
+            if (inStyleRuntimeScope)
+                RegisterObservedAtFontLoadMappings(self);
+            if (hasStyleMappings)
+                ApplyRegisteredStyleMappings(self);
+            if (hasInlineScope)
+                ApplyMTextInlineLoadStyleRecMappings(self);
             int result = trampoline(self, db);
-            LogStyleLoad(self, db, result);
+            if (inStyleRuntimeScope || hasStyleMappings)
+                LogStyleLoad(self, db, result);
             return result;
         }
         catch (Exception ex)
@@ -242,9 +259,17 @@ internal static class StyleTextStyleHook
     private static bool TryInstallLoadStyleRecThunkHook(
         IntPtr address,
         uint rva,
-        AcGiTextStyleLoadStyleRecDelegate hookDelegate)
+        AcGiTextStyleLoadStyleRecDelegate hookDelegate,
+        byte[] expectedPrefix)
     {
         const int patchSize = 16;
+
+        if (!MatchesBytes(address, expectedPrefix))
+        {
+            DiagnosticLogger.Log(Tag,
+                $"AcGiTextStyle::loadStyleRec RVA=0x{rva:X} 入口字节不匹配，实际: {TryReadBytes(address, expectedPrefix.Length)}");
+            return false;
+        }
 
         if (!IsLoadStyleRecThunk(address))
             return false;
@@ -343,13 +368,15 @@ internal static class StyleTextStyleHook
     {
         try
         {
+            byte modRmFirst = Marshal.ReadByte(address + 2);
+            byte modRmSecond = Marshal.ReadByte(address + 6);
             return Marshal.ReadByte(address) == 0x48
                    && Marshal.ReadByte(address + 1) == 0x8B
-                   && Marshal.ReadByte(address + 2) == 0x41
+                   && (modRmFirst == 0x41 || modRmFirst == 0x49)
                    && Marshal.ReadByte(address + 3) == 0x08
                    && Marshal.ReadByte(address + 4) == 0x48
                    && Marshal.ReadByte(address + 5) == 0x8B
-                   && Marshal.ReadByte(address + 6) == 0x48
+                   && (modRmSecond == 0x48 || modRmSecond == 0x49)
                    && Marshal.ReadByte(address + 7) == 0x08
                    && Marshal.ReadByte(address + 8) == 0xE9;
         }
@@ -368,6 +395,41 @@ internal static class StyleTextStyleHook
         buffer[offset + 4] = 0x00;
         buffer[offset + 5] = 0x00;
         BitConverter.GetBytes(target.ToInt64()).CopyTo(buffer, offset + 6);
+    }
+
+    private static bool MatchesBytes(IntPtr address, byte[] expected)
+    {
+        if (expected.Length == 0)
+            return true;
+
+        try
+        {
+            for (int i = 0; i < expected.Length; i++)
+            {
+                if (Marshal.ReadByte(address + i) != expected[i])
+                    return false;
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string TryReadBytes(IntPtr address, int count)
+    {
+        try
+        {
+            var buffer = new byte[count];
+            Marshal.Copy(address, buffer, 0, count);
+            return BitConverter.ToString(buffer).Replace('-', ' ');
+        }
+        catch (Exception ex)
+        {
+            return "<读取失败:" + ex.Message + ">";
+        }
     }
 
     private static void LogStyleLoad(IntPtr self, IntPtr db, int result)
@@ -759,23 +821,44 @@ internal static class StyleTextStyleHook
         return true;
     }
 
-    private static bool TryGetExportAddress(IntPtr module, string exportName, out IntPtr address, out uint rva)
+    private static bool TryGetExportAddress(IntPtr module, NativeHookTarget target, out IntPtr address, out uint rva)
     {
+        address = IntPtr.Zero;
+        rva = 0;
+
+        if (!target.IsEnabled || string.IsNullOrWhiteSpace(target.ExportName))
+        {
+            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少导出符号"}");
+            return false;
+        }
+
+        string exportName = target.ExportName!;
         address = NativeInlineHookInterop.GetProcAddress(module, exportName);
         if (address == IntPtr.Zero)
         {
-            rva = 0;
+            DiagnosticLogger.Log(Tag, $"{target.Name} 导出未找到，跳过。");
             return false;
         }
 
         long delta = address.ToInt64() - module.ToInt64();
         if (delta <= 0 || delta > uint.MaxValue)
         {
-            rva = 0;
+            DiagnosticLogger.Log(Tag, $"{target.Name} RVA 解析失败，跳过。Address=0x{address.ToInt64():X}");
+            address = IntPtr.Zero;
             return false;
         }
 
         rva = (uint)delta;
+        if (target.Rva.HasValue && target.Rva.Value != rva)
+        {
+            DiagnosticLogger.Log(Tag,
+                $"{target.Name} RVA 不匹配，跳过。Expected=0x{target.Rva.Value:X}, Actual=0x{rva:X}");
+            address = IntPtr.Zero;
+            rva = 0;
+            return false;
+        }
+
+        DiagnosticLogger.Log(Tag, $"{target.Name} 导出解析成功。RVA=0x{rva:X}");
         return true;
     }
 

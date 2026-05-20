@@ -198,17 +198,18 @@ internal static class MTextInlineFontHook
             return;
         }
 
-        TryInstallExplodeFragmentsScope(module, exports.AcDbMTextExplodeFragmentsExport);
+        NativeFontHookProfile profile = exports.NativeFontHookProfile;
+        TryInstallExplodeFragmentsScope(module, profile.AcDbMTextExplodeFragments);
         if (_explodeFragmentsHook?.IsInstalled != true)
         {
             DiagnosticLogger.Log(Tag, "MText 作用域 Hook 未安装，MText 内联字体映射 fail closed。");
             return;
         }
 
-        TryInstallSetFontHook(module, exports.AcGiTextStyleSetFontExport);
-        TryInstallFileNameCtorHook(module, exports.AcGiTextStyleFileNameCtorExport);
-        TryInstallSetFileNameHook(module, exports.AcGiTextStyleSetFileNameExport);
-        TryInstallSetBigFontFileNameHook(module, exports.AcGiTextStyleSetBigFontFileNameExport);
+        TryInstallSetFontHook(module, profile.AcGiTextStyleSetFont);
+        TryInstallFileNameCtorHook(module, profile.AcGiTextStyleFileNameCtor);
+        TryInstallSetFileNameHook(module, profile.AcGiTextStyleSetFileName);
+        TryInstallSetBigFontFileNameHook(module, profile.AcGiTextStyleSetBigFontFileName);
     }
 
     internal static void Uninstall()
@@ -248,12 +249,12 @@ internal static class MTextInlineFontHook
         Interlocked.Exchange(ref _suppressedSetterHitCount, 0);
     }
 
-    private static void TryInstallSetFontHook(IntPtr module, string exportName)
+    private static void TryInstallSetFontHook(IntPtr module, NativeHookTarget target)
     {
         if (_setFontHook?.IsInstalled == true)
             return;
 
-        if (!TryGetExportAddress(module, exportName, out var address, out uint rva))
+        if (!TryGetExportAddress(module, target, out var address, out uint rva))
         {
             DiagnosticLogger.Log(Tag, "AcGiTextStyle::setFont 导出未找到，跳过 MText 内联 TrueType Hook。");
             return;
@@ -262,18 +263,24 @@ internal static class MTextInlineFontHook
         _setFontHookDelegate = SetFontHookHandler;
         _setFontHook = new NativeInlineHook<AcGiTextStyleSetFontDelegate>(
             Tag,
-            "AcGiTextStyle::setFont",
-            rva);
+            target.Name,
+            target.Rva ?? rva);
 
-        _setFontHook.InstallAtAddress(address, rva, _setFontHookDelegate, 14, 64);
+        _setFontHook.InstallAtAddress(
+            address,
+            rva,
+            _setFontHookDelegate,
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
     }
 
-    private static void TryInstallFileNameCtorHook(IntPtr module, string exportName)
+    private static void TryInstallFileNameCtorHook(IntPtr module, NativeHookTarget target)
     {
         if (_fileNameCtorHook?.IsInstalled == true)
             return;
 
-        if (!TryGetExportAddress(module, exportName, out var address, out uint rva))
+        if (!TryGetExportAddress(module, target, out var address, out uint rva))
         {
             DiagnosticLogger.Log(Tag, "AcGiTextStyle::AcGiTextStyle(font,bigFont) 导出未找到，跳过构造函数 Hook。");
             return;
@@ -282,18 +289,24 @@ internal static class MTextInlineFontHook
         _fileNameCtorHookDelegate = FileNameCtorHookHandler;
         _fileNameCtorHook = new NativeInlineHook<AcGiTextStyleFileNameCtorDelegate>(
             Tag,
-            "AcGiTextStyle::AcGiTextStyle(font,bigFont)",
-            rva);
+            target.Name,
+            target.Rva ?? rva);
 
-        _fileNameCtorHook.InstallAtAddress(address, rva, _fileNameCtorHookDelegate, 14, 96);
+        _fileNameCtorHook.InstallAtAddress(
+            address,
+            rva,
+            _fileNameCtorHookDelegate,
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
     }
 
-    private static void TryInstallSetFileNameHook(IntPtr module, string exportName)
+    private static void TryInstallSetFileNameHook(IntPtr module, NativeHookTarget target)
     {
         if (_setFileNameHook?.IsInstalled == true)
             return;
 
-        if (!TryGetExportAddress(module, exportName, out var address, out uint rva))
+        if (!TryGetExportAddress(module, target, out var address, out uint rva))
         {
             DiagnosticLogger.Log(Tag, "AcGiTextStyle::setFileName 导出未找到，跳过 MText 内联 SHX 主字体 Hook。");
             return;
@@ -302,18 +315,24 @@ internal static class MTextInlineFontHook
         _setFileNameHookDelegate = SetFileNameHookHandler;
         _setFileNameHook = new NativeInlineHook<AcGiTextStyleSetFileNameDelegate>(
             Tag,
-            "AcGiTextStyle::setFileName",
-            rva);
+            target.Name,
+            target.Rva ?? rva);
 
-        _setFileNameHook.InstallAtAddress(address, rva, _setFileNameHookDelegate, 14, 64);
+        _setFileNameHook.InstallAtAddress(
+            address,
+            rva,
+            _setFileNameHookDelegate,
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
     }
 
-    private static void TryInstallSetBigFontFileNameHook(IntPtr module, string exportName)
+    private static void TryInstallSetBigFontFileNameHook(IntPtr module, NativeHookTarget target)
     {
         if (_setBigFontFileNameHook?.IsInstalled == true)
             return;
 
-        if (!TryGetExportAddress(module, exportName, out var address, out uint rva))
+        if (!TryGetExportAddress(module, target, out var address, out uint rva))
         {
             DiagnosticLogger.Log(Tag, "AcGiTextStyle::setBigFontFileName 导出未找到，跳过 MText 内联 SHX 大字体 Hook。");
             return;
@@ -322,18 +341,24 @@ internal static class MTextInlineFontHook
         _setBigFontFileNameHookDelegate = SetBigFontFileNameHookHandler;
         _setBigFontFileNameHook = new NativeInlineHook<AcGiTextStyleSetFileNameDelegate>(
             Tag,
-            "AcGiTextStyle::setBigFontFileName",
-            rva);
+            target.Name,
+            target.Rva ?? rva);
 
-        _setBigFontFileNameHook.InstallAtAddress(address, rva, _setBigFontFileNameHookDelegate, 14, 64);
+        _setBigFontFileNameHook.InstallAtAddress(
+            address,
+            rva,
+            _setBigFontFileNameHookDelegate,
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
     }
 
-    private static void TryInstallExplodeFragmentsScope(IntPtr module, string exportName)
+    private static void TryInstallExplodeFragmentsScope(IntPtr module, NativeHookTarget target)
     {
         if (_explodeFragmentsHook?.IsInstalled == true)
             return;
 
-        if (!TryGetExportAddress(module, exportName, out var address, out uint rva))
+        if (!TryGetExportAddress(module, target, out var address, out uint rva))
         {
             DiagnosticLogger.Log(Tag, "AcDbMText::explodeFragments 导出未找到，跳过 MText 作用域 Hook。");
             return;
@@ -342,10 +367,16 @@ internal static class MTextInlineFontHook
         _explodeFragmentsHookDelegate = ExplodeFragmentsHookHandler;
         _explodeFragmentsHook = new NativeInlineHook<AcDbMTextExplodeFragmentsDelegate>(
             Tag,
-            "AcDbMText::explodeFragments scope",
-            rva);
+            target.Name,
+            target.Rva ?? rva);
 
-        _explodeFragmentsHook.InstallAtAddress(address, rva, _explodeFragmentsHookDelegate, 14, 64);
+        _explodeFragmentsHook.InstallAtAddress(
+            address,
+            rva,
+            _explodeFragmentsHookDelegate,
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
     }
 
     private static int SetFontHookHandler(
@@ -991,23 +1022,44 @@ internal static class MTextInlineFontHook
         }
     }
 
-    private static bool TryGetExportAddress(IntPtr module, string exportName, out IntPtr address, out uint rva)
+    private static bool TryGetExportAddress(IntPtr module, NativeHookTarget target, out IntPtr address, out uint rva)
     {
+        address = IntPtr.Zero;
+        rva = 0;
+
+        if (!target.IsEnabled || string.IsNullOrWhiteSpace(target.ExportName))
+        {
+            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少导出符号"}");
+            return false;
+        }
+
+        string exportName = target.ExportName!;
         address = NativeInlineHookInterop.GetProcAddress(module, exportName);
         if (address == IntPtr.Zero)
         {
-            rva = 0;
+            DiagnosticLogger.Log(Tag, $"{target.Name} 导出未找到，跳过。");
             return false;
         }
 
         long delta = address.ToInt64() - module.ToInt64();
         if (delta <= 0 || delta > uint.MaxValue)
         {
-            rva = 0;
+            DiagnosticLogger.Log(Tag, $"{target.Name} RVA 解析失败，跳过。Address=0x{address.ToInt64():X}");
+            address = IntPtr.Zero;
             return false;
         }
 
         rva = (uint)delta;
+        if (target.Rva.HasValue && target.Rva.Value != rva)
+        {
+            DiagnosticLogger.Log(Tag,
+                $"{target.Name} RVA 不匹配，跳过。Expected=0x{target.Rva.Value:X}, Actual=0x{rva:X}");
+            address = IntPtr.Zero;
+            rva = 0;
+            return false;
+        }
+
+        DiagnosticLogger.Log(Tag, $"{target.Name} 导出解析成功。RVA=0x{rva:X}");
         return true;
     }
 

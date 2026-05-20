@@ -19,8 +19,8 @@ internal static class TextEditorDbcsDecodeHook
     private const string Tag = "TextEditorDbcs";
     private const uint MemCommit = 0x1000;
     private const int EvidenceLogLimit = 40;
-    private const int NoScopeLogLimit = 20;
-    private const int DecodeProbeLogLimit = 80;
+    private const int NoScopeLogLimit = 8;
+    private const int DecodeProbeLogLimit = 24;
     private const int DecodeEvidenceSampleLimit = 16;
 
     private static NativeInlineHook<ReadDoubleByteAnsiDelegate>? _readDoubleByteHook;
