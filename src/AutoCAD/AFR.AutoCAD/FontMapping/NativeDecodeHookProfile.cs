@@ -31,6 +31,10 @@ internal interface INativeFontHookExportsProvider
     string AcGiTextStyleFileNameCtorExport { get; }
 
     string AcDbMTextExplodeFragmentsExport { get; }
+
+    string LdFileExport { get; }
+
+    uint? LdFileRva { get; }
 }
 
 internal enum FilerCodePageResolverKind

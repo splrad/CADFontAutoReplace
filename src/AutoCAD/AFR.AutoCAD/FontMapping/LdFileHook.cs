@@ -20,7 +20,6 @@ namespace AFR.FontMapping;
 internal static class LdFileHook
 {
     private const string Tag = "LdFileHook";
-    private const string LdFileExport = "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z";
 
     // ldfile 的 param2 用于区分普通字体、ShapeFile 和大字体；ShapeFile 不参与字体兜底。
     private const int FontTypeRegular = 0;
@@ -90,9 +89,8 @@ internal static class LdFileHook
 
         RegisteredRedirects.AddOrUpdate(
             key,
-            static (_, incoming) => incoming,
-            static (_, existing, incoming) => MergeRegisteredRedirect(existing, incoming),
-            request);
+            request,
+            (_, existing) => MergeRegisteredRedirect(existing, request));
 
         string logKey = $"register|{key}|{resolved}|{normalizedSource}|{inlineType}";
         if (RedirectLogSeen.TryAdd(logKey, 0))
@@ -112,6 +110,12 @@ internal static class LdFileHook
         if (IsInstalled)
             return;
 
+        if (PlatformManager.Platform is not INativeFontHookExportsProvider exports)
+        {
+            DiagnosticLogger.Log(Tag, $"{PlatformManager.Platform.DisplayName} 未提供 ldfile Hook 导出定义，跳过 @ 字体加载桥接。");
+            return;
+        }
+
         IntPtr module = GetModuleHandle(PlatformManager.Platform.AcDbDllName);
         if (module == IntPtr.Zero)
         {
@@ -119,7 +123,7 @@ internal static class LdFileHook
             return;
         }
 
-        IntPtr address = NativeInlineHookInterop.GetProcAddress(module, LdFileExport);
+        IntPtr address = NativeInlineHookInterop.GetProcAddress(module, exports.LdFileExport);
         if (address == IntPtr.Zero)
         {
             DiagnosticLogger.Log(Tag, "ldfile 导出未找到，跳过 @ 字体加载桥接。");
@@ -133,9 +137,17 @@ internal static class LdFileHook
             return;
         }
 
+        uint resolvedRva = (uint)delta;
+        if (exports.LdFileRva.HasValue && exports.LdFileRva.Value != resolvedRva)
+        {
+            DiagnosticLogger.Log(Tag,
+                $"ldfile RVA 不匹配，跳过。Expected=0x{exports.LdFileRva.Value:X}, Actual=0x{resolvedRva:X}");
+            return;
+        }
+
         _hookDelegate = HookHandler;
-        _hook = new NativeInlineHook<LdFileDelegate>(Tag, "ldfile", (uint)delta);
-        _hook.InstallAtAddress(address, (uint)delta, _hookDelegate, 14, 64);
+        _hook = new NativeInlineHook<LdFileDelegate>(Tag, "ldfile", exports.LdFileRva ?? resolvedRva);
+        _hook.InstallAtAddress(address, resolvedRva, _hookDelegate, 14, 64);
     }
 
     internal static void Uninstall()

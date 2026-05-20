@@ -31,6 +31,10 @@ internal sealed class AutoCad2018Platform : ICadPlatform, INativeDecodeHookProfi
 
     public string AcDbMTextExplodeFragmentsExport => "?explodeFragments@AcDbMText@@QEBAXP6AHPEAUAcDbMTextFragment@@PEAX@Z1PEAVAcGiWorldDraw@@@Z";
 
+    public string LdFileExport => "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z";
+
+    public uint? LdFileRva => null;
+
     public string BrandName => "AutoCAD";
     public string VersionName => "2018";
     public string AppName => "AFR-ACAD2018";

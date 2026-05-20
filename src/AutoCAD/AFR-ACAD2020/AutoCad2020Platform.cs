@@ -31,6 +31,10 @@ internal sealed class AutoCad2020Platform : ICadPlatform, INativeDecodeHookProfi
 
     public string AcDbMTextExplodeFragmentsExport => "?explodeFragments@AcDbMText@@QEBAXP6AHPEAUAcDbMTextFragment@@PEAX@Z1PEAVAcGiWorldDraw@@@Z";
 
+    public string LdFileExport => "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z";
+
+    public uint? LdFileRva => null;
+
     public string BrandName => "AutoCAD";
     public string VersionName => "2020";
     public string AppName => "AFR-ACAD2020";                    // 注册表中的应用名称

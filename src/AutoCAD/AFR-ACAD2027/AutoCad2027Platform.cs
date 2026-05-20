@@ -41,6 +41,10 @@ internal sealed class AutoCad2027Platform : ICadPlatform, INativeDecodeHookProfi
 
     public string AcDbMTextExplodeFragmentsExport => "?explodeFragments@AcDbMText@@QEBAXP6AHPEAUAcDbMTextFragment@@PEAX@Z1PEAVAcGiWorldDraw@@@Z";
 
+    public string LdFileExport => "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z";
+
+    public uint? LdFileRva => null;
+
     private static readonly int[] MainDispatcherPattern =
     [
         0x48, 0x89, 0x5C, 0x24, 0x20,

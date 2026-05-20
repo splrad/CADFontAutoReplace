@@ -41,6 +41,10 @@ internal sealed class AutoCad2025Platform : ICadPlatform, INativeDecodeHookProfi
 
     public string AcDbMTextExplodeFragmentsExport => "?explodeFragments@AcDbMText@@QEBAXP6AHPEAUAcDbMTextFragment@@PEAX@Z1PEAVAcGiWorldDraw@@@Z";
 
+    public string LdFileExport => "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z";
+
+    public uint? LdFileRva => 0xD2988;
+
     public string BrandName => "AutoCAD";
     public string VersionName => "2025";
     public string AppName => "AFR-ACAD2025";                    // 注册表中的应用名称
