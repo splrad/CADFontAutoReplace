@@ -10,7 +10,7 @@ namespace AFR.FontMapping;
 internal static class FontAvailabilityIndex
 {
     private static readonly object CacheLock = new();
-    private static readonly HashSet<string> AvailableFonts = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> AvailableFonts = new(StringComparer.Ordinal);
     private static volatile bool _initialized;
 
     internal static void Initialize()

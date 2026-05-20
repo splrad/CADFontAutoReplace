@@ -6,7 +6,7 @@ namespace AFR.FontMapping;
 internal sealed class MTextInlineFontScanResult
 {
     internal MTextInlineFontScanResult(
-        Dictionary<string, InlineFontType> inlineFonts,
+        Dictionary<string, InlineFontCandidate> inlineFonts,
         int mTextCount,
         int fragmentExpansionAttempts,
         int fragmentExpansionSuccesses,
@@ -21,7 +21,7 @@ internal sealed class MTextInlineFontScanResult
         FragmentCount = fragmentCount;
     }
 
-    internal Dictionary<string, InlineFontType> InlineFonts { get; }
+    internal Dictionary<string, InlineFontCandidate> InlineFonts { get; }
     internal int MTextCount { get; }
     internal int FragmentExpansionAttempts { get; }
     internal int FragmentExpansionSuccesses { get; }
@@ -49,7 +49,7 @@ internal static class MTextInlineFontScanner
     /// <returns>扫描到的内联字体、MText 数量与 fragment 展开统计。</returns>
     internal static MTextInlineFontScanResult ScanInlineFonts(Database db)
     {
-        var result = new Dictionary<string, InlineFontType>(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, InlineFontCandidate>(StringComparer.Ordinal);
         int mTextCount = 0;
         int fragmentExpansionAttempts = 0;
         int fragmentExpansionSuccesses = 0;
@@ -77,7 +77,7 @@ internal static class MTextInlineFontScanner
                                 if (!ContainsInlineFontMarker(contents))
                                     continue;
 
-                                var entityFonts = new Dictionary<string, InlineFontType>(StringComparer.OrdinalIgnoreCase);
+                                var entityFonts = new Dictionary<string, InlineFontCandidate>(StringComparer.Ordinal);
                                 MTextFontParser.ParseInlineFonts(contents, entityFonts);
                                 foreach (var pair in entityFonts)
                                     result.TryAdd(pair.Key, pair.Value);

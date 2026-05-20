@@ -248,7 +248,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
 
     private IReadOnlyList<StyleFontReplacement> BuildReplacementRequests()
     {
-        var map = new Dictionary<string, StyleFontReplacement>(StringComparer.OrdinalIgnoreCase);
+        var map = new Dictionary<string, StyleFontReplacement>(StringComparer.Ordinal);
         foreach (var row in Items)
         {
             string font = row.SelectedReplacement?.Trim() ?? string.Empty;
@@ -256,7 +256,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
 
             // 已替换行仅在用户修改了选择时才纳入，避免重复提交未变更的替换。
             if (row.IsReplaced && string.Equals(font, row.OriginalReplacement?.Trim(),
-                StringComparison.OrdinalIgnoreCase)) continue;
+                StringComparison.Ordinal)) continue;
 
             if (!map.TryGetValue(row.StyleName, out var existing))
                 existing = new StyleFontReplacement(row.StyleName, false, string.Empty, string.Empty);
@@ -404,8 +404,8 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         if (runtimeMappingResults != null)
         {
             foreach (var r in runtimeMappingResults
-                         .OrderBy(r => r.StyleName, StringComparer.OrdinalIgnoreCase)
-                         .ThenBy(r => r.OriginalFont, StringComparer.OrdinalIgnoreCase))
+                         .OrderBy(r => r.StyleName, StringComparer.Ordinal)
+                         .ThenBy(r => r.OriginalFont, StringComparer.Ordinal))
                 RuntimeMappingItems.Add(r);
             RuntimeMappingCount = runtimeMappingResults.Count;
 
@@ -446,7 +446,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         {
             string current = row.SelectedReplacement?.Trim() ?? string.Empty;
             string original = row.OriginalReplacement?.Trim() ?? string.Empty;
-            if (!string.Equals(current, original, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(current, original, StringComparison.Ordinal))
                 return true;
         }
         return false;

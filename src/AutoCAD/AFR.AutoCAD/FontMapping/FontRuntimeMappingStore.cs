@@ -9,9 +9,9 @@ namespace AFR.FontMapping;
 internal static class FontRuntimeMappingStore
 {
     private static readonly ConcurrentDictionary<string, RuntimeFontMappingRecord> StyleMappings =
-        new(StringComparer.OrdinalIgnoreCase);
+        new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, InlineFontFixRecord> InlineMappings =
-        new(StringComparer.OrdinalIgnoreCase);
+        new(StringComparer.Ordinal);
 
     internal static void Clear()
     {
@@ -65,14 +65,14 @@ internal static class FontRuntimeMappingStore
 
     internal static List<RuntimeFontMappingRecord> GetStyleMappings()
         => StyleMappings.Values
-            .OrderBy(x => x.StyleName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(x => x.OriginalFont, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x.StyleName, StringComparer.Ordinal)
+            .ThenBy(x => x.OriginalFont, StringComparer.Ordinal)
             .ToList();
 
     internal static List<InlineFontFixRecord> GetInlineMappings()
         => InlineMappings.Values
-            .OrderBy(x => x.MissingFont, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(x => x.ReplacementFont, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x.MissingFont, StringComparer.Ordinal)
+            .ThenBy(x => x.ReplacementFont, StringComparer.Ordinal)
             .ToList();
 
     private static string GetStyleKey(RuntimeFontMappingRecord record)

@@ -193,9 +193,9 @@ internal static class FontRedirectResolver
         }
 
         string sourceKey = GetRedirectSourceKey(original, kind);
-        if (string.Equals(sourceKey, configured, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(original, configured, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(lookupName, configured, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(sourceKey, configured, StringComparison.Ordinal)
+            || string.Equals(original, configured, StringComparison.Ordinal)
+            || string.Equals(lookupName, configured, StringComparison.Ordinal))
         {
             return new FontLogicalReplacement(
                 FontLogicalReplacementAction.NoAction,
@@ -368,18 +368,14 @@ internal static class FontRedirectResolver
         if (string.IsNullOrWhiteSpace(normalized))
             return false;
 
+        if (FontDetector.IsTrueTypeFontFile(normalized))
+            return FontAvailabilityIndex.IsExactKnownAvailableFont(normalized);
+
         if (FontDetector.IsSystemFont(normalized))
             return true;
 
         if (FontAvailabilityIndex.IsKnownAvailableFont(normalized))
             return true;
-
-        if (FontDetector.IsTrueTypeFontFile(normalized))
-        {
-            string familyCandidate = Path.GetFileNameWithoutExtension(normalized);
-            return !string.IsNullOrWhiteSpace(familyCandidate)
-                   && FontDetector.IsSystemFont(familyCandidate);
-        }
 
         return false;
     }

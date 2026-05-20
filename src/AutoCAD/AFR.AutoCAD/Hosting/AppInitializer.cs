@@ -217,7 +217,7 @@ internal static class AppInitializer
 
         for (int i = 0; i < oldDefaultValues.Length; i++)
         {
-            if (string.Equals(current, oldDefaultValues[i], StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(current, oldDefaultValues[i], StringComparison.Ordinal))
             {
                 RegistryService.WriteString(Registry.CurrentUser, appPath, name, defaultValue);
                 return;

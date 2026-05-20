@@ -24,11 +24,11 @@ internal static class MTextInlineFontHook
     private static AcGiTextStyleSetFileNameDelegate? _setFileNameHookDelegate;
     private static AcGiTextStyleSetFileNameDelegate? _setBigFontFileNameHookDelegate;
     private static AcDbMTextExplodeFragmentsDelegate? _explodeFragmentsHookDelegate;
-    private static readonly ConcurrentDictionary<string, IntPtr> NativeTypefaceCache = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, IntPtr> NativeFileNameCache = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, InlineFontType> InlineFontCandidates = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, byte> LoadStyleRecRedirectLogSeen = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, IntPtr> NativeTypefaceCache = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, IntPtr> NativeFileNameCache = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, InlineFontCandidate> InlineFontCandidates = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, byte> LoadStyleRecRedirectLogSeen = new(StringComparer.Ordinal);
     private static long _explodeFragmentsHitCount;
     private static long _explodeFragmentsCallbackHitCount;
     private static long _explodeFragmentsWorldDrawHitCount;
@@ -83,18 +83,16 @@ internal static class MTextInlineFontHook
            + $"CtorHits={Interlocked.Read(ref _fileNameCtorHitCount)}, "
            + $"SuppressedSetterHits={Interlocked.Read(ref _suppressedSetterHitCount)}";
 
-    internal static void ReplaceInlineFontCandidates(IReadOnlyDictionary<string, InlineFontType> inlineFonts)
+    internal static void ReplaceInlineFontCandidates(IReadOnlyDictionary<string, InlineFontCandidate> inlineFonts)
     {
         InlineFontCandidates.Clear();
 
-        foreach (var (fontName, inlineType) in inlineFonts)
+        foreach (var candidate in inlineFonts.Values)
         {
-            string key = inlineType == InlineFontType.TrueType
-                ? MTextFontParser.NormalizeTrueTypeFontName(fontName)
-                : NormalizeInlineShxName(fontName);
+            string key = GetInlineCandidateKey(candidate.OriginalFont, candidate.FontType);
 
             if (!string.IsNullOrWhiteSpace(key))
-                InlineFontCandidates[key] = inlineType;
+                InlineFontCandidates[key] = candidate with { LookupName = key };
         }
     }
 
@@ -392,7 +390,10 @@ internal static class MTextInlineFontHook
             return 0;
 
         string scopedFontName = ReadNativeString(typeface);
-        bool inlineCandidate = IsInlineCandidate(scopedFontName, InlineFontType.TrueType);
+        bool inlineCandidate = TryGetInlineCandidate(
+            scopedFontName,
+            InlineFontType.TrueType,
+            out InlineFontCandidate? candidate);
         if (_inSetFontHook
             || _suppressInlineRuntimeMapping
             || (!IsInsideMTextScope && !inlineCandidate)
@@ -409,8 +410,10 @@ internal static class MTextInlineFontHook
         try
         {
             string fontName = scopedFontName;
+            string displayFontName = candidate?.OriginalFont ?? fontName;
             if (TryRegisterLdFileTrueTypeMapping(
                     fontName,
+                    displayFontName,
                     "AcGiTextStyle::setFont:TrueType",
                     out _))
             {
@@ -424,13 +427,13 @@ internal static class MTextInlineFontHook
                     replacement,
                     static name => Marshal.StringToHGlobalUni(name));
 
-                FontRuntimeMappingStore.RecordInlineMapping(fontName, replacement, InlineFontType.TrueType);
+                FontRuntimeMappingStore.RecordInlineMapping(displayFontName, replacement, InlineFontType.TrueType);
 
-                string redirectKey = $"{fontName}|{replacement}|{bold}|{italic}|{charset}|{pitch}|{family}";
+                string redirectKey = $"{displayFontName}|{replacement}|{bold}|{italic}|{charset}|{pitch}|{family}";
                 if (RedirectLogSeen.TryAdd(redirectKey, 0))
                 {
                     DiagnosticLogger.Log(Tag,
-                        $"AcGiTextStyle TrueType 重定向: '{fontName}' → '{replacement}' " +
+                        $"AcGiTextStyle TrueType 重定向: '{displayFontName}' → '{replacement}' " +
                         $"bold={bold != 0} italic={italic != 0} charset={charset} pitch={pitch} family={family}");
                 }
 
@@ -593,7 +596,10 @@ internal static class MTextInlineFontHook
             return;
 
         string originalForScope = ReadNativeString(fontName);
-        bool inlineCandidate = IsInlineCandidate(originalForScope, inlineType);
+        bool inlineCandidate = TryGetInlineCandidate(
+            originalForScope,
+            inlineType,
+            out InlineFontCandidate? candidate);
         if (inHook
             || _suppressInlineRuntimeMapping
             || (!IsInsideMTextScope && !inlineCandidate)
@@ -615,6 +621,7 @@ internal static class MTextInlineFontHook
         try
         {
             string original = originalForScope;
+            string displayOriginal = candidate?.OriginalFont ?? original;
             string? replacement = ResolveMissingShxReplacement(original, bigFont, out string sourceKey);
             if (replacement != null)
             {
@@ -622,13 +629,13 @@ internal static class MTextInlineFontHook
                     replacement,
                     static name => Marshal.StringToHGlobalUni(name));
 
-                FontRuntimeMappingStore.RecordInlineMapping(sourceKey, replacement, inlineType);
+                FontRuntimeMappingStore.RecordInlineMapping(displayOriginal, replacement, inlineType);
 
-                string redirectKey = $"{hookName}|{sourceKey}|{replacement}";
+                string redirectKey = $"{hookName}|{displayOriginal}|{replacement}";
                 if (RedirectLogSeen.TryAdd(redirectKey, 0))
                 {
                     DiagnosticLogger.Log(Tag,
-                        $"{hookName} {logCategory}重定向: '{original}' → '{replacement}'");
+                        $"{hookName} {logCategory}重定向: '{displayOriginal}' → '{replacement}'");
                 }
 
                 _inInlineFontRedirect = true;
@@ -645,6 +652,7 @@ internal static class MTextInlineFontHook
 
             if (TryRegisterLdFileShxMapping(
                     original,
+                    displayOriginal,
                     bigFont,
                     inlineType,
                     $"{hookName}:{logCategory}",
@@ -676,11 +684,14 @@ internal static class MTextInlineFontHook
     {
         sourceKey = string.Empty;
         string original = Marshal.PtrToStringUni(fontNamePtr) ?? string.Empty;
+        TryGetInlineCandidate(original, inlineType, out InlineFontCandidate? candidate);
+        string displayOriginal = candidate?.OriginalFont ?? original;
         string? replacement = ResolveMissingShxReplacement(original, bigFont, out sourceKey);
         if (replacement == null)
         {
             TryRegisterLdFileShxMapping(
                 original,
+                displayOriginal,
                 bigFont,
                 inlineType,
                 $"AcGiTextStyle.ctor:{logCategory}",
@@ -688,13 +699,13 @@ internal static class MTextInlineFontHook
             return IntPtr.Zero;
         }
 
-        FontRuntimeMappingStore.RecordInlineMapping(sourceKey, replacement, inlineType);
+        FontRuntimeMappingStore.RecordInlineMapping(displayOriginal, replacement, inlineType);
 
-        string redirectKey = $"ctor|{sourceKey}|{replacement}";
+        string redirectKey = $"ctor|{displayOriginal}|{replacement}";
         if (RedirectLogSeen.TryAdd(redirectKey, 0))
         {
             DiagnosticLogger.Log(Tag,
-                $"AcGiTextStyle 构造函数 {logCategory}重定向: '{original}' → '{replacement}'");
+                $"AcGiTextStyle 构造函数 {logCategory}重定向: '{displayOriginal}' → '{replacement}'");
         }
 
         return NativeFileNameCache.GetOrAdd(
@@ -727,8 +738,8 @@ internal static class MTextInlineFontHook
             return null;
 
         string replacement = FontRedirectResolver.NormalizeInputName(resolution.ReplacementName).TrimStart('@');
-        if (string.Equals(original, replacement, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(lookupName, replacement, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(original, replacement, StringComparison.Ordinal)
+            || string.Equals(lookupName, replacement, StringComparison.Ordinal))
         {
             return null;
         }
@@ -777,7 +788,7 @@ internal static class MTextInlineFontHook
             return null;
 
         string replacement = FontRedirectResolver.EnsureShx(resolution.ReplacementName);
-        if (string.Equals(FontRedirectResolver.GetRedirectSourceKey(original, kind), replacement, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(FontRedirectResolver.GetRedirectSourceKey(original, kind), replacement, StringComparison.Ordinal))
             return null;
 
         return replacement;
@@ -785,6 +796,7 @@ internal static class MTextInlineFontHook
 
     private static bool TryRegisterLdFileTrueTypeMapping(
         string fontName,
+        string displayFontName,
         string source,
         out string sourceKey)
     {
@@ -812,12 +824,14 @@ internal static class MTextInlineFontHook
             FontRedirectKind.TrueType,
             source,
             InlineFontType.TrueType,
+            displayFontName,
             out sourceKey,
             out _);
     }
 
     private static bool TryRegisterLdFileShxMapping(
         string fontName,
+        string displayFontName,
         bool bigFont,
         InlineFontType inlineType,
         string source,
@@ -849,6 +863,7 @@ internal static class MTextInlineFontHook
             kind,
             source,
             inlineType,
+            displayFontName,
             out sourceKey,
             out _);
     }
@@ -865,16 +880,27 @@ internal static class MTextInlineFontHook
     }
 
     private static bool IsInlineCandidate(string fontName, InlineFontType expectedType)
+        => TryGetInlineCandidate(fontName, expectedType, out _);
+
+    private static bool TryGetInlineCandidate(
+        string fontName,
+        InlineFontType expectedType,
+        out InlineFontCandidate? candidate)
     {
+        candidate = null;
         if (string.IsNullOrWhiteSpace(fontName))
             return false;
 
-        string key = expectedType == InlineFontType.TrueType
+        string key = GetInlineCandidateKey(fontName, expectedType);
+        return InlineFontCandidates.TryGetValue(key, out candidate)
+               && candidate.FontType == expectedType;
+    }
+
+    private static string GetInlineCandidateKey(string fontName, InlineFontType expectedType)
+    {
+        return expectedType == InlineFontType.TrueType
             ? MTextFontParser.NormalizeTrueTypeFontName(fontName)
             : NormalizeInlineShxName(fontName);
-
-        return InlineFontCandidates.TryGetValue(key, out InlineFontType actualType)
-               && actualType == expectedType;
     }
 
     private static bool TryApplyInlineLoadStyleRecShxMapping(
@@ -886,14 +912,16 @@ internal static class MTextInlineFontHook
         Action<IntPtr, IntPtr>? setter,
         string logCategory)
     {
-        if (!IsInlineCandidate(original, inlineType))
+        if (!TryGetInlineCandidate(original, inlineType, out InlineFontCandidate? candidate))
             return false;
 
+        string displayOriginal = candidate?.OriginalFont ?? original;
         string? replacement = ResolveMissingShxReplacement(original, bigFont, out string sourceKey);
         if (replacement == null)
         {
             return TryRegisterLdFileShxMapping(
                 original,
+                displayOriginal,
                 bigFont,
                 inlineType,
                 $"AcGiTextStyle.loadStyleRec:{logCategory}",
@@ -904,13 +932,13 @@ internal static class MTextInlineFontHook
             return false;
 
         setter(self, getNativeString(replacement));
-        FontRuntimeMappingStore.RecordInlineMapping(sourceKey, replacement, inlineType);
+        FontRuntimeMappingStore.RecordInlineMapping(displayOriginal, replacement, inlineType);
 
-        string redirectKey = $"loadStyleRec|{sourceKey}|{replacement}|{logCategory}";
+        string redirectKey = $"loadStyleRec|{displayOriginal}|{replacement}|{logCategory}";
         if (LoadStyleRecRedirectLogSeen.TryAdd(redirectKey, 0))
         {
             DiagnosticLogger.Log(Tag,
-                $"AcGiTextStyle.loadStyleRec MText内联{logCategory}重定向: '{original}' → '{replacement}'");
+                $"AcGiTextStyle.loadStyleRec MText内联{logCategory}重定向: '{displayOriginal}' → '{replacement}'");
         }
 
         return true;

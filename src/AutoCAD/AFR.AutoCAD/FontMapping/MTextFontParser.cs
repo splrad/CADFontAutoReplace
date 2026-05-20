@@ -17,6 +17,11 @@ internal enum InlineFontType
     TrueType
 }
 
+internal sealed record InlineFontCandidate(
+    string LookupName,
+    string OriginalFont,
+    InlineFontType FontType);
+
 /// <summary>
 /// MText Contents 字符串的流式解析器。
 /// 提取 \F（SHX）和 \f（TrueType）格式代码中的内联字体引用。
@@ -36,9 +41,9 @@ internal static class MTextFontParser
 {
     /// <summary>
     /// 从 MText Contents 字符串中提取所有内联字体引用。
-    /// 结果去重，key 为归一化后的字体名（SHX 加 .shx 后缀，TrueType 保留原名）。
+    /// 结果去重，key 为大小写敏感的查找名；记录中保留 Contents 里的原始显示名。
     /// </summary>
-    internal static void ParseInlineFonts(string? contents, Dictionary<string, InlineFontType> result)
+    internal static void ParseInlineFonts(string? contents, Dictionary<string, InlineFontCandidate> result)
     {
         if (string.IsNullOrEmpty(contents)) return;
 
@@ -87,7 +92,7 @@ internal static class MTextFontParser
     /// 格式: \Fmain[,[@]big]|
     /// 进入时 i 指向 \F 之后的第一个字符。
     /// </summary>
-    private static void ParseShxFont(string text, ref int i, Dictionary<string, InlineFontType> result)
+    private static void ParseShxFont(string text, ref int i, Dictionary<string, InlineFontCandidate> result)
     {
         int len = text.Length;
 
@@ -131,7 +136,7 @@ internal static class MTextFontParser
     ///   | 后紧跟 [bicp] + 数字 → 参数分隔符，继续读取到 ;
     ///   否则 → 结束符，字族名结束
     /// </summary>
-    private static void ParseTrueTypeFont(string text, ref int i, Dictionary<string, InlineFontType> result)
+    private static void ParseTrueTypeFont(string text, ref int i, Dictionary<string, InlineFontCandidate> result)
     {
         int len = text.Length;
         int nameStart = i;
@@ -195,13 +200,13 @@ internal static class MTextFontParser
         return string.IsNullOrWhiteSpace(fileName) ? trimmed : fileName;
     }
 
-    private static void AddTrueTypeFont(string fontName, Dictionary<string, InlineFontType> result)
+    private static void AddTrueTypeFont(string fontName, Dictionary<string, InlineFontCandidate> result)
     {
         string normalized = NormalizeTrueTypeFontName(fontName);
         if (string.IsNullOrWhiteSpace(normalized))
             return;
 
-        result.TryAdd(normalized, InlineFontType.TrueType);
+        result.TryAdd(normalized, new InlineFontCandidate(normalized, normalized, InlineFontType.TrueType));
     }
 
     /// <summary>
@@ -258,7 +263,7 @@ internal static class MTextFontParser
     /// <summary>
     /// 添加 SHX 字体到结果集。归一化处理：剥离目录路径 + 确保 .shx 后缀。
     /// </summary>
-    private static void AddShxFont(string fontName, InlineFontType fontType, Dictionary<string, InlineFontType> result)
+    private static void AddShxFont(string fontName, InlineFontType fontType, Dictionary<string, InlineFontCandidate> result)
     {
         // MText \F 格式代码可能存储完整路径（如旧版 CAD 安装目录），
         // 剥离路径确保与 Hook 重定向日志和 _availableFonts 的纯文件名 key 对齐
@@ -268,7 +273,7 @@ internal static class MTextFontParser
             ? fontName
             : fontName + ".shx";
 
-        result.TryAdd(normalized, fontType);
+        result.TryAdd(normalized, new InlineFontCandidate(normalized, normalized, fontType));
     }
 
     #endregion

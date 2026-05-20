@@ -29,7 +29,7 @@ internal sealed class AutoCadFontScanner : IFontScanner
     {
         if (_cachedShxFonts != null) return _cachedShxFonts;
 
-        var fonts = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var fonts = new SortedSet<string>(StringComparer.Ordinal);
 
         foreach (var dir in CadEnvironmentSettings.GetAllFontSearchPaths())
             ScanShxDirectory(dir, fonts);
@@ -46,7 +46,7 @@ internal sealed class AutoCadFontScanner : IFontScanner
     {
         if (_cachedTrueTypeFonts != null) return _cachedTrueTypeFonts;
 
-        var fonts = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var fonts = new SortedSet<string>(StringComparer.Ordinal);
         try
         {
             var zhCN = XmlLanguage.GetLanguage("zh-cn");

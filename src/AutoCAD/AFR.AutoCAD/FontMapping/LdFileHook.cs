@@ -29,11 +29,11 @@ internal static class LdFileHook
     private static NativeInlineHook<LdFileDelegate>? _hook;
     private static LdFileDelegate? _hookDelegate;
     private static readonly ConcurrentDictionary<string, IntPtr> NativeStringCache =
-        new(StringComparer.OrdinalIgnoreCase);
+        new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, RegisteredRedirect> RegisteredRedirects =
-        new(StringComparer.OrdinalIgnoreCase);
+        new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen =
-        new(StringComparer.OrdinalIgnoreCase);
+        new(StringComparer.Ordinal);
     private static long _hitCount;
     private static long _redirectCount;
 
@@ -44,6 +44,7 @@ internal static class LdFileHook
 
     private sealed record RegisteredRedirect(
         string OriginalFont,
+        string OriginalDisplayFont,
         string ReplacementFont,
         FontRedirectKind Kind,
         string Source,
@@ -62,6 +63,7 @@ internal static class LdFileHook
         FontRedirectKind kind,
         string source,
         InlineFontType? inlineType,
+        string? originalDisplayName,
         out string sourceKey,
         out string replacement)
     {
@@ -72,6 +74,9 @@ internal static class LdFileHook
         string original = NormalizeLoadFontName(originalFont, kind);
         if (!IsRegisterableLoadFontName(original, kind))
             return false;
+        string displayOriginal = NormalizeLoadFontName(originalDisplayName ?? originalFont, kind);
+        if (string.IsNullOrWhiteSpace(displayOriginal))
+            displayOriginal = original;
 
         FontLogicalReplacement resolution = FontRedirectResolver.ResolveLogicalFont(
             original,
@@ -82,13 +87,13 @@ internal static class LdFileHook
 
         string resolved = NormalizeReplacementFontName(resolution.ReplacementName, kind, original);
         if (string.IsNullOrWhiteSpace(resolved)
-            || string.Equals(original, resolved, StringComparison.OrdinalIgnoreCase))
+            || string.Equals(original, resolved, StringComparison.Ordinal))
         {
             return false;
         }
 
         string normalizedSource = string.IsNullOrWhiteSpace(source) ? "unknown" : source.Trim();
-        var request = new RegisteredRedirect(original, resolved, kind, normalizedSource, inlineType);
+        var request = new RegisteredRedirect(original, displayOriginal, resolved, kind, normalizedSource, inlineType);
         string key = GetRedirectKey(original, kind);
 
         RegisteredRedirects.AddOrUpdate(
@@ -101,7 +106,7 @@ internal static class LdFileHook
         {
             DiagnosticLogger.Log(Tag,
                 $"登记字体加载桥接: source={normalizedSource} kind={kind} " +
-                $"'{original}' → '{resolved}' inline={inlineType?.ToString() ?? "none"}");
+                $"'{displayOriginal}' → '{resolved}' inline={inlineType?.ToString() ?? "none"}");
         }
 
         sourceKey = original;
@@ -188,14 +193,14 @@ internal static class LdFileHook
             }
 
             string replacement = request.ReplacementFont;
-            if (string.Equals(normalized, replacement, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(normalized, replacement, StringComparison.Ordinal))
                 return trampoline(fileName, param2, db, desc);
 
             Interlocked.Increment(ref _redirectCount);
             if (request.InlineType.HasValue)
             {
                 FontRuntimeMappingStore.RecordInlineMapping(
-                    request.OriginalFont,
+                    request.OriginalDisplayFont,
                     replacement,
                     request.InlineType.Value);
             }
@@ -205,7 +210,7 @@ internal static class LdFileHook
             {
                 DiagnosticLogger.Log(Tag,
                     $"执行字体加载桥接: source={request.Source} kind={request.Kind} " +
-                    $"'{normalized}' → '{replacement}' param2={param2}");
+                    $"'{request.OriginalDisplayFont}' → '{replacement}' request='{normalized}' param2={param2}");
             }
 
             IntPtr replacementPtr = NativeStringCache.GetOrAdd(
@@ -312,7 +317,7 @@ internal static class LdFileHook
         RegisteredRedirect existing,
         RegisteredRedirect incoming)
     {
-        if (string.Equals(existing.ReplacementFont, incoming.ReplacementFont, StringComparison.OrdinalIgnoreCase)
+        if (string.Equals(existing.ReplacementFont, incoming.ReplacementFont, StringComparison.Ordinal)
             && existing.InlineType.HasValue)
         {
             return existing;

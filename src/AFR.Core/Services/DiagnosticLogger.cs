@@ -344,7 +344,7 @@ internal static class DiagnosticLogger
         string actual, [CallerMemberName] string caller = "")
     {
         if (!IsEnabled) return;
-        bool match = string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase);
+        bool match = string.Equals(expected, actual, StringComparison.Ordinal);
         var level = match ? DiagLevel.Info : DiagLevel.Warn;
         var symbol = match ? "✓" : "✗";
         EnqueueEntry(level, "验证", caller,

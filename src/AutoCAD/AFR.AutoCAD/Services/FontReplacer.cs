@@ -68,7 +68,7 @@ internal static class FontReplacer
             trueTypeFont = NormalizeTrueTypeName(trueTypeFont!, context);
 
         // 预构建字典—O(1)查找替代线性搜索
-        var missingMap = new Dictionary<string, FontCheckResult>(missingFonts.Count, StringComparer.OrdinalIgnoreCase);
+        var missingMap = new Dictionary<string, FontCheckResult>(missingFonts.Count, StringComparer.Ordinal);
         for (int i = 0; i < missingFonts.Count; i++)
         {
             missingMap.TryAdd(missingFonts[i].StyleName, missingFonts[i]);
@@ -213,7 +213,7 @@ internal static class FontReplacer
         var log = LogService.Instance;
         int replaceCount = 0;
 
-        var map = new Dictionary<string, StyleFontReplacement>(replacements.Count, StringComparer.OrdinalIgnoreCase);
+        var map = new Dictionary<string, StyleFontReplacement>(replacements.Count, StringComparer.Ordinal);
         foreach (var r in replacements)
             map.TryAdd(r.StyleName, r);
 
@@ -412,9 +412,11 @@ internal static class FontReplacer
                 // 通过 AutoCAD 搜索路径定位字体文件，解析内部真实字族名
                 string path = HostApplicationServices.Current.FindFile(
                     name, context.Db, FindFileHint.TrueTypeFontFile);
-                if (!string.IsNullOrEmpty(path))
+                string? exactPath = FontDetector.GetExactFindFilePath(name, path);
+                exactPath ??= FontDetector.TryFindExactFontFilePath(name);
+                if (exactPath != null)
                 {
-                    var glyph = new GlyphTypeface(new Uri(path));
+                    var glyph = new GlyphTypeface(new Uri(exactPath));
                     var familyName = glyph.FamilyNames.Values.FirstOrDefault();
                     if (!string.IsNullOrEmpty(familyName))
                     {

@@ -34,15 +34,15 @@ internal static class StyleTextStyleHook
     private static byte[]? _loadStyleRecThunkSavedBytes;
     private static bool _loadStyleRecThunkInstalled;
     private static readonly ConcurrentDictionary<string, RuntimeFontMappingRecord[]> RuntimeMappingsByStyle =
-        new(StringComparer.OrdinalIgnoreCase);
+        new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, RuntimeFontMappingRecord> RuntimeApplyHits =
-        new(StringComparer.OrdinalIgnoreCase);
+        new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> StyleLoadLogSeen =
-        new(StringComparer.OrdinalIgnoreCase);
+        new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> RuntimeApplyLogSeen =
-        new(StringComparer.OrdinalIgnoreCase);
+        new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, IntPtr> NativeStringCache =
-        new(StringComparer.OrdinalIgnoreCase);
+        new(StringComparer.Ordinal);
     private static int _styleLoadLogCount;
 
     [ThreadStatic] private static bool _inLoadStyleRecHook;
@@ -191,7 +191,7 @@ internal static class StyleTextStyleHook
         RuntimeMappingsByStyle.Clear();
         RuntimeApplyHits.Clear();
 
-        var grouped = new Dictionary<string, List<RuntimeFontMappingRecord>>(StringComparer.OrdinalIgnoreCase);
+        var grouped = new Dictionary<string, List<RuntimeFontMappingRecord>>(StringComparer.Ordinal);
 
         foreach (RuntimeFontMappingRecord mapping in mappings)
         {
@@ -521,14 +521,57 @@ internal static class StyleTextStyleHook
         string source = string.IsNullOrWhiteSpace(styleName)
             ? "StyleTextStyleHook:observed"
             : $"StyleTextStyleHook:observed:{styleName}";
+        string displayOriginal = ResolveObservedDisplayOriginal(styleName, original, kind);
 
         return LdFileHook.TryRegisterResolvedAtFont(
             original,
             kind,
             source,
-            inlineType: null,
+            null,
+            displayOriginal,
             out _,
             out _);
+    }
+
+    private static string ResolveObservedDisplayOriginal(
+        string styleName,
+        string observedOriginal,
+        FontRedirectKind kind)
+    {
+        if (string.IsNullOrWhiteSpace(styleName)
+            || !RuntimeMappingsByStyle.TryGetValue(styleName, out RuntimeFontMappingRecord[]? mappings)
+            || mappings.Length == 0)
+        {
+            return observedOriginal;
+        }
+
+        var matches = mappings
+            .Where(mapping => IsMappingKind(mapping, kind))
+            .ToArray();
+        if (matches.Length == 0)
+            return observedOriginal;
+
+        string observedKey = FontRedirectResolver.GetRedirectSourceKey(observedOriginal, kind);
+        for (int i = 0; i < matches.Length; i++)
+        {
+            string mappingKey = FontRedirectResolver.GetRedirectSourceKey(matches[i].OriginalFont, kind);
+            if (string.Equals(mappingKey, observedKey, StringComparison.Ordinal))
+                return matches[i].OriginalFont;
+        }
+
+        // 同一样式同一槽位正常只有一条映射；当 CAD 回调已经改写大小写时，用登记记录恢复显示原名。
+        return matches.Length == 1 ? matches[0].OriginalFont : observedOriginal;
+    }
+
+    private static bool IsMappingKind(RuntimeFontMappingRecord mapping, FontRedirectKind kind)
+    {
+        return kind switch
+        {
+            FontRedirectKind.TrueType => IsTrueTypeMapping(mapping),
+            FontRedirectKind.ShxBigFont => IsBigFontMapping(mapping),
+            FontRedirectKind.ShxMain => !IsTrueTypeMapping(mapping) && !IsBigFontMapping(mapping),
+            _ => false
+        };
     }
 
     private static void ApplyMTextInlineLoadStyleRecMappings(IntPtr self)
@@ -561,7 +604,8 @@ internal static class StyleTextStyleHook
                 mapping.OriginalFont,
                 FontRedirectKind.TrueType,
                 $"StyleTextStyleHook:{styleName}",
-                inlineType: null,
+                null,
+                mapping.OriginalFont,
                 out _,
                 out string ldFileReplacement);
             if (!registered)
@@ -638,7 +682,8 @@ internal static class StyleTextStyleHook
                 mapping.OriginalFont,
                 kind,
                 $"StyleTextStyleHook:{styleName}",
-                inlineType: null,
+                null,
+                mapping.OriginalFont,
                 out _,
                 out string ldFileReplacement);
             if (!registered)

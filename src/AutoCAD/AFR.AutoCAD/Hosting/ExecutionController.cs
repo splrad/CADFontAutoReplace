@@ -215,7 +215,7 @@ internal sealed class ExecutionController
         if (runtimeFontMappings.Count == 0)
             return;
 
-        var styleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var styleNames = new HashSet<string>(StringComparer.Ordinal);
         for (int i = 0; i < runtimeFontMappings.Count; i++)
         {
             if (!string.IsNullOrWhiteSpace(runtimeFontMappings[i].StyleName))
@@ -270,7 +270,7 @@ internal sealed class ExecutionController
     {
         try
         {
-            var missingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var missingNames = new HashSet<string>(StringComparer.Ordinal);
             for (int i = 0; i < missingFonts.Count; i++)
                 missingNames.Add(missingFonts[i].StyleName);
 
