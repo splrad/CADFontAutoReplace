@@ -36,6 +36,42 @@ internal readonly struct FontRedirectResolution
     internal string Reason { get; }
 }
 
+internal enum FontLogicalReplacementAction
+{
+    NoAction,
+    DirectLogicalReplacement,
+    RuntimeLoadBridge
+}
+
+internal readonly struct FontLogicalReplacement
+{
+    internal FontLogicalReplacement(
+        FontLogicalReplacementAction action,
+        string originalName,
+        string lookupName,
+        string replacementName,
+        FontRedirectKind kind,
+        bool carriesAutoCadSemantic,
+        string reason)
+    {
+        Action = action;
+        OriginalName = originalName;
+        LookupName = lookupName;
+        ReplacementName = replacementName;
+        Kind = kind;
+        CarriesAutoCadSemantic = carriesAutoCadSemantic;
+        Reason = reason;
+    }
+
+    internal FontLogicalReplacementAction Action { get; }
+    internal string OriginalName { get; }
+    internal string LookupName { get; }
+    internal string ReplacementName { get; }
+    internal FontRedirectKind Kind { get; }
+    internal bool CarriesAutoCadSemantic { get; }
+    internal string Reason { get; }
+}
+
 internal static class FontRedirectResolver
 {
     internal static string NormalizeInputName(string fontName)
@@ -61,6 +97,124 @@ internal static class FontRedirectResolver
     {
         string lookupName = StripLeadingAtPrefix(fontName);
         return kind == FontRedirectKind.TrueType ? lookupName : EnsureShx(lookupName);
+    }
+
+    internal static FontLogicalReplacement ResolveLogicalFont(
+        string fontName,
+        FontRedirectKind kind,
+        bool carriesAutoCadSemantic = false)
+    {
+        string original = NormalizeInputName(fontName);
+        if (string.IsNullOrWhiteSpace(original))
+        {
+            return new FontLogicalReplacement(
+                FontLogicalReplacementAction.NoAction,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                kind,
+                carriesAutoCadSemantic,
+                "空字体名");
+        }
+
+        bool hasAtPrefix = original[0] == '@';
+        bool semantic = carriesAutoCadSemantic || hasAtPrefix;
+        string lookupName = hasAtPrefix ? original.TrimStart('@') : original;
+        if (string.IsNullOrWhiteSpace(lookupName))
+        {
+            return new FontLogicalReplacement(
+                FontLogicalReplacementAction.NoAction,
+                original,
+                string.Empty,
+                string.Empty,
+                kind,
+                semantic,
+                "空字体名");
+        }
+
+        if (semantic)
+        {
+            if (IsOriginalSemanticFontAvailable(original, lookupName, kind, hasAtPrefix))
+            {
+                return new FontLogicalReplacement(
+                    FontLogicalReplacementAction.NoAction,
+                    original,
+                    lookupName,
+                    string.Empty,
+                    kind,
+                    semantic,
+                    "原始语义字体可用");
+            }
+
+            if (TryResolveMissingFont(original, kind, out FontRedirectResolution runtimeResolution))
+            {
+                return new FontLogicalReplacement(
+                    FontLogicalReplacementAction.RuntimeLoadBridge,
+                    original,
+                    runtimeResolution.LookupName,
+                    runtimeResolution.RedirectName,
+                    kind,
+                    semantic,
+                    runtimeResolution.Reason);
+            }
+
+            return new FontLogicalReplacement(
+                FontLogicalReplacementAction.NoAction,
+                original,
+                lookupName,
+                string.Empty,
+                kind,
+                semantic,
+                "未找到可用运行时加载映射");
+        }
+
+        if (IsLogicalFontAvailable(original, kind))
+        {
+            return new FontLogicalReplacement(
+                FontLogicalReplacementAction.NoAction,
+                original,
+                lookupName,
+                string.Empty,
+                kind,
+                semantic,
+                "字体可用");
+        }
+
+        if (!TryResolveConfiguredReplacement(kind, out string configured))
+        {
+            return new FontLogicalReplacement(
+                FontLogicalReplacementAction.NoAction,
+                original,
+                lookupName,
+                string.Empty,
+                kind,
+                semantic,
+                "未找到可用配置字体");
+        }
+
+        string sourceKey = GetRedirectSourceKey(original, kind);
+        if (string.Equals(sourceKey, configured, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(original, configured, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(lookupName, configured, StringComparison.OrdinalIgnoreCase))
+        {
+            return new FontLogicalReplacement(
+                FontLogicalReplacementAction.NoAction,
+                original,
+                lookupName,
+                string.Empty,
+                kind,
+                semantic,
+                "替换目标与原字体相同");
+        }
+
+        return new FontLogicalReplacement(
+            FontLogicalReplacementAction.DirectLogicalReplacement,
+            original,
+            lookupName,
+            configured,
+            kind,
+            semantic,
+            "配置字体兜底");
     }
 
     internal static bool TryResolveMissingFont(
@@ -236,6 +390,57 @@ internal static class FontRedirectResolver
     internal static string EnsureShx(string name)
     {
         string normalized = NormalizeInputName(name).TrimStart('@');
+        return normalized.EndsWith(".shx", StringComparison.OrdinalIgnoreCase)
+            ? normalized
+            : normalized + ".shx";
+    }
+
+    private static bool IsOriginalSemanticFontAvailable(
+        string original,
+        string lookupName,
+        FontRedirectKind kind,
+        bool hasAtPrefix)
+    {
+        if (kind == FontRedirectKind.TrueType)
+            return IsAvailableTrueType(hasAtPrefix ? lookupName : original);
+
+        string shxName = NormalizeShxPreserveAt(original);
+        if (!FontAvailabilityIndex.IsExactKnownAvailableFont(shxName))
+            return false;
+
+        return FontAvailabilityIndex.TryGetKnownShxFontKind(shxName, out bool isBigFont)
+               && IsExpectedShxKind(kind, isBigFont);
+    }
+
+    private static bool IsLogicalFontAvailable(string fontName, FontRedirectKind kind)
+    {
+        if (kind == FontRedirectKind.TrueType)
+            return IsAvailableTrueType(fontName);
+
+        string shxName = NormalizeShxPreserveAt(fontName);
+        if (!FontAvailabilityIndex.IsKnownAvailableFont(shxName))
+            return false;
+
+        return FontAvailabilityIndex.TryGetKnownShxFontKind(shxName, out bool isBigFont)
+               && IsExpectedShxKind(kind, isBigFont);
+    }
+
+    private static bool IsExpectedShxKind(FontRedirectKind kind, bool isBigFont)
+    {
+        return kind switch
+        {
+            FontRedirectKind.ShxBigFont => isBigFont,
+            FontRedirectKind.ShxMain => !isBigFont,
+            _ => false
+        };
+    }
+
+    private static string NormalizeShxPreserveAt(string name)
+    {
+        string normalized = NormalizeInputName(name);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return string.Empty;
+
         return normalized.EndsWith(".shx", StringComparison.OrdinalIgnoreCase)
             ? normalized
             : normalized + ".shx";

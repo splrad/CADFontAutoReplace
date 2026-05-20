@@ -10,10 +10,10 @@ namespace AFR.FontMapping;
 /// 只处理 AutoCAD ldfile 阶段的运行时字体加载重定向。
 /// <para>
 /// 上层 Hook 先按 Style/MText 各自规则判断是否需要交给 LdFileHook；
-/// 这里不负责样式表永久替换，也不决定哪些 @ 字体应该映射。
+/// 这里不负责样式表永久替换，也不决定哪些字体应该映射。
 /// </para>
 /// <para>
-/// 登记后仅在 ldfile 实际请求同一个 @ 字体时替换加载文件名，
+/// 登记后仅在 ldfile 实际请求同一个语义字体时替换加载文件名，
 /// 保留 AcGiTextStyle/MText 原始字体名，避免破坏竖排 TrueType 和大字体解码语义。
 /// </para>
 /// </summary>
@@ -68,15 +68,19 @@ internal static class LdFileHook
         sourceKey = string.Empty;
         replacement = string.Empty;
 
-        // 是否交给 LdFileHook 由调用方决定；这里只负责解析目标字体并登记运行时加载映射。
+        // 是否交给 LdFileHook 由调用方决定；这里只接受共享判定后的运行时加载桥接。
         string original = NormalizeLoadFontName(originalFont, kind);
-        if (!IsRegisteredAtFontName(original, kind))
+        if (!IsRegisterableLoadFontName(original, kind))
             return false;
 
-        if (!FontRedirectResolver.TryResolveAtPrefixedFont(original, kind, out var resolution))
+        FontLogicalReplacement resolution = FontRedirectResolver.ResolveLogicalFont(
+            original,
+            kind,
+            carriesAutoCadSemantic: true);
+        if (resolution.Action != FontLogicalReplacementAction.RuntimeLoadBridge)
             return false;
 
-        string resolved = NormalizeReplacementFontName(resolution.RedirectName, kind, original);
+        string resolved = NormalizeReplacementFontName(resolution.ReplacementName, kind, original);
         if (string.IsNullOrWhiteSpace(resolved)
             || string.Equals(original, resolved, StringComparison.OrdinalIgnoreCase))
         {
@@ -96,7 +100,7 @@ internal static class LdFileHook
         if (RedirectLogSeen.TryAdd(logKey, 0))
         {
             DiagnosticLogger.Log(Tag,
-                $"登记@字体加载映射: source={normalizedSource} kind={kind} " +
+                $"登记字体加载桥接: source={normalizedSource} kind={kind} " +
                 $"'{original}' → '{resolved}' inline={inlineType?.ToString() ?? "none"}");
         }
 
@@ -112,7 +116,7 @@ internal static class LdFileHook
 
         if (PlatformManager.Platform is not INativeFontHookExportsProvider exports)
         {
-            DiagnosticLogger.Log(Tag, $"{PlatformManager.Platform.DisplayName} 未提供 ldfile Hook 导出定义，跳过 @ 字体加载桥接。");
+            DiagnosticLogger.Log(Tag, $"{PlatformManager.Platform.DisplayName} 未提供 ldfile Hook 导出定义，跳过字体加载桥接。");
             return;
         }
 
@@ -126,7 +130,7 @@ internal static class LdFileHook
         NativeHookTarget target = exports.NativeFontHookProfile.LdFile;
         if (!TryGetExportAddress(module, target, out IntPtr address, out uint resolvedRva))
         {
-            DiagnosticLogger.Log(Tag, "ldfile 入口未通过强校验，跳过 @ 字体加载桥接。");
+            DiagnosticLogger.Log(Tag, "ldfile 入口未通过强校验，跳过字体加载桥接。");
             return;
         }
 
@@ -176,7 +180,7 @@ internal static class LdFileHook
         try
         {
             string original = ReadFontName(fileName);
-            // 未登记的字体请求必须原样放行，避免 ldfile 抢走样式表替换或普通字体缺失处理。
+            // 未登记的字体请求必须原样放行，避免 ldfile 抢走上层 Hook 的决策权。
             if (!TryGetRegisteredRedirect(original, param2, out RegisteredRedirect? request, out string normalized)
                 || request == null)
             {
@@ -200,7 +204,7 @@ internal static class LdFileHook
             if (RedirectLogSeen.TryAdd(logKey, 0))
             {
                 DiagnosticLogger.Log(Tag,
-                    $"执行@字体加载映射: source={request.Source} kind={request.Kind} " +
+                    $"执行字体加载桥接: source={request.Source} kind={request.Kind} " +
                     $"'{normalized}' → '{replacement}' param2={param2}");
             }
 
@@ -232,7 +236,7 @@ internal static class LdFileHook
         // TrueType 和 SHX 使用不同归一化规则，必须按注册类型和 ldfile 参数分别匹配。
         string trueTypeName = NormalizeLoadTrueTypeName(fontName);
         if (param2 != FontTypeShape
-            && IsRegisteredAtFontName(trueTypeName, FontRedirectKind.TrueType)
+            && IsRegisterableLoadFontName(trueTypeName, FontRedirectKind.TrueType)
             && RegisteredRedirects.TryGetValue(GetRedirectKey(trueTypeName, FontRedirectKind.TrueType), out request))
         {
             normalized = trueTypeName;
@@ -243,7 +247,7 @@ internal static class LdFileHook
             return false;
 
         string shxName = NormalizeLoadShxName(fontName);
-        if (!IsRegisteredAtFontName(shxName, FontRedirectKind.ShxMain))
+        if (!IsRegisterableLoadFontName(shxName, FontRedirectKind.ShxMain))
             return false;
 
         if (param2 == FontTypeBigFont)
@@ -365,9 +369,9 @@ internal static class LdFileHook
     private static string GetRedirectKey(string normalized, FontRedirectKind kind)
         => string.Concat(normalized, "\u001F", kind);
 
-    private static bool IsRegisteredAtFontName(string fontName, FontRedirectKind kind)
+    private static bool IsRegisterableLoadFontName(string fontName, FontRedirectKind kind)
     {
-        if (string.IsNullOrWhiteSpace(fontName) || fontName.Length <= 1 || fontName[0] != '@')
+        if (string.IsNullOrWhiteSpace(fontName))
             return false;
 
         return kind == FontRedirectKind.TrueType
