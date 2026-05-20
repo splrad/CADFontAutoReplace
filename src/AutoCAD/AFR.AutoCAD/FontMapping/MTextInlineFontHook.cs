@@ -687,19 +687,7 @@ internal static class MTextInlineFontHook
             return null;
 
         if (hasAtPrefix)
-        {
-            if (!FontRedirectResolver.TryResolveAtPrefixedFont(
-                    original,
-                    FontRedirectKind.TrueType,
-                    out var resolution))
-            {
-                return null;
-            }
-
-            return string.Equals(original, resolution.RedirectName, StringComparison.OrdinalIgnoreCase)
-                ? null
-                : resolution.RedirectName;
-        }
+            return null;
 
         if (IsAvailableTypeface(lookupName))
             return null;
@@ -798,34 +786,21 @@ internal static class MTextInlineFontHook
         if (string.IsNullOrWhiteSpace(lookupName) || IsShxFontName(lookupName))
             return false;
 
-        if (!FontRedirectResolver.TryResolveAtPrefixedFont(
-                original,
+        if (FontRedirectResolver.TryResolveAvailableBase(
+                lookupName,
                 FontRedirectKind.TrueType,
-                out var resolution))
+                out _))
         {
             return false;
         }
 
-        string replacement = EnsureVerticalTrueTypeName(resolution.RedirectName);
-        if (string.IsNullOrWhiteSpace(replacement)
-            || string.Equals(original, replacement, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        sourceKey = original;
-        return LdFileHook.RegisterRedirect(
-            sourceKey,
-            replacement,
+        return LdFileHook.TryRegisterResolvedAtFont(
+            original,
             FontRedirectKind.TrueType,
             source,
-            InlineFontType.TrueType);
-    }
-
-    private static string EnsureVerticalTrueTypeName(string fontName)
-    {
-        string normalized = MTextFontParser.NormalizeTrueTypeFontName(fontName).TrimStart('@');
-        return string.IsNullOrWhiteSpace(normalized) ? string.Empty : "@" + normalized;
+            InlineFontType.TrueType,
+            out sourceKey,
+            out _);
     }
 
     private static bool TryRegisterLdFileShxMapping(
@@ -839,32 +814,25 @@ internal static class MTextInlineFontHook
         if (string.IsNullOrWhiteSpace(fontName))
             return false;
 
-        string original = FontRedirectResolver.NormalizeInputName(fontName);
-        if (string.IsNullOrWhiteSpace(original) || IsTrueTypeFontFileName(original))
+        string input = FontRedirectResolver.NormalizeInputName(fontName);
+        if (string.IsNullOrWhiteSpace(input) || IsTrueTypeFontFileName(input))
             return false;
 
-        if (original.Length <= 1 || original[0] != '@')
+        string original = NormalizeInlineShxName(input);
+        if (string.IsNullOrWhiteSpace(original) || original.Length <= 1 || original[0] != '@')
+            return false;
+
+        if (IsExactAvailableShxForSlot(original, bigFont))
             return false;
 
         var kind = bigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
-        sourceKey = NormalizeInlineShxName(original);
-
-        if (!FontRedirectResolver.TryResolveAtPrefixedFont(original, kind, out var resolution))
-            return false;
-
-        string replacement = FontRedirectResolver.EnsureShx(resolution.RedirectName);
-        if (string.IsNullOrWhiteSpace(replacement)
-            || string.Equals(sourceKey, replacement, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return LdFileHook.RegisterRedirect(
-            sourceKey,
-            replacement,
+        return LdFileHook.TryRegisterResolvedAtFont(
+            original,
             kind,
             source,
-            inlineType);
+            inlineType,
+            out sourceKey,
+            out _);
     }
 
     private static bool ShouldReplaceShx(string original, string sourceKey, bool bigFont)
@@ -891,6 +859,15 @@ internal static class MTextInlineFontHook
         // 文件存在但 SHX 类型无法确认时，按缺失处理。旧图纸中这类字体
         // 常导致 MText 大字体槽位显示为空，交给配置字体兜底更稳定。
         return true;
+    }
+
+    private static bool IsExactAvailableShxForSlot(string original, bool bigFont)
+    {
+        if (!FontAvailabilityIndex.IsExactKnownAvailableFont(original))
+            return false;
+
+        return FontAvailabilityIndex.TryGetKnownShxFontKind(original, out bool sourceIsBig)
+               && sourceIsBig == bigFont;
     }
 
     private static string NormalizeInlineShxName(string name)

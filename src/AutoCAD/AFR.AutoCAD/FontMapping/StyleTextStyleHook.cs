@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Runtime.InteropServices;
 using AFR.Models;
 using AFR.Platform;
@@ -220,6 +221,7 @@ internal static class StyleTextStyleHook
         _inLoadStyleRecHook = true;
         try
         {
+            RegisterObservedAtFontLoadMappings(self);
             ApplyRegisteredStyleMappings(self);
             ApplyMTextInlineLoadStyleRecMappings(self);
             int result = trampoline(self, db);
@@ -430,6 +432,36 @@ internal static class StyleTextStyleHook
         }
     }
 
+    private static void RegisterObservedAtFontLoadMappings(IntPtr self)
+    {
+        string styleName = ReadString(_styleNameGetter, self);
+        string fileName = ReadString(_fileNameGetter, self);
+        string bigFontFileName = ReadString(_bigFontFileNameGetter, self);
+
+        RegisterObservedAtShxMapping(styleName, fileName, bigFont: false);
+        RegisterObservedAtShxMapping(styleName, bigFontFileName, bigFont: true);
+    }
+
+    private static void RegisterObservedAtShxMapping(string styleName, string fontName, bool bigFont)
+    {
+        if (string.IsNullOrWhiteSpace(fontName) || !FontRedirectResolver.HasAtPrefix(fontName))
+            return;
+
+        string original = NormalizeObservedShxName(fontName);
+        var kind = bigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
+        string source = string.IsNullOrWhiteSpace(styleName)
+            ? "StyleTextStyleHook:observed"
+            : $"StyleTextStyleHook:observed:{styleName}";
+
+        LdFileHook.TryRegisterResolvedAtFont(
+            original,
+            kind,
+            source,
+            inlineType: null,
+            out _,
+            out _);
+    }
+
     private static void ApplyMTextInlineLoadStyleRecMappings(IntPtr self)
     {
         string styleName = ReadString(_styleNameGetter, self);
@@ -454,14 +486,18 @@ internal static class StyleTextStyleHook
             return;
 
         bool baseAvailable = IsBaseFontAvailableMapping(mapping);
+        if (vertical && baseAvailable)
+            return;
+
         if (vertical && !baseAvailable)
         {
-            string ldFileReplacement = EnsureVerticalTrueTypeName(replacement);
-            bool registered = LdFileHook.RegisterRedirect(
+            bool registered = LdFileHook.TryRegisterResolvedAtFont(
                 mapping.OriginalFont,
-                ldFileReplacement,
                 FontRedirectKind.TrueType,
-                $"StyleTextStyleHook:{styleName}");
+                $"StyleTextStyleHook:{styleName}",
+                inlineType: null,
+                out _,
+                out string ldFileReplacement);
             if (!registered)
                 return;
 
@@ -527,11 +563,13 @@ internal static class StyleTextStyleHook
         if (FontRedirectResolver.HasAtPrefix(mapping.OriginalFont))
         {
             var kind = bigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
-            bool registered = LdFileHook.RegisterRedirect(
+            bool registered = LdFileHook.TryRegisterResolvedAtFont(
                 mapping.OriginalFont,
-                replacement,
                 kind,
-                $"StyleTextStyleHook:{styleName}");
+                $"StyleTextStyleHook:{styleName}",
+                inlineType: null,
+                out _,
+                out string ldFileReplacement);
             if (!registered)
                 return;
 
@@ -540,7 +578,7 @@ internal static class StyleTextStyleHook
                 styleName,
                 mapping,
                 bigFont ? "registerLdFile(SHX大字体)" : "registerLdFile(SHX主字体)",
-                replacement);
+                ldFileReplacement);
             return;
         }
 
@@ -579,12 +617,6 @@ internal static class StyleTextStyleHook
     private static bool IsBaseFontAvailableMapping(RuntimeFontMappingRecord mapping)
         => mapping.Status.Contains("基础字体可用", StringComparison.OrdinalIgnoreCase);
 
-    private static string EnsureVerticalTrueTypeName(string fontName)
-    {
-        string normalized = MTextFontParser.NormalizeTrueTypeFontName(fontName).TrimStart('@');
-        return string.IsNullOrWhiteSpace(normalized) ? string.Empty : "@" + normalized;
-    }
-
     private static void LogRuntimeApply(
         string styleName,
         RuntimeFontMappingRecord mapping,
@@ -602,6 +634,18 @@ internal static class StyleTextStyleHook
 
     private static IntPtr GetNativeString(string value)
         => NativeStringCache.GetOrAdd(value, static text => Marshal.StringToHGlobalUni(text));
+
+    private static string NormalizeObservedShxName(string name)
+    {
+        string normalized = FontRedirectResolver.NormalizeInputName(name);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return string.Empty;
+
+        if (!string.IsNullOrEmpty(Path.GetExtension(normalized)))
+            return normalized;
+
+        return normalized + ".shx";
+    }
 
     private static bool ShouldLogStyleLoad(
         string styleName,

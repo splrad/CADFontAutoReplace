@@ -91,6 +91,39 @@ internal static class LdFileHook
         return true;
     }
 
+    internal static bool TryRegisterResolvedAtFont(
+        string originalFont,
+        FontRedirectKind kind,
+        string source,
+        InlineFontType? inlineType,
+        out string sourceKey,
+        out string replacement)
+    {
+        sourceKey = string.Empty;
+        replacement = string.Empty;
+
+        string original = NormalizeLoadFontName(originalFont, kind);
+        if (!IsRegisteredAtFontName(original, kind))
+            return false;
+
+        if (!FontRedirectResolver.TryResolveAtPrefixedFont(original, kind, out var resolution))
+            return false;
+
+        string resolved = NormalizeReplacementFontName(resolution.RedirectName, kind, original);
+        if (string.IsNullOrWhiteSpace(resolved)
+            || string.Equals(original, resolved, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!RegisterRedirect(original, resolved, kind, source, inlineType))
+            return false;
+
+        sourceKey = original;
+        replacement = resolved;
+        return true;
+    }
+
     internal static void Install()
     {
         if (IsInstalled)
