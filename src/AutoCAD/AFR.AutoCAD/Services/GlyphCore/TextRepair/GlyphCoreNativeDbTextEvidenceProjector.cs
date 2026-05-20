@@ -93,8 +93,7 @@ internal static class GlyphCoreNativeDbTextEvidenceProjector
                 {
                     Interlocked.Increment(ref _familyMismatchMissCount);
                     IncrementRawReject(rawRejectReason);
-                    if (rawRejectReason == RawEquivalentRejectReason.PolicyRejected
-                        || rawRejectReason == RawEquivalentRejectReason.TextCarrierPending)
+                    if (rawRejectReason == RawEquivalentRejectReason.TextCarrierPending)
                     {
                         StorePendingRawEquivalentEvidence(
                             drawing,

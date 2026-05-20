@@ -146,8 +146,7 @@ internal static class MTextFontParser
                 // 分号 → 确定的结束符
                 string fontName = text[nameStart..i].Trim();
                 i++; // 跳过 ;
-                if (fontName.Length > 0)
-                    result.TryAdd(fontName, InlineFontType.TrueType);
+                AddTrueTypeFont(fontName, result);
                 return;
             }
 
@@ -164,8 +163,7 @@ internal static class MTextFontParser
                 }
 
                 // 无论哪种情况，字族名已确定
-                if (fontName.Length > 0)
-                    result.TryAdd(fontName, InlineFontType.TrueType);
+                AddTrueTypeFont(fontName, result);
                 return;
             }
 
@@ -173,8 +171,7 @@ internal static class MTextFontParser
             {
                 // 遇到新的转义序列 → 缺少终止符，容错截断
                 string fontName = text[nameStart..i].Trim();
-                if (fontName.Length > 0)
-                    result.TryAdd(fontName, InlineFontType.TrueType);
+                AddTrueTypeFont(fontName, result);
                 return;
             }
 
@@ -183,11 +180,29 @@ internal static class MTextFontParser
 
         // 到达字符串末尾，缺少终止符 → 容错
         string remaining = text[nameStart..].Trim();
-        if (remaining.Length > 0)
-            result.TryAdd(remaining, InlineFontType.TrueType);
+        AddTrueTypeFont(remaining, result);
     }
 
     #region 辅助方法
+
+    internal static string NormalizeTrueTypeFontName(string fontName)
+    {
+        if (string.IsNullOrWhiteSpace(fontName))
+            return string.Empty;
+
+        string trimmed = fontName.Trim();
+        string fileName = Path.GetFileName(trimmed);
+        return string.IsNullOrWhiteSpace(fileName) ? trimmed : fileName;
+    }
+
+    private static void AddTrueTypeFont(string fontName, Dictionary<string, InlineFontType> result)
+    {
+        string normalized = NormalizeTrueTypeFontName(fontName);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        result.TryAdd(normalized, InlineFontType.TrueType);
+    }
 
     /// <summary>
     /// 查找终止符位置。若找不到则返回字符串末尾或下一个 '\' 的位置（容错）。

@@ -453,6 +453,34 @@ internal static class StyleTextStyleHook
         if (string.IsNullOrWhiteSpace(replacement))
             return;
 
+        bool baseAvailable = IsBaseFontAvailableMapping(mapping);
+        if (vertical && !baseAvailable)
+        {
+            string ldFileReplacement = EnsureVerticalTrueTypeName(replacement);
+            bool registered = LdFileHook.RegisterRedirect(
+                mapping.OriginalFont,
+                ldFileReplacement,
+                FontRedirectKind.TrueType,
+                $"StyleTextStyleHook:{styleName}");
+            if (!registered)
+                return;
+
+            bool ldFileVerticalApplied = false;
+            if (_setVertical != null)
+            {
+                _setVertical(self, 1);
+                ldFileVerticalApplied = true;
+            }
+
+            RecordRuntimeApplyHit(styleName, mapping);
+            LogRuntimeApply(
+                styleName,
+                mapping,
+                ldFileVerticalApplied ? "registerLdFile+setVertical(TrueType)" : "registerLdFile(TrueType)",
+                ldFileReplacement);
+            return;
+        }
+
         bool shouldSetFont = !mapping.Status.Contains("基础字体可用", StringComparison.OrdinalIgnoreCase)
                              || !vertical;
         bool fontApplied = false;
@@ -496,6 +524,26 @@ internal static class StyleTextStyleHook
         if (string.IsNullOrWhiteSpace(replacement))
             return;
 
+        if (FontRedirectResolver.HasAtPrefix(mapping.OriginalFont))
+        {
+            var kind = bigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
+            bool registered = LdFileHook.RegisterRedirect(
+                mapping.OriginalFont,
+                replacement,
+                kind,
+                $"StyleTextStyleHook:{styleName}");
+            if (!registered)
+                return;
+
+            RecordRuntimeApplyHit(styleName, mapping);
+            LogRuntimeApply(
+                styleName,
+                mapping,
+                bigFont ? "registerLdFile(SHX大字体)" : "registerLdFile(SHX主字体)",
+                replacement);
+            return;
+        }
+
         var setter = bigFont ? _setBigFontFileName : _setFileName;
         if (setter == null)
             return;
@@ -527,6 +575,15 @@ internal static class StyleTextStyleHook
 
     private static bool IsBigFontMapping(RuntimeFontMappingRecord mapping)
         => mapping.MappingCategory.Contains("SHX大", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsBaseFontAvailableMapping(RuntimeFontMappingRecord mapping)
+        => mapping.Status.Contains("基础字体可用", StringComparison.OrdinalIgnoreCase);
+
+    private static string EnsureVerticalTrueTypeName(string fontName)
+    {
+        string normalized = MTextFontParser.NormalizeTrueTypeFontName(fontName).TrimStart('@');
+        return string.IsNullOrWhiteSpace(normalized) ? string.Empty : "@" + normalized;
+    }
 
     private static void LogRuntimeApply(
         string styleName,

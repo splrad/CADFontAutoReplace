@@ -19,6 +19,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontAvailabilityIndex.cs" Link="FontMapping\FontAvailabilityIndex.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontRedirectResolver.cs" Link="FontMapping\FontRedirectResolver.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontRuntimeMappingStore.cs" Link="FontMapping\FontRuntimeMappingStore.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\LdFileHook.cs" Link="FontMapping\LdFileHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextFontParser.cs" Link="FontMapping\MTextFontParser.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontHook.cs" Link="FontMapping\MTextInlineFontHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontScanner.cs" Link="FontMapping\MTextInlineFontScanner.cs" />

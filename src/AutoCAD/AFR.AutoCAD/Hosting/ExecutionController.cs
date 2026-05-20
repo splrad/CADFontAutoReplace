@@ -60,6 +60,7 @@ internal sealed class ExecutionController
                 // 创建独立的字体检测上下文 — 缓存生命周期与本次执行绑定，结束后由 GC 自动回收
                 var context = new FontDetectionContext(doc.Database);
                 FontRuntimeMappingStore.Clear();
+                LdFileHook.ClearRegisteredRedirects();
                 StyleTextStyleHook.ReplaceStyleRuntimeFontMappings(Array.Empty<RuntimeFontMappingRecord>());
 
                 DiagnosticLogger.BeginDocument(doc.Name, config.MainFont, config.BigFont, config.TrueTypeFont);

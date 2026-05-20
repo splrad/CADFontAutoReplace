@@ -91,7 +91,7 @@ internal static class MTextInlineFontHook
         foreach (var (fontName, inlineType) in inlineFonts)
         {
             string key = inlineType == InlineFontType.TrueType
-                ? FontRedirectResolver.NormalizeInputName(fontName)
+                ? MTextFontParser.NormalizeTrueTypeFontName(fontName)
                 : NormalizeInlineShxName(fontName);
 
             if (!string.IsNullOrWhiteSpace(key))
@@ -119,29 +119,23 @@ internal static class MTextInlineFontHook
         Interlocked.Increment(ref _loadStyleRecInlineHitCount);
         bool applied = false;
 
-        if (setFileName != null)
-        {
-            applied |= TryApplyInlineLoadStyleRecShxMapping(
-                self,
-                fileName,
-                bigFont: false,
-                InlineFontType.ShxMain,
-                getNativeString,
-                setFileName,
-                "SHX主字体");
-        }
+        applied |= TryApplyInlineLoadStyleRecShxMapping(
+            self,
+            fileName,
+            bigFont: false,
+            InlineFontType.ShxMain,
+            getNativeString,
+            setFileName,
+            "SHX主字体");
 
-        if (setBigFontFileName != null)
-        {
-            applied |= TryApplyInlineLoadStyleRecShxMapping(
-                self,
-                bigFontFileName,
-                bigFont: true,
-                InlineFontType.ShxBigFont,
-                getNativeString,
-                setBigFontFileName,
-                "SHX大字体");
-        }
+        applied |= TryApplyInlineLoadStyleRecShxMapping(
+            self,
+            bigFontFileName,
+            bigFont: true,
+            InlineFontType.ShxBigFont,
+            getNativeString,
+            setBigFontFileName,
+            "SHX大字体");
 
         if (applied)
             Interlocked.Increment(ref _loadStyleRecInlineApplyCount);
@@ -382,6 +376,14 @@ internal static class MTextInlineFontHook
         try
         {
             string fontName = scopedFontName;
+            if (TryRegisterLdFileTrueTypeMapping(
+                    fontName,
+                    "AcGiTextStyle::setFont:TrueType",
+                    out _))
+            {
+                return trampoline(self, typeface, bold, italic, charset, pitch, family);
+            }
+
             string? replacement = ResolveMissingTrueTypeReplacement(fontName);
             if (replacement != null)
             {
@@ -608,6 +610,17 @@ internal static class MTextInlineFontHook
                 return;
             }
 
+            if (TryRegisterLdFileShxMapping(
+                    original,
+                    bigFont,
+                    inlineType,
+                    $"{hookName}:{logCategory}",
+                    out _))
+            {
+                trampoline(self, fontName);
+                return;
+            }
+
             trampoline(self, fontName);
         }
         catch (Exception ex)
@@ -632,7 +645,15 @@ internal static class MTextInlineFontHook
         string original = Marshal.PtrToStringUni(fontNamePtr) ?? string.Empty;
         string? replacement = ResolveMissingShxReplacement(original, bigFont, out sourceKey);
         if (replacement == null)
+        {
+            TryRegisterLdFileShxMapping(
+                original,
+                bigFont,
+                inlineType,
+                $"AcGiTextStyle.ctor:{logCategory}",
+                out sourceKey);
             return IntPtr.Zero;
+        }
 
         FontRuntimeMappingStore.RecordInlineMapping(sourceKey, replacement, inlineType);
 
@@ -653,7 +674,7 @@ internal static class MTextInlineFontHook
         if (string.IsNullOrWhiteSpace(fontName))
             return null;
 
-        string original = FontRedirectResolver.NormalizeInputName(fontName);
+        string original = MTextFontParser.NormalizeTrueTypeFontName(fontName);
         bool hasAtPrefix = original.Length > 1 && original[0] == '@';
         string lookupName = hasAtPrefix ? original.TrimStart('@') : original;
         if (string.IsNullOrWhiteSpace(lookupName))
@@ -734,24 +755,15 @@ internal static class MTextInlineFontHook
         if (string.IsNullOrWhiteSpace(lookupName))
             return null;
 
+        // @-prefixed SHX names carry AutoCAD big-font/vertical semantics for MText.
+        // Do not replace the AcGiTextStyle name here; let ldfile bridge only the
+        // backing font file so the original inline decoding path stays intact.
+        if (original.Length > 1 && original[0] == '@')
+            return null;
+
         var kind = bigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
         string lookupKey = FontRedirectResolver.GetRedirectSourceKey(original, kind);
         sourceKey = NormalizeInlineShxName(original);
-
-        if (original.Length > 1 && original[0] == '@')
-        {
-            if (!FontRedirectResolver.TryResolveAtPrefixedFont(
-                    original,
-                    kind,
-                    out var resolution))
-            {
-                return null;
-            }
-
-            return string.Equals(original, resolution.RedirectName, StringComparison.OrdinalIgnoreCase)
-                ? null
-                : resolution.RedirectName;
-        }
 
         if (!ShouldReplaceShx(original, lookupKey, bigFont))
             return null;
@@ -767,6 +779,92 @@ internal static class MTextInlineFontHook
             return null;
 
         return replacement;
+    }
+
+    private static bool TryRegisterLdFileTrueTypeMapping(
+        string fontName,
+        string source,
+        out string sourceKey)
+    {
+        sourceKey = string.Empty;
+        if (string.IsNullOrWhiteSpace(fontName))
+            return false;
+
+        string original = MTextFontParser.NormalizeTrueTypeFontName(fontName);
+        if (string.IsNullOrWhiteSpace(original) || original.Length <= 1 || original[0] != '@')
+            return false;
+
+        string lookupName = original.TrimStart('@');
+        if (string.IsNullOrWhiteSpace(lookupName) || IsShxFontName(lookupName))
+            return false;
+
+        if (!FontRedirectResolver.TryResolveAtPrefixedFont(
+                original,
+                FontRedirectKind.TrueType,
+                out var resolution))
+        {
+            return false;
+        }
+
+        string replacement = EnsureVerticalTrueTypeName(resolution.RedirectName);
+        if (string.IsNullOrWhiteSpace(replacement)
+            || string.Equals(original, replacement, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        sourceKey = original;
+        return LdFileHook.RegisterRedirect(
+            sourceKey,
+            replacement,
+            FontRedirectKind.TrueType,
+            source,
+            InlineFontType.TrueType);
+    }
+
+    private static string EnsureVerticalTrueTypeName(string fontName)
+    {
+        string normalized = MTextFontParser.NormalizeTrueTypeFontName(fontName).TrimStart('@');
+        return string.IsNullOrWhiteSpace(normalized) ? string.Empty : "@" + normalized;
+    }
+
+    private static bool TryRegisterLdFileShxMapping(
+        string fontName,
+        bool bigFont,
+        InlineFontType inlineType,
+        string source,
+        out string sourceKey)
+    {
+        sourceKey = string.Empty;
+        if (string.IsNullOrWhiteSpace(fontName))
+            return false;
+
+        string original = FontRedirectResolver.NormalizeInputName(fontName);
+        if (string.IsNullOrWhiteSpace(original) || IsTrueTypeFontFileName(original))
+            return false;
+
+        if (original.Length <= 1 || original[0] != '@')
+            return false;
+
+        var kind = bigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
+        sourceKey = NormalizeInlineShxName(original);
+
+        if (!FontRedirectResolver.TryResolveAtPrefixedFont(original, kind, out var resolution))
+            return false;
+
+        string replacement = FontRedirectResolver.EnsureShx(resolution.RedirectName);
+        if (string.IsNullOrWhiteSpace(replacement)
+            || string.Equals(sourceKey, replacement, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return LdFileHook.RegisterRedirect(
+            sourceKey,
+            replacement,
+            kind,
+            source,
+            inlineType);
     }
 
     private static bool ShouldReplaceShx(string original, string sourceKey, bool bigFont)
@@ -812,8 +910,9 @@ internal static class MTextInlineFontHook
             return false;
 
         string key = expectedType == InlineFontType.TrueType
-            ? FontRedirectResolver.NormalizeInputName(fontName)
+            ? MTextFontParser.NormalizeTrueTypeFontName(fontName)
             : NormalizeInlineShxName(fontName);
+
         return InlineFontCandidates.TryGetValue(key, out InlineFontType actualType)
                && actualType == expectedType;
     }
@@ -839,7 +938,7 @@ internal static class MTextInlineFontHook
         bool bigFont,
         InlineFontType inlineType,
         Func<string, IntPtr> getNativeString,
-        Action<IntPtr, IntPtr> setter,
+        Action<IntPtr, IntPtr>? setter,
         string logCategory)
     {
         if (!IsInlineCandidate(original, inlineType))
@@ -847,6 +946,16 @@ internal static class MTextInlineFontHook
 
         string? replacement = ResolveMissingShxReplacement(original, bigFont, out string sourceKey);
         if (replacement == null)
+        {
+            return TryRegisterLdFileShxMapping(
+                original,
+                bigFont,
+                inlineType,
+                $"AcGiTextStyle.loadStyleRec:{logCategory}",
+                out _);
+        }
+
+        if (setter == null)
             return false;
 
         setter(self, getNativeString(replacement));
