@@ -32,6 +32,8 @@ public abstract class PluginEntryBase : IExtensionApplication
     private static readonly HashSet<Document> _hiddenUnloadDocuments = new();
     private static bool _hiddenUnloadRegistered;
     private static bool _hiddenUnloadInProgress;
+    private const string FontAltVariableName = "FONTALT";
+    private const string DisabledFontAltValue = ".";
 
     // 嵌入程序集缓存：第三方托管依赖以嵌入资源形式打包在插件 DLL 中
     private static readonly Dictionary<string, Assembly> ResolvedEmbeddedAssemblies = new(StringComparer.OrdinalIgnoreCase);
@@ -130,6 +132,8 @@ public abstract class PluginEntryBase : IExtensionApplication
         var log = LogService.Instance;
         try
         {
+            EnsureFontAltDisabled(log);
+
             // 第一阶段: 注册表初始化 — 检查/创建自动加载注册表项和默认配置
             // 首次安装时还会部署内嵌字体到 CAD Fonts 目录并写入默认替换字体
             bool isFirstRun = AppInitializer.Initialize();
@@ -138,7 +142,6 @@ public abstract class PluginEntryBase : IExtensionApplication
                 // 首次通过 NETLOAD 加载：CAD 已启动，Hook 无法拦截已加载的字体。
                 // 仅完成注册表写入和字体部署，提示用户重启 CAD 后自动生效。
                 try { AcadApp.SetSystemVariable("FONTMAP", ""); } catch { }
-                try { AcadApp.SetSystemVariable("FONTALT", "."); } catch { }
                 log.Info("首次加载完成，默认替换字体已部署。请重启 CAD 使插件自动生效。");
                 log.Flush();
                 return;
@@ -235,6 +238,24 @@ public abstract class PluginEntryBase : IExtensionApplication
         AppDomain.CurrentDomain.AssemblyResolve -= OnResolveEmbeddedAssembly;
         ResolvedEmbeddedAssemblies.Clear();
         AFR.GlyphCore.TextRepair.GlyphCoreTextRepairScorerFactory.DisposeAndReset();
+    }
+
+    private static void EnsureFontAltDisabled(ILogService log)
+    {
+        try
+        {
+            object currentValue = AcadApp.GetSystemVariable(FontAltVariableName);
+            string? current = currentValue?.ToString();
+            if (string.Equals(current, DisabledFontAltValue, StringComparison.Ordinal))
+                return;
+
+            AcadApp.SetSystemVariable(FontAltVariableName, DisabledFontAltValue);
+            log.Info($"FONTALT 已从 \"{current ?? "未设置"}\" 重设为 \"{DisabledFontAltValue}\"");
+        }
+        catch (System.Exception ex)
+        {
+            log.Warning("FONTALT 检测或重设失败：" + ex.Message);
+        }
     }
 
     // ── 事件处理与延迟调度 ──
