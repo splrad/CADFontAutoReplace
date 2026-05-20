@@ -43,7 +43,7 @@ internal sealed class AutoCad2022Platform : ICadPlatform, INativeDecodeHookProfi
 
     public string LdFileExport => "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z";
 
-    public uint? LdFileRva => null;
+    public uint? LdFileRva => 0x315E8;
 
     public string BrandName => "AutoCAD";
     public string VersionName => "2022";

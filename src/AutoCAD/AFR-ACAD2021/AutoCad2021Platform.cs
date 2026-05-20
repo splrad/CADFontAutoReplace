@@ -33,7 +33,7 @@ internal sealed class AutoCad2021Platform : ICadPlatform, INativeDecodeHookProfi
 
     public string LdFileExport => "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z";
 
-    public uint? LdFileRva => null;
+    public uint? LdFileRva => 0x527BC;
 
     public string BrandName => "AutoCAD";
     public string VersionName => "2021";

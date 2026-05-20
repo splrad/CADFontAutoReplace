@@ -33,7 +33,7 @@ internal sealed class AutoCad2018Platform : ICadPlatform, INativeDecodeHookProfi
 
     public string LdFileExport => "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z";
 
-    public uint? LdFileRva => null;
+    public uint? LdFileRva => 0x4093C4;
 
     public string BrandName => "AutoCAD";
     public string VersionName => "2018";

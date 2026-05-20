@@ -43,7 +43,7 @@ internal sealed class AutoCad2026Platform : ICadPlatform, INativeDecodeHookProfi
 
     public string LdFileExport => "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z";
 
-    public uint? LdFileRva => null;
+    public uint? LdFileRva => 0xD87AC;
 
     public string BrandName => "AutoCAD";
     public string VersionName => "2026";

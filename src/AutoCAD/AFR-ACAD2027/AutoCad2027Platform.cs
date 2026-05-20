@@ -43,7 +43,7 @@ internal sealed class AutoCad2027Platform : ICadPlatform, INativeDecodeHookProfi
 
     public string LdFileExport => "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z";
 
-    public uint? LdFileRva => null;
+    public uint? LdFileRva => 0xA375C;
 
     private static readonly int[] MainDispatcherPattern =
     [
