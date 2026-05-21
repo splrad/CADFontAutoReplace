@@ -248,7 +248,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
 
     private IReadOnlyList<StyleFontReplacement> BuildReplacementRequests()
     {
-        var map = new Dictionary<string, StyleFontReplacement>(StringComparer.Ordinal);
+        var map = new Dictionary<string, StyleFontReplacement>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in Items)
         {
             string font = row.SelectedReplacement?.Trim() ?? string.Empty;
@@ -256,7 +256,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
 
             // 已替换行仅在用户修改了选择时才纳入，避免重复提交未变更的替换。
             if (row.IsReplaced && string.Equals(font, row.OriginalReplacement?.Trim(),
-                StringComparison.Ordinal)) continue;
+                StringComparison.OrdinalIgnoreCase)) continue;
 
             if (!map.TryGetValue(row.StyleName, out var existing))
                 existing = new StyleFontReplacement(row.StyleName, false, string.Empty, string.Empty);
@@ -446,7 +446,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         {
             string current = row.SelectedReplacement?.Trim() ?? string.Empty;
             string original = row.OriginalReplacement?.Trim() ?? string.Empty;
-            if (!string.Equals(current, original, StringComparison.Ordinal))
+            if (!string.Equals(current, original, StringComparison.OrdinalIgnoreCase))
                 return true;
         }
         return false;

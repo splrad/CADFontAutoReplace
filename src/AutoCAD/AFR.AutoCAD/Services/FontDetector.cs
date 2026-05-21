@@ -1,10 +1,8 @@
-using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.InteropServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.GraphicsInterface;
 using AFR.FontMapping;
-using Microsoft.Win32;
 using System.Windows.Media;
 using AFR.Models;
 
@@ -27,8 +25,6 @@ internal static class FontDetector
     // FindFile 缓存 key 前缀（预计算，避免每次调用 int.ToString()）
     private static readonly string FindFilePrefixShx = ((int)FindFileHint.CompiledShapeFile).ToString() + ":";
     private static readonly string FindFilePrefixTtf = ((int)FindFileHint.TrueTypeFontFile).ToString() + ":";
-    private static readonly ConcurrentDictionary<string, string> TrueTypeFileNameByFamilyCache =
-        new(StringComparer.Ordinal);
 
     /// <summary>预热系统字体索引。调用此方法会触发后台索引构建（如果尚未开始）。</summary>
     public static void PrewarmSystemFonts() { }
@@ -171,7 +167,7 @@ internal static class FontDetector
         string configuredTrueTypeFont)
     {
         var results = new List<RuntimeFontMappingRecord>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         using var tr = context.Db.TransactionManager.StartTransaction();
         var styleTable = (TextStyleTable)tr.GetObject(context.Db.TextStyleTableId, OpenMode.ForRead);
@@ -357,7 +353,7 @@ internal static class FontDetector
     /// </summary>
     public static HashSet<string> CollectStyleTableFontNames(Database db)
     {
-        var names = new HashSet<string>(StringComparer.Ordinal);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         using var tr = db.TransactionManager.StartOpenCloseTransaction();
         var styleTable = (TextStyleTable)tr.GetObject(db.TextStyleTableId, OpenMode.ForRead);
         foreach (ObjectId id in styleTable)
@@ -380,7 +376,7 @@ internal static class FontDetector
     /// </summary>
     public static Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)> ReadCurrentFontAssignments(Database db)
     {
-        var result = new Dictionary<string, (string, string, string)>(StringComparer.Ordinal);
+        var result = new Dictionary<string, (string, string, string)>(StringComparer.OrdinalIgnoreCase);
         using var tr = db.TransactionManager.StartTransaction();
         var styleTable = (TextStyleTable)tr.GetObject(db.TextStyleTableId, OpenMode.ForRead);
         foreach (ObjectId id in styleTable)
@@ -417,14 +413,11 @@ internal static class FontDetector
 
     /// <summary>
     /// 检查 TrueType 字体是否可用。
-    /// 依次通过：精确 FileName → 系统字体索引 → FindFile（.ttf/.ttc/.otf）→ WPF 本地化名称反查。
+    /// 依次通过：系统字体索引 → FindFile（FileName）→ FindFile（.ttf/.ttc/.otf）→ WPF 本地化名称反查。
     /// </summary>
     private static bool IsTrueTypeFontAvailable(string typeface, string fileName, FontDetectionContext context)
     {
         if (string.IsNullOrWhiteSpace(typeface)) return true;
-
-        if (!string.IsNullOrWhiteSpace(fileName))
-            return TryFindFile(NormalizeFontName(fileName), context, FindFileHint.TrueTypeFontFile);
 
         if (IsTrueTypeFontFile(typeface))
             return TryFindFile(NormalizeFontName(typeface), context, FindFileHint.TrueTypeFontFile);
@@ -437,6 +430,8 @@ internal static class FontDetector
         bool indexReady = task.Status == TaskStatus.RanToCompletion;
 
         if (indexReady && task.Result.Contains(typeface)) return true;
+        if (!string.IsNullOrWhiteSpace(fileName)
+            && TryFindFile(NormalizeFontName(fileName), context, FindFileHint.TrueTypeFontFile)) return true;
         if (TryFindFile(typeface + ".ttf", context, FindFileHint.TrueTypeFontFile)) return true;
         if (TryFindFile(typeface + ".ttc", context, FindFileHint.TrueTypeFontFile)) return true;
         if (TryFindFile(typeface + ".otf", context, FindFileHint.TrueTypeFontFile)) return true;
@@ -450,7 +445,7 @@ internal static class FontDetector
             {
                 var family = System.Windows.Media.Fonts.SystemFontFamilies
                     .FirstOrDefault(f => f.FamilyNames.Values.Any(
-                        n => string.Equals(n, typeface, StringComparison.Ordinal)));
+                        n => string.Equals(n, typeface, StringComparison.OrdinalIgnoreCase)));
                 if (family != null) return true;
             }
             catch { }
@@ -466,16 +461,9 @@ internal static class FontDetector
             hint == FindFileHint.CompiledShapeFile ? FindFilePrefixShx : FindFilePrefixTtf,
             fileName);
         if (context.FindFileCache.TryGetValue(cacheKey, out var cached)) return cached;
-        bool found = false;
-        try
-        {
-            var r = HostApplicationServices.Current.FindFile(fileName, context.Db, hint);
-            found = IsExactFindFileMatch(fileName, r);
-        }
+        bool found;
+        try { var r = HostApplicationServices.Current.FindFile(fileName, context.Db, hint); found = !string.IsNullOrEmpty(r); }
         catch { found = false; }
-
-        if (!found)
-            found = TryFindExactFontFilePath(fileName) != null;
 
         context.FindFileCache.TryAdd(cacheKey, found);
         return found;
@@ -511,21 +499,13 @@ internal static class FontDetector
         if (context.FindFileCache.TryGetValue(cacheKey, out var cached) && !cached)
             return null;
 
-        string? exactPath = TryFindExactFontFilePath(normalized);
-        if (exactPath != null)
-        {
-            context.FindFileCache.TryAdd(cacheKey, true);
-            return exactPath;
-        }
-
         try
         {
             string result = HostApplicationServices.Current.FindFile(normalized, context.Db, hint);
-            string? exactResult = GetExactFindFilePath(normalized, result);
-            if (exactResult != null)
+            if (!string.IsNullOrEmpty(result))
             {
                 context.FindFileCache.TryAdd(cacheKey, true);
-                return exactResult;
+                return result;
             }
         }
         catch { }
@@ -576,230 +556,6 @@ internal static class FontDetector
     /// <summary>去除路径前缀，仅保留文件名并去除首尾空白。</summary>
     private static string NormalizeFontName(string name) => Path.GetFileName(name.Trim());
 
-    internal static string? TryFindExactFontFilePath(string requestedFileName)
-    {
-        if (string.IsNullOrWhiteSpace(requestedFileName))
-            return null;
-
-        string requested = NormalizeFontName(requestedFileName);
-        foreach (string directory in CadEnvironmentSettings.GetAllFontSearchPaths())
-        {
-            try
-            {
-                foreach (string file in Directory.EnumerateFiles(directory))
-                {
-                    if (string.Equals(Path.GetFileName(file), requested, StringComparison.Ordinal))
-                        return file;
-                }
-            }
-            catch
-            {
-                // 单个搜索目录不可读时跳过，继续检查其它目录。
-            }
-        }
-
-        return null;
-    }
-
-    internal static string? TryResolveTrueTypeFontFileName(string fontName)
-    {
-        if (string.IsNullOrWhiteSpace(fontName))
-            return null;
-
-        string normalized = NormalizeFontName(fontName).TrimStart('@');
-        if (string.IsNullOrWhiteSpace(normalized))
-            return null;
-
-        if (IsTrueTypeFontFile(normalized))
-        {
-            string? exactPath = TryFindExactFontFilePath(normalized);
-            return exactPath == null ? null : Path.GetFileName(exactPath);
-        }
-
-        string resolved = TrueTypeFileNameByFamilyCache.GetOrAdd(
-            normalized,
-            static name => ResolveTrueTypeFontFileNameCore(name) ?? string.Empty);
-        return string.IsNullOrEmpty(resolved) ? null : resolved;
-    }
-
-    private static string? ResolveTrueTypeFontFileNameCore(string familyName)
-    {
-        var aliases = GetTrueTypeFamilyAliases(familyName);
-
-        string? registryMatch = TryResolveTrueTypeFontFileNameFromRegistry(aliases);
-        if (registryMatch != null)
-            return registryMatch;
-
-        return TryResolveTrueTypeFontFileNameByGlyph(aliases);
-    }
-
-    private static HashSet<string> GetTrueTypeFamilyAliases(string familyName)
-    {
-        var aliases = new HashSet<string>(StringComparer.Ordinal);
-        if (!string.IsNullOrWhiteSpace(familyName))
-            aliases.Add(familyName);
-
-        try
-        {
-            foreach (FontFamily family in Fonts.SystemFontFamilies)
-            {
-                bool matched = string.Equals(GetFontFamilySourceName(family.Source), familyName, StringComparison.Ordinal)
-                               || family.FamilyNames.Values.Any(name => string.Equals(name, familyName, StringComparison.Ordinal));
-                if (!matched)
-                    continue;
-
-                AddFontFamilyAlias(aliases, family.Source);
-                foreach (string name in family.FamilyNames.Values)
-                    AddFontFamilyAlias(aliases, name);
-            }
-        }
-        catch
-        {
-            // WPF 字体枚举失败时保留原始名称继续走注册表/文件扫描降级。
-        }
-
-        ExpandTrueTypeFamilyAliasesFromFiles(aliases);
-        return aliases;
-    }
-
-    private static void ExpandTrueTypeFamilyAliasesFromFiles(HashSet<string> aliases)
-    {
-        foreach (string directory in CadEnvironmentSettings.GetAllFontSearchPaths())
-        {
-            if (!Directory.Exists(directory))
-                continue;
-
-            try
-            {
-                foreach (string file in Directory.EnumerateFiles(directory))
-                {
-                    if (!IsTrueTypeFontFile(file))
-                        continue;
-
-                    var fileAliases = new HashSet<string>(StringComparer.Ordinal);
-                    AddTrueTypeFamilyAliasesFromFile(file, fileAliases);
-                    if (!fileAliases.Overlaps(aliases))
-                        continue;
-
-                    foreach (string alias in fileAliases)
-                        aliases.Add(alias);
-                }
-            }
-            catch
-            {
-                // 单个字体目录不可读时跳过。
-            }
-        }
-    }
-
-    private static string? TryResolveTrueTypeFontFileNameFromRegistry(HashSet<string> aliases)
-    {
-        try
-        {
-            using RegistryKey? fontsKey = Registry.LocalMachine.OpenSubKey(
-                @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts");
-            if (fontsKey == null)
-                return null;
-
-            foreach (string valueName in fontsKey.GetValueNames())
-            {
-                if (!RegistryFontDisplayMatches(valueName, aliases))
-                    continue;
-
-                if (fontsKey.GetValue(valueName) is not string registryFileName
-                    || string.IsNullOrWhiteSpace(registryFileName)
-                    || !IsTrueTypeFontFile(registryFileName))
-                {
-                    continue;
-                }
-
-                string? exactPath = TryFindExactFontFilePath(Path.GetFileName(registryFileName));
-                if (exactPath != null)
-                    return Path.GetFileName(exactPath);
-            }
-        }
-        catch
-        {
-            // 注册表不可读时走 GlyphTypeface 文件扫描。
-        }
-
-        return null;
-    }
-
-    private static string? TryResolveTrueTypeFontFileNameByGlyph(HashSet<string> aliases)
-    {
-        foreach (string directory in CadEnvironmentSettings.GetAllFontSearchPaths())
-        {
-            if (!Directory.Exists(directory))
-                continue;
-
-            try
-            {
-                foreach (string file in Directory.EnumerateFiles(directory))
-                {
-                    if (!IsTrueTypeFontFile(file))
-                        continue;
-
-                    if (TrueTypeFileMatchesAnyAlias(file, aliases))
-                        return Path.GetFileName(file);
-                }
-            }
-            catch
-            {
-                // 单个字体目录不可读时跳过。
-            }
-        }
-
-        return null;
-    }
-
-    private static bool TrueTypeFileMatchesAnyAlias(string filePath, HashSet<string> aliases)
-    {
-        var fileAliases = new HashSet<string>(StringComparer.Ordinal);
-        AddTrueTypeFamilyAliasesFromFile(filePath, fileAliases);
-        return fileAliases.Overlaps(aliases);
-    }
-
-    private static bool RegistryFontDisplayMatches(string valueName, HashSet<string> aliases)
-    {
-        string display = valueName;
-        int suffixIndex = display.IndexOf("(", StringComparison.Ordinal);
-        if (suffixIndex >= 0)
-            display = display[..suffixIndex];
-
-        foreach (string part in display.Split('&', ',', ';'))
-        {
-            string token = part.Trim();
-            if (string.IsNullOrEmpty(token))
-                continue;
-
-            if (aliases.Contains(token))
-                return true;
-        }
-
-        string trimmedDisplay = display.Trim();
-        return aliases.Contains(trimmedDisplay);
-    }
-
-    internal static void AddTrueTypeFamilyAliasesFromFile(string filePath, ISet<string> aliases)
-    {
-        if (string.IsNullOrWhiteSpace(filePath))
-            return;
-
-        try
-        {
-            var glyph = new GlyphTypeface(new Uri(filePath));
-            foreach (string name in glyph.FamilyNames.Values)
-                AddFontFamilyAlias(aliases, name);
-            foreach (string name in glyph.Win32FamilyNames.Values)
-                AddFontFamilyAlias(aliases, name);
-        }
-        catch
-        {
-            // 字体文件无法被 WPF 解析时不影响其它检测路径。
-        }
-    }
-
     private static void AddFontFamilyAlias(ISet<string> aliases, string? value)
     {
         string? alias = GetFontFamilySourceName(value);
@@ -819,49 +575,6 @@ internal static class FontDetector
             : trimmed;
     }
 
-    internal static bool IsExactFindFileMatch(string requestedFileName, string? foundPath)
-        => GetExactFindFilePath(requestedFileName, foundPath) != null;
-
-    internal static string? GetExactFindFilePath(string requestedFileName, string? foundPath)
-    {
-        if (string.IsNullOrWhiteSpace(requestedFileName) || string.IsNullOrEmpty(foundPath))
-            return null;
-
-        string requested = NormalizeFontName(requestedFileName);
-        string found = Path.GetFileName(foundPath);
-        string? exactPath = TryFindExactFileInDirectory(requested, foundPath);
-        if (exactPath != null)
-            return exactPath;
-
-        return string.Equals(found, requested, StringComparison.Ordinal) ? foundPath : null;
-    }
-
-    private static string? TryFindExactFileInDirectory(string requestedFileName, string? foundPath)
-    {
-        if (string.IsNullOrWhiteSpace(requestedFileName) || string.IsNullOrEmpty(foundPath))
-            return null;
-
-        string requested = NormalizeFontName(requestedFileName);
-        try
-        {
-            string? directory = Path.GetDirectoryName(foundPath);
-            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
-                return null;
-
-            foreach (string file in Directory.EnumerateFiles(directory))
-            {
-                if (string.Equals(Path.GetFileName(file), requested, StringComparison.Ordinal))
-                    return file;
-            }
-        }
-        catch
-        {
-            // 非普通文件系统路径时退回到 FindFile 返回名的字面比较。
-        }
-
-        return null;
-    }
-
     /// <summary>
     /// 判断文件名是否为 TrueType 字体文件（.ttf/.ttc/.otf）。
     /// </summary>
@@ -877,7 +590,7 @@ internal static class FontDetector
     /// </summary>
     private static HashSet<string> BuildSystemFontIndex()
     {
-        var names = new HashSet<string>(StringComparer.Ordinal);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
             foreach (var family in Fonts.SystemFontFamilies)
@@ -895,24 +608,6 @@ internal static class FontDetector
                 }
             }
 
-            foreach (string directory in CadEnvironmentSettings.GetAllFontSearchPaths())
-            {
-                if (!Directory.Exists(directory))
-                    continue;
-
-                try
-                {
-                    foreach (string file in Directory.EnumerateFiles(directory))
-                    {
-                        if (IsTrueTypeFontFile(file))
-                            AddTrueTypeFamilyAliasesFromFile(file, names);
-                    }
-                }
-                catch
-                {
-                    // 单个字体目录不可读时跳过，继续索引后续目录。
-                }
-            }
         }
         catch (Exception ex) { DiagnosticLogger.LogError("系统字体索引构建失败", ex); }
         return names;

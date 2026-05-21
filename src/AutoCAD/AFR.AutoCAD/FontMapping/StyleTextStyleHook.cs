@@ -36,7 +36,7 @@ internal static class StyleTextStyleHook
     private static readonly ConcurrentDictionary<string, RuntimeFontMappingRecord[]> RuntimeMappingsByStyle =
         new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, RuntimeFontMappingRecord> RuntimeApplyHits =
-        new(StringComparer.Ordinal);
+        new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, byte> StyleLoadLogSeen =
         new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> RuntimeApplyLogSeen =
@@ -563,7 +563,7 @@ internal static class StyleTextStyleHook
         for (int i = 0; i < matches.Length; i++)
         {
             string mappingKey = FontRedirectResolver.GetRedirectSourceKey(matches[i].OriginalFont, kind);
-            if (string.Equals(mappingKey, observedKey, StringComparison.Ordinal))
+            if (string.Equals(mappingKey, observedKey, StringComparison.OrdinalIgnoreCase))
                 return matches[i].OriginalFont;
         }
 

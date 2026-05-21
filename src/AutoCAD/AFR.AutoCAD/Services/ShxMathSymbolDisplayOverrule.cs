@@ -14,7 +14,7 @@ internal static class ShxMathSymbolDisplayOverrule
 {
     private const string GreaterEqual = "\u2265";
     private const string TxtShx = "txt.shx";
-    private static readonly HashSet<string> KnownMissingGreaterEqualBigFonts = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> KnownMissingGreaterEqualBigFonts = new(StringComparer.OrdinalIgnoreCase)
     {
         "hztxt.shx",
         "tssdchn.shx"
@@ -127,7 +127,7 @@ internal static class ShxMathSymbolDisplayOverrule
 
             // Fail open: do not take over arbitrary SHX fonts. If a user has a SHX/BigFont
             // that already contains U+2265, AutoCAD's native renderer must remain in control.
-            return string.Equals(fileName, TxtShx, StringComparison.Ordinal)
+            return string.Equals(fileName, TxtShx, StringComparison.OrdinalIgnoreCase)
                    && KnownMissingGreaterEqualBigFonts.Contains(bigFontName);
         }
         catch

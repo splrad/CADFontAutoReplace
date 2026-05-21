@@ -147,7 +147,7 @@ public class AfrCommands
                     // 有存储结果时以其为基础，确保已替换的字体也能在日志中显示
                     results = stored;
                     // 构建仍缺失的样式名集合，用于在 UI 中高亮标记
-                    stillMissingStyleNames = new HashSet<string>(StringComparer.Ordinal);
+                    stillMissingStyleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     for (int i = 0; i < currentMissing.Count; i++)
                         stillMissingStyleNames.Add(currentMissing[i].StyleName);
                 }
@@ -158,7 +158,7 @@ public class AfrCommands
                     if (currentMissing.Count > 0)
                     {
                         // 全部视为未替换
-                        stillMissingStyleNames = new HashSet<string>(StringComparer.Ordinal);
+                        stillMissingStyleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         for (int i = 0; i < currentMissing.Count; i++)
                             stillMissingStyleNames.Add(currentMissing[i].StyleName);
                     }
@@ -226,7 +226,7 @@ public class AfrCommands
                     if (stored != null && stored.Count > 0)
                     {
                         freshResults = stored;
-                        freshMissing = new HashSet<string>(StringComparer.Ordinal);
+                        freshMissing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         for (int i = 0; i < currentMissing.Count; i++)
                             freshMissing.Add(currentMissing[i].StyleName);
                     }
@@ -235,7 +235,7 @@ public class AfrCommands
                         freshResults = currentMissing;
                         if (currentMissing.Count > 0)
                         {
-                            freshMissing = new HashSet<string>(StringComparer.Ordinal);
+                            freshMissing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                             for (int i = 0; i < currentMissing.Count; i++)
                                 freshMissing.Add(currentMissing[i].StyleName);
                         }
@@ -306,17 +306,17 @@ public class AfrCommands
                 if (r.IsTrueType)
                 {
                     if (r.IsMainFontMissing && !string.IsNullOrEmpty(config.TrueTypeFont)
-                        && !string.Equals(config.TrueTypeFont, current.TypeFace, StringComparison.Ordinal))
+                        && !string.Equals(config.TrueTypeFont, current.TypeFace, StringComparison.OrdinalIgnoreCase))
                         replacements.Add(new StyleFontReplacement(r.StyleName, true, config.TrueTypeFont, string.Empty));
                 }
                 else
                 {
                     // 逐槽位判断：仅当新配置字体与当前实际字体不同时才填入替换值
                     string mainFont = (r.IsMainFontMissing && !string.IsNullOrEmpty(config.MainFont)
-                        && !string.Equals(config.MainFont, current.FileName, StringComparison.Ordinal))
+                        && !string.Equals(config.MainFont, current.FileName, StringComparison.OrdinalIgnoreCase))
                         ? config.MainFont : string.Empty;
                     string bigFont = (r.IsBigFontMissing && !string.IsNullOrEmpty(config.BigFont)
-                        && !string.Equals(config.BigFont, current.BigFontFileName, StringComparison.Ordinal))
+                        && !string.Equals(config.BigFont, current.BigFontFileName, StringComparison.OrdinalIgnoreCase))
                         ? config.BigFont : string.Empty;
 
                     // 主字体和大字体都未变更时跳过该样式

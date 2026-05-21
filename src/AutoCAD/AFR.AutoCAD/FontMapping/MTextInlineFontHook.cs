@@ -27,7 +27,7 @@ internal static class MTextInlineFontHook
     private static readonly ConcurrentDictionary<string, IntPtr> NativeTypefaceCache = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, IntPtr> NativeFileNameCache = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen = new(StringComparer.Ordinal);
-    private static readonly ConcurrentDictionary<string, InlineFontCandidate> InlineFontCandidates = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, InlineFontCandidate> InlineFontCandidates = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, InlineFontCandidate?> FoldedInlineFontCandidates = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> LoadStyleRecRedirectLogSeen = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> FoldedCandidateAmbiguityLogSeen = new(StringComparer.Ordinal);
@@ -756,8 +756,8 @@ internal static class MTextInlineFontHook
             return null;
 
         string replacement = FontRedirectResolver.NormalizeInputName(resolution.ReplacementName).TrimStart('@');
-        if (string.Equals(original, replacement, StringComparison.Ordinal)
-            || string.Equals(lookupName, replacement, StringComparison.Ordinal))
+        if (string.Equals(original, replacement, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(lookupName, replacement, StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
@@ -806,7 +806,7 @@ internal static class MTextInlineFontHook
             return null;
 
         string replacement = FontRedirectResolver.EnsureShx(resolution.ReplacementName);
-        if (string.Equals(FontRedirectResolver.GetRedirectSourceKey(original, kind), replacement, StringComparison.Ordinal))
+        if (string.Equals(FontRedirectResolver.GetRedirectSourceKey(original, kind), replacement, StringComparison.OrdinalIgnoreCase))
             return null;
 
         return replacement;
@@ -953,7 +953,7 @@ internal static class MTextInlineFontHook
         FoldedInlineFontCandidates.AddOrUpdate(
             foldedKey,
             candidate,
-            (_, existing) => existing != null && string.Equals(existing.LookupName, candidate.LookupName, StringComparison.Ordinal)
+            (_, existing) => existing != null && string.Equals(existing.LookupName, candidate.LookupName, StringComparison.OrdinalIgnoreCase)
                 ? existing
                 : null);
     }

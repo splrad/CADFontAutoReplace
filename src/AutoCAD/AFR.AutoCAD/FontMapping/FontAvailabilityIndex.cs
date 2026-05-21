@@ -10,7 +10,7 @@ namespace AFR.FontMapping;
 internal static class FontAvailabilityIndex
 {
     private static readonly object CacheLock = new();
-    private static readonly HashSet<string> AvailableFonts = new(StringComparer.Ordinal);
+    private static readonly HashSet<string> AvailableFonts = new(StringComparer.OrdinalIgnoreCase);
     private static volatile bool _initialized;
 
     internal static void Initialize()
@@ -102,9 +102,9 @@ internal static class FontAvailabilityIndex
         {
             foreach (var family in Fonts.SystemFontFamilies)
             {
-                AvailableFonts.Add(family.Source);
+                AddTrueTypeFamilyName(family.Source);
                 foreach (var localizedName in family.FamilyNames.Values)
-                    AvailableFonts.Add(localizedName);
+                    AddTrueTypeFamilyName(localizedName);
             }
         }
         catch (Exception ex)
@@ -135,8 +135,11 @@ internal static class FontAvailabilityIndex
                          ext.Equals(".ttc", StringComparison.OrdinalIgnoreCase) ||
                          ext.Equals(".otf", StringComparison.OrdinalIgnoreCase))
                 {
-                    AvailableFonts.Add(Path.GetFileName(file));
-                    FontDetector.AddTrueTypeFamilyAliasesFromFile(file, AvailableFonts);
+                    string fileName = Path.GetFileName(file);
+                    AvailableFonts.Add(fileName);
+                    string familyLikeName = Path.GetFileNameWithoutExtension(fileName);
+                    if (!string.IsNullOrWhiteSpace(familyLikeName))
+                        AvailableFonts.Add(familyLikeName);
                 }
             }
         }
@@ -144,6 +147,20 @@ internal static class FontAvailabilityIndex
         {
             // 字体目录不可读时跳过，后续按缺失字体处理。
         }
+    }
+
+    private static void AddTrueTypeFamilyName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return;
+
+        string trimmed = value.Trim();
+        int hashIndex = trimmed.LastIndexOf('#');
+        string name = hashIndex >= 0 && hashIndex + 1 < trimmed.Length
+            ? trimmed[(hashIndex + 1)..]
+            : trimmed;
+        if (!string.IsNullOrWhiteSpace(name))
+            AvailableFonts.Add(name);
     }
 
     private static void ClassifyShxFont(string filePath, string fileName)

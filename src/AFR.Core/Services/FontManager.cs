@@ -14,10 +14,10 @@ public static class FontManager
 {
     /// <summary>
     /// 全局 SHX 字体类型缓存。
-    /// Key: 文件名（不含路径，如 "hztxt.shx"），大小写敏感。
+    /// Key: 文件名（不含路径，如 "hztxt.shx"），按 CAD/Windows 字体查找语义忽略大小写。
     /// Value: true = 大字体，false = 常规字体。
     /// </summary>
-    public static ConcurrentDictionary<string, bool> FontCache { get; } = new(StringComparer.Ordinal);
+    public static ConcurrentDictionary<string, bool> FontCache { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// 获取常规 SHX 主字体的排序快照（FontCache 中 Value 为 false 的 Key）。
@@ -30,7 +30,7 @@ public static class FontManager
         {
             if (!kvp.Value) list.Add(kvp.Key);
         }
-        list.Sort(StringComparer.Ordinal);
+        list.Sort(StringComparer.OrdinalIgnoreCase);
         return list;
     }
 
@@ -45,7 +45,7 @@ public static class FontManager
         {
             if (kvp.Value) list.Add(kvp.Key);
         }
-        list.Sort(StringComparer.Ordinal);
+        list.Sort(StringComparer.OrdinalIgnoreCase);
         return list;
     }
 }

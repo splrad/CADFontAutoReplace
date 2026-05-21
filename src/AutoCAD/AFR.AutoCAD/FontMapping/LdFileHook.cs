@@ -31,7 +31,7 @@ internal static class LdFileHook
     private static readonly ConcurrentDictionary<string, IntPtr> NativeStringCache =
         new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, RegisteredRedirect> RegisteredRedirects =
-        new(StringComparer.Ordinal);
+        new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, RegisteredRedirect?> FoldedShxRegisteredRedirects =
         new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen =
@@ -93,7 +93,7 @@ internal static class LdFileHook
 
         string resolved = NormalizeReplacementFontName(resolution.ReplacementName, kind, original);
         if (string.IsNullOrWhiteSpace(resolved)
-            || string.Equals(original, resolved, StringComparison.Ordinal))
+            || string.Equals(original, resolved, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -200,7 +200,7 @@ internal static class LdFileHook
             }
 
             string replacement = request.ReplacementFont;
-            if (string.Equals(normalized, replacement, StringComparison.Ordinal))
+            if (string.Equals(normalized, replacement, StringComparison.OrdinalIgnoreCase))
                 return trampoline(fileName, param2, db, desc);
 
             Interlocked.Increment(ref _redirectCount);
@@ -328,7 +328,7 @@ internal static class LdFileHook
         RegisteredRedirect existing,
         RegisteredRedirect incoming)
     {
-        if (string.Equals(existing.ReplacementFont, incoming.ReplacementFont, StringComparison.Ordinal)
+        if (string.Equals(existing.ReplacementFont, incoming.ReplacementFont, StringComparison.OrdinalIgnoreCase)
             && existing.InlineType.HasValue)
         {
             return existing;
@@ -378,7 +378,7 @@ internal static class LdFileHook
             foldedKey,
             request,
             (_, existing) => existing != null
-                             && string.Equals(existing.OriginalFont, request.OriginalFont, StringComparison.Ordinal)
+                             && string.Equals(existing.OriginalFont, request.OriginalFont, StringComparison.OrdinalIgnoreCase)
                 ? MergeRegisteredRedirect(existing, request)
                 : null);
     }

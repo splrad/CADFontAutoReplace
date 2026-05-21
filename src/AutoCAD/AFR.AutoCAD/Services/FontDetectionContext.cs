@@ -21,14 +21,14 @@ public sealed class FontDetectionContext
     /// FindFile 结果缓存，避免对同一字体重复调用 HostApplicationServices.FindFile。
     /// Key: "{FindFileHint数值}:{归一化文件名}"，Value: 是否找到。
     /// </summary>
-    public ConcurrentDictionary<string, bool> FindFileCache { get; } = new(StringComparer.Ordinal);
+    public ConcurrentDictionary<string, bool> FindFileCache { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// TrueType 字体度量缓存，避免对同一字体重复调用 GDI API。
     /// Key: 字体名，Value: (CharacterSet, PitchAndFamily) 用于构造 FontDescriptor。
     /// </summary>
     public ConcurrentDictionary<string, (int CharacterSet, int PitchAndFamily)> FontMetricsCache { get; }
-        = new(StringComparer.Ordinal);
+        = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// 创建一个新的字体检测上下文。

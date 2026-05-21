@@ -9,9 +9,9 @@ namespace AFR.FontMapping;
 internal static class FontRuntimeMappingStore
 {
     private static readonly ConcurrentDictionary<string, RuntimeFontMappingRecord> StyleMappings =
-        new(StringComparer.Ordinal);
+        new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, InlineFontFixRecord> InlineMappings =
-        new(StringComparer.Ordinal);
+        new(StringComparer.OrdinalIgnoreCase);
 
     internal static void Clear()
     {

@@ -41,7 +41,7 @@ internal static class MTextFontParser
 {
     /// <summary>
     /// 从 MText Contents 字符串中提取所有内联字体引用。
-    /// 结果去重，key 为大小写敏感的查找名；记录中保留 Contents 里的原始显示名。
+    /// 结果去重由调用方字典的比较器决定；记录中保留 Contents 里的原始显示名。
     /// </summary>
     internal static void ParseInlineFonts(string? contents, Dictionary<string, InlineFontCandidate> result)
     {

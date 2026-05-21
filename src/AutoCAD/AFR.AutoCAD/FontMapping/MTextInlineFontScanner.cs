@@ -49,7 +49,7 @@ internal static class MTextInlineFontScanner
     /// <returns>扫描到的内联字体、MText 数量与 fragment 展开统计。</returns>
     internal static MTextInlineFontScanResult ScanInlineFonts(Database db)
     {
-        var result = new Dictionary<string, InlineFontCandidate>(StringComparer.Ordinal);
+        var result = new Dictionary<string, InlineFontCandidate>(StringComparer.OrdinalIgnoreCase);
         int mTextCount = 0;
         int fragmentExpansionAttempts = 0;
         int fragmentExpansionSuccesses = 0;
@@ -77,7 +77,7 @@ internal static class MTextInlineFontScanner
                                 if (!ContainsInlineFontMarker(contents))
                                     continue;
 
-                                var entityFonts = new Dictionary<string, InlineFontCandidate>(StringComparer.Ordinal);
+                                var entityFonts = new Dictionary<string, InlineFontCandidate>(StringComparer.OrdinalIgnoreCase);
                                 MTextFontParser.ParseInlineFonts(contents, entityFonts);
                                 foreach (var pair in entityFonts)
                                     result.TryAdd(pair.Key, pair.Value);

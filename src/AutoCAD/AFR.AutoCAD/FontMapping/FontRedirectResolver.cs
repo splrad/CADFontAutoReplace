@@ -193,9 +193,9 @@ internal static class FontRedirectResolver
         }
 
         string sourceKey = GetRedirectSourceKey(original, kind);
-        if (string.Equals(sourceKey, configured, StringComparison.Ordinal)
-            || string.Equals(original, configured, StringComparison.Ordinal)
-            || string.Equals(lookupName, configured, StringComparison.Ordinal))
+        if (string.Equals(sourceKey, configured, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(original, configured, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(lookupName, configured, StringComparison.OrdinalIgnoreCase))
         {
             return new FontLogicalReplacement(
                 FontLogicalReplacementAction.NoAction,
