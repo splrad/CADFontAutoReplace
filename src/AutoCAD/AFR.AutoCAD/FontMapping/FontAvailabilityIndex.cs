@@ -136,6 +136,7 @@ internal static class FontAvailabilityIndex
                          ext.Equals(".otf", StringComparison.OrdinalIgnoreCase))
                 {
                     AvailableFonts.Add(Path.GetFileName(file));
+                    FontDetector.AddTrueTypeFamilyAliasesFromFile(file, AvailableFonts);
                 }
             }
         }

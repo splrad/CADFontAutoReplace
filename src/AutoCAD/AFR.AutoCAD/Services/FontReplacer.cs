@@ -63,9 +63,19 @@ internal static class FontReplacer
         DiagnosticLogger.LogPreValidation(bigFont ?? "", "大字体", bigFontValid);
         DiagnosticLogger.LogPreValidation(trueTypeFont ?? "", "TrueType", trueTypeFontValid);
 
-        // FontDescriptor 和 GDI 查询要求字族名（如 "SimSun"），而非文件名（如 "simsun.ttc"）
+        string? trueTypeFontFileName = null;
+        // FontDescriptor 和 GDI 查询要求字族名（如 "SimSun"），而非文件名（如 "simsun.ttc"）。
+        // TextStyleTableRecord.FileName 则必须写真实存在的字体文件名，否则 AutoCAD 可能回填不存在的旧别名。
         if (trueTypeFontValid)
-            trueTypeFont = NormalizeTrueTypeName(trueTypeFont!, context);
+        {
+            string requestedTrueTypeFont = trueTypeFont!;
+            trueTypeFontFileName = FontDetector.TryResolveTrueTypeFontFileName(requestedTrueTypeFont);
+            trueTypeFont = NormalizeTrueTypeName(requestedTrueTypeFont, context);
+            trueTypeFontFileName ??= FontDetector.TryResolveTrueTypeFontFileName(trueTypeFont);
+            DiagnosticLogger.Log(
+                "替换",
+                $"TrueType替换字体 '{requestedTrueTypeFont}' 解析为 TypeFace='{trueTypeFont}' FileName='{trueTypeFontFileName ?? "未解析"}'");
+        }
 
         // 预构建字典—O(1)查找替代线性搜索
         var missingMap = new Dictionary<string, FontCheckResult>(missingFonts.Count, StringComparer.Ordinal);
@@ -110,6 +120,7 @@ internal static class FontReplacer
                             style.BigFontFileName = string.Empty;
                             style.FileName = string.Empty;
                             style.Font = new FontDescriptor(trueTypeFont, false, false, charset, pitch);
+                            ApplyTrueTypeFileName(style, trueTypeFontFileName);
 
                             DiagnosticLogger.LogReplacement(style.Name, "Font.TypeFace",
                                 missing.TypeFace, trueTypeFont ?? "");
@@ -247,13 +258,17 @@ internal static class FontReplacer
                         }
                         else
                         {
+                            string requestedTrueTypeFont = replacement.MainFontReplacement;
+                            string? fontFileName = FontDetector.TryResolveTrueTypeFontFileName(requestedTrueTypeFont);
                             // FontDescriptor 要求字族名，去除可能的文件扩展名
-                            var fontFamily = NormalizeTrueTypeName(replacement.MainFontReplacement, context);
+                            var fontFamily = NormalizeTrueTypeName(requestedTrueTypeFont, context);
+                            fontFileName ??= FontDetector.TryResolveTrueTypeFontFileName(fontFamily);
                             var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(fontFamily, context);
                             // 清空顺序: 先 BigFont 再 FileName，避免 eInvalidInput
                             style.BigFontFileName = string.Empty;
                             style.FileName = string.Empty;
                             style.Font = new FontDescriptor(fontFamily, false, false, charset, pitch);
+                            ApplyTrueTypeFileName(style, fontFileName);
                             changed = true;
                         }
                     }
@@ -314,6 +329,26 @@ internal static class FontReplacer
 
         tr.Commit();
         return replaceCount;
+    }
+
+    private static void ApplyTrueTypeFileName(TextStyleTableRecord style, string? fontFileName)
+    {
+        if (string.IsNullOrWhiteSpace(fontFileName))
+            return;
+
+        string before = style.FileName ?? string.Empty;
+        if (string.Equals(before, fontFileName, StringComparison.Ordinal))
+            return;
+
+        try
+        {
+            style.FileName = fontFileName;
+            DiagnosticLogger.LogReplacement(style.Name, "FileName", before, fontFileName);
+        }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.Log("替换", $"样式 '{style.Name}' TrueType FileName='{fontFileName}' 写入失败: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -437,5 +472,4 @@ internal static class FontReplacer
 
         return name;
     }
-
-    }
+}
