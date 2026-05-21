@@ -247,16 +247,27 @@ public abstract class PluginEntryBase : IExtensionApplication
         {
             object currentValue = AcadApp.GetSystemVariable(FontAltVariableName);
             string? current = currentValue?.ToString();
-            if (string.Equals(current, DisabledFontAltValue, StringComparison.Ordinal))
+            if (IsFontAltDisabled(current))
                 return;
 
+            string normalized = current!.Trim();
             AcadApp.SetSystemVariable(FontAltVariableName, DisabledFontAltValue);
-            log.Info($"FONTALT 已从 \"{current ?? "未设置"}\" 重设为 \"{DisabledFontAltValue}\"");
+            log.Info($"FONTALT 已从 \"{normalized}\" 重设为 \"{DisabledFontAltValue}\"");
         }
         catch (System.Exception ex)
         {
             log.Warning("FONTALT 检测或重设失败：" + ex.Message);
         }
+    }
+
+    private static bool IsFontAltDisabled(string? value)
+    {
+        if (value == null)
+            return true;
+
+        string trimmed = value.Trim();
+        return trimmed.Length == 0
+               || string.Equals(trimmed, DisabledFontAltValue, StringComparison.Ordinal);
     }
 
     // ── 事件处理与延迟调度 ──
