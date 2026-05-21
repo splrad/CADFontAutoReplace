@@ -56,6 +56,9 @@ internal static class LdFileHook
 
     internal static bool IsInstalled => _hook?.IsInstalled == true;
 
+    internal static (long HitCount, long RedirectCount) GetCountersSnapshot()
+        => (Interlocked.Read(ref _hitCount), Interlocked.Read(ref _redirectCount));
+
     internal static void ClearRegisteredRedirects()
     {
         RegisteredRedirects.Clear();

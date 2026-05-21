@@ -76,6 +76,9 @@ internal sealed class DocumentContextManager
             _inlineFontFixResults.Remove(key);
             _runtimeFontMappingResults.Remove(key);
         }
+        DiagnosticLogger.Log(
+            "DocumentContextManager",
+            $"Remove: key='{key}' name='{ReadDocumentName(doc)}' database='{ReadDatabaseFilename(doc)}'");
         LogService.Instance.ResetHeaderForDocument(key);
     }
 
@@ -210,7 +213,7 @@ internal sealed class DocumentContextManager
     /// 未保存图纸（Filename 为空）则回退到 Document.Name 作为临时标识。
     /// 访问已释放文档时返回 null。
     /// </summary>
-    private static string? GetDocumentKey(Document doc)
+    internal static string? GetDocumentKey(Document doc)
     {
         try
         {
@@ -221,6 +224,31 @@ internal sealed class DocumentContextManager
         catch
         {
             return null;
+        }
+    }
+
+    internal static string ReadDocumentName(Document doc)
+    {
+        try
+        {
+            return doc.IsDisposed ? "<disposed>" : doc.Name;
+        }
+        catch
+        {
+            return "<unavailable>";
+        }
+    }
+
+    internal static string ReadDatabaseFilename(Document doc)
+    {
+        try
+        {
+            if (doc.IsDisposed) return "<disposed>";
+            return doc.Database?.Filename ?? string.Empty;
+        }
+        catch
+        {
+            return "<unavailable>";
         }
     }
 }

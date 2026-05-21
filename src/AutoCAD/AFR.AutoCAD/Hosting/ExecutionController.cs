@@ -43,7 +43,16 @@ internal sealed class ExecutionController
         {
             // 重复执行防护
             var contextMgr = DocumentContextManager.Instance;
-            if (contextMgr.HasExecuted(doc)) return;
+            string documentKey = DocumentContextManager.GetDocumentKey(doc) ?? "<null>";
+            string documentName = DocumentContextManager.ReadDocumentName(doc);
+            string databaseFilename = DocumentContextManager.ReadDatabaseFilename(doc);
+            if (contextMgr.HasExecuted(doc))
+            {
+                DiagnosticLogger.Log(
+                    "文档",
+                    $"跳过已执行文档: trigger='{triggerSource}' key='{documentKey}' name='{documentName}' database='{databaseFilename}'");
+                return;
+            }
 
             // 门控: 未配置替换字体时跳过
             if (!config.IsInitialized)
@@ -63,6 +72,10 @@ internal sealed class ExecutionController
                 StyleTextStyleHook.ReplaceStyleRuntimeFontMappings(Array.Empty<RuntimeFontMappingRecord>());
 
                 DiagnosticLogger.BeginDocument(doc.Name, config.MainFont, config.BigFont, config.TrueTypeFont);
+                DiagnosticLogger.Log(
+                    "文档",
+                    $"执行触发: trigger='{triggerSource}' key='{documentKey}' name='{documentName}' database='{databaseFilename}'");
+                var ldFileCountersBefore = LdFileHook.GetCountersSnapshot();
 
                 // 第一阶段: 检测缺失字体（读取样式表原始状态，判断哪些字体在系统中不可用）
                 DiagnosticLogger.BeginPhase("检测缺失字体");
@@ -111,7 +124,6 @@ internal sealed class ExecutionController
                     // 触发型 Regen: 这里必须立即触发 AcGiTextStyle::loadStyleRec，
                     // 让样式表 @TrueType 映射在 StyleTextStyleHook 中命中，不能与最终视觉刷新合并。
                     doc.Editor.Regen();
-                    needsVisualRegen = false;
 
                     actualStyleRuntimeMappings = FontRuntimeMappingStore.GetStyleMappings();
                     contextMgr.StoreRuntimeFontMappingResults(doc, actualStyleRuntimeMappings);
@@ -139,7 +151,6 @@ internal sealed class ExecutionController
                         // 触发型 Regen: MTextInlineFontHook 依赖 CAD 的 MText 展开/绘制流程命中实际内联字体。
                         // 这一步负责收集真实 Hook 映射结果，不改写 MText.Contents。
                         doc.Editor.Regen();
-                        needsVisualRegen = false;
                     }
 
                     inlineFixResults = FontRuntimeMappingStore.GetInlineMappings();
@@ -164,7 +175,20 @@ internal sealed class ExecutionController
                 // 最终视觉刷新: 只处理永久样式写回后的显示更新。
                 // 前面的两个触发型 Regen 负责 Hook 命中顺序，不在这里合并。
                 if (needsVisualRegen)
+                {
+                    int markedGraphics = MarkAffectedTextGraphicsModified(doc.Database, missingFonts);
+                    DiagnosticLogger.Log(
+                        "图形刷新",
+                        $"样式表替换后执行 Hook 卸载后的最终 Regen: marked={markedGraphics}");
                     doc.Editor.Regen();
+                }
+
+                var ldFileCountersAfter = LdFileHook.GetCountersSnapshot();
+                DiagnosticLogger.Log(
+                    "LdFileHook",
+                    $"本次文档 ldfile 计数: hits={ldFileCountersAfter.HitCount - ldFileCountersBefore.HitCount}, " +
+                    $"redirects={ldFileCountersAfter.RedirectCount - ldFileCountersBefore.RedirectCount}, " +
+                    $"sessionHits={ldFileCountersAfter.HitCount}, sessionRedirects={ldFileCountersAfter.RedirectCount}");
 
                 log.AddStatistics(
                     missingFonts,
@@ -251,6 +275,254 @@ internal sealed class ExecutionController
 
         tr.Commit();
         DiagnosticLogger.Log("样式表运行时映射", $"主动加载样式完成: attempted={attempted}, loaded={loaded}");
+    }
+
+    private static int MarkAffectedTextGraphicsModified(
+        Database db,
+        IReadOnlyList<FontCheckResult> missingFonts)
+    {
+        if (missingFonts.Count == 0)
+            return 0;
+
+        var affectedStyleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < missingFonts.Count; i++)
+        {
+            FontCheckResult missing = missingFonts[i];
+            if ((missing.IsMainFontMissing || missing.IsBigFontMissing)
+                && !string.IsNullOrWhiteSpace(missing.StyleName))
+            {
+                affectedStyleNames.Add(missing.StyleName);
+            }
+        }
+
+        if (affectedStyleNames.Count == 0)
+            return 0;
+
+        int textMarked = 0;
+        int attributeMarked = 0;
+        int blockReferenceMarked = 0;
+        int errors = 0;
+
+        using var tr = db.TransactionManager.StartTransaction();
+        var affectedStyleIds = ResolveAffectedStyleIds(db, tr, affectedStyleNames);
+        if (affectedStyleIds.Count == 0)
+        {
+            tr.Commit();
+            DiagnosticLogger.Log(
+                "图形刷新",
+                $"未找到需刷新文字样式: names={affectedStyleNames.Count}");
+            return 0;
+        }
+
+        var dirtyBlockDefinitions = CollectDirtyBlockDefinitions(db, tr, affectedStyleIds);
+        var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+
+        foreach (ObjectId btrId in bt)
+        {
+            try
+            {
+                if (tr.GetObject(btrId, OpenMode.ForRead, false, true) is not BlockTableRecord btr)
+                    continue;
+
+                foreach (ObjectId entId in btr)
+                {
+                    try
+                    {
+                        if (tr.GetObject(entId, OpenMode.ForRead, false, true) is not Entity entity)
+                            continue;
+
+                        if (UsesAffectedTextStyle(entity, affectedStyleIds)
+                            && TryMarkGraphicsModified(entity))
+                        {
+                            textMarked++;
+                        }
+
+                        if (entity is BlockReference blockReference)
+                        {
+                            int markedAttributes = MarkAffectedAttributes(blockReference, tr, affectedStyleIds);
+                            attributeMarked += markedAttributes;
+
+                            bool referencesDirtyDefinition =
+                                dirtyBlockDefinitions.Contains(blockReference.BlockTableRecord);
+                            if ((markedAttributes > 0 || referencesDirtyDefinition)
+                                && TryMarkGraphicsModified(blockReference))
+                            {
+                                blockReferenceMarked++;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        errors++;
+                    }
+                }
+            }
+            catch
+            {
+                errors++;
+            }
+        }
+
+        tr.Commit();
+        DiagnosticLogger.Log(
+            "图形刷新",
+            $"已标记文字图形缓存: styles={affectedStyleIds.Count}, dirtyBlocks={dirtyBlockDefinitions.Count}, " +
+            $"text={textMarked}, attributes={attributeMarked}, blockRefs={blockReferenceMarked}, errors={errors}");
+
+        return textMarked + attributeMarked + blockReferenceMarked;
+    }
+
+    private static HashSet<ObjectId> ResolveAffectedStyleIds(
+        Database db,
+        Transaction tr,
+        HashSet<string> affectedStyleNames)
+    {
+        var styleIds = new HashSet<ObjectId>();
+        var styleTable = (TextStyleTable)tr.GetObject(db.TextStyleTableId, OpenMode.ForRead);
+
+        foreach (ObjectId id in styleTable)
+        {
+            try
+            {
+                if (tr.GetObject(id, OpenMode.ForRead, false, true) is TextStyleTableRecord style
+                    && affectedStyleNames.Contains(style.Name))
+                {
+                    styleIds.Add(id);
+                }
+            }
+            catch
+            {
+                // 跳过无法读取的样式。
+            }
+        }
+
+        return styleIds;
+    }
+
+    private static HashSet<ObjectId> CollectDirtyBlockDefinitions(
+        Database db,
+        Transaction tr,
+        HashSet<ObjectId> affectedStyleIds)
+    {
+        var dirtyBlocks = new HashSet<ObjectId>();
+        var referencesByOwner = new Dictionary<ObjectId, List<ObjectId>>();
+        var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+
+        foreach (ObjectId btrId in bt)
+        {
+            try
+            {
+                if (tr.GetObject(btrId, OpenMode.ForRead, false, true) is not BlockTableRecord btr)
+                    continue;
+
+                foreach (ObjectId entId in btr)
+                {
+                    try
+                    {
+                        if (tr.GetObject(entId, OpenMode.ForRead, false, true) is not Entity entity)
+                            continue;
+
+                        if (UsesAffectedTextStyle(entity, affectedStyleIds))
+                            dirtyBlocks.Add(btrId);
+
+                        if (entity is BlockReference blockReference
+                            && !blockReference.BlockTableRecord.IsNull)
+                        {
+                            if (!referencesByOwner.TryGetValue(btrId, out var references))
+                            {
+                                references = [];
+                                referencesByOwner[btrId] = references;
+                            }
+
+                            references.Add(blockReference.BlockTableRecord);
+                        }
+                    }
+                    catch
+                    {
+                        // 跳过无法读取的实体。
+                    }
+                }
+            }
+            catch
+            {
+                // 跳过无法读取的块定义。
+            }
+        }
+
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (var pair in referencesByOwner)
+            {
+                if (dirtyBlocks.Contains(pair.Key))
+                    continue;
+
+                for (int i = 0; i < pair.Value.Count; i++)
+                {
+                    if (!dirtyBlocks.Contains(pair.Value[i]))
+                        continue;
+
+                    dirtyBlocks.Add(pair.Key);
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        while (changed);
+
+        return dirtyBlocks;
+    }
+
+    private static int MarkAffectedAttributes(
+        BlockReference blockReference,
+        Transaction tr,
+        HashSet<ObjectId> affectedStyleIds)
+    {
+        int marked = 0;
+        foreach (ObjectId attributeId in blockReference.AttributeCollection)
+        {
+            try
+            {
+                if (tr.GetObject(attributeId, OpenMode.ForRead, false, true) is AttributeReference attribute
+                    && affectedStyleIds.Contains(attribute.TextStyleId)
+                    && TryMarkGraphicsModified(attribute))
+                {
+                    marked++;
+                }
+            }
+            catch
+            {
+                // 跳过无法访问的块属性。
+            }
+        }
+
+        return marked;
+    }
+
+    private static bool UsesAffectedTextStyle(Entity entity, HashSet<ObjectId> affectedStyleIds)
+    {
+        return entity switch
+        {
+            DBText dbText => affectedStyleIds.Contains(dbText.TextStyleId),
+            MText mText => affectedStyleIds.Contains(mText.TextStyleId),
+            _ => false
+        };
+    }
+
+    private static bool TryMarkGraphicsModified(Entity entity)
+    {
+        try
+        {
+            if (!entity.IsWriteEnabled)
+                entity.UpgradeOpen();
+            entity.RecordGraphicsModified(true);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
