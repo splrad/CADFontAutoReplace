@@ -1,0 +1,11 @@
+root = true
+
+[*]
+end_of_line = crlf
+insert_final_newline = true
+
+[*.{sh,bash}]
+end_of_line = lf
+
+[*.{jpg,jpeg,png,gif,ico,pdf,zip,dll,exe,pdb,onnx,ttf,otf,shx,dwg}]
+insert_final_newline = false
