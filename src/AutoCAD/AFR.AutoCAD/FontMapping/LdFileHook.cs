@@ -32,7 +32,11 @@ internal static class LdFileHook
         new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, RegisteredRedirect> RegisteredRedirects =
         new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, RegisteredRedirect?> FoldedShxRegisteredRedirects =
+        new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen =
+        new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, byte> FoldedRedirectAmbiguityLogSeen =
         new(StringComparer.Ordinal);
     private static long _hitCount;
     private static long _redirectCount;
@@ -55,7 +59,9 @@ internal static class LdFileHook
     internal static void ClearRegisteredRedirects()
     {
         RegisteredRedirects.Clear();
+        FoldedShxRegisteredRedirects.Clear();
         RedirectLogSeen.Clear();
+        FoldedRedirectAmbiguityLogSeen.Clear();
     }
 
     internal static bool TryRegisterResolvedAtFont(
@@ -96,10 +102,11 @@ internal static class LdFileHook
         var request = new RegisteredRedirect(original, displayOriginal, resolved, kind, normalizedSource, inlineType);
         string key = GetRedirectKey(original, kind);
 
-        RegisteredRedirects.AddOrUpdate(
+        RegisteredRedirect registeredRequest = RegisteredRedirects.AddOrUpdate(
             key,
             request,
             (_, existing) => MergeRegisteredRedirect(existing, request));
+        AddFoldedShxRegisteredRedirect(original, kind, registeredRequest);
 
         string logKey = $"register|{key}|{resolved}|{normalizedSource}|{inlineType}";
         if (RedirectLogSeen.TryAdd(logKey, 0))
@@ -257,8 +264,9 @@ internal static class LdFileHook
 
         if (param2 == FontTypeBigFont)
         {
-            if (RegisteredRedirects.TryGetValue(
-                GetRedirectKey(shxName, FontRedirectKind.ShxBigFont),
+            if (TryGetShxRegisteredRedirect(
+                shxName,
+                FontRedirectKind.ShxBigFont,
                 out request))
             {
                 normalized = shxName;
@@ -273,8 +281,9 @@ internal static class LdFileHook
 
         if (param2 == FontTypeRegular)
         {
-            if (RegisteredRedirects.TryGetValue(
-                GetRedirectKey(shxName, FontRedirectKind.ShxMain),
+            if (TryGetShxRegisteredRedirect(
+                shxName,
+                FontRedirectKind.ShxMain,
                 out request))
             {
                 normalized = shxName;
@@ -299,11 +308,13 @@ internal static class LdFileHook
     {
         // 部分 DWG 的 ldfile 参数不稳定；只有主/大字体注册唯一时才允许按 SHX 名称兜底。
         request = null;
-        bool foundMain = RegisteredRedirects.TryGetValue(
-            GetRedirectKey(normalized, FontRedirectKind.ShxMain),
+        bool foundMain = TryGetShxRegisteredRedirect(
+            normalized,
+            FontRedirectKind.ShxMain,
             out RegisteredRedirect? mainRequest);
-        bool foundBig = RegisteredRedirects.TryGetValue(
-            GetRedirectKey(normalized, FontRedirectKind.ShxBigFont),
+        bool foundBig = TryGetShxRegisteredRedirect(
+            normalized,
+            FontRedirectKind.ShxBigFont,
             out RegisteredRedirect? bigRequest);
 
         if (foundMain == foundBig)
@@ -324,6 +335,65 @@ internal static class LdFileHook
         }
 
         return incoming;
+    }
+
+    private static bool TryGetShxRegisteredRedirect(
+        string normalized,
+        FontRedirectKind kind,
+        out RegisteredRedirect? request)
+    {
+        if (RegisteredRedirects.TryGetValue(GetRedirectKey(normalized, kind), out request))
+            return true;
+
+        return TryGetFoldedShxRegisteredRedirect(normalized, kind, out request);
+    }
+
+    private static bool TryGetFoldedShxRegisteredRedirect(
+        string normalized,
+        FontRedirectKind kind,
+        out RegisteredRedirect? request)
+    {
+        request = null;
+        string foldedKey = GetFoldedShxRedirectKey(normalized, kind);
+        if (!FoldedShxRegisteredRedirects.TryGetValue(foldedKey, out request))
+            return false;
+
+        if (request != null)
+            return true;
+
+        LogFoldedRedirectAmbiguity(normalized, kind);
+        return false;
+    }
+
+    private static void AddFoldedShxRegisteredRedirect(
+        string normalized,
+        FontRedirectKind kind,
+        RegisteredRedirect request)
+    {
+        if (kind == FontRedirectKind.TrueType)
+            return;
+
+        string foldedKey = GetFoldedShxRedirectKey(normalized, kind);
+        FoldedShxRegisteredRedirects.AddOrUpdate(
+            foldedKey,
+            request,
+            (_, existing) => existing != null
+                             && string.Equals(existing.OriginalFont, request.OriginalFont, StringComparison.Ordinal)
+                ? MergeRegisteredRedirect(existing, request)
+                : null);
+    }
+
+    private static string GetFoldedShxRedirectKey(string normalized, FontRedirectKind kind)
+        => string.Concat(kind, "\u001F", normalized.ToUpperInvariant());
+
+    private static void LogFoldedRedirectAmbiguity(string normalized, FontRedirectKind kind)
+    {
+        string logKey = string.Concat("folded-redirect-ambiguous|", kind, "|", normalized.ToUpperInvariant());
+        if (FoldedRedirectAmbiguityLogSeen.TryAdd(logKey, 0))
+        {
+            DiagnosticLogger.Log(Tag,
+                $"ldfile SHX 请求大小写恢复存在歧义，已跳过: kind={kind} request='{normalized}'");
+        }
     }
 
     private static bool TryGetExportAddress(

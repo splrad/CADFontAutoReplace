@@ -28,7 +28,9 @@ internal static class MTextInlineFontHook
     private static readonly ConcurrentDictionary<string, IntPtr> NativeFileNameCache = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, InlineFontCandidate> InlineFontCandidates = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, InlineFontCandidate?> FoldedInlineFontCandidates = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> LoadStyleRecRedirectLogSeen = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, byte> FoldedCandidateAmbiguityLogSeen = new(StringComparer.Ordinal);
     private static long _explodeFragmentsHitCount;
     private static long _explodeFragmentsCallbackHitCount;
     private static long _explodeFragmentsWorldDrawHitCount;
@@ -86,14 +88,31 @@ internal static class MTextInlineFontHook
     internal static void ReplaceInlineFontCandidates(IReadOnlyDictionary<string, InlineFontCandidate> inlineFonts)
     {
         InlineFontCandidates.Clear();
+        FoldedInlineFontCandidates.Clear();
+        FoldedCandidateAmbiguityLogSeen.Clear();
 
         foreach (var candidate in inlineFonts.Values)
         {
             string key = GetInlineCandidateKey(candidate.OriginalFont, candidate.FontType);
 
             if (!string.IsNullOrWhiteSpace(key))
-                InlineFontCandidates[key] = candidate with { LookupName = key };
+            {
+                var normalizedCandidate = candidate with { LookupName = key };
+                InlineFontCandidates[key] = normalizedCandidate;
+                AddFoldedInlineCandidate(key, normalizedCandidate);
+            }
         }
+    }
+
+    internal static bool HasAnonymousInlineLoadStyleRecCandidate(
+        string styleName,
+        string fileName,
+        string bigFontFileName)
+    {
+        return string.IsNullOrWhiteSpace(styleName)
+               && !InlineFontCandidates.IsEmpty
+               && (IsInlineCandidate(fileName, InlineFontType.ShxMain)
+                   || IsInlineCandidate(bigFontFileName, InlineFontType.ShxBigFont));
     }
 
     internal static bool TryApplyInlineLoadStyleRecMappings(
@@ -105,9 +124,6 @@ internal static class MTextInlineFontHook
         Action<IntPtr, IntPtr>? setFileName,
         Action<IntPtr, IntPtr>? setBigFontFileName)
     {
-        if (!IsInsideInlineFontHook)
-            return false;
-
         if (!string.IsNullOrWhiteSpace(styleName) || InlineFontCandidates.IsEmpty)
             return false;
 
@@ -234,6 +250,8 @@ internal static class MTextInlineFontHook
         RedirectLogSeen.Clear();
         LoadStyleRecRedirectLogSeen.Clear();
         InlineFontCandidates.Clear();
+        FoldedInlineFontCandidates.Clear();
+        FoldedCandidateAmbiguityLogSeen.Clear();
         Interlocked.Exchange(ref _explodeFragmentsHitCount, 0);
         Interlocked.Exchange(ref _explodeFragmentsCallbackHitCount, 0);
         Interlocked.Exchange(ref _explodeFragmentsWorldDrawHitCount, 0);
@@ -892,8 +910,31 @@ internal static class MTextInlineFontHook
             return false;
 
         string key = GetInlineCandidateKey(fontName, expectedType);
-        return InlineFontCandidates.TryGetValue(key, out candidate)
-               && candidate.FontType == expectedType;
+        if (InlineFontCandidates.TryGetValue(key, out candidate)
+            && candidate.FontType == expectedType)
+        {
+            return true;
+        }
+
+        if (expectedType == InlineFontType.TrueType)
+        {
+            candidate = null;
+            return false;
+        }
+
+        string foldedKey = GetFoldedInlineCandidateKey(key, expectedType);
+        if (FoldedInlineFontCandidates.TryGetValue(foldedKey, out candidate)
+            && candidate is { FontType: var actualType }
+            && actualType == expectedType)
+        {
+            return true;
+        }
+
+        if (FoldedInlineFontCandidates.ContainsKey(foldedKey))
+            LogFoldedCandidateAmbiguity(key, expectedType);
+
+        candidate = null;
+        return false;
     }
 
     private static string GetInlineCandidateKey(string fontName, InlineFontType expectedType)
@@ -901,6 +942,33 @@ internal static class MTextInlineFontHook
         return expectedType == InlineFontType.TrueType
             ? MTextFontParser.NormalizeTrueTypeFontName(fontName)
             : NormalizeInlineShxName(fontName);
+    }
+
+    private static void AddFoldedInlineCandidate(string key, InlineFontCandidate candidate)
+    {
+        if (candidate.FontType == InlineFontType.TrueType)
+            return;
+
+        string foldedKey = GetFoldedInlineCandidateKey(key, candidate.FontType);
+        FoldedInlineFontCandidates.AddOrUpdate(
+            foldedKey,
+            candidate,
+            (_, existing) => existing != null && string.Equals(existing.LookupName, candidate.LookupName, StringComparison.Ordinal)
+                ? existing
+                : null);
+    }
+
+    private static string GetFoldedInlineCandidateKey(string key, InlineFontType fontType)
+        => string.Concat(fontType, "\u001F", key.ToUpperInvariant());
+
+    private static void LogFoldedCandidateAmbiguity(string key, InlineFontType fontType)
+    {
+        string logKey = string.Concat("folded-ambiguous|", fontType, "|", key.ToUpperInvariant());
+        if (FoldedCandidateAmbiguityLogSeen.TryAdd(logKey, 0))
+        {
+            DiagnosticLogger.Log(Tag,
+                $"MText 内联字体回调大小写恢复存在歧义，已跳过: kind={fontType} request='{key}'");
+        }
     }
 
     private static bool TryApplyInlineLoadStyleRecShxMapping(

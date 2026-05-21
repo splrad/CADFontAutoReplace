@@ -34,7 +34,7 @@ internal static class StyleTextStyleHook
     private static byte[]? _loadStyleRecThunkSavedBytes;
     private static bool _loadStyleRecThunkInstalled;
     private static readonly ConcurrentDictionary<string, RuntimeFontMappingRecord[]> RuntimeMappingsByStyle =
-        new(StringComparer.Ordinal);
+        new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, RuntimeFontMappingRecord> RuntimeApplyHits =
         new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> StyleLoadLogSeen =
@@ -191,7 +191,7 @@ internal static class StyleTextStyleHook
         RuntimeMappingsByStyle.Clear();
         RuntimeApplyHits.Clear();
 
-        var grouped = new Dictionary<string, List<RuntimeFontMappingRecord>>(StringComparer.Ordinal);
+        var grouped = new Dictionary<string, List<RuntimeFontMappingRecord>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (RuntimeFontMappingRecord mapping in mappings)
         {
@@ -232,13 +232,21 @@ internal static class StyleTextStyleHook
         _inLoadStyleRecHook = true;
         try
         {
-            RegisterObservedAtFontLoadMappings(self);
+            bool handledInline = MTextInlineFontHook.HasAnonymousInlineLoadStyleRecCandidate(
+                ReadString(_styleNameGetter, self),
+                ReadString(_fileNameGetter, self),
+                ReadString(_bigFontFileNameGetter, self));
+            if (handledInline)
+                ApplyMTextInlineLoadStyleRecMappings(self);
+            else
+                RegisterObservedAtFontLoadMappings(self);
+
             if (hasStyleMappings)
                 ApplyRegisteredStyleMappings(self);
-            if (hasInlineScope)
+            if (hasInlineScope && !handledInline)
                 ApplyMTextInlineLoadStyleRecMappings(self);
             int result = trampoline(self, db);
-            if (inStyleRuntimeScope || hasStyleMappings || hasInlineScope)
+            if (inStyleRuntimeScope || hasStyleMappings || hasInlineScope || handledInline)
                 LogStyleLoad(self, db, result);
             return result;
         }
@@ -716,7 +724,7 @@ internal static class StyleTextStyleHook
 
     private static void RecordRuntimeApplyHit(string styleName, RuntimeFontMappingRecord mapping)
     {
-        string key = GetRuntimeMappingKey(styleName, mapping.OriginalFont, mapping.MappingCategory);
+        string key = GetRuntimeMappingKey(mapping.StyleName, mapping.OriginalFont, mapping.MappingCategory);
         RuntimeApplyHits[key] = mapping;
         FontRuntimeMappingStore.RecordStyleMapping(mapping);
     }
