@@ -99,7 +99,7 @@ public class AfrCommands
     /// <summary>
     /// AFRLOG 命令：打开字体替换日志界面。
     /// <para>
-    /// 显示当前文档的缺失字体检测结果和 MText 内联修复记录。
+    /// 显示当前文档的缺失字体检测结果和字体映射记录。
     /// 用户可在界面中手动逐一指定替换字体（仅影响当前图纸，不写入注册表全局配置）。
     /// 每次打开时重新检测数据库，以反映 ST 命令等外部修改后的最新状态。
     /// </para>
@@ -179,7 +179,7 @@ public class AfrCommands
                 currentFonts, inlineFixResults, runtimeFontMappings, stillMissingStyleNames);
 
             DiagnosticLogger.Info("AFRLOG",
-                $"ViewModel 构建完成: Items={vm.Items.Count} 未替换={vm.FailedCount} 已替换={vm.ReplacedCount} 运行时映射={vm.RuntimeMappingCount}");
+                $"ViewModel 构建完成: Items={vm.Items.Count} 未替换={vm.FailedCount} 已替换={vm.ReplacedCount} 字体映射={vm.FontMappingCount}");
 
             // 注册手动替换回调：当用户在日志界面中点击"替换"时执行
             var window = new FontReplacementLogWindow(vm);

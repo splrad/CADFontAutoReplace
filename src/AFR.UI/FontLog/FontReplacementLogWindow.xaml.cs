@@ -131,7 +131,7 @@ public partial class FontReplacementLogWindow : Window
         }
     }
 
-    /// <summary>动态获取单行真实行高（从样式表或 MText 数据行中探测）。</summary>
+    /// <summary>动态获取单行真实行高（从样式表数据行中探测）。</summary>
     private double GetRowHeight()
     {
         // 优先从样式表数据行探测
@@ -155,116 +155,81 @@ public partial class FontReplacementLogWindow : Window
         }
     }
 
-    /// <summary>
-    /// 滚动事件：根据 MText 标题在视口中的位置切换粘性标题。
-    /// </summary>
+    /// <summary>滚动事件：根据字体映射标题在视口中的位置切换粘性标题。</summary>
     private void OnScrollChanged(object sender, ScrollChangedEventArgs e)
     {
         UpdateStickyHeader();
     }
 
     /// <summary>
-    /// 根据当前滚动位置决定显示哪组粘性标题。
-    /// <para>
-    /// 向下滚动：MText 标题完全滚出视口顶部（Y≤0）时切换为 MText 粘性标题，
-    /// 实现无缝过渡（用户看到 MText 标题自然向上移动并被覆盖层接管）。
-    /// </para>
-    /// <para>
-    /// 向上滚动：MText 标题下移到覆盖层下方（Y&gt;0）时切换回样式表粘性标题，
-    /// 确保样式表最后一行数据可见。
-    /// </para>
+    /// 根据当前滚动位置决定显示样式表或字体映射粘性标题。
     /// </summary>
     private void UpdateStickyHeader()
     {
         var vm = ViewModel;
         bool hasStyle = vm.HasItems;
-        bool hasRuntime = vm.HasRuntimeMapping;
-        bool hasMText = vm.HasInlineFix;
+        bool hasFontMappings = vm.HasFontMappings;
 
-        if (!hasStyle && !hasRuntime && !hasMText) return;
+        if (!hasStyle && !hasFontMappings) return;
 
         // 仅样式表：始终显示样式表标题
-        if (hasStyle && !hasRuntime && !hasMText)
+        if (hasStyle && !hasFontMappings)
         {
-            ShowStickyHeader(style: true, runtime: false, mtext: false);
+            ShowStickyHeader(style: true, fontMapping: false);
             return;
         }
 
-        // 仅运行时映射：始终显示运行时映射标题
-        if (!hasStyle && hasRuntime && !hasMText)
+        // 仅字体映射：始终显示字体映射标题
+        if (!hasStyle && hasFontMappings)
         {
-            ShowStickyHeader(style: false, runtime: true, mtext: false);
-            return;
-        }
-
-        // 仅 MText：始终显示 MText 标题
-        if (!hasStyle && !hasRuntime && hasMText)
-        {
-            ShowStickyHeader(style: false, runtime: false, mtext: true);
+            ShowStickyHeader(style: false, fontMapping: true);
             return;
         }
 
         // 多个区块：根据各区块标题位置切换
         if (!ContentScroll.IsLoaded)
         {
-            ShowFirstAvailableHeader(hasStyle, hasRuntime, hasMText);
+            ShowFirstAvailableHeader(hasStyle, hasFontMappings);
             return;
         }
 
         try
         {
-            if (hasMText && MTextHeaderMarker.IsLoaded)
+            if (hasFontMappings && FontMappingHeaderMarker.IsLoaded)
             {
-                var mtextPos = MTextHeaderMarker.TransformToAncestor(ContentScroll).Transform(new Point(0, 0));
-                if (mtextPos.Y <= 0)
+                var fontMappingPos = FontMappingHeaderMarker.TransformToAncestor(ContentScroll).Transform(new Point(0, 0));
+                if (fontMappingPos.Y <= 0)
                 {
-                    ShowStickyHeader(style: false, runtime: false, mtext: true);
+                    ShowStickyHeader(style: false, fontMapping: true);
                     return;
                 }
             }
 
-            if (hasRuntime && RuntimeMappingHeaderMarker.IsLoaded)
-            {
-                var runtimePos = RuntimeMappingHeaderMarker.TransformToAncestor(ContentScroll).Transform(new Point(0, 0));
-                if (runtimePos.Y <= 0)
-                {
-                    ShowStickyHeader(style: false, runtime: true, mtext: false);
-                    return;
-                }
-            }
-
-            ShowFirstAvailableHeader(hasStyle, hasRuntime, hasMText);
+            ShowFirstAvailableHeader(hasStyle, hasFontMappings);
         }
         catch (InvalidOperationException)
         {
             // TransformToAncestor 在元素不在可视树中时抛出异常
-            ShowFirstAvailableHeader(hasStyle, hasRuntime, hasMText);
+            ShowFirstAvailableHeader(hasStyle, hasFontMappings);
         }
     }
 
-    private void ShowFirstAvailableHeader(bool hasStyle, bool hasRuntime, bool hasMText)
+    private void ShowFirstAvailableHeader(bool hasStyle, bool hasFontMappings)
     {
         if (hasStyle)
         {
-            ShowStickyHeader(style: true, runtime: false, mtext: false);
+            ShowStickyHeader(style: true, fontMapping: false);
             return;
         }
 
-        if (hasRuntime)
-        {
-            ShowStickyHeader(style: false, runtime: true, mtext: false);
-            return;
-        }
-
-        if (hasMText)
-            ShowStickyHeader(style: false, runtime: false, mtext: true);
+        if (hasFontMappings)
+            ShowStickyHeader(style: false, fontMapping: true);
     }
 
-    private void ShowStickyHeader(bool style, bool runtime, bool mtext)
+    private void ShowStickyHeader(bool style, bool fontMapping)
     {
         StickyStyleHeader.Visibility = style ? Visibility.Visible : Visibility.Collapsed;
-        StickyRuntimeHeader.Visibility = runtime ? Visibility.Visible : Visibility.Collapsed;
-        StickyMTextHeader.Visibility = mtext ? Visibility.Visible : Visibility.Collapsed;
+        StickyFontMappingHeader.Visibility = fontMapping ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

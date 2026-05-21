@@ -74,6 +74,40 @@ public sealed class FontReplacementRow : INotifyPropertyChanged
 }
 
 /// <summary>
+/// AFRLOG 字体映射只读展示行。
+/// </summary>
+public sealed class FontMappingDisplayRow
+{
+    public FontMappingDisplayRow(
+        string source,
+        string styleName,
+        string missingFont,
+        string fontType,
+        string replacementFont,
+        string status)
+    {
+        Source = source;
+        StyleName = styleName;
+        MissingFont = missingFont;
+        FontType = fontType;
+        ReplacementFont = replacementFont;
+        Status = status;
+    }
+
+    public string Source { get; }
+
+    public string StyleName { get; }
+
+    public string MissingFont { get; }
+
+    public string FontType { get; }
+
+    public string ReplacementFont { get; }
+
+    public string Status { get; }
+}
+
+/// <summary>
 /// 字体替换日志窗口的 ViewModel。
 /// 将检测结果拆平为每个缺失字体一行，按类型分组排序（SHX → TrueType → 大字体）。
 /// 通过 FontSelectionViewModel 获取可用字体列表，解耦平台依赖。
@@ -87,14 +121,12 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
     private bool _hasUserChanges;
 
     public ObservableCollection<FontReplacementRow> Items { get; } = new();
-    public ObservableCollection<InlineFontFixRecord> InlineFixItems { get; } = new();
-    public ObservableCollection<RuntimeFontMappingRecord> RuntimeMappingItems { get; } = new();
+    public ObservableCollection<FontMappingDisplayRow> FontMappingItems { get; } = new();
     public string SummaryText { get; }
     public int ShxCount { get; }
     public int TrueTypeCount { get; }
     public int BigFontCount { get; }
-    public int InlineFixCount { get; }
-    public int RuntimeMappingCount { get; }
+    public int FontMappingCount { get; }
     /// <summary>未成功替换的字体数量。</summary>
     public int FailedCount { get; }
     /// <summary>已成功替换的字体数量。</summary>
@@ -102,18 +134,16 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
     public string ShxLabel => $"SHX主字体  {ShxCount}";
     public string TrueTypeLabel => $"TrueType  {TrueTypeCount}";
     public string BigFontLabel => $"SHX大字体  {BigFontCount}";
-    public string InlineFixLabel => $"MText映射  {InlineFixCount}";
-    public string RuntimeMappingLabel => $"临时映射  {RuntimeMappingCount}";
+    public string FontMappingLabel => $"字体映射  {FontMappingCount}";
     public string FailedLabel => $"未替换  {FailedCount}";
     public bool HasShx => ShxCount > 0;
     public bool HasTrueType => TrueTypeCount > 0;
     public bool HasBigFont => BigFontCount > 0;
-    public bool HasInlineFix => InlineFixCount > 0;
-    public bool HasRuntimeMapping => RuntimeMappingCount > 0;
+    public bool HasFontMappings => FontMappingCount > 0;
     public bool HasFailed => FailedCount > 0;
     public bool HasItems => Items.Count > 0;
-    public bool HasNoItems => !HasItems && !HasInlineFix && !HasRuntimeMapping;
-    public bool HasAnyContent => HasItems || HasInlineFix || HasRuntimeMapping;
+    public bool HasNoItems => !HasItems && !HasFontMappings;
+    public bool HasAnyContent => HasItems || HasFontMappings;
 
     public ICommand ApplyCommand => _applyCommand;
 
@@ -400,38 +430,71 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         foreach (var row in Items)
             row.PropertyChanged += OnRowPropertyChanged;
 
-        // 运行时字体映射记录（只读展示，不参与手动替换）
+        // 字体映射记录（只读展示，不参与手动替换）
         if (runtimeMappingResults != null)
         {
             foreach (var r in runtimeMappingResults
-                         .OrderBy(r => r.StyleName, StringComparer.Ordinal)
-                         .ThenBy(r => r.OriginalFont, StringComparer.Ordinal))
-                RuntimeMappingItems.Add(r);
-            RuntimeMappingCount = runtimeMappingResults.Count;
-
-            if (Items.Count == 0 && RuntimeMappingCount > 0)
-                SummaryText = $"样式表 @ 字体临时映射 {RuntimeMappingCount} 项";
-            else if (RuntimeMappingCount > 0)
-                SummaryText += $" · 临时映射 {RuntimeMappingCount} 项";
+                          .OrderBy(r => r.StyleName, StringComparer.Ordinal)
+                          .ThenBy(r => GetFontTypeOrder(r.MappingCategory))
+                          .ThenBy(r => r.OriginalFont, StringComparer.Ordinal))
+            {
+                FontMappingItems.Add(new FontMappingDisplayRow(
+                    "样式表",
+                    r.StyleName,
+                    r.OriginalFont,
+                    NormalizeFontType(r.MappingCategory),
+                    r.ReplacementFont,
+                    r.Status));
+            }
         }
 
-        // 内联字体修复记录（按类型排序：SHX主字体 → SHX大字体 → TrueType）
         if (inlineFixResults != null)
         {
-            foreach (var r in inlineFixResults.OrderBy(r => r.FontCategory switch
+            foreach (var r in inlineFixResults
+                         .OrderBy(r => GetFontTypeOrder(r.FontCategory))
+                         .ThenBy(r => r.MissingFont, StringComparer.Ordinal)
+                         .ThenBy(r => r.ReplacementFont, StringComparer.Ordinal))
             {
-                "SHX主字体" => 0,
-                "SHX大字体" => 1,
-                _ => 2   // TrueType、TrueType映射 等
-            }))
-                InlineFixItems.Add(r);
-            InlineFixCount = inlineFixResults.Count;
-
-            if (Items.Count == 0 && RuntimeMappingCount == 0 && InlineFixCount > 0)
-                SummaryText = $"内联字体修复 {InlineFixCount} 项";
-            else if (InlineFixCount > 0)
-                SummaryText += $" · 内联修复 {InlineFixCount} 项";
+                FontMappingItems.Add(new FontMappingDisplayRow(
+                    "MText",
+                    "--",
+                    r.MissingFont,
+                    NormalizeFontType(r.FontCategory),
+                    r.ReplacementFont,
+                    string.Empty));
+            }
         }
+
+        FontMappingCount = FontMappingItems.Count;
+        if (FontMappingCount > 0)
+        {
+            if (Items.Count == 0)
+                SummaryText = $"字体映射 {FontMappingCount} 项";
+            else
+                SummaryText += $" · 字体映射 {FontMappingCount} 项";
+        }
+    }
+
+    private static int GetFontTypeOrder(string category)
+    {
+        string fontType = NormalizeFontType(category);
+        return fontType switch
+        {
+            "SHX字体" => 0,
+            "SHX大字体" => 1,
+            _ => 2
+        };
+    }
+
+    private static string NormalizeFontType(string category)
+    {
+        if (category.Contains("SHX大", StringComparison.OrdinalIgnoreCase))
+            return "SHX大字体";
+
+        if (category.Contains("TrueType", StringComparison.OrdinalIgnoreCase))
+            return "TrueType字体";
+
+        return "SHX字体";
     }
 
     private void OnRowPropertyChanged(object? sender, PropertyChangedEventArgs e)
