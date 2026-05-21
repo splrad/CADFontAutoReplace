@@ -31,12 +31,14 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - `NativeInlineHook`：底层 inline patch 基础设施。
 - `NativeHookTarget`、`NativeFontHookProfile`、`INativeFontHookExportsProvider`：字体 Hook profile 与平台导出/RVA 信息。
 - `LdFileHook`：字体加载阶段透明重定向。
-- `StyleTextStyleHook`：样式表 `@TrueType` 字体运行时映射。
+- `StyleTextStyleHook`：样式表 `@TrueType` 字体运行时映射；同时在 `loadStyleRec` 进入原生代码前对观察到的 `@SHX` 做加载桥接预登记，防止首次字体展开绕过 `LdFileHook`。
 - `MTextInlineFontHook`：MText 内联字体运行时映射。
 
 字体加载 Hook 核心文件是 `LdFileHook.cs`。普通样式表检测和永久写回应优先使用 AutoCAD 托管 API，例如当前 `Database` 上的 `HostApplicationServices.Current.FindFile`；`FontAvailabilityIndex` 只是 native Hook 路径无法安全取得托管 `Database` 时的进程级兜底索引。
 
 样式表 `@SHX` 主字体和大字体缺失走永久替换；样式表 `@TrueType` 保留运行时映射，不要永久写回样式表。
+
+所有会交给 `LdFileHook` 的路径都必须先调用 `TryPreRegisterRuntimeBridge` 再进入可能触发 `ldfile` 的原生 trampoline、`LoadStyleRec` 或 `Regen`。`e5f3b311` 曾因删除 `loadStyleRec` 前置 `@SHX` 登记，导致 MText 内联 `@gbcbig.shx` 首次加载未走桥接并显示乱码；`c9fc7199` 的预登记修复必须保留并扩散到新增入口。
 
 风险点：
 
@@ -106,6 +108,7 @@ artifacts/ReleaseAssets/Fonts.zip
 - [ ] SHX 主字体 / 大字体 / TrueType 三类都验证
 - [ ] 样式表 `@TrueType` 运行时映射和 `@SHX` 永久替换都验证
 - [ ] MText `\F` / `\f` / 参数段 / 路径残留 / `@` 前缀都覆盖
+- [ ] 所有进入 `LdFileHook` 的字体都在原生加载前完成预登记
 - [ ] Release 构建下 Debug 功能完全排除
 
 ## 8. 代码评审关注点

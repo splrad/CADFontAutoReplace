@@ -840,7 +840,7 @@ internal static class MTextInlineFontHook
         if (resolution.Action != FontLogicalReplacementAction.RuntimeLoadBridge)
             return false;
 
-        return LdFileHook.TryRegisterResolvedAtFont(
+        return LdFileHook.TryPreRegisterRuntimeBridge(
             original,
             FontRedirectKind.TrueType,
             source,
@@ -880,7 +880,7 @@ internal static class MTextInlineFontHook
         if (resolution.Action != FontLogicalReplacementAction.RuntimeLoadBridge)
             return false;
 
-        return LdFileHook.TryRegisterResolvedAtFont(
+        return LdFileHook.TryPreRegisterRuntimeBridge(
             original,
             kind,
             source,

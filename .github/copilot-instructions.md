@@ -54,8 +54,8 @@ Debug 命令：
 当前 Hook 职责边界：
 
 - `NativeInlineHook`、`NativeHookTarget`、`NativeFontHookProfile`、`INativeFontHookExportsProvider` 是字体 Hook 共享基础设施，必须保留。
-- `LdFileHook` 只处理字体加载阶段的透明重定向。
-- `StyleTextStyleHook` 只负责样式表 `@TrueType` 缺失字体运行时映射。
+- `LdFileHook` 只处理字体加载阶段的透明重定向；所有进入它的字体必须由上层 Hook 在触发原生加载前调用 `TryPreRegisterRuntimeBridge` 预登记。
+- `StyleTextStyleHook` 的正式样式表运行时映射只负责 `@TrueType` 缺失字体；它在 `loadStyleRec` 前观察到 `@SHX` 时只允许做 `LdFileHook` 预登记防线，不记录样式表运行时映射、不改写样式。
 - `MTextInlineFontHook` 只负责 MText 内联缺失字体运行时映射。
 - MText Hook 不能处理样式表字体；样式表 Hook 不能处理 MText 内联字体。
 - 普通样式表检测、永久替换和二次验证必须优先使用当前 `Database` 上的 CAD 托管 API。
@@ -73,6 +73,8 @@ MText 内联运行时映射规则：
 - MText 内联非 `@` TrueType / SHX 主字体 / SHX 大字体由 `MTextInlineFontHook` 直接映射当前显示参数。
 - MText 内联 `@TrueType` / `@SHX` 主字体 / `@SHX` 大字体才登记给 `LdFileHook` 做加载桥接。
 - AFRLOG 展示记录必须来自 `MTextInlineFontHook` 实际命中的业务映射结果。
+
+典型回归：`e5f3b311` 收窄样式表 Hook 职责时移除了 `loadStyleRec` 前置 `@SHX` 预登记，导致 MText 内联 `@gbcbig.shx` 首次展开早于 `LdFileHook` 登记并出现乱码；`c9fc7199` 通过恢复 `loadStyleRec` trampoline 前的 SHX 加载预注册修复。今后重构 Style/MText/LdFile 边界时，不能删除任何“进入 `LdFileHook` 前先登记”的防线。
 
 ## 发布资产
 

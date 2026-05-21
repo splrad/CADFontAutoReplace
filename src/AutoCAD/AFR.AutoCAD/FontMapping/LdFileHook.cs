@@ -64,7 +64,11 @@ internal static class LdFileHook
         FoldedRedirectAmbiguityLogSeen.Clear();
     }
 
-    internal static bool TryRegisterResolvedAtFont(
+    /// <summary>
+    /// Pre-register a runtime load bridge before the caller enters native code that may invoke ldfile.
+    /// The caller owns the Style/MText decision; this method only accepts bridge-worthy requests.
+    /// </summary>
+    internal static bool TryPreRegisterRuntimeBridge(
         string originalFont,
         FontRedirectKind kind,
         string source,

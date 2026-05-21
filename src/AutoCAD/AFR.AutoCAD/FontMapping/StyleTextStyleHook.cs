@@ -511,7 +511,7 @@ internal static class StyleTextStyleHook
             ? "StyleTextStyleHook:observed"
             : $"StyleTextStyleHook:observed:{styleName}";
 
-        return LdFileHook.TryRegisterResolvedAtFont(
+        return LdFileHook.TryPreRegisterRuntimeBridge(
             fontName,
             kind,
             source,
@@ -548,7 +548,7 @@ internal static class StyleTextStyleHook
         if (resolution.Action != FontLogicalReplacementAction.RuntimeLoadBridge)
             return;
 
-        bool registered = LdFileHook.TryRegisterResolvedAtFont(
+        bool registered = LdFileHook.TryPreRegisterRuntimeBridge(
             mapping.OriginalFont,
             FontRedirectKind.TrueType,
             $"StyleTextStyleHook:{styleName}",
