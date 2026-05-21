@@ -231,12 +231,18 @@ internal static class StyleTextStyleHook
         _inLoadStyleRecHook = true;
         try
         {
+            string styleName = ReadString(_styleNameGetter, self);
+            string fileName = ReadString(_fileNameGetter, self);
+            string bigFontFileName = ReadString(_bigFontFileNameGetter, self);
+
             bool handledInline = MTextInlineFontHook.HasAnonymousInlineLoadStyleRecCandidate(
-                ReadString(_styleNameGetter, self),
-                ReadString(_fileNameGetter, self),
-                ReadString(_bigFontFileNameGetter, self));
+                styleName,
+                fileName,
+                bigFontFileName);
             if (handledInline)
                 ApplyMTextInlineLoadStyleRecMappings(self);
+            else
+                RegisterObservedAtShxLoadMappings(styleName, fileName, bigFontFileName);
 
             if (hasStyleMappings)
                 ApplyRegisteredStyleMappings(self);
@@ -484,6 +490,35 @@ internal static class StyleTextStyleHook
             if (IsTrueTypeMapping(mapping))
                 ApplyTrueTypeMapping(self, styleName, mapping);
         }
+    }
+
+    private static bool RegisterObservedAtShxLoadMappings(string styleName, string fileName, string bigFontFileName)
+    {
+        // Only pre-register the ldfile bridge; do not record style runtime mappings or mutate this style.
+        bool registered = false;
+        registered |= RegisterObservedAtShxLoadMapping(styleName, fileName, bigFont: false);
+        registered |= RegisterObservedAtShxLoadMapping(styleName, bigFontFileName, bigFont: true);
+        return registered;
+    }
+
+    private static bool RegisterObservedAtShxLoadMapping(string styleName, string fontName, bool bigFont)
+    {
+        if (string.IsNullOrWhiteSpace(fontName) || !FontRedirectResolver.HasAtPrefix(fontName))
+            return false;
+
+        var kind = bigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
+        string source = string.IsNullOrWhiteSpace(styleName)
+            ? "StyleTextStyleHook:observed"
+            : $"StyleTextStyleHook:observed:{styleName}";
+
+        return LdFileHook.TryRegisterResolvedAtFont(
+            fontName,
+            kind,
+            source,
+            null,
+            fontName,
+            out _,
+            out _);
     }
 
     private static void ApplyMTextInlineLoadStyleRecMappings(IntPtr self)
