@@ -149,18 +149,19 @@ public abstract class PluginEntryBase : IExtensionApplication
 
             // ── 以下仅在非首次加载（注册表自动启动）时执行 ──
 
-            // 第零阶段 A: 安装字体 Hook — 在字体解析前就位，才能拦截缺失字体请求
+            // 第零阶段 A: 预热系统 TrueType 字族索引。
+            // Hook 侧的 FontAvailabilityIndex 只保留 CAD 字体目录兜底索引，不再同步枚举系统字体。
+            FontDetector.PrewarmSystemFonts();
+
+            // 第零阶段 B: 安装字体 Hook — 在字体解析前就位，才能拦截缺失字体请求
             if (PlatformManager.Platform.SupportsNativeFontHooks)
                 PlatformManager.FontHook.Install();
 
-            // 第零阶段 B: 安装文枢 DBText native evidence Hook，只产强信号，不改 native 文本
+            // 第零阶段 C: 安装文枢 DBText native evidence Hook，只产强信号，不改 native 文本
             InstallGlyphCoreNativeDecodeHooks();
 
-            // 第零阶段 C: 安装显示层补绘，仅处理 SHX 缺失的单字符数学符号，不改图纸文字内容
+            // 第零阶段 D: 安装显示层补绘，仅处理 SHX 缺失的单字符数学符号，不改图纸文字内容
             ShxMathSymbolDisplayOverrule.Install();
-
-            // 第零阶段 D: 预热系统字体索引 — 提前扫描可用字体，加速后续检测
-            FontDetector.PrewarmSystemFonts();
 
             // 第二阶段: 注册文档事件 — 监听新建/关闭文档，自动触发字体替换
             var docMgr = AcadApp.DocumentManager;

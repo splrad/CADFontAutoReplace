@@ -405,8 +405,8 @@ internal static class FontReplacer
     /// 将 TrueType 字体名归一化为字族名。
     /// FontDescriptor 和 GDI 查询要求纯字族名（如 "SimSun"），
     /// 不能包含文件扩展名（如 "simsun.ttc"），否则 AutoCAD 找不到字体。
-    /// 优先通过 GlyphTypeface 解析字体文件内部的真实字族名，
-    /// 避免文件名与字族名不一致的问题（如 FZYTK.TTF → "方正姚体"）。
+    /// 仅当配置值是 .ttf/.ttc/.otf 文件名时，才通过 CAD FindFile 定位文件并用 GlyphTypeface
+    /// 解析内部真实字族名；这是配置归一化兜底，不参与字体可用性热路径判断。
     /// </summary>
     private static string NormalizeTrueTypeName(string name, FontDetectionContext context)
     {

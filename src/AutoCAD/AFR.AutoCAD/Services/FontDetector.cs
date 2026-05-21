@@ -559,20 +559,21 @@ internal static class FontDetector
     private static void AddFontFamilyAlias(ISet<string> aliases, string? value)
     {
         string? alias = GetFontFamilySourceName(value);
-        if (!string.IsNullOrWhiteSpace(alias))
+        if (alias is { Length: > 0 })
             aliases.Add(alias);
     }
 
     private static string? GetFontFamilySourceName(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        string trimmed = value?.Trim() ?? string.Empty;
+        if (trimmed.Length == 0)
             return null;
 
-        string trimmed = value.Trim();
         int hashIndex = trimmed.LastIndexOf('#');
-        return hashIndex >= 0 && hashIndex + 1 < trimmed.Length
+        string name = hashIndex >= 0 && hashIndex + 1 < trimmed.Length
             ? trimmed[(hashIndex + 1)..]
             : trimmed;
+        return string.IsNullOrWhiteSpace(name) ? null : name;
     }
 
     /// <summary>

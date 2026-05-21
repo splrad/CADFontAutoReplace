@@ -1,11 +1,14 @@
 using System.IO;
-using System.Windows.Media;
 using AFR.Services;
 
 namespace AFR.FontMapping;
 
 /// <summary>
-/// 进程级字体可用性索引，供样式表 Hook 与 MText Hook 判断字体是否存在。
+/// Hook 侧进程级字体可用性兜底索引。
+/// <para>
+/// 普通样式表检测和写回以当前 Database 上的 HostApplicationServices.FindFile 为权威；
+/// 此索引只服务 ldfile/AcGiTextStyle 等 native 回调附近无法安全取得托管 Database 的路径。
+/// </para>
 /// </summary>
 internal static class FontAvailabilityIndex
 {
@@ -97,23 +100,8 @@ internal static class FontAvailabilityIndex
         foreach (var dir in CadEnvironmentSettings.GetAllFontSearchPaths())
             ScanDirectory(dir);
 
-        int beforeCount = AvailableFonts.Count;
-        try
-        {
-            foreach (var family in Fonts.SystemFontFamilies)
-            {
-                AddTrueTypeFamilyName(family.Source);
-                foreach (var localizedName in family.FamilyNames.Values)
-                    AddTrueTypeFamilyName(localizedName);
-            }
-        }
-        catch (Exception ex)
-        {
-            DiagnosticLogger.Log("FontMapping", $"系统字体扫描失败: {ex.Message}");
-        }
-
         DiagnosticLogger.Log("FontMapping",
-            $"可用字体 {AvailableFonts.Count} 项 (系统字族名 {AvailableFonts.Count - beforeCount} 项)");
+            $"Hook 侧字体兜底索引 {AvailableFonts.Count} 项；系统 TrueType 字族由 FontDetector 后台索引处理。");
     }
 
     private static void ScanDirectory(string dir)
@@ -147,20 +135,6 @@ internal static class FontAvailabilityIndex
         {
             // 字体目录不可读时跳过，后续按缺失字体处理。
         }
-    }
-
-    private static void AddTrueTypeFamilyName(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return;
-
-        string trimmed = value.Trim();
-        int hashIndex = trimmed.LastIndexOf('#');
-        string name = hashIndex >= 0 && hashIndex + 1 < trimmed.Length
-            ? trimmed[(hashIndex + 1)..]
-            : trimmed;
-        if (!string.IsNullOrWhiteSpace(name))
-            AvailableFonts.Add(name);
     }
 
     private static void ClassifyShxFont(string filePath, string fileName)

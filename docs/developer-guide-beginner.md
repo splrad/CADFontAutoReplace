@@ -148,6 +148,8 @@ public void YourCommand() { }
 ### 错误 3：改 Hook 后行为异常
 
 `LdFileHook` 和 DBText native evidence Hook 都涉及非托管逻辑，改动要小、每次改完都实测。两者用途不同：`LdFileHook` 处理字体加载，不能拿来当 DBText AI 启动强信号。
+数据库读写、样式表检测、字体文件查找应优先使用 AutoCAD 托管 API；但字体加载期重定向、MText 不改内容的内联字体映射、DBText 原始解码证据没有等价托管 API，不要为了“原生 API”删除这些 Hook。
+带 `@` 的 TrueType / SHX / BigFont 语义只能运行时临时映射，不要永久写回样式表。
 
 ### 错误 4：改了代码但 CAD 行为没变化
 

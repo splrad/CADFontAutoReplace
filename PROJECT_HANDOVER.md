@@ -272,9 +272,9 @@ GlyphCore 工具链使用 Python、Node.js、React/Vite、LightGBM、ONNX 相关
 - `FontMapping/FontDetector.cs`
 - `FontMapping/FontReplacer.cs`
 - `FontMapping/LdFileHook.cs`
-- `MText/MTextInlineFontScanner.cs`
-- `MText/MTextInlineFontReplacer.cs`
-- `MText/MTextFontParser.cs`
+- `FontMapping/MTextInlineFontScanner.cs`
+- `FontMapping/MTextInlineFontHook.cs`
+- `FontMapping/MTextFontParser.cs`
 
 修改建议：
 
@@ -409,7 +409,7 @@ GlyphCore 工具链使用 Python、Node.js、React/Vite、LightGBM、ONNX 相关
 7. 首次配置场景下返回，不继续自动执行，要求重启 CAD。
 8. 非首次配置场景下安装字体 Hook 和 GlyphCore Native Decode Hook。
 9. 安装 SHX 数学符号显示 Overrule。
-10. 预热字体索引。
+10. 预热系统 TrueType 字族索引。
 11. 注册文档事件。
 12. 对当前文档排队，在 AutoCAD Idle 阶段执行自动流程。
 
@@ -536,13 +536,12 @@ GlyphCore 工具链使用 Python、Node.js、React/Vite、LightGBM、ONNX 相关
 9. 再次检测仍缺失字体。
 10. 清理 stale SHX 引用：
     - `FontReplacer.CleanupStaleShxReferences()`
-11. `Editor.Regen()` 刷新显示。
+11. `Editor.Regen()` 触发样式表运行时 Hook 并刷新显示。
 12. 扫描 MText 内联字体：
     - `MTextInlineFontScanner.ScanInlineFonts()`
-13. 转换缺失 TrueType 内联字体：
-    - `MTextInlineFontReplacer.ConvertMissingTrueTypeToShx()`
-14. 从 `LdFileHook.GetRawRedirectLog()` 构造内联修复记录。
-15. 保存 MText 修复结果。
+13. 临时安装 `MTextInlineFontHook` 并通过触发型 `Editor.Regen()` 命中 CAD MText 展开/绘制流程。
+14. 从 `FontRuntimeMappingStore.GetInlineMappings()` 读取 Hook 实际记录的内联映射。
+15. 保存 MText 运行时映射结果。
 16. 执行 DBText AI 修复：
     - `GlyphCoreTextRepairService.Repair()`
 17. 根据 DBText 修复结果再次刷新图纸。
@@ -566,8 +565,8 @@ GlyphCore 工具链使用 Python、Node.js、React/Vite、LightGBM、ONNX 相关
 - 读取 `TextStyleTableRecord.FileName`、`BigFontFileName` 和 `FontDescriptor`。
 - 判断字体类型：
   - SHX：通过文件扩展名和 `ShxFontAnalyzer` 判断主字体或 BigFont。
-  - TrueType：通过 `FontDescriptor.TypeFace`、字体文件扩展名、系统字体索引、WPF 本地化字体名等判断。
-- 通过 `HostApplicationServices.Current.FindFile()` 判断 AutoCAD 能否找到 SHX 文件。
+- TrueType：通过 `FontDescriptor.TypeFace`、字体文件扩展名、系统字体索引、WPF 本地化字体名等判断。
+- 通过 `HostApplicationServices.Current.FindFile()` 和当前 `Database` 判断 AutoCAD 能否找到 SHX / TrueType 字体文件。
 - 对 `@TrueType` 形式的竖排字体做特殊处理。
 
 为什么跳过 ShapeFile：
@@ -579,6 +578,7 @@ GlyphCore 工具链使用 Python、Node.js、React/Vite、LightGBM、ONNX 相关
 
 - 中文 Windows 和英文 Windows 上同一字体可能有不同显示名。
 - 仅按 `TypeFace` 字符串匹配会误判已经安装的字体为缺失。
+- `FontAvailabilityIndex` 不是普通检测的权威来源；它只服务 native Hook 附近无法安全取得托管 `Database` 的兜底判断。
 
 ### 7.2 样式字体替换
 
@@ -660,6 +660,7 @@ BigFont 是中文 DWG 中非常关键的字体组合机制。主字体和 BigFon
 关键约束：
 
 - Hook 必须尽早安装，最好在图纸打开前。
+- Hook 安装链路当前由 `AutoCadFontHook.Install()` 同时安装 `LdFileHook` 和 `StyleTextStyleHook`；不要按旧文档误删 `LdFileHook`。
 - 直接 Shape 请求会透传，避免破坏形文件。
 - 竖排 TrueType `@xxx` 只做运行时映射，不写入普通字体替换日志。
 - Hook 中需要防递归，当前有 `_inHook` 等保护。
@@ -676,14 +677,15 @@ BigFont 是中文 DWG 中非常关键的字体组合机制。主字体和 BigFon
 - `LdFileHook` 属于字体加载链，不是 DBText AI 的触发证据链。
 - DBText AI 依赖的是 `GlyphCoreNativeDecodeEvidenceStore` 和相关 native decode hooks。
 - 维护时不要把 `LdFileHook` 的字体重定向日志当成 DBText AI 的强信号。
+- 维护时也不要为了“改用 CAD 原生 API”把 `@TrueType`、`@SHX` 或 BigFont 运行时语义永久写回样式表。
 
 ### 7.5 MText 内联字体处理
 
 入口：
 
-- `src/AutoCAD/AFR.AutoCAD/MText/MTextInlineFontScanner.cs`
-- `src/AutoCAD/AFR.AutoCAD/MText/MTextFontParser.cs`
-- `src/AutoCAD/AFR.AutoCAD/MText/MTextInlineFontReplacer.cs`
+- `src/AutoCAD/AFR.AutoCAD/FontMapping/MTextInlineFontScanner.cs`
+- `src/AutoCAD/AFR.AutoCAD/FontMapping/MTextFontParser.cs`
+- `src/AutoCAD/AFR.AutoCAD/FontMapping/MTextInlineFontHook.cs`
 
 MText 内联字体问题：
 
@@ -695,8 +697,8 @@ MText 内联字体问题：
 
 - `MTextInlineFontScanner` 遍历模型空间、布局空间和嵌套块中的 MText。
 - `MTextFontParser` 解析 MText 内容流，识别主字体、BigFont、参数和终止符。
-- `MTextInlineFontReplacer` 将缺失 TrueType 内联字体转换为 SHX 形式。
-- 转换目标通常为 `\Fmain,big|`，使用配置主字体和 BigFont。
+- `MTextInlineFontHook` 只在扫描阶段临时安装，通过 CAD 原生 MText 展开/绘制流程命中实际内联字体。
+- 内联缺失字体只做运行时映射，不改写 `MText.Contents`。
 - 对明显乱码或私用区字体名做跳过处理，避免把异常控制文本误当字体名。
 
 维护建议：
@@ -789,6 +791,11 @@ Native Hook 版本边界：
 - WPF 插件窗口：放在 `AFR.UI`。
 - 安装器逻辑：放在 `AFR.Deployer`。
 - 字体资源和宿主集成资源：放在 `AFR.HostIntegration`。
+
+CAD API 优先级：
+
+- 数据库读写、样式表检测、字体文件查找、选择集、窗口和命令输出优先使用 AutoCAD 托管 API。
+- 字体加载期透明重定向、MText 不改内容的临时内联字体映射、DBText 原始解码证据属于托管 API 暴露不到的阶段，继续保留经过版本 profile 保护的 Native Hook。
 
 ### 8.2 不能随意修改的行为
 
@@ -1362,6 +1369,7 @@ HKCU\<CadRegistryBasePath>\<Profile>\Applications\<AppName>
 4. 是否为 ShapeFile 样式，当前会跳过。
 5. 是否为 MText 内联字体覆盖。
 6. 是否为竖排 TrueType `@xxx` 运行时映射。
+7. 启动诊断日志中的 `CadEnvironment` 字体搜索路径是否包含用户自定义 Support / Fonts 目录。
 
 ### 15.4 MText 没有修复
 
@@ -1372,6 +1380,8 @@ HKCU\<CadRegistryBasePath>\<Profile>\Applications\<AppName>
 3. 字体名是否被判定为缺失。
 4. 是否因为乱码字体名或私用区字符被保护性跳过。
 5. 转换后是否执行了 `Editor.Regen()`。
+
+注意：样式表运行时映射和 MText 内联映射各自依赖触发型 `Editor.Regen()` 命中 CAD 绘制/加载流程，不应只按“减少刷新次数”合并掉。
 
 ### 15.5 DBText AI 没有写回
 
@@ -1533,6 +1543,7 @@ HKCU\<CadRegistryBasePath>\<Profile>\Applications\<AppName>
 - 缺失 BigFont。
 - 缺失 TrueType。
 - 竖排 TrueType。
+- `FontAvailabilityIndex` 是否只作为 Hook 侧兜底索引使用；普通检测仍应走 `FontDetector` 的 `FindFile + 当前 Database`。
 - AutoCAD 2022-2027 真实打开测试。
 
 ### 17.4 修改 DBText AI
@@ -1742,7 +1753,7 @@ AI 禁止：
 | 改字体检测 | `FontDetector.cs`、`SystemFontIndex`、`ShxFontAnalyzer` |
 | 改字体替换 | `FontReplacer.cs`、`AfrCommands.ReapplyWithNewConfig()` |
 | 改运行时字体重定向 | `LdFileHook.cs`、`PlatformProfiles` |
-| 改 MText 内联字体 | `MTextInlineFontScanner.cs`、`MTextFontParser.cs`、`MTextInlineFontReplacer.cs` |
+| 改 MText 内联字体 | `MTextInlineFontScanner.cs`、`MTextFontParser.cs`、`MTextInlineFontHook.cs`、`FontRuntimeMappingStore.cs` |
 | 改 DBText AI 触发 | `GlyphCoreTextRepairProblemDetector`、`GlyphCoreNativeDecodeEvidenceStore` |
 | 改 DBText AI 候选 | `GlyphCoreTextRepairCandidateGenerator` |
 | 改 DBText AI 决策 | `GlyphCoreTextRepairDecisionEngine` |

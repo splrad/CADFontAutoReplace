@@ -110,7 +110,8 @@ internal sealed class ExecutionController
                     ActivateStyleRuntimeFontMappings(runtimeFontMappings);
                     ForceLoadStyleRuntimeMappings(doc.Database, runtimeFontMappings);
 
-                    // Regen 刷新显示并触发 AcGiTextStyle::loadStyleRec，让 Hook 对样式表 @ 字体做临时映射。
+                    // 触发型 Regen: 这里必须立即触发 AcGiTextStyle::loadStyleRec，
+                    // 让样式表 @ 字体映射在 StyleTextStyleHook 中命中，不能与最终视觉刷新合并。
                     doc.Editor.Regen();
                     needsVisualRegen = false;
 
@@ -137,6 +138,8 @@ internal sealed class ExecutionController
                     inlineScanResult = MTextInlineFontScanner.ScanInlineFonts(doc.Database);
                     if (inlineScanResult.InlineFonts.Count > 0)
                     {
+                        // 触发型 Regen: MTextInlineFontHook 依赖 CAD 的 MText 展开/绘制流程命中实际内联字体。
+                        // 这一步负责收集真实 Hook 映射结果，不改写 MText.Contents。
                         doc.Editor.Regen();
                         needsVisualRegen = false;
                     }
@@ -168,7 +171,8 @@ internal sealed class ExecutionController
                 if (repairedDbTextCount > 0)
                     needsVisualRegen = true;
 
-                // 统计汇总 — Regen 之后输出，确保字体修复汇总来自同一个统计出口。
+                // 最终视觉刷新: 只处理永久样式写回或 DBText 写回后的显示更新。
+                // 前面的两个触发型 Regen 负责 Hook 命中顺序，不在这里合并。
                 if (needsVisualRegen)
                     doc.Editor.Regen();
 

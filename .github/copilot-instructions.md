@@ -66,7 +66,9 @@ Debug 命令：
 
 - `StyleTextStyleHook` 只负责样式表带 `@` 的缺失字体运行时映射。它 Hook `AcGiTextStyle::loadStyleRec`，并解析/调用 `styleName`、`fileName`、`bigFontFileName`、`isVertical`、`setFont`、`setFileName`、`setBigFontFileName`、`setVertical`。
 - `MTextInlineFontHook` 只负责 MText 内联缺失字体运行时映射。它 Hook `AcDbMText::explodeFragments` 建立 MText 作用域，在该作用域内处理 `AcGiTextStyle::setFont`、`AcGiTextStyle(font,bigFont)`、`setFileName`、`setBigFontFileName`。
-- `LdFileHook` 已从 Release 主链路删除；字体存在性与 SHX 类型判断统一由 `FontAvailabilityIndex` 提供，运行时命中记录统一由 `FontRuntimeMappingStore` 提供。
+- `AutoCadFontHook.Install()` 在 Release 主链路安装 `LdFileHook + StyleTextStyleHook`；`MTextInlineFontHook` 只在 MText 扫描阶段临时安装并随后卸载。
+- 普通样式表检测、永久替换和二次验证必须优先使用当前 `Database` 上的 CAD 托管 API（尤其是 `HostApplicationServices.Current.FindFile`）；`FontAvailabilityIndex` 只是 Hook 侧无法安全取得托管 `Database` 时的进程级兜底索引。
+- `LdFileHook` 只处理字体加载阶段的透明重定向，不是 DBText AI 强信号来源；不得把它的字体重定向记录当作乱码证据。
 - 样式表运行时操作必须进入 `StyleTextStyleHook.EnterStyleRuntimeOperation()` 作用域；`MTextInlineFontHook` 在 `StyleTextStyleHook.IsInsideStyleRuntimeOperation` 为 true 时必须旁路，避免样式表主动加载触发 MText Hook 日志或重定向。
 - MText Hook 不能处理样式表字体；样式表 Hook 不能处理 MText 内联字体。两者都可以使用同一套字体可用性、`@` 前缀剥离和配置兜底规则，但不能混用触发来源。
 
@@ -76,6 +78,7 @@ Debug 命令：
 - 带一个或多个 `@` 前缀的样式表字体必须一次性去除所有连续前缀后优先检查本机真实字体；本机存在时映射到去 `@` 后字体，本机不存在时映射到配置替换字体。
 - 样式表 `@TrueType` 去 `@` 后本机字体存在时跳过映射，交给 CAD 原生显示；样式表 `@SHX` 去 `@` 后本机字体存在且主/大字体类型匹配时临时映射到真实 SHX。
 - 带 `@` 前缀的样式表字体只能运行时临时映射，不允许永久替换。
+- 不得为了“改用 CAD 原生 API”把 `@TrueType`、`@SHX` 或 BigFont 运行时语义永久写回样式表。
 - `StyleTextStyleHook` 必须在原始 `loadStyleRec` 执行前应用登记映射；登记后主动对相关样式执行 managed `Autodesk.AutoCAD.GraphicsInterface.TextStyle.FromTextStyleTableRecord(id)` 与 `LoadStyleRec`，确保未自然触发显示加载的 SHX 样式也能命中 Hook。
 - 已验证日志证据：`AFR_Diag_20260520_020305.log` 中 `10_TrueType竖写字体格式.dwg` 的对账结果为 `主动加载样式完成: attempted=5, loaded=5`，`样式表Hook对账: 替换逻辑缺失槽位=5, 运行时登记=6, Hook总命中=6, Hook命中缺失槽位=5, 字体名一致=True, 未命中=0, 额外命中=1`。额外 1 项是 `黑体竖写:@黑体`，属于预期 @TrueType 运行时映射。
 
