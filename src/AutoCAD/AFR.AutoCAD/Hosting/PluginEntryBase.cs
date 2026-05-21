@@ -92,8 +92,7 @@ public abstract class PluginEntryBase : IExtensionApplication
 
     private static bool IsEmbeddedDependency(string name)
     {
-        return string.Equals(name, "HandyControl", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(name, "Newtonsoft.Json", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(name, "HandyControl", StringComparison.OrdinalIgnoreCase);
     }
 
     // ── IExtensionApplication 实现 ──

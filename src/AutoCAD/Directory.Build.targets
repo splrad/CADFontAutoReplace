@@ -2,18 +2,17 @@
   <ItemGroup>
     <!-- UI 控件库 — 嵌入为程序集资源，不复制到输出 -->
     <PackageReference Include="HandyControl" Version="3.5.1" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
   <!-- 将第三方托管依赖嵌入为程序集资源 -->
   <Target Name="EmbedPluginDependencies" AfterTargets="ResolveAssemblyReferences">
     <ItemGroup>
       <EmbeddedResource Include="@(ReferenceCopyLocalPaths)"
-                        Condition="'%(Filename)' == 'HandyControl' Or '%(Filename)' == 'Newtonsoft.Json'">
+                        Condition="'%(Filename)' == 'HandyControl'">
         <LogicalName>%(Filename)%(Extension)</LogicalName>
       </EmbeddedResource>
       <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)"
-                               Condition="'%(Filename)' == 'HandyControl' Or '%(Filename)' == 'Newtonsoft.Json'" />
+                               Condition="'%(Filename)' == 'HandyControl'" />
     </ItemGroup>
   </Target>
 
