@@ -134,7 +134,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
     public string ShxLabel => $"SHX主字体  {ShxCount}";
     public string TrueTypeLabel => $"TrueType  {TrueTypeCount}";
     public string BigFontLabel => $"SHX大字体  {BigFontCount}";
-    public string FontMappingLabel => $"字体映射  {FontMappingCount}";
+    public string FontMappingLabel => $"语义字体映射  {FontMappingCount}";
     public string FailedLabel => $"未替换  {FailedCount}";
     public bool HasShx => ShxCount > 0;
     public bool HasTrueType => TrueTypeCount > 0;
@@ -469,9 +469,9 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         if (FontMappingCount > 0)
         {
             if (Items.Count == 0)
-                SummaryText = $"字体映射 {FontMappingCount} 项";
+                SummaryText = $"语义字体映射 {FontMappingCount} 项";
             else
-                SummaryText += $" · 字体映射 {FontMappingCount} 项";
+                SummaryText += $" · 语义字体映射 {FontMappingCount} 项";
         }
     }
 

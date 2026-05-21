@@ -81,7 +81,7 @@
                                 Visibility="{Binding HasTrueType, Converter={StaticResource BoolToVis}}">
                             <TextBlock Text="{Binding TrueTypeLabel}" FontSize="10" Foreground="White"/>
                         </Border>
-                        <!-- 字体映射计数 -->
+                        <!-- 语义字体映射计数 -->
                         <Border CornerRadius="3" Padding="6,2" Margin="6,0,0,0"
                                 Background="{StaticResource RuntimeMappingBrush}"
                                 Visibility="{Binding HasFontMappings, Converter={StaticResource BoolToVis}}">
@@ -117,7 +117,7 @@
 											   FontSize="11" FontWeight="SemiBold"
 											   Foreground="{DynamicResource PrimaryTextBrush}"/>
 								</Border>
-								<Border Padding="8,5,24,5"
+								<Border Padding="11,5,8,5"
 										BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
 									<Grid>
 										<Grid.ColumnDefinitions>
@@ -134,7 +134,7 @@
 												   HorizontalAlignment="Center" VerticalAlignment="Center"/>
 										<TextBlock Grid.Column="2" Text="缺失字体" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
-												   VerticalAlignment="Center"/>
+												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
 										<TextBlock Grid.Column="3" Text="替换字体" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
 												   HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -142,12 +142,12 @@
 								</Border>
 							</StackPanel>
 
-							<!-- 字体映射标题组 -->
+							<!-- 语义字体映射标题组 -->
 							<StackPanel x:Name="StickyFontMappingHeader" Visibility="Collapsed">
 								<Border Padding="8,7,8,7"
 										BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
 									<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-										<TextBlock Text="字体映射"
+										<TextBlock Text="语义字体映射"
 												   FontSize="11" FontWeight="SemiBold"
 												   Foreground="{DynamicResource PrimaryTextBrush}"/>
 										<Border CornerRadius="3" Padding="5,1" Margin="8,0,0,0"
@@ -156,7 +156,7 @@
 										</Border>
 									</StackPanel>
 								</Border>
-								<Border Padding="8,5,24,5"
+								<Border Padding="11,5,8,5"
 										BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
 									<Grid>
 										<Grid.ColumnDefinitions>
@@ -174,13 +174,13 @@
 												   VerticalAlignment="Center"/>
 										<TextBlock Grid.Column="2" Text="缺失字体" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
-												   VerticalAlignment="Center"/>
+												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
 										<TextBlock Grid.Column="3" Text="类型" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
 												   HorizontalAlignment="Center" VerticalAlignment="Center"/>
 										<TextBlock Grid.Column="4" Text="映射字体" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
-												   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
 									</Grid>
 								</Border>
 							</StackPanel>
@@ -255,7 +255,7 @@
 														</TextBlock.Style>
 													</TextBlock>
 													<Border Grid.Column="1" CornerRadius="3"
-															Padding="4,1" Margin="0,0,4,0"
+															Padding="4,1"
 															HorizontalAlignment="Center" VerticalAlignment="Center">
 														<Border.Style>
 															<Style TargetType="Border">
@@ -304,7 +304,7 @@
 								</ItemsControl>
 							</StackPanel>
 
-							<!-- ─── 字体映射区块 ─── -->
+							<!-- ─── 语义字体映射区块 ─── -->
 							<StackPanel x:Name="FontMappingSection"
 										Visibility="{Binding HasFontMappings, Converter={StaticResource BoolToVis}}">
 								<Border x:Name="FontMappingHeaderMarker"
@@ -313,7 +313,7 @@
 										<Border Padding="8,7,8,7"
 												BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
 											<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-												<TextBlock Text="字体映射"
+												<TextBlock Text="语义字体映射"
 														   FontSize="11" FontWeight="SemiBold"
 														   Foreground="{DynamicResource PrimaryTextBrush}"/>
 												<Border CornerRadius="3" Padding="5,1" Margin="8,0,0,0"
@@ -322,7 +322,7 @@
 												</Border>
 											</StackPanel>
 										</Border>
-										<Border Padding="8,5,24,5"
+										<Border Padding="11,5,8,5"
 												BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
 											<Grid>
 												<Grid.ColumnDefinitions>
@@ -340,13 +340,13 @@
 														   VerticalAlignment="Center"/>
 												<TextBlock Grid.Column="2" Text="缺失字体" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
-														   VerticalAlignment="Center"/>
+														   HorizontalAlignment="Left" VerticalAlignment="Center"/>
 												<TextBlock Grid.Column="3" Text="类型" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
 														   HorizontalAlignment="Center" VerticalAlignment="Center"/>
 												<TextBlock Grid.Column="4" Text="映射字体" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
-														   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+														   HorizontalAlignment="Left" VerticalAlignment="Center"/>
 											</Grid>
 										</Border>
 									</StackPanel>
@@ -358,8 +358,7 @@
 											<Border Padding="8,1"
 													BorderThickness="3,0,0,0"
 													BorderBrush="{StaticResource RuntimeMappingBrush}"
-													Background="#0500897B"
-													ToolTip="{Binding Status}">
+													Background="#0500897B">
 												<Grid MinHeight="28">
 													<Grid.ColumnDefinitions>
 														<ColumnDefinition Width="70"/>
@@ -388,15 +387,13 @@
 													<TextBlock Grid.Column="1" Text="{Binding StyleName}"
 															   FontSize="11" VerticalAlignment="Center"
 															   Foreground="{DynamicResource PrimaryTextBrush}"
-															   TextTrimming="CharacterEllipsis"
-															   ToolTip="{Binding StyleName}"/>
+															   TextTrimming="CharacterEllipsis"/>
 													<TextBlock Grid.Column="2" Text="{Binding MissingFont}"
 															   FontSize="11" VerticalAlignment="Center"
 															   Foreground="{DynamicResource SecondaryTextBrush}"
-															   TextTrimming="CharacterEllipsis"
-															   ToolTip="{Binding MissingFont}"/>
+															   TextTrimming="CharacterEllipsis"/>
 													<Border Grid.Column="3" CornerRadius="3"
-															Padding="4,1" Margin="0,0,4,0"
+															Padding="4,1"
 															HorizontalAlignment="Center" VerticalAlignment="Center">
 														<Border.Style>
 															<Style TargetType="Border">
@@ -415,10 +412,9 @@
 													</Border>
 													<TextBlock Grid.Column="4" Text="{Binding ReplacementFont}"
 															   FontSize="11" VerticalAlignment="Center"
-															   HorizontalAlignment="Center"
+															   HorizontalAlignment="Left"
 															   Foreground="{StaticResource RuntimeMappingBrush}"
-															   TextTrimming="CharacterEllipsis"
-															   ToolTip="{Binding ReplacementFont}"/>
+															   TextTrimming="CharacterEllipsis"/>
 												</Grid>
 											</Border>
 										</DataTemplate>
