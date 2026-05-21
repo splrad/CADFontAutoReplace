@@ -457,7 +457,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
             {
                 FontMappingItems.Add(new FontMappingDisplayRow(
                     "MText",
-                    "--",
+                    "多行文字",
                     r.MissingFont,
                     NormalizeFontType(r.FontCategory),
                     r.ReplacementFont,

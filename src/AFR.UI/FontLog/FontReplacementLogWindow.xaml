@@ -169,7 +169,7 @@
 										<TextBlock Grid.Column="0" Text="来源" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
 												   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-										<TextBlock Grid.Column="1" Text="样式名" FontSize="10"
+										<TextBlock Grid.Column="1" Text="所属对象" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
 												   VerticalAlignment="Center"/>
 										<TextBlock Grid.Column="2" Text="缺失字体" FontSize="10"
@@ -335,7 +335,7 @@
 												<TextBlock Grid.Column="0" Text="来源" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
 														   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-												<TextBlock Grid.Column="1" Text="样式名" FontSize="10"
+												<TextBlock Grid.Column="1" Text="所属对象" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
 														   VerticalAlignment="Center"/>
 												<TextBlock Grid.Column="2" Text="缺失字体" FontSize="10"
