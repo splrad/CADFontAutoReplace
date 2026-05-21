@@ -13,8 +13,8 @@ namespace AFR.FontMapping;
 /// 这里不负责样式表永久替换，也不决定哪些字体应该映射。
 /// </para>
 /// <para>
-/// 登记后仅在 ldfile 实际请求同一个语义字体时替换加载文件名，
-/// 保留 AcGiTextStyle/MText 原始字体名，避免破坏竖排 TrueType 和大字体解码语义。
+/// 登记后仅在 ldfile 实际请求同一个原始加载字体时替换加载文件名，
+/// 保留 AcGiTextStyle/MText 原始字体名，避免破坏竖排 TrueType 和大字体解码上下文。
 /// </para>
 /// </summary>
 internal static class LdFileHook
@@ -76,7 +76,7 @@ internal static class LdFileHook
         sourceKey = string.Empty;
         replacement = string.Empty;
 
-        // 是否交给 LdFileHook 由调用方决定；这里只接受共享判定后的运行时加载桥接。
+        // 是否交给 LdFileHook 由调用方决定；这里只接受共享决策后的运行时加载桥接。
         string original = NormalizeLoadFontName(originalFont, kind);
         if (!IsRegisterableLoadFontName(original, kind))
             return false;
@@ -87,7 +87,7 @@ internal static class LdFileHook
         FontLogicalReplacement resolution = FontRedirectResolver.ResolveLogicalFont(
             original,
             kind,
-            carriesAutoCadSemantic: true);
+            preserveOriginalLoadRequest: true);
         if (resolution.Action != FontLogicalReplacementAction.RuntimeLoadBridge)
             return false;
 

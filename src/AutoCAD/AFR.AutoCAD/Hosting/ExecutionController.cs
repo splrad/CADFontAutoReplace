@@ -72,8 +72,8 @@ internal sealed class ExecutionController
                 contextMgr.StoreDetectionResults(doc, missingFonts);
                 DiagnosticLogger.EndPhase($"缺失: {missingFonts.Count}个");
 
-                // 第二阶段: 恢复样式表永久替换。FontDetector 已排除 @ 前缀样式字体，
-                // 因此这里仅会写回普通缺失字体；@ 字体保留给 StyleTextStyleHook 做临时映射。
+                // 第二阶段: 恢复样式表永久替换。FontDetector 仅排除 @TrueType，
+                // SHX 缺失字体（包含 @SHX）在这里永久写回样式表。
                 int replacedStyleCount = 0;
                 if (missingFonts.Count > 0)
                 {
@@ -99,7 +99,7 @@ internal sealed class ExecutionController
                 contextMgr.StoreStillMissingResults(doc, stillMissing);
                 DiagnosticLogger.EndPhase($"仍缺失: {stillMissing.Count}个");
 
-                // 第四阶段: 仅登记样式表 @ 前缀缺失字体的临时运行时映射。
+                // 第四阶段: 仅登记样式表 @TrueType 缺失字体的临时运行时映射。
                 var runtimeFontMappings = FontDetector.CollectRuntimeFontMappings(postContext, config.TrueTypeFont);
                 List<RuntimeFontMappingRecord> actualStyleRuntimeMappings = [];
                 if (runtimeFontMappings.Count > 0)
@@ -109,7 +109,7 @@ internal sealed class ExecutionController
                     ForceLoadStyleRuntimeMappings(doc.Database, runtimeFontMappings);
 
                     // 触发型 Regen: 这里必须立即触发 AcGiTextStyle::loadStyleRec，
-                    // 让样式表 @ 字体映射在 StyleTextStyleHook 中命中，不能与最终视觉刷新合并。
+                    // 让样式表 @TrueType 映射在 StyleTextStyleHook 中命中，不能与最终视觉刷新合并。
                     doc.Editor.Regen();
                     needsVisualRegen = false;
 

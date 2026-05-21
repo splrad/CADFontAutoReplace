@@ -5,7 +5,7 @@
 ## 当前项目事实
 
 - 项目名：`CADFontAutoReplace`，简称 AFR。
-- 主用途：为 AutoCAD 图纸自动处理缺失字体、样式表字体替换、样式表 `@` 字体运行时映射、`LdFileHook` 字体加载重定向，以及 MText 内联字体映射。
+- 主用途：为 AutoCAD 图纸自动处理缺失字体、样式表字体替换、样式表 `@TrueType` 字体运行时映射、`LdFileHook` 字体加载重定向，以及 MText 内联字体映射。
 - 项目不再处理任何单行文字编码修复、AI 决策、native decode evidence、训练数据、候选包、模型或补绘问题。
 - 支持 AutoCAD 版本：2018 到 2027。
 - 主要分发方式：`AFR.Deployer` 部署工具一键安装/卸载。
@@ -45,9 +45,9 @@ Debug 命令：
 
 主链路在 `ExecutionController.Execute`：
 
-1. 使用 `FontDetector` 检测样式表普通缺失字体，并由 `FontReplacer.ReplaceMissingFonts()` 执行永久替换。
+1. 使用 `FontDetector` 检测样式表缺失字体，并由 `FontReplacer.ReplaceMissingFonts()` 对普通缺失字体和 `@SHX` 缺失字体执行永久替换。
 2. 替换后重新检测并存储仍缺失结果，供 `AFRLOG` 标记当前状态。
-3. 使用 `StyleTextStyleHook` 只对样式表带 `@` 的缺失字体执行临时运行时映射。
+3. 使用 `StyleTextStyleHook` 只对样式表 `@TrueType` 缺失字体执行临时运行时映射。
 4. 扫描 MText 内联字体；`MTextInlineFontHook` 只在 MText 作用域内处理全部内联缺失字体，并直接记录实际映射结果。
 5. 需要时执行最终视觉刷新。
 
@@ -55,24 +55,23 @@ Debug 命令：
 
 - `NativeInlineHook`、`NativeHookTarget`、`NativeFontHookProfile`、`INativeFontHookExportsProvider` 是字体 Hook 共享基础设施，必须保留。
 - `LdFileHook` 只处理字体加载阶段的透明重定向。
-- `StyleTextStyleHook` 只负责样式表带 `@` 的缺失字体运行时映射。
+- `StyleTextStyleHook` 只负责样式表 `@TrueType` 缺失字体运行时映射。
 - `MTextInlineFontHook` 只负责 MText 内联缺失字体运行时映射。
 - MText Hook 不能处理样式表字体；样式表 Hook 不能处理 MText 内联字体。
 - 普通样式表检测、永久替换和二次验证必须优先使用当前 `Database` 上的 CAD 托管 API。
 - `FontAvailabilityIndex` 只是 Hook 侧无法安全取得托管 `Database` 时的进程级兜底索引。
 
-样式表运行时映射规则：
+样式表处理规则：
 
 - 样式表非 `@` 缺失字体必须走永久替换。
-- 带 `@` 前缀的样式表字体只能运行时临时映射，不允许永久替换。
-- 带一个或多个 `@` 前缀的样式表字体必须一次性去除所有连续前缀后优先检查本机真实字体。
-- 不得为了“改用 CAD 原生 API”把 `@TrueType`、`@SHX` 或 BigFont 运行时语义永久写回样式表。
+- 样式表 `@SHX` 主字体和 `@SHX` 大字体缺失也必须走永久替换。
+- 样式表 `@TrueType` 不写回；去 `@` 后基础字体存在则放行，不存在才通过 `StyleTextStyleHook -> LdFileHook` 映射到配置 TrueType。
 
 MText 内联运行时映射规则：
 
 - MText 内联缺失字体不改写 `MText.Contents`。
-- MText 内联 TrueType 缺失必须保持 TrueType 到 TrueType 的运行时映射。
-- MText 内联 SHX 主字体和 SHX 大字体按 SHX 类型映射。
+- MText 内联非 `@` TrueType / SHX 主字体 / SHX 大字体由 `MTextInlineFontHook` 直接映射当前显示参数。
+- MText 内联 `@TrueType` / `@SHX` 主字体 / `@SHX` 大字体才登记给 `LdFileHook` 做加载桥接。
 - AFRLOG 展示记录必须来自 `MTextInlineFontHook` 实际命中的业务映射结果。
 
 ## 发布资产

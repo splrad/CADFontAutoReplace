@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.IO;
 using System.Runtime.InteropServices;
 using AFR.Models;
 using AFR.Platform;
@@ -8,9 +7,9 @@ using AFR.Services;
 namespace AFR.FontMapping;
 
 /// <summary>
-/// 处理样式表 @ 前缀缺失字体临时映射的 AcGiTextStyle Hook。
+/// 处理样式表 @TrueType 缺失字体临时映射的 AcGiTextStyle Hook。
 /// <para>
-/// 它不改写样式表，只在样式加载时对已登记的 @ 字体做运行时映射。
+/// 它不改写样式表，只在样式加载时对已登记的 @TrueType 字体做运行时映射。
 /// </para>
 /// </summary>
 internal static class StyleTextStyleHook
@@ -238,8 +237,6 @@ internal static class StyleTextStyleHook
                 ReadString(_bigFontFileNameGetter, self));
             if (handledInline)
                 ApplyMTextInlineLoadStyleRecMappings(self);
-            else
-                RegisterObservedAtFontLoadMappings(self);
 
             if (hasStyleMappings)
                 ApplyRegisteredStyleMappings(self);
@@ -485,101 +482,8 @@ internal static class StyleTextStyleHook
                 continue;
 
             if (IsTrueTypeMapping(mapping))
-            {
                 ApplyTrueTypeMapping(self, styleName, mapping);
-            }
-            else if (IsBigFontMapping(mapping))
-            {
-                ApplyShxMapping(self, styleName, mapping, bigFont: true);
-            }
-            else
-            {
-                ApplyShxMapping(self, styleName, mapping, bigFont: false);
-            }
         }
-    }
-
-    private static bool RegisterObservedAtFontLoadMappings(IntPtr self)
-    {
-        string styleName = ReadString(_styleNameGetter, self);
-        string fileName = ReadString(_fileNameGetter, self);
-        string bigFontFileName = ReadString(_bigFontFileNameGetter, self);
-
-        bool registered = false;
-        registered |= RegisterObservedAtShxMapping(styleName, fileName, bigFont: false);
-        registered |= RegisterObservedAtShxMapping(styleName, bigFontFileName, bigFont: true);
-        return registered;
-    }
-
-    private static bool RegisterObservedAtShxMapping(string styleName, string fontName, bool bigFont)
-    {
-        if (string.IsNullOrWhiteSpace(fontName))
-            return false;
-
-        string original = NormalizeObservedShxName(fontName);
-        var kind = bigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
-        bool semantic = bigFont || FontRedirectResolver.HasAtPrefix(original);
-        FontLogicalReplacement resolution = FontRedirectResolver.ResolveLogicalFont(
-            original,
-            kind,
-            carriesAutoCadSemantic: semantic);
-        if (resolution.Action != FontLogicalReplacementAction.RuntimeLoadBridge)
-            return false;
-
-        string source = string.IsNullOrWhiteSpace(styleName)
-            ? "StyleTextStyleHook:observed"
-            : $"StyleTextStyleHook:observed:{styleName}";
-        string displayOriginal = ResolveObservedDisplayOriginal(styleName, original, kind);
-
-        return LdFileHook.TryRegisterResolvedAtFont(
-            original,
-            kind,
-            source,
-            null,
-            displayOriginal,
-            out _,
-            out _);
-    }
-
-    private static string ResolveObservedDisplayOriginal(
-        string styleName,
-        string observedOriginal,
-        FontRedirectKind kind)
-    {
-        if (string.IsNullOrWhiteSpace(styleName)
-            || !RuntimeMappingsByStyle.TryGetValue(styleName, out RuntimeFontMappingRecord[]? mappings)
-            || mappings.Length == 0)
-        {
-            return observedOriginal;
-        }
-
-        var matches = mappings
-            .Where(mapping => IsMappingKind(mapping, kind))
-            .ToArray();
-        if (matches.Length == 0)
-            return observedOriginal;
-
-        string observedKey = FontRedirectResolver.GetRedirectSourceKey(observedOriginal, kind);
-        for (int i = 0; i < matches.Length; i++)
-        {
-            string mappingKey = FontRedirectResolver.GetRedirectSourceKey(matches[i].OriginalFont, kind);
-            if (string.Equals(mappingKey, observedKey, StringComparison.OrdinalIgnoreCase))
-                return matches[i].OriginalFont;
-        }
-
-        // 同一样式同一槽位正常只有一条映射；当 CAD 回调已经改写大小写时，用登记记录恢复显示原名。
-        return matches.Length == 1 ? matches[0].OriginalFont : observedOriginal;
-    }
-
-    private static bool IsMappingKind(RuntimeFontMappingRecord mapping, FontRedirectKind kind)
-    {
-        return kind switch
-        {
-            FontRedirectKind.TrueType => IsTrueTypeMapping(mapping),
-            FontRedirectKind.ShxBigFont => IsBigFontMapping(mapping),
-            FontRedirectKind.ShxMain => !IsTrueTypeMapping(mapping) && !IsBigFontMapping(mapping),
-            _ => false
-        };
     }
 
     private static void ApplyMTextInlineLoadStyleRecMappings(IntPtr self)
@@ -600,126 +504,39 @@ internal static class StyleTextStyleHook
 
     private static void ApplyTrueTypeMapping(IntPtr self, string styleName, RuntimeFontMappingRecord mapping)
     {
-        bool semantic = FontRedirectResolver.HasAtPrefix(mapping.OriginalFont);
+        bool preserveLoadRequest = FontRedirectResolver.HasAtPrefix(mapping.OriginalFont);
         FontLogicalReplacement resolution = FontRedirectResolver.ResolveLogicalFont(
             mapping.OriginalFont,
             FontRedirectKind.TrueType,
-            carriesAutoCadSemantic: semantic);
+            preserveOriginalLoadRequest: preserveLoadRequest);
 
-        if (resolution.Action == FontLogicalReplacementAction.RuntimeLoadBridge)
-        {
-            bool registered = LdFileHook.TryRegisterResolvedAtFont(
-                mapping.OriginalFont,
-                FontRedirectKind.TrueType,
-                $"StyleTextStyleHook:{styleName}",
-                null,
-                mapping.OriginalFont,
-                out _,
-                out string ldFileReplacement);
-            if (!registered)
-                return;
-
-            bool runtimeVerticalApplied = false;
-            if (_setVertical != null && semantic)
-            {
-                _setVertical(self, 1);
-                runtimeVerticalApplied = true;
-            }
-
-            RecordRuntimeApplyHit(styleName, mapping);
-            LogRuntimeApply(
-                styleName,
-                mapping,
-                runtimeVerticalApplied ? "registerLdFile+setVertical(TrueType)" : "registerLdFile(TrueType)",
-                ldFileReplacement);
-            return;
-        }
-
-        if (resolution.Action != FontLogicalReplacementAction.DirectLogicalReplacement)
+        if (resolution.Action != FontLogicalReplacementAction.RuntimeLoadBridge)
             return;
 
-        string replacement = FontRedirectResolver.NormalizeInputName(resolution.ReplacementName).TrimStart('@');
-        if (string.IsNullOrWhiteSpace(replacement))
-            return;
-
-        bool fontApplied = false;
-        bool verticalApplied = false;
-
-        if (_setFont != null)
-        {
-            IntPtr replacementPtr = GetNativeString(replacement);
-            _setFont(self, replacementPtr, 0, 0, 134, 2, 0);
-            fontApplied = true;
-        }
-
-        if (_setVertical != null)
-        {
-            _setVertical(self, semantic ? (byte)1 : (byte)0);
-            verticalApplied = true;
-        }
-
-        if (!fontApplied && !verticalApplied)
-            return;
-
-        RecordRuntimeApplyHit(styleName, mapping);
-
-        string action = fontApplied && verticalApplied
-            ? "setFont+setVertical(TrueType)"
-            : fontApplied
-                ? "setFont(TrueType)"
-                : "setVertical(TrueType)";
-        LogRuntimeApply(styleName, mapping, action, replacement);
-    }
-
-    private static void ApplyShxMapping(
-        IntPtr self,
-        string styleName,
-        RuntimeFontMappingRecord mapping,
-        bool bigFont)
-    {
-        var kind = bigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
-        bool semantic = bigFont || FontRedirectResolver.HasAtPrefix(mapping.OriginalFont);
-        FontLogicalReplacement resolution = FontRedirectResolver.ResolveLogicalFont(
+        bool registered = LdFileHook.TryRegisterResolvedAtFont(
             mapping.OriginalFont,
-            kind,
-            carriesAutoCadSemantic: semantic);
-
-        if (resolution.Action == FontLogicalReplacementAction.RuntimeLoadBridge)
-        {
-            bool registered = LdFileHook.TryRegisterResolvedAtFont(
-                mapping.OriginalFont,
-                kind,
-                $"StyleTextStyleHook:{styleName}",
-                null,
-                mapping.OriginalFont,
-                out _,
-                out string ldFileReplacement);
-            if (!registered)
-                return;
-
-            RecordRuntimeApplyHit(styleName, mapping);
-            LogRuntimeApply(
-                styleName,
-                mapping,
-                bigFont ? "registerLdFile(SHX大字体)" : "registerLdFile(SHX主字体)",
-                ldFileReplacement);
+            FontRedirectKind.TrueType,
+            $"StyleTextStyleHook:{styleName}",
+            null,
+            mapping.OriginalFont,
+            out _,
+            out string ldFileReplacement);
+        if (!registered)
             return;
+
+        bool runtimeVerticalApplied = false;
+        if (_setVertical != null && preserveLoadRequest)
+        {
+            _setVertical(self, 1);
+            runtimeVerticalApplied = true;
         }
 
-        if (resolution.Action != FontLogicalReplacementAction.DirectLogicalReplacement)
-            return;
-
-        string replacement = FontRedirectResolver.EnsureShx(resolution.ReplacementName);
-        if (string.IsNullOrWhiteSpace(replacement))
-            return;
-
-        var setter = bigFont ? _setBigFontFileName : _setFileName;
-        if (setter == null)
-            return;
-
-        setter(self, GetNativeString(replacement));
         RecordRuntimeApplyHit(styleName, mapping);
-        LogRuntimeApply(styleName, mapping, bigFont ? "setBigFontFileName" : "setFileName", replacement);
+        LogRuntimeApply(
+            styleName,
+            mapping,
+            runtimeVerticalApplied ? "registerLdFile+setVertical(TrueType)" : "registerLdFile(TrueType)",
+            ldFileReplacement);
     }
 
     private static void RecordRuntimeApplyHit(string styleName, RuntimeFontMappingRecord mapping)
@@ -742,9 +559,6 @@ internal static class StyleTextStyleHook
     private static bool IsTrueTypeMapping(RuntimeFontMappingRecord mapping)
         => mapping.MappingCategory.Contains("TrueType", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsBigFontMapping(RuntimeFontMappingRecord mapping)
-        => mapping.MappingCategory.Contains("SHX大", StringComparison.OrdinalIgnoreCase);
-
     private static void LogRuntimeApply(
         string styleName,
         RuntimeFontMappingRecord mapping,
@@ -762,18 +576,6 @@ internal static class StyleTextStyleHook
 
     private static IntPtr GetNativeString(string value)
         => NativeStringCache.GetOrAdd(value, static text => Marshal.StringToHGlobalUni(text));
-
-    private static string NormalizeObservedShxName(string name)
-    {
-        string normalized = FontRedirectResolver.NormalizeInputName(name);
-        if (string.IsNullOrWhiteSpace(normalized))
-            return string.Empty;
-
-        if (!string.IsNullOrEmpty(Path.GetExtension(normalized)))
-            return normalized;
-
-        return normalized + ".shx";
-    }
 
     private static bool ShouldLogStyleLoad(
         string styleName,

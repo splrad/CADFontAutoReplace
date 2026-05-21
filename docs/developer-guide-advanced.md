@@ -31,12 +31,12 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - `NativeInlineHook`：底层 inline patch 基础设施。
 - `NativeHookTarget`、`NativeFontHookProfile`、`INativeFontHookExportsProvider`：字体 Hook profile 与平台导出/RVA 信息。
 - `LdFileHook`：字体加载阶段透明重定向。
-- `StyleTextStyleHook`：样式表 `@` 字体运行时映射。
+- `StyleTextStyleHook`：样式表 `@TrueType` 字体运行时映射。
 - `MTextInlineFontHook`：MText 内联字体运行时映射。
 
 字体加载 Hook 核心文件是 `LdFileHook.cs`。普通样式表检测和永久写回应优先使用 AutoCAD 托管 API，例如当前 `Database` 上的 `HostApplicationServices.Current.FindFile`；`FontAvailabilityIndex` 只是 native Hook 路径无法安全取得托管 `Database` 时的进程级兜底索引。
 
-不要为了“改用 CAD 原生 API”把 `@TrueType`、`@SHX` 或 BigFont 运行时语义永久写回样式表。
+样式表 `@SHX` 主字体和大字体缺失走永久替换；样式表 `@TrueType` 保留运行时映射，不要永久写回样式表。
 
 风险点：
 
@@ -104,7 +104,7 @@ artifacts/ReleaseAssets/Fonts.zip
 - [ ] 不同触发源（Startup / Command / DocumentCreated）都验证
 - [ ] Hook on/off 两条路径验证
 - [ ] SHX 主字体 / 大字体 / TrueType 三类都验证
-- [ ] 样式表 `@` 字体运行时映射验证
+- [ ] 样式表 `@TrueType` 运行时映射和 `@SHX` 永久替换都验证
 - [ ] MText `\F` / `\f` / 参数段 / 路径残留 / `@` 前缀都覆盖
 - [ ] Release 构建下 Debug 功能完全排除
 

@@ -51,7 +51,7 @@ internal readonly struct FontLogicalReplacement
         string lookupName,
         string replacementName,
         FontRedirectKind kind,
-        bool carriesAutoCadSemantic,
+        bool preservesOriginalLoadRequest,
         string reason)
     {
         Action = action;
@@ -59,7 +59,7 @@ internal readonly struct FontLogicalReplacement
         LookupName = lookupName;
         ReplacementName = replacementName;
         Kind = kind;
-        CarriesAutoCadSemantic = carriesAutoCadSemantic;
+        PreservesOriginalLoadRequest = preservesOriginalLoadRequest;
         Reason = reason;
     }
 
@@ -68,7 +68,7 @@ internal readonly struct FontLogicalReplacement
     internal string LookupName { get; }
     internal string ReplacementName { get; }
     internal FontRedirectKind Kind { get; }
-    internal bool CarriesAutoCadSemantic { get; }
+    internal bool PreservesOriginalLoadRequest { get; }
     internal string Reason { get; }
 }
 
@@ -102,7 +102,7 @@ internal static class FontRedirectResolver
     internal static FontLogicalReplacement ResolveLogicalFont(
         string fontName,
         FontRedirectKind kind,
-        bool carriesAutoCadSemantic = false)
+        bool preserveOriginalLoadRequest = false)
     {
         string original = NormalizeInputName(fontName);
         if (string.IsNullOrWhiteSpace(original))
@@ -113,12 +113,12 @@ internal static class FontRedirectResolver
                 string.Empty,
                 string.Empty,
                 kind,
-                carriesAutoCadSemantic,
+                preserveOriginalLoadRequest,
                 "空字体名");
         }
 
         bool hasAtPrefix = original[0] == '@';
-        bool semantic = carriesAutoCadSemantic || hasAtPrefix;
+        bool preserveLoadRequest = preserveOriginalLoadRequest || hasAtPrefix;
         string lookupName = hasAtPrefix ? original.TrimStart('@') : original;
         if (string.IsNullOrWhiteSpace(lookupName))
         {
@@ -128,13 +128,13 @@ internal static class FontRedirectResolver
                 string.Empty,
                 string.Empty,
                 kind,
-                semantic,
+                preserveLoadRequest,
                 "空字体名");
         }
 
-        if (semantic)
+        if (preserveLoadRequest)
         {
-            if (IsOriginalSemanticFontAvailable(original, lookupName, kind, hasAtPrefix))
+            if (IsOriginalLoadFontAvailable(original, lookupName, kind, hasAtPrefix))
             {
                 return new FontLogicalReplacement(
                     FontLogicalReplacementAction.NoAction,
@@ -142,8 +142,8 @@ internal static class FontRedirectResolver
                     lookupName,
                     string.Empty,
                     kind,
-                    semantic,
-                    "原始语义字体可用");
+                    preserveLoadRequest,
+                    "原始加载字体可用");
             }
 
             if (TryResolveMissingFont(original, kind, out FontRedirectResolution runtimeResolution))
@@ -154,7 +154,7 @@ internal static class FontRedirectResolver
                     runtimeResolution.LookupName,
                     runtimeResolution.RedirectName,
                     kind,
-                    semantic,
+                    preserveLoadRequest,
                     runtimeResolution.Reason);
             }
 
@@ -164,7 +164,7 @@ internal static class FontRedirectResolver
                 lookupName,
                 string.Empty,
                 kind,
-                semantic,
+                preserveLoadRequest,
                 "未找到可用运行时加载映射");
         }
 
@@ -176,7 +176,7 @@ internal static class FontRedirectResolver
                 lookupName,
                 string.Empty,
                 kind,
-                semantic,
+                preserveLoadRequest,
                 "字体可用");
         }
 
@@ -188,7 +188,7 @@ internal static class FontRedirectResolver
                 lookupName,
                 string.Empty,
                 kind,
-                semantic,
+                preserveLoadRequest,
                 "未找到可用配置字体");
         }
 
@@ -203,7 +203,7 @@ internal static class FontRedirectResolver
                 lookupName,
                 string.Empty,
                 kind,
-                semantic,
+                preserveLoadRequest,
                 "替换目标与原字体相同");
         }
 
@@ -213,7 +213,7 @@ internal static class FontRedirectResolver
             lookupName,
             configured,
             kind,
-            semantic,
+            preserveLoadRequest,
             "配置字体兜底");
     }
 
@@ -391,7 +391,7 @@ internal static class FontRedirectResolver
             : normalized + ".shx";
     }
 
-    private static bool IsOriginalSemanticFontAvailable(
+    private static bool IsOriginalLoadFontAvailable(
         string original,
         string lookupName,
         FontRedirectKind kind,

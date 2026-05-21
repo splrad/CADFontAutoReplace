@@ -5,7 +5,7 @@
 CADFontAutoReplace 当前只维护 AutoCAD 缺失字体自动替换和字体运行时映射能力：
 
 - 样式表缺失字体检测与永久替换。
-- 样式表 `@` 字体运行时映射。
+- 样式表 `@TrueType` 字体运行时映射。
 - `LdFileHook` 字体加载重定向。
 - `MTextInlineFontHook` 内联字体运行时映射。
 - `AFR` 字体配置、`AFRLOG` 替换日志、`AFRUNLOAD` 隐藏卸载入口。
@@ -38,9 +38,9 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 `ExecutionController.Execute` 是字体处理主流程：
 
 1. 检测样式表缺失字体。
-2. 永久替换普通缺失字体。
+2. 永久替换普通缺失字体和 `@SHX` 缺失字体。
 3. 二次检测并记录仍缺失样式。
-4. 登记并触发样式表 `@` 字体运行时映射。
+4. 登记并触发样式表 `@TrueType` 字体运行时映射。
 5. 扫描 MText 内联字体，临时安装 MText Hook，通过 Regen 收集实际映射结果。
 6. 需要时执行最终 Regen，输出统计并写入 `AFRLOG` 可读取的上下文。
 
@@ -88,7 +88,7 @@ artifacts/ReleaseAssets/Fonts.zip
 - 新增命令先登记到 `CommandNames.cs`，再在目标版本壳 `PluginEntry.cs` 注册。
 - Debug-only 命令必须同时在命令文件和注册处用 `#if DEBUG` 控制。
 - 修改 Hook 热路径时保持小范围变更，并用真实 CAD 图纸验证。
-- 样式表普通缺失字体走永久替换；样式表 `@` 字体只做运行时映射。
+- 样式表普通缺失字体和 `@SHX` 缺失字体走永久替换；样式表 `@TrueType` 只做运行时映射。
 - MText 内联字体不改写 `MText.Contents`，映射记录以 Hook 实际命中为准。
 - 文档入口为 `README.md`、`docs/developer-guide-beginner.md`、`docs/developer-guide-advanced.md` 和 `.github/copilot-instructions.md`。
 

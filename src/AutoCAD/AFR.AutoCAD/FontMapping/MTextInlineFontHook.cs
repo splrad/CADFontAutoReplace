@@ -751,7 +751,7 @@ internal static class MTextInlineFontHook
         FontLogicalReplacement resolution = FontRedirectResolver.ResolveLogicalFont(
             original,
             FontRedirectKind.TrueType,
-            carriesAutoCadSemantic: hasAtPrefix);
+            preserveOriginalLoadRequest: hasAtPrefix);
         if (resolution.Action != FontLogicalReplacementAction.DirectLogicalReplacement)
             return null;
 
@@ -795,13 +795,16 @@ internal static class MTextInlineFontHook
         if (string.IsNullOrWhiteSpace(lookupName))
             return null;
 
+        if (FontRedirectResolver.HasAtPrefix(original))
+            return null;
+
         var kind = bigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
         sourceKey = NormalizeInlineShxName(original);
 
         FontLogicalReplacement resolution = FontRedirectResolver.ResolveLogicalFont(
             original,
             kind,
-            carriesAutoCadSemantic: bigFont);
+            preserveOriginalLoadRequest: false);
         if (resolution.Action != FontLogicalReplacementAction.DirectLogicalReplacement)
             return null;
 
@@ -833,7 +836,7 @@ internal static class MTextInlineFontHook
         FontLogicalReplacement resolution = FontRedirectResolver.ResolveLogicalFont(
             original,
             FontRedirectKind.TrueType,
-            carriesAutoCadSemantic: true);
+            preserveOriginalLoadRequest: true);
         if (resolution.Action != FontLogicalReplacementAction.RuntimeLoadBridge)
             return false;
 
@@ -866,13 +869,14 @@ internal static class MTextInlineFontHook
         string original = NormalizeInlineShxName(input);
         if (string.IsNullOrWhiteSpace(original))
             return false;
+        if (!FontRedirectResolver.HasAtPrefix(original))
+            return false;
 
         var kind = bigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
-        bool semantic = bigFont || FontRedirectResolver.HasAtPrefix(original);
         FontLogicalReplacement resolution = FontRedirectResolver.ResolveLogicalFont(
             original,
             kind,
-            carriesAutoCadSemantic: semantic);
+            preserveOriginalLoadRequest: true);
         if (resolution.Action != FontLogicalReplacementAction.RuntimeLoadBridge)
             return false;
 

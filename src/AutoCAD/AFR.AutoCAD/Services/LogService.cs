@@ -78,11 +78,11 @@ internal sealed class LogService : ILogService
         int shxCount = Math.Max(0, missing.ShxMain - stillMissing.ShxMain);
         int bigFontCount = Math.Max(0, missing.ShxBig - stillMissing.ShxBig);
         int total = trueTypeCount + shxCount + bigFontCount;
-        int semanticMappingCount = Math.Max(0, styleRuntimeMappingCount) + Math.Max(0, mtextMappingCount);
+        int runtimeMappingCount = Math.Max(0, styleRuntimeMappingCount) + Math.Max(0, mtextMappingCount);
 
         // --- 第二步：生成唯一的字体修复汇总消息 ---
         string msg = $"[字体修复]已替换缺失字体 {total} 个(SHX主字体: {shxCount} , SHX大字体: {bigFontCount} , TrueType: {trueTypeCount})";
-        msg += $" | 语义字体映射：{semanticMappingCount}";
+        msg += $" | 运行时字体映射：{runtimeMappingCount}";
 
         // --- 第三步：将汇总消息写入缓冲区 ---
         lock (_lock)
