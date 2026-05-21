@@ -1,143 +1,19 @@
 <Project>
-  <UsingTask TaskName="GenerateGlyphCoreOnnxRuntimeManifest"
-             TaskFactory="RoslynCodeTaskFactory"
-             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
-    <ParameterGroup>
-      <NativeRuntimePath ParameterType="System.String" Required="true" />
-      <ProvidersSharedPath ParameterType="System.String" Required="true" />
-      <OnnxRuntimePackageVersion ParameterType="System.String" Required="true" />
-      <Platform ParameterType="System.String" Required="true" />
-      <OutputPath ParameterType="System.String" Required="true" />
-    </ParameterGroup>
-    <Task>
-      <Using Namespace="System" />
-      <Using Namespace="System.IO" />
-      <Using Namespace="System.Security.Cryptography" />
-      <Using Namespace="System.Text" />
-      <Code Type="Fragment" Language="cs"><![CDATA[
-        string Sanitize(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-                return "unknown";
-
-            var invalid = Path.GetInvalidFileNameChars();
-            var builder = new StringBuilder(value.Length);
-            foreach (char ch in value.Trim())
-                builder.Append(Array.IndexOf(invalid, ch) >= 0 ? '_' : ch);
-            return builder.ToString();
-        }
-
-        string EscapeJson(string value) =>
-            value.Replace("\\", "\\\\").Replace("\"", "\\\"");
-
-        string Sha256Hex(string path)
-        {
-            using (var stream = File.OpenRead(path))
-            using (var sha256 = SHA256.Create())
-            {
-                byte[] hash = sha256.ComputeHash(stream);
-                var builder = new StringBuilder(hash.Length * 2);
-                foreach (byte b in hash)
-                    builder.Append(b.ToString("x2"));
-                return builder.ToString();
-            }
-        }
-
-        string version = Sanitize(OnnxRuntimePackageVersion);
-        string platform = Sanitize(Platform);
-        string abiKey = "ort-" + version + "-" + platform;
-
-        var nativeInfo = new FileInfo(NativeRuntimePath);
-        var providersInfo = new FileInfo(ProvidersSharedPath);
-
-        string json =
-            "{\n" +
-            "  \"manifestVersion\": 1,\n" +
-            "  \"abiKey\": \"" + EscapeJson(abiKey) + "\",\n" +
-            "  \"onnxRuntimePackageVersion\": \"" + EscapeJson(OnnxRuntimePackageVersion) + "\",\n" +
-            "  \"platform\": \"" + EscapeJson(Platform) + "\",\n" +
-            "  \"files\": [\n" +
-            "    { \"name\": \"onnxruntime.dll\", \"length\": " + nativeInfo.Length + ", \"sha256\": \"" + Sha256Hex(NativeRuntimePath) + "\" },\n" +
-            "    { \"name\": \"onnxruntime_providers_shared.dll\", \"length\": " + providersInfo.Length + ", \"sha256\": \"" + Sha256Hex(ProvidersSharedPath) + "\" }\n" +
-            "  ]\n" +
-            "}\n";
-
-        string directory = Path.GetDirectoryName(OutputPath);
-        if (!string.IsNullOrEmpty(directory))
-            Directory.CreateDirectory(directory);
-
-        File.WriteAllText(OutputPath, json, new UTF8Encoding(false));
-      ]]></Code>
-    </Task>
-  </UsingTask>
-
-  <PropertyGroup>
-    <GlyphCoreOnnxRuntimeVersion Condition="'$(GlyphCoreOnnxRuntimeVersion)' == ''">1.18.0</GlyphCoreOnnxRuntimeVersion>
-  </PropertyGroup>
-
   <ItemGroup>
     <!-- UI 控件库 — 嵌入为程序集资源，不复制到输出 -->
     <PackageReference Include="HandyControl" Version="3.5.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="$(GlyphCoreOnnxRuntimeVersion)" />
-    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0"
-                      Condition="'$(TargetFramework)' == 'net8.0-windows'" />
   </ItemGroup>
 
-  <PropertyGroup>
-    <_GlyphCoreRepoRoot>$([MSBuild]::GetDirectoryNameOfFileAbove('$(MSBuildThisFileDirectory)', 'CADFontAutoReplace.slnx'))</_GlyphCoreRepoRoot>
-    <_GlyphCoreDefaultModelPath>$(_GlyphCoreRepoRoot)\AFR.GlyphCore\models\AFR.GlyphCore.Model.onnx</_GlyphCoreDefaultModelPath>
-    <_GlyphCoreDefaultManifestPath>$(_GlyphCoreRepoRoot)\AFR.GlyphCore\models\AFR.GlyphCore.ModelManifest.json</_GlyphCoreDefaultManifestPath>
-    <_GlyphCoreOnnxRuntimePackageRoot Condition="'$(NuGetPackageRoot)' != ''">$(NuGetPackageRoot)microsoft.ml.onnxruntime\$(GlyphCoreOnnxRuntimeVersion)</_GlyphCoreOnnxRuntimePackageRoot>
-    <_GlyphCoreOnnxRuntimePackageRoot Condition="'$(_GlyphCoreOnnxRuntimePackageRoot)' == ''">$([System.Environment]::GetEnvironmentVariable('USERPROFILE'))\.nuget\packages\microsoft.ml.onnxruntime\$(GlyphCoreOnnxRuntimeVersion)</_GlyphCoreOnnxRuntimePackageRoot>
-    <_GlyphCoreOnnxRuntimeNativeDirectory Condition="'$(GlyphCoreRuntimeDirectory)' != ''">$(GlyphCoreRuntimeDirectory)</_GlyphCoreOnnxRuntimeNativeDirectory>
-    <_GlyphCoreOnnxRuntimeNativeDirectory Condition="'$(_GlyphCoreOnnxRuntimeNativeDirectory)' == ''">$(_GlyphCoreOnnxRuntimePackageRoot)\runtimes\win-x64\native</_GlyphCoreOnnxRuntimeNativeDirectory>
-    <_GlyphCoreOnnxRuntimeNativePath>$(_GlyphCoreOnnxRuntimeNativeDirectory)\onnxruntime.dll</_GlyphCoreOnnxRuntimeNativePath>
-    <_GlyphCoreOnnxRuntimeProvidersPath>$(_GlyphCoreOnnxRuntimeNativeDirectory)\onnxruntime_providers_shared.dll</_GlyphCoreOnnxRuntimeProvidersPath>
-    <_GlyphCoreOnnxRuntimeManifestPath>$(IntermediateOutputPath)AFR.GlyphCore.OnnxRuntimeManifest.json</_GlyphCoreOnnxRuntimeManifestPath>
-    <GlyphCoreModelPath Condition="'$(GlyphCoreModelPath)' == '' and '$(_GlyphCoreRepoRoot)' != '' and Exists('$(_GlyphCoreDefaultModelPath)')">$(_GlyphCoreDefaultModelPath)</GlyphCoreModelPath>
-    <GlyphCoreModelManifestPath Condition="'$(GlyphCoreModelManifestPath)' == '' and '$(_GlyphCoreRepoRoot)' != '' and Exists('$(_GlyphCoreDefaultManifestPath)')">$(_GlyphCoreDefaultManifestPath)</GlyphCoreModelManifestPath>
-  </PropertyGroup>
-
-  <ItemGroup Condition="'$(GlyphCoreModelPath)' != '' and Exists('$(GlyphCoreModelPath)')">
-    <EmbeddedResource Include="$(GlyphCoreModelPath)">
-      <LogicalName>AFR.GlyphCore.Model.onnx</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(GlyphCoreModelManifestPath)' != '' and Exists('$(GlyphCoreModelManifestPath)')">
-    <EmbeddedResource Include="$(GlyphCoreModelManifestPath)">
-      <LogicalName>AFR.GlyphCore.ModelManifest.json</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
-
-  <!-- 将第三方托管依赖和文枢 GlyphCore ONNX 原生运行库嵌入为程序集资源 -->
+  <!-- 将第三方托管依赖嵌入为程序集资源 -->
   <Target Name="EmbedPluginDependencies" AfterTargets="ResolveAssemblyReferences">
-    <GenerateGlyphCoreOnnxRuntimeManifest NativeRuntimePath="$(_GlyphCoreOnnxRuntimeNativePath)"
-                                          ProvidersSharedPath="$(_GlyphCoreOnnxRuntimeProvidersPath)"
-                                          OnnxRuntimePackageVersion="$(GlyphCoreOnnxRuntimeVersion)"
-                                          Platform="win-x64"
-                                          OutputPath="$(_GlyphCoreOnnxRuntimeManifestPath)"
-                                          Condition="Exists('$(_GlyphCoreOnnxRuntimeNativePath)') and Exists('$(_GlyphCoreOnnxRuntimeProvidersPath)')" />
     <ItemGroup>
       <EmbeddedResource Include="@(ReferenceCopyLocalPaths)"
-                        Condition="'%(Filename)' == 'HandyControl' Or '%(Filename)' == 'Newtonsoft.Json' Or '%(Filename)' == 'System.Text.Encoding.CodePages' Or '%(Filename)' == 'Microsoft.ML.OnnxRuntime'">
+                        Condition="'%(Filename)' == 'HandyControl' Or '%(Filename)' == 'Newtonsoft.Json'">
         <LogicalName>%(Filename)%(Extension)</LogicalName>
       </EmbeddedResource>
       <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)"
-                               Condition="'%(Filename)' == 'HandyControl' Or '%(Filename)' == 'Newtonsoft.Json' Or '%(Filename)' == 'System.Text.Encoding.CodePages' Or '%(Filename)' == 'Microsoft.ML.OnnxRuntime'" />
-      <EmbeddedResource Include="$(_GlyphCoreOnnxRuntimeNativePath)"
-                        Condition="Exists('$(_GlyphCoreOnnxRuntimeNativePath)')">
-        <LogicalName>onnxruntime.dll</LogicalName>
-      </EmbeddedResource>
-      <EmbeddedResource Include="$(_GlyphCoreOnnxRuntimeProvidersPath)"
-                        Condition="Exists('$(_GlyphCoreOnnxRuntimeProvidersPath)')">
-        <LogicalName>onnxruntime_providers_shared.dll</LogicalName>
-      </EmbeddedResource>
-      <EmbeddedResource Include="$(_GlyphCoreOnnxRuntimeManifestPath)"
-                        Condition="Exists('$(_GlyphCoreOnnxRuntimeManifestPath)')">
-        <LogicalName>AFR.GlyphCore.OnnxRuntimeManifest.json</LogicalName>
-      </EmbeddedResource>
+                               Condition="'%(Filename)' == 'HandyControl' Or '%(Filename)' == 'Newtonsoft.Json'" />
     </ItemGroup>
   </Target>
 

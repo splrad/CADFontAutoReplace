@@ -3,7 +3,6 @@ using Autodesk.AutoCAD.DatabaseServices;
 using AFR.FontMapping;
 using AFR.Models;
 using AFR.Services;
-using AFR.Services.GlyphCore.TextRepair;
 
 namespace AFR.Hosting;
 
@@ -89,7 +88,6 @@ internal sealed class ExecutionController
 
                     if (replacedStyleCount > 0)
                     {
-                        ShxMathSymbolDisplayOverrule.ClearCache();
                         needsVisualRegen = true;
                     }
                 }
@@ -163,15 +161,7 @@ internal sealed class ExecutionController
                     $"HookBefore=[{hookStatsBeforeInlineScan}], " +
                     $"HookAfter=[{hookStatsAfterInlineRegen}]");
 
-                // DBText 单行文字在样式表与运行时字体映射处理完成后，再读取 native 解码证据并懒加载文枢模型。
-                DiagnosticLogger.BeginPhase("DBText文枢修复");
-                int repairedDbTextCount = GlyphCoreTextRepairService.Repair(doc.Database);
-                GlyphCoreTextRepairRunSummary dbTextRepairSummary = GlyphCoreTextRepairService.LastRunSummary;
-                DiagnosticLogger.EndPhase($"DBText实际修复: {repairedDbTextCount}个");
-                if (repairedDbTextCount > 0)
-                    needsVisualRegen = true;
-
-                // 最终视觉刷新: 只处理永久样式写回或 DBText 写回后的显示更新。
+                // 最终视觉刷新: 只处理永久样式写回后的显示更新。
                 // 前面的两个触发型 Regen 负责 Hook 命中顺序，不在这里合并。
                 if (needsVisualRegen)
                     doc.Editor.Regen();
@@ -179,12 +169,11 @@ internal sealed class ExecutionController
                 log.AddStatistics(
                     missingFonts,
                     stillMissing,
-                    dbTextMappingCount: actualStyleRuntimeMappings.Count,
+                    styleRuntimeMappingCount: actualStyleRuntimeMappings.Count,
                     mtextMappingCount: inlineFixResults.Count);
                 DiagnosticLogger.WriteSummary();
                 summarized = true;
                 log.Flush();
-                GlyphCoreTextRepairService.WriteCommandLineSummary(dbTextRepairSummary);
             }
 
             contextMgr.MarkExecuted(doc);

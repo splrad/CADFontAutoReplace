@@ -200,10 +200,7 @@ public class AfrCommands
                     int count = FontReplacer.ReplaceByStyleMapping(replacements, replaceContext);
                     DiagnosticLogger.Info("AFRLOG", $"ReplaceByStyleMapping 返回: {count}");
                     if (count > 0)
-                    {
-                        ShxMathSymbolDisplayOverrule.ClearCache();
                         doc.Editor.Regen();
-                    }
                     return count;
                 }
             };
@@ -333,8 +330,6 @@ public class AfrCommands
 
             DiagnosticLogger.Info("命令", $"构建 {replacements.Count} 条替换指令");
             int replaceCount = FontReplacer.ReplaceByStyleMapping(replacements, context);
-            if (replaceCount > 0)
-                ShxMathSymbolDisplayOverrule.ClearCache();
 
             // 二次验证
             var postContext = new FontDetectionContext(doc.Database);

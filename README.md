@@ -19,7 +19,7 @@
 
 - ✅ **自动处理图纸中的缺失字体**：配置一次后，后续大多数图纸都能自动处理，不用反复手动改字体。
 - ✅ **覆盖三类常见缺失字体场景**：支持 `SHX 主字体`、`SHX 大字体` 与 `TrueType` 缺失的统一处理。
-- ✅ **支持 MText 与 DBText 文字修复**：MText 内联字体缺失会自动处理；DBText 单行文字必须先命中 native DBCS/code page Hook 强证据，再由封闭式本地 AI 决策是否写回。
+- ✅ **支持 MText 内联字体映射**：MText 内联字体缺失会通过运行时 Hook 映射处理，不改写 MText 内容。
 - ✅ **减少 SHX 缺失对话框干扰**：部署工具会自动关闭“缺少 SHX 文件”对话框，减少打开图纸时的重复确认。
 - ✅ **安装与卸载更省心**：使用 `部署工具`，无需手动处理注册表、自动加载项和文件放置。
 - ✅ **自动识别 CAD 版本**：发布包同时支持 AutoCAD 2018–2027，部署工具会自动扫描并列出可安装版本。
@@ -151,14 +151,6 @@ AFR 缺失字体自动替换 v9.1.0
 >
 > ⚠️ MText 内联字体采用 Hook 重定向自动修复，不支持手动替换。
 
-### DBText 单行文字 AI 修复
-
-AFR 会在样式表替换和 MText 内联字体处理完成后，对 DBText 单行文字读取内存中的 native 解码证据。强信号来自 Hook 数据流中可证明 DBCS / code page family mismatch 的对象级、簇级或已修复强证据种子产生的等同证据，不来自“读取到的文字看起来像乱码”，也不来自字体缺失本身。未命中强证据时保持静默，不加载文枢决策模型；命中后才生成候选、提取 `dbtext-ai-features-v7` 特征并交给内置本地 AI 模型选择修复或保持当前文本。
-
-普通用户不能训练、导入、替换或修改 DBText AI 模型。若仍发现 DBText 乱码或误修，请直接联系开发者并发送问题 DWG、必要截图和现象描述。
-
----
-
 ## ⌨️ 命令说明
 
 | 命令 | 说明 |
@@ -231,7 +223,6 @@ QQ：1186191934
 
 - [新手：开发者指南](docs/developer-guide-beginner.md)
 - [进阶：开发者指南](docs/developer-guide-advanced.md)
-- [DBText：封闭式 AI 修复](docs/debugging/DBText-Repair-Model.md)
 - [规范：Git 分支模板](docs/git-branch-guidelines.md)
 
 ---

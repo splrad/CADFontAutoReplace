@@ -12,56 +12,12 @@
     <File Path="Version.props" />
   </Folder>
 
-  <Folder Name="/AFR GlyphCore/">
-    <File Path="AFR.GlyphCore/tools/README.md" />
-    <File Path="AFR.GlyphCore/tools/requirements.txt" />
-    <File Path="AFR.GlyphCore/tools/Start-GlyphCoreWorkbench.ps1" />
-    <File Path="AFR.GlyphCore/tools/Invoke-GlyphCoreTraining.ps1" />
-  </Folder>
-
-  <Folder Name="/AFR GlyphCore/Workbench/">
-    <File Path="AFR.GlyphCore/tools/workbench/server.py" />
-    <File Path="AFR.GlyphCore/tools/workbench/test_review_clusters.py" />
-  </Folder>
-
-  <Folder Name="/AFR GlyphCore/Workbench/Frontend/">
-    <File Path="AFR.GlyphCore/tools/workbench/frontend/.gitignore" />
-    <File Path="AFR.GlyphCore/tools/workbench/frontend/index.html" />
-    <File Path="AFR.GlyphCore/tools/workbench/frontend/package.json" />
-    <File Path="AFR.GlyphCore/tools/workbench/frontend/package-lock.json" />
-    <File Path="AFR.GlyphCore/tools/workbench/frontend/vite.config.ts" />
-    <File Path="AFR.GlyphCore/tools/workbench/frontend/src/App.tsx" />
-    <File Path="AFR.GlyphCore/tools/workbench/frontend/src/main.tsx" />
-    <File Path="AFR.GlyphCore/tools/workbench/frontend/src/styles/globals.css" />
-    <File Path="AFR.GlyphCore/tools/workbench/frontend/src/styles/tokens.css" />
-  </Folder>
-
-  <Folder Name="/AFR GlyphCore/Training/">
-    <File Path="AFR.GlyphCore/tools/training/build_features.py" />
-    <File Path="AFR.GlyphCore/tools/training/generate_seed_data.py" />
-    <File Path="AFR.GlyphCore/tools/training/train_lightgbm.py" />
-  </Folder>
-
-  <Folder Name="/AFR GlyphCore/Python Package/">
-    <File Path="AFR.GlyphCore/tools/afr_glyphcore/__init__.py" />
-    <File Path="AFR.GlyphCore/tools/afr_glyphcore/candidates.py" />
-    <File Path="AFR.GlyphCore/tools/afr_glyphcore/features.py" />
-  </Folder>
-
-  <Folder Name="/AFR GlyphCore/Schemas/">
-    <File Path="AFR.GlyphCore/tools/schemas/candidate_group_v1.schema.json" />
-    <File Path="AFR.GlyphCore/tools/schemas/export_package_v1.schema.json" />
-    <File Path="AFR.GlyphCore/tools/schemas/feature_schema_v7.json" />
-    <File Path="AFR.GlyphCore/tools/schemas/reviewed_label_v1.schema.json" />
-  </Folder>
-
   <Folder Name="/Docs/">
     <File Path="README.md" />
     <File Path="docs/autodesk-fonts.md" />
     <File Path="docs/developer-guide-advanced.md" />
     <File Path="docs/developer-guide-beginner.md" />
     <File Path="docs/git-branch-guidelines.md" />
-    <File Path="docs/debugging/DBText-Repair-Model.md" />
   </Folder>
 
   <Folder Name="/GitHub/">

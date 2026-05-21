@@ -32,6 +32,5 @@ internal sealed class AutoCadFontHook : IFontHook
     public void UpdateConfig()
     {
         FontAvailabilityIndex.Initialize();
-        ShxMathSymbolDisplayOverrule.ClearCache();
     }
 }

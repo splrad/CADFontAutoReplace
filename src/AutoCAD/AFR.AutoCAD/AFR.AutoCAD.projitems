@@ -12,10 +12,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrCommands.cs" Link="Commands\AfrCommands.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrUnloadCommand.cs" Link="Commands\AfrUnloadCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\AutoCadFontHook.cs" Link="FontMapping\AutoCadFontHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\CodePageFamilyHook.cs" Link="FontMapping\CodePageFamilyHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextDwgInFieldsScopeHook.cs" Link="FontMapping\DbTextDwgInFieldsScopeHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DbTextUpstreamDecodeProbeHook.cs" Link="FontMapping\DbTextUpstreamDecodeProbeHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\DwgFilerCodePageScopeHook.cs" Link="FontMapping\DwgFilerCodePageScopeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontAvailabilityIndex.cs" Link="FontMapping\FontAvailabilityIndex.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontRedirectResolver.cs" Link="FontMapping\FontRedirectResolver.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontRuntimeMappingStore.cs" Link="FontMapping\FontRuntimeMappingStore.cs" />
@@ -23,10 +19,9 @@
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextFontParser.cs" Link="FontMapping\MTextFontParser.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontHook.cs" Link="FontMapping\MTextInlineFontHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontScanner.cs" Link="FontMapping\MTextInlineFontScanner.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeDecodeHookProfile.cs" Link="FontMapping\NativeDecodeHookProfile.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeFontHookProfile.cs" Link="FontMapping\NativeFontHookProfile.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeInlineHook.cs" Link="FontMapping\NativeInlineHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\StyleTextStyleHook.cs" Link="FontMapping\StyleTextStyleHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\TextEditorDbcsDecodeHook.cs" Link="FontMapping\TextEditorDbcsDecodeHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AppInitializer.cs" Link="Hosting\AppInitializer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AutoCadHost.cs" Link="Hosting\AutoCadHost.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\CadDialogSystemVariableScope.cs" Link="Hosting\CadDialogSystemVariableScope.cs" />
@@ -38,20 +33,12 @@
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetectionContext.cs" Link="Services\FontDetectionContext.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetector.cs" Link="Services\FontDetector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontReplacer.cs" Link="Services\FontReplacer.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\ShxMathSymbolDisplayOverrule.cs" Link="Services\ShxMathSymbolDisplayOverrule.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreDrawingIdentity.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreDrawingIdentity.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreNativeDbTextEvidenceProjector.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreNativeDbTextEvidenceProjector.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreNativeDecodeEvidenceStore.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreNativeDecodeEvidenceStore.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreTextRepairEntitySnapshotBuilder.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreTextRepairEntitySnapshotBuilder.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreTextRepairAdvisor.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreTextRepairAdvisor.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)Services\GlyphCore\TextRepair\GlyphCoreTextRepairService.cs" Link="Services\GlyphCore\TextRepair\GlyphCoreTextRepairService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\LogService.cs" Link="Services\LogService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\EmbeddedFontDeployer.cs" Link="Hosting\EmbeddedFontDeployer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AssemblyRegistryDefaults.cs" Link="Hosting\AssemblyRegistryDefaults.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\ExternalRegistryDefaultsApplier.cs" Link="Hosting\ExternalRegistryDefaultsApplier.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Diagnostics\AwsHideableDialogPatcher.cs" Link="Diagnostics\AwsHideableDialogPatcher.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DumpDialogApiCommand.cs" Link="DebugCommands\DumpDialogApiCommand.cs" Condition="'$(Configuration)'=='Debug'" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\GlyphCoreExportCommand.cs" Link="DebugCommands\GlyphCoreExportCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\GenProbeScriptsCommand.cs" Link="DebugCommands\GenProbeScriptsCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextEditorCommand.cs" Link="DebugCommands\MTextEditorCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextInsertCommand.cs" Link="DebugCommands\MTextInsertCommand.cs" Condition="'$(Configuration)'=='Debug'" />

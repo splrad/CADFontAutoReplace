@@ -25,10 +25,7 @@
     .\tools\Publish-ReleaseAssets.ps1 -SkipPluginBuild   # 跳过插件构建，仅重新生成发布资产
 #>
 param(
-    [switch]$SkipPluginBuild,
-    [string]$GlyphCoreModelPath = $env:AFR_GLYPHCORE_MODEL_PATH,
-    [string]$GlyphCoreModelManifestPath = $env:AFR_GLYPHCORE_MODEL_MANIFEST_PATH,
-    [string]$GlyphCoreRuntimeDirectory = $env:AFR_GLYPHCORE_RUNTIME_DIRECTORY
+    [switch]$SkipPluginBuild
 )
 
 Set-StrictMode -Version Latest
@@ -50,24 +47,6 @@ $DeployerCsproj = Join-Path $RepoRoot "src\AFR.Deployer\AFR.Deployer.csproj"
 $PublishOutput  = Join-Path $RepoRoot "publish\AFR.Deployer"
 $VersionProps    = Join-Path $RepoRoot "Version.props"
 $FontsSourcePath = Join-Path $RepoRoot "chore\Fonts.zip"
-$DefaultGlyphCoreModelPath = Join-Path $RepoRoot "AFR.GlyphCore\models\AFR.GlyphCore.Model.onnx"
-$DefaultGlyphCoreModelManifestPath = Join-Path $RepoRoot "AFR.GlyphCore\models\AFR.GlyphCore.ModelManifest.json"
-
-if ([string]::IsNullOrWhiteSpace($GlyphCoreModelPath) -and -not [string]::IsNullOrWhiteSpace($env:AFR_GLYPHCORE_MODEL_PATH)) {
-    $GlyphCoreModelPath = $env:AFR_GLYPHCORE_MODEL_PATH
-}
-if ([string]::IsNullOrWhiteSpace($GlyphCoreModelManifestPath) -and -not [string]::IsNullOrWhiteSpace($env:AFR_GLYPHCORE_MODEL_MANIFEST_PATH)) {
-    $GlyphCoreModelManifestPath = $env:AFR_GLYPHCORE_MODEL_MANIFEST_PATH
-}
-if ([string]::IsNullOrWhiteSpace($GlyphCoreRuntimeDirectory) -and -not [string]::IsNullOrWhiteSpace($env:AFR_GLYPHCORE_RUNTIME_DIRECTORY)) {
-    $GlyphCoreRuntimeDirectory = $env:AFR_GLYPHCORE_RUNTIME_DIRECTORY
-}
-if ([string]::IsNullOrWhiteSpace($GlyphCoreModelPath) -and (Test-Path -LiteralPath $DefaultGlyphCoreModelPath)) {
-    $GlyphCoreModelPath = $DefaultGlyphCoreModelPath
-}
-if ([string]::IsNullOrWhiteSpace($GlyphCoreModelManifestPath) -and (Test-Path -LiteralPath $DefaultGlyphCoreModelManifestPath)) {
-    $GlyphCoreModelManifestPath = $DefaultGlyphCoreModelManifestPath
-}
 
 # 自动发现 src\AutoCAD\AFR-ACAD*\*.csproj，避免新增 CAD 版本时手工维护列表。
 # TFM 仅用于控制台日志展示；解析失败时回落为 "(unknown)"，不阻断发布流程。
@@ -107,29 +86,6 @@ if ($Plugins.Count -eq 0) {
 Write-Host "自动发现 $($Plugins.Count) 个插件项目：" -ForegroundColor DarkGray
 $Plugins | ForEach-Object { Write-Host "    • $($_.Name) ($($_.TFM))" -ForegroundColor DarkGray }
 
-$GlyphCoreBuildArgs = @()
-if (-not [string]::IsNullOrWhiteSpace($GlyphCoreModelPath)) {
-    if (-not (Test-Path -LiteralPath $GlyphCoreModelPath)) {
-        Write-Host "文枢 DBText 模型不存在：$GlyphCoreModelPath" -ForegroundColor Red
-        exit 1
-    }
-    $GlyphCoreBuildArgs += "/p:GlyphCoreModelPath=$GlyphCoreModelPath"
-}
-if (-not [string]::IsNullOrWhiteSpace($GlyphCoreModelManifestPath)) {
-    if (-not (Test-Path -LiteralPath $GlyphCoreModelManifestPath)) {
-        Write-Host "文枢 DBText 模型清单不存在：$GlyphCoreModelManifestPath" -ForegroundColor Red
-        exit 1
-    }
-    $GlyphCoreBuildArgs += "/p:GlyphCoreModelManifestPath=$GlyphCoreModelManifestPath"
-}
-if (-not [string]::IsNullOrWhiteSpace($GlyphCoreRuntimeDirectory)) {
-    if (-not (Test-Path -LiteralPath $GlyphCoreRuntimeDirectory)) {
-        Write-Host "文枢 DBText ONNX Runtime 目录不存在：$GlyphCoreRuntimeDirectory" -ForegroundColor Red
-        exit 1
-    }
-    $GlyphCoreBuildArgs += "/p:GlyphCoreRuntimeDirectory=$GlyphCoreRuntimeDirectory"
-}
-
 # ── 工具函数 ──────────────────────────────────────────────────────────────
 function Write-Step([string]$msg) { Write-Host "`n── $msg" -ForegroundColor Cyan }
 function Write-Ok([string]$msg)   { Write-Host "  ✓ $msg" -ForegroundColor Green }
@@ -167,7 +123,7 @@ if (-not $SkipPluginBuild) {
         Write-Host "  → 构建 $($p.Name) ($($p.TFM))..." -NoNewline
 
         # 构建单个版本壳项目；构建成功后会在标准输出目录生成 DLL 与 sidecar JSON。
-        $output = dotnet build $csproj -c Release --nologo -v quiet @GlyphCoreBuildArgs 2>&1
+        $output = dotnet build $csproj -c Release --nologo -v quiet 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Fail "失败"
             $buildErrors += $p.Name

@@ -7,7 +7,7 @@ namespace AFR;
 /// AutoCAD 2020 版本的平台常量定义。
 /// 包含注册表路径、acdb DLL 名称等版本特定信息。
 /// </summary>
-internal sealed class AutoCad2020Platform : ICadPlatform, INativeDecodeHookProfileProvider, INativeFontHookExportsProvider
+internal sealed class AutoCad2020Platform : ICadPlatform, INativeFontHookExportsProvider
 {
     public string AcGiTextStyleLoadStyleRecExport => "?loadStyleRec@AcGiTextStyle@@UEBAHPEAVAcDbDatabase@@@Z";
 
@@ -53,10 +53,4 @@ internal sealed class AutoCad2020Platform : ICadPlatform, INativeDecodeHookProfi
     public string RegistryKeyPattern => @"^ACAD-[A-Za-z0-9]+:[A-Za-z0-9]+$"; // 匹配配置文件子键的正则
     public string AcDbDllName => "acdb23.dll";                  // AutoCAD 2020 的数据库 DLL
     public bool SupportsNativeFontHooks => true;
-
-    public NativeDecodeHookProfile NativeDecodeHookProfile
-        => AutoCadNativeDecodeHookProfiles.CreateFailClosedProfile(
-            DisplayName,
-            AcDbDllName,
-            "2020 acdb 基线可经 RTTI 定位 AcDbImpText::dwgInFields，但缺少 readString 与 acdbGetFilerCodePageId 导出且 resolver 未验证，DBText AI native hook fail closed。");
 }

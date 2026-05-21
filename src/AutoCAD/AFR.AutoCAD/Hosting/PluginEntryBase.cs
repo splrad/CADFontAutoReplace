@@ -93,9 +93,7 @@ public abstract class PluginEntryBase : IExtensionApplication
     private static bool IsEmbeddedDependency(string name)
     {
         return string.Equals(name, "HandyControl", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(name, "Newtonsoft.Json", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(name, "System.Text.Encoding.CodePages", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(name, "Microsoft.ML.OnnxRuntime", StringComparison.OrdinalIgnoreCase);
+               || string.Equals(name, "Newtonsoft.Json", StringComparison.OrdinalIgnoreCase);
     }
 
     // ── IExtensionApplication 实现 ──
@@ -120,7 +118,6 @@ public abstract class PluginEntryBase : IExtensionApplication
 
         // 注册嵌入程序集解析回调，使 HandyControl 等打包在 DLL 资源中的依赖可被加载
         AppDomain.CurrentDomain.AssemblyResolve += OnResolveEmbeddedAssembly;
-        PreExtractGlyphCoreNativeRuntime();
 
         // 隐藏卸载入口必须在首次 NETLOAD、自动加载和部署加载场景下都可用。
         // 它不进入 CommandMethod/命令栈，只由 UnknownCommand 的完整名称匹配触发。
@@ -157,12 +154,6 @@ public abstract class PluginEntryBase : IExtensionApplication
             if (PlatformManager.Platform.SupportsNativeFontHooks)
                 PlatformManager.FontHook.Install();
 
-            // 第零阶段 C: 安装文枢 DBText native evidence Hook，只产强信号，不改 native 文本
-            InstallGlyphCoreNativeDecodeHooks();
-
-            // 第零阶段 D: 安装显示层补绘，仅处理 SHX 缺失的单字符数学符号，不改图纸文字内容
-            ShxMathSymbolDisplayOverrule.Install();
-
             // 第二阶段: 注册文档事件 — 监听新建/关闭文档，自动触发字体替换
             var docMgr = AcadApp.DocumentManager;
             docMgr.DocumentCreated += OnDocumentCreated;
@@ -181,16 +172,11 @@ public abstract class PluginEntryBase : IExtensionApplication
     /// <summary>AutoCAD 卸载插件时调用（通常在 CAD 退出时）。</summary>
     public void Terminate()
     {
-        UninstallGlyphCoreNativeDecodeHooks();
-        ShxMathSymbolDisplayOverrule.Uninstall();
         PlatformManager.FontHook.Uninstall();
         DiagnosticLogger.Disable();
         UnregisterEvents();
         AppDomain.CurrentDomain.AssemblyResolve -= OnResolveEmbeddedAssembly;
         ResolvedEmbeddedAssemblies.Clear();
-        AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDecodeEvidenceStore.Clear();
-        AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDbTextEvidenceProjector.Clear();
-        AFR.GlyphCore.TextRepair.GlyphCoreTextRepairScorerFactory.DisposeAndReset();
     }
 
     /// <summary>
@@ -225,12 +211,8 @@ public abstract class PluginEntryBase : IExtensionApplication
         // 清理 FixedProfile.aws 中带 AFR 所有权标记的弹窗抑制节点。
         try { Diagnostics.AwsHideableDialogPatcher.Cleanup(); } catch { }
 
-        UninstallGlyphCoreNativeDecodeHooks();
-        ShxMathSymbolDisplayOverrule.Uninstall();
         PlatformManager.FontHook.Uninstall();
         DocumentContextManager.Instance.Clear();
-        AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDecodeEvidenceStore.Clear();
-        AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDbTextEvidenceProjector.Clear();
         DiagnosticLogger.Disable();
 
         // 注销嵌入程序集解析回调并释放缓存的嵌入程序集。
@@ -238,7 +220,6 @@ public abstract class PluginEntryBase : IExtensionApplication
         // 上累加多份回调；同时静态字段持有旧 HandyControl 实例的引用会阻止旧 DLL 卸载。
         AppDomain.CurrentDomain.AssemblyResolve -= OnResolveEmbeddedAssembly;
         ResolvedEmbeddedAssemblies.Clear();
-        AFR.GlyphCore.TextRepair.GlyphCoreTextRepairScorerFactory.DisposeAndReset();
     }
 
     private static void EnsureFontAltDisabled(ILogService log)
@@ -284,47 +265,6 @@ public abstract class PluginEntryBase : IExtensionApplication
         catch { }
 
         UnregisterHiddenUnloadCommand();
-    }
-
-    private static void InstallGlyphCoreNativeDecodeHooks()
-    {
-        try
-        {
-            AFR.FontMapping.DwgFilerCodePageScopeHook.Install();
-            AFR.FontMapping.DbTextDwgInFieldsScopeHook.Install();
-            AFR.FontMapping.DbTextUpstreamDecodeProbeHook.Install();
-            AFR.FontMapping.TextEditorDbcsDecodeHook.Install();
-            AFR.FontMapping.CodePageFamilyHook.Install();
-        }
-        catch (System.Exception ex)
-        {
-            DiagnosticLogger.LogError("DBText文枢Hook 安装失败", ex);
-        }
-    }
-
-    private static void PreExtractGlyphCoreNativeRuntime()
-    {
-        try
-        {
-            Assembly owner = typeof(PluginEntryBase).Assembly;
-            if (AFR.GlyphCore.TextRepair.GlyphCoreTextRepairRuntimeResources.EnsureNativeRuntimeExtracted(owner, out string error))
-                DiagnosticLogger.Log("DBText文枢AI", "ONNX 原生运行库 ABI 目录已就绪。");
-            else
-                DiagnosticLogger.Log("DBText文枢AI", "ONNX 原生运行库预释放失败：" + error);
-        }
-        catch (System.Exception ex)
-        {
-            DiagnosticLogger.LogError("DBText文枢AI 预释放失败", ex);
-        }
-    }
-
-    private static void UninstallGlyphCoreNativeDecodeHooks()
-    {
-        try { AFR.FontMapping.CodePageFamilyHook.Uninstall(); } catch { }
-        try { AFR.FontMapping.TextEditorDbcsDecodeHook.Uninstall(); } catch { }
-        try { AFR.FontMapping.DbTextUpstreamDecodeProbeHook.Uninstall(); } catch { }
-        try { AFR.FontMapping.DbTextDwgInFieldsScopeHook.Uninstall(); } catch { }
-        try { AFR.FontMapping.DwgFilerCodePageScopeHook.Uninstall(); } catch { }
     }
 
     /// <summary>
@@ -491,11 +431,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         try
         {
             if (e.Document != null)
-            {
                 DocumentContextManager.Instance.Remove(e.Document);
-                AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDecodeEvidenceStore.Clear();
-                AFR.Services.GlyphCore.TextRepair.GlyphCoreNativeDbTextEvidenceProjector.Clear();
-            }
         }
         catch { }
     }

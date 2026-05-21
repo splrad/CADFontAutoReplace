@@ -62,8 +62,6 @@ internal static class PluginDeployer
             return false;
         }
 
-        GlyphCoreRuntimeExtractor.TryExtract(dllPath, out warningMessage);
-
         // 3. 写入注册表（幂等）
         try
         {
