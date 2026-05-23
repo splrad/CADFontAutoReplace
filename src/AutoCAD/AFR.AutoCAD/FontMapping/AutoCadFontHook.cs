@@ -24,6 +24,7 @@ internal sealed class AutoCadFontHook : IFontHook
     public void Install()
     {
         FontAvailabilityIndex.Initialize();
+        GdiTrueTypeFontFaceIndex.Prewarm();
 #if DEBUG
         MapFontDiagnosticHook.Install();
 #endif
@@ -48,5 +49,6 @@ internal sealed class AutoCadFontHook : IFontHook
     public void UpdateConfig()
     {
         FontAvailabilityIndex.Initialize();
+        GdiTrueTypeFontFaceIndex.Prewarm();
     }
 }

@@ -7,7 +7,7 @@ using AFR.Services;
 namespace AFR.FontMapping;
 
 /// <summary>
-/// 处理 AutoCAD ldfile 阶段的 SHX 运行时字体加载重定向，并维护共享字体加载桥接登记表。
+/// 处理 AutoCAD ldfile 阶段的 SHX 运行时字体加载重定向。
 /// <para>
 /// 上层 Hook 先按 Style/MText 各自规则判断是否需要登记桥接；
 /// TrueType 登记由 shpload 消费，ldfile 仅保留 SHX 主字体/大字体执行路径。
@@ -30,15 +30,7 @@ internal static class LdFileHook
     private static LdFileDelegate? _hookDelegate;
     private static readonly ConcurrentDictionary<string, IntPtr> NativeStringCache =
         new(StringComparer.Ordinal);
-    private static readonly ConcurrentDictionary<string, RegisteredRedirect> RegisteredRedirects =
-        new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, RegisteredRedirect?> FoldedShxRegisteredRedirects =
-        new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen =
-        new(StringComparer.Ordinal);
-    private static readonly ConcurrentDictionary<string, byte> RedirectHitKeys =
-        new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, byte> FoldedRedirectAmbiguityLogSeen =
         new(StringComparer.Ordinal);
     private static long _hitCount;
     private static long _redirectCount;
@@ -47,23 +39,6 @@ internal static class LdFileHook
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int LdFileDelegate(IntPtr fileName, int param2, IntPtr db, IntPtr desc);
-
-    private sealed record RegisteredRedirect(
-        string OriginalFont,
-        string OriginalDisplayFont,
-        string ReplacementFont,
-        FontRedirectKind Kind,
-        string Source,
-        InlineFontType? InlineType);
-
-    internal sealed record RegisteredRedirectDiagnostic(
-        string OriginalFont,
-        string OriginalDisplayFont,
-        string ReplacementFont,
-        FontRedirectKind Kind,
-        string Source,
-        InlineFontType? InlineType,
-        bool Hit);
 
     internal sealed record RuntimeBridgeRedirect(
         string NormalizedRequest,
@@ -80,33 +55,8 @@ internal static class LdFileHook
 
     internal static void ClearRegisteredRedirects()
     {
-        RegisteredRedirects.Clear();
-        FoldedShxRegisteredRedirects.Clear();
+        FontRuntimeRequestRegistry.Clear();
         RedirectLogSeen.Clear();
-        RedirectHitKeys.Clear();
-        FoldedRedirectAmbiguityLogSeen.Clear();
-    }
-
-    internal static IReadOnlyList<RegisteredRedirectDiagnostic> GetRegisteredRedirectDiagnosticsSnapshot()
-    {
-        return RegisteredRedirects
-            .Select(pair =>
-            {
-                RegisteredRedirect request = pair.Value;
-                bool hit = RedirectHitKeys.ContainsKey(GetRedirectKey(request.OriginalFont, request.Kind));
-                return new RegisteredRedirectDiagnostic(
-                    request.OriginalFont,
-                    request.OriginalDisplayFont,
-                    request.ReplacementFont,
-                    request.Kind,
-                    request.Source,
-                    request.InlineType,
-                    hit);
-            })
-            .OrderBy(item => item.InlineType.HasValue ? 0 : 1)
-            .ThenBy(item => item.Kind.ToString(), StringComparer.Ordinal)
-            .ThenBy(item => item.OriginalFont, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
     }
 
     internal static bool TryGetRegisteredTrueTypeRedirect(
@@ -114,11 +64,8 @@ internal static class LdFileHook
         out RuntimeBridgeRedirect? redirect)
     {
         redirect = null;
-        string normalized = NormalizeLoadTrueTypeName(fontName);
-        if (!IsRegisterableLoadFontName(normalized, FontRedirectKind.TrueType))
-            return false;
-
-        if (!RegisteredRedirects.TryGetValue(GetRedirectKey(normalized, FontRedirectKind.TrueType), out RegisteredRedirect? request))
+        if (!FontRuntimeRequestRegistry.TryGetTrueTypeRequest(fontName, out FontRuntimeRequest? request, out string normalized)
+            || request == null)
             return false;
 
         if (string.Equals(normalized, request.ReplacementFont, StringComparison.OrdinalIgnoreCase))
@@ -131,74 +78,6 @@ internal static class LdFileHook
             request.Kind,
             request.Source,
             request.InlineType);
-        return true;
-    }
-
-    internal static void MarkRegisteredRedirectHit(string normalizedFont, FontRedirectKind kind)
-    {
-        string normalized = NormalizeLoadFontName(normalizedFont, kind);
-        if (!string.IsNullOrWhiteSpace(normalized))
-            RedirectHitKeys.TryAdd(GetRedirectKey(normalized, kind), 0);
-    }
-
-    /// <summary>
-    /// Pre-register a runtime load bridge before the caller enters native code that may invoke ldfile.
-    /// The caller owns the Style/MText decision; this method only accepts bridge-worthy requests.
-    /// </summary>
-    internal static bool TryPreRegisterRuntimeBridge(
-        string originalFont,
-        FontRedirectKind kind,
-        string source,
-        InlineFontType? inlineType,
-        string? originalDisplayName,
-        out string sourceKey,
-        out string replacement)
-    {
-        sourceKey = string.Empty;
-        replacement = string.Empty;
-
-        // 是否交给 LdFileHook 由调用方决定；这里只接受共享决策后的运行时加载桥接。
-        string original = NormalizeLoadFontName(originalFont, kind);
-        if (!IsRegisterableLoadFontName(original, kind))
-            return false;
-        string displayOriginal = NormalizeLoadFontName(originalDisplayName ?? originalFont, kind);
-        if (string.IsNullOrWhiteSpace(displayOriginal))
-            displayOriginal = original;
-
-        FontLogicalReplacement resolution = FontRedirectResolver.ResolveLogicalFont(
-            original,
-            kind,
-            preserveOriginalLoadRequest: true);
-        if (resolution.Action != FontLogicalReplacementAction.RuntimeLoadBridge)
-            return false;
-
-        string resolved = NormalizeReplacementFontName(resolution.ReplacementName, kind, original);
-        if (string.IsNullOrWhiteSpace(resolved)
-            || string.Equals(original, resolved, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        string normalizedSource = string.IsNullOrWhiteSpace(source) ? "unknown" : source.Trim();
-        var request = new RegisteredRedirect(original, displayOriginal, resolved, kind, normalizedSource, inlineType);
-        string key = GetRedirectKey(original, kind);
-
-        RegisteredRedirect registeredRequest = RegisteredRedirects.AddOrUpdate(
-            key,
-            request,
-            (_, existing) => MergeRegisteredRedirect(existing, request));
-        AddFoldedShxRegisteredRedirect(original, kind, registeredRequest);
-
-        string logKey = $"register|{key}|{resolved}|{normalizedSource}|{inlineType}";
-        if (RedirectLogSeen.TryAdd(logKey, 0))
-        {
-            DiagnosticLogger.Log(Tag,
-                $"登记字体加载桥接: source={normalizedSource} kind={kind} " +
-                $"'{displayOriginal}' → '{resolved}' inline={inlineType?.ToString() ?? "none"}");
-        }
-
-        sourceKey = original;
-        replacement = resolved;
         return true;
     }
 
@@ -266,7 +145,7 @@ internal static class LdFileHook
             return trampoline(fileName, param2, db, desc);
 
         Interlocked.Increment(ref _hitCount);
-        if (RegisteredRedirects.IsEmpty)
+        if (!FontRuntimeRequestRegistry.HasShxRequests)
             return trampoline(fileName, param2, db, desc);
 
         _inHook = true;
@@ -274,7 +153,7 @@ internal static class LdFileHook
         {
             string original = ReadFontName(fileName);
             // 未登记的字体请求必须原样放行，避免 ldfile 抢走上层 Hook 的决策权。
-            if (!TryGetRegisteredRedirect(original, param2, out RegisteredRedirect? request, out string normalized)
+            if (!TryGetRegisteredRedirect(original, param2, out FontRuntimeRequest? request, out string normalized)
                 || request == null)
             {
                 return trampoline(fileName, param2, db, desc);
@@ -285,14 +164,8 @@ internal static class LdFileHook
                 return trampoline(fileName, param2, db, desc);
 
             Interlocked.Increment(ref _redirectCount);
-            RedirectHitKeys.TryAdd(GetRedirectKey(request.OriginalFont, request.Kind), 0);
-            if (request.InlineType.HasValue)
-            {
-                FontRuntimeMappingStore.RecordInlineMapping(
-                    request.OriginalDisplayFont,
-                    replacement,
-                    request.InlineType.Value);
-            }
+            FontRuntimeRequestRegistry.MarkHit(request.NormalizedRequest, request.Kind);
+            FontRuntimeMappingStore.RecordRuntimeMapping(request, "LdFileHook", "已映射");
 
             string logKey = $"redirect|{normalized}|{replacement}|{param2}|{request.Source}";
             if (RedirectLogSeen.TryAdd(logKey, 0))
@@ -321,7 +194,7 @@ internal static class LdFileHook
     private static bool TryGetRegisteredRedirect(
         string fontName,
         int param2,
-        out RegisteredRedirect? request,
+        out FontRuntimeRequest? request,
         out string normalized)
     {
         request = null;
@@ -337,16 +210,17 @@ internal static class LdFileHook
 
         if (param2 == FontTypeBigFont)
         {
-            if (TryGetShxRegisteredRedirect(
+            if (FontRuntimeRequestRegistry.TryGetShxRequest(
                 shxName,
                 FontRedirectKind.ShxBigFont,
-                out request))
+                out request,
+                out _))
             {
                 normalized = shxName;
                 return true;
             }
 
-            bool found = TryGetUniqueShxRegisteredRedirect(shxName, out request);
+            bool found = FontRuntimeRequestRegistry.TryGetUniqueShxRequest(shxName, out request, out _);
             if (found)
                 normalized = shxName;
             return found;
@@ -354,119 +228,26 @@ internal static class LdFileHook
 
         if (param2 == FontTypeRegular)
         {
-            if (TryGetShxRegisteredRedirect(
+            if (FontRuntimeRequestRegistry.TryGetShxRequest(
                 shxName,
                 FontRedirectKind.ShxMain,
-                out request))
+                out request,
+                out _))
             {
                 normalized = shxName;
                 return true;
             }
 
-            bool found = TryGetUniqueShxRegisteredRedirect(shxName, out request);
+            bool found = FontRuntimeRequestRegistry.TryGetUniqueShxRequest(shxName, out request, out _);
             if (found)
                 normalized = shxName;
             return found;
         }
 
-        bool fallback = TryGetUniqueShxRegisteredRedirect(shxName, out request);
+        bool fallback = FontRuntimeRequestRegistry.TryGetUniqueShxRequest(shxName, out request, out _);
         if (fallback)
             normalized = shxName;
         return fallback;
-    }
-
-    private static bool TryGetUniqueShxRegisteredRedirect(
-        string normalized,
-        out RegisteredRedirect? request)
-    {
-        // 部分 DWG 的 ldfile 参数不稳定；只有主/大字体注册唯一时才允许按 SHX 名称兜底。
-        request = null;
-        bool foundMain = TryGetShxRegisteredRedirect(
-            normalized,
-            FontRedirectKind.ShxMain,
-            out RegisteredRedirect? mainRequest);
-        bool foundBig = TryGetShxRegisteredRedirect(
-            normalized,
-            FontRedirectKind.ShxBigFont,
-            out RegisteredRedirect? bigRequest);
-
-        if (foundMain == foundBig)
-            return false;
-
-        request = foundMain ? mainRequest : bigRequest;
-        return request != null;
-    }
-
-    private static RegisteredRedirect MergeRegisteredRedirect(
-        RegisteredRedirect existing,
-        RegisteredRedirect incoming)
-    {
-        if (string.Equals(existing.ReplacementFont, incoming.ReplacementFont, StringComparison.OrdinalIgnoreCase)
-            && existing.InlineType.HasValue)
-        {
-            return existing;
-        }
-
-        return incoming;
-    }
-
-    private static bool TryGetShxRegisteredRedirect(
-        string normalized,
-        FontRedirectKind kind,
-        out RegisteredRedirect? request)
-    {
-        if (RegisteredRedirects.TryGetValue(GetRedirectKey(normalized, kind), out request))
-            return true;
-
-        return TryGetFoldedShxRegisteredRedirect(normalized, kind, out request);
-    }
-
-    private static bool TryGetFoldedShxRegisteredRedirect(
-        string normalized,
-        FontRedirectKind kind,
-        out RegisteredRedirect? request)
-    {
-        request = null;
-        string foldedKey = GetFoldedShxRedirectKey(normalized, kind);
-        if (!FoldedShxRegisteredRedirects.TryGetValue(foldedKey, out request))
-            return false;
-
-        if (request != null)
-            return true;
-
-        LogFoldedRedirectAmbiguity(normalized, kind);
-        return false;
-    }
-
-    private static void AddFoldedShxRegisteredRedirect(
-        string normalized,
-        FontRedirectKind kind,
-        RegisteredRedirect request)
-    {
-        if (kind == FontRedirectKind.TrueType)
-            return;
-
-        string foldedKey = GetFoldedShxRedirectKey(normalized, kind);
-        FoldedShxRegisteredRedirects.AddOrUpdate(
-            foldedKey,
-            request,
-            (_, existing) => existing != null
-                             && string.Equals(existing.OriginalFont, request.OriginalFont, StringComparison.OrdinalIgnoreCase)
-                ? MergeRegisteredRedirect(existing, request)
-                : null);
-    }
-
-    private static string GetFoldedShxRedirectKey(string normalized, FontRedirectKind kind)
-        => string.Concat(kind, "\u001F", normalized.ToUpperInvariant());
-
-    private static void LogFoldedRedirectAmbiguity(string normalized, FontRedirectKind kind)
-    {
-        string logKey = string.Concat("folded-redirect-ambiguous|", kind, "|", normalized.ToUpperInvariant());
-        if (FoldedRedirectAmbiguityLogSeen.TryAdd(logKey, 0))
-        {
-            DiagnosticLogger.Log(Tag,
-                $"ldfile SHX 请求大小写恢复存在歧义，已跳过: kind={kind} request='{normalized}'");
-        }
     }
 
     private static bool TryGetExportAddress(
@@ -514,9 +295,6 @@ internal static class LdFileHook
         return true;
     }
 
-    private static string GetRedirectKey(string normalized, FontRedirectKind kind)
-        => string.Concat(normalized, "\u001F", kind);
-
     private static bool IsRegisterableLoadFontName(string fontName, FontRedirectKind kind)
     {
         if (string.IsNullOrWhiteSpace(fontName))
@@ -525,37 +303,6 @@ internal static class LdFileHook
         return kind == FontRedirectKind.TrueType
             ? !fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase)
             : fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string NormalizeLoadFontName(string fontName, FontRedirectKind kind)
-    {
-        return kind == FontRedirectKind.TrueType
-            ? NormalizeLoadTrueTypeName(fontName)
-            : NormalizeLoadShxName(fontName);
-    }
-
-    private static string NormalizeReplacementFontName(
-        string fontName,
-        FontRedirectKind kind,
-        string original)
-    {
-        // TrueType 替换保留 @ 前缀以保留竖排语义；SHX 替换交给 ldfile 加载基础 shx 文件。
-        if (kind != FontRedirectKind.TrueType)
-            return FontRedirectResolver.EnsureShx(fontName);
-
-        string replacement = NormalizeLoadTrueTypeName(fontName);
-        if (string.IsNullOrWhiteSpace(replacement))
-            return string.Empty;
-
-        if (original.Length > 1 && original[0] == '@' && replacement[0] != '@')
-            replacement = "@" + replacement.TrimStart('@');
-
-        return replacement;
-    }
-
-    private static string NormalizeLoadTrueTypeName(string fontName)
-    {
-        return MTextFontParser.NormalizeTrueTypeFontName(fontName);
     }
 
     private static string NormalizeLoadShxName(string fontName)

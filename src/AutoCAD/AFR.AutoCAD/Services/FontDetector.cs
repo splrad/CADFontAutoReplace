@@ -97,8 +97,9 @@ internal static class FontDetector
                     continue;
                 }
 
-                // TrueType 样式: 验证字体可用才跳过
-                // IsTrueTypeFontAvailable 通过系统字体索引 + FindFile + 本地化反查三重验证
+                // TrueType 样式: 验证字体可用才跳过。
+                // 普通 face 通过 GDI face 索引、系统字体索引、FindFile 和本地化反查验证；
+                // @TrueType 不参与永久写回，后续运行时流程只用 GDI exact face 判断。
                 if (isTrueType)
                 {
                     var typeFace = safeFont!.Value.TypeFace!;
@@ -235,12 +236,10 @@ internal static class FontDetector
         if (!FontRedirectResolver.HasAtPrefix(original))
             return null;
 
-        string baseName = FontRedirectResolver.StripLeadingAtPrefix(original);
-        if (!string.IsNullOrWhiteSpace(baseName)
-            && IsRuntimeTrueTypeFontAvailable(baseName, context))
+        if (FontRedirectResolver.IsAvailableTrueType(original))
         {
             DiagnosticLogger.Log("检测",
-                $"样式 '{styleName}' 的 @TrueType '{original}' 去 @ 后基础字体 '{baseName}' 可用，跳过样式表运行时映射");
+                $"样式 '{styleName}' 的 @TrueType '{original}' 已由 GDI 枚举到，跳过样式表运行时映射");
             return null;
         }
 
@@ -344,7 +343,7 @@ internal static class FontDetector
 
     /// <summary>
     /// 检查 TrueType 字体是否可用。
-    /// 依次通过：系统字体索引 → FindFile（FileName）→ FindFile（.ttf/.ttc/.otf）→ WPF 本地化名称反查。
+    /// 依次通过：GDI face 索引 → 系统字体索引 → FindFile（FileName）→ FindFile（.ttf/.ttc/.otf）→ WPF 本地化名称反查。
     /// </summary>
     private static bool IsTrueTypeFontAvailable(string typeface, string fileName, FontDetectionContext context)
     {
@@ -360,6 +359,7 @@ internal static class FontDetector
         var task = _systemFontNamesTask;
         bool indexReady = task.Status == TaskStatus.RanToCompletion;
 
+        if (GdiTrueTypeFontFaceIndex.IsFaceAvailable(typeface)) return true;
         if (indexReady && task.Result.Contains(typeface)) return true;
         if (!string.IsNullOrWhiteSpace(fileName)
             && TryFindFile(NormalizeFontName(fileName), context, FindFileHint.TrueTypeFontFile)) return true;

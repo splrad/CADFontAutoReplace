@@ -33,7 +33,7 @@ internal sealed class DocumentContextManager
     // MText 内联字体修复记录
     private readonly Dictionary<string, List<InlineFontFixRecord>> _inlineFontFixResults = new(StringComparer.OrdinalIgnoreCase);
     // Hook 运行时字体映射记录
-    private readonly Dictionary<string, List<RuntimeFontMappingRecord>> _runtimeFontMappingResults = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<RuntimeFontMappingResultRecord>> _runtimeFontMappingResults = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
 
     private DocumentContextManager() { }
@@ -182,7 +182,7 @@ internal sealed class DocumentContextManager
     /// <summary>
     /// 存储文档的运行时字体映射记录，供 AFRLOG 命令使用。
     /// </summary>
-    public void StoreRuntimeFontMappingResults(Document doc, List<RuntimeFontMappingRecord> results)
+    public void StoreRuntimeFontMappingResults(Document doc, List<RuntimeFontMappingResultRecord> results)
     {
         if (doc == null) return;
         var key = GetDocumentKey(doc);
@@ -196,7 +196,7 @@ internal sealed class DocumentContextManager
     /// <summary>
     /// 获取文档的运行时字体映射记录。
     /// </summary>
-    public List<RuntimeFontMappingRecord>? GetRuntimeFontMappingResults(Document doc)
+    public List<RuntimeFontMappingResultRecord>? GetRuntimeFontMappingResults(Document doc)
     {
         if (doc == null) return null;
         var key = GetDocumentKey(doc);

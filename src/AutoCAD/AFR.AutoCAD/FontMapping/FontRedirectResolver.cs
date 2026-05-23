@@ -233,7 +233,9 @@ internal static class FontRedirectResolver
         if (string.IsNullOrWhiteSpace(lookupName))
             return false;
 
-        if (hadAtPrefix && TryResolveAvailableBase(lookupName, kind, out string baseFont))
+        if (hadAtPrefix
+            && kind != FontRedirectKind.TrueType
+            && TryResolveAvailableBase(lookupName, kind, out string baseFont))
         {
             resolution = new FontRedirectResolution(
                 original,
@@ -364,17 +366,14 @@ internal static class FontRedirectResolver
 
     internal static bool IsAvailableTrueType(string name)
     {
-        string normalized = NormalizeInputName(name).TrimStart('@');
+        string normalized = NormalizeInputName(name);
         if (string.IsNullOrWhiteSpace(normalized))
             return false;
 
         if (FontDetector.IsTrueTypeFontFile(normalized))
             return FontAvailabilityIndex.IsExactKnownAvailableFont(normalized);
 
-        if (FontDetector.IsSystemFont(normalized))
-            return true;
-
-        if (FontAvailabilityIndex.IsKnownAvailableFont(normalized))
+        if (GdiTrueTypeFontFaceIndex.IsFaceAvailable(normalized))
             return true;
 
         return false;
@@ -398,7 +397,7 @@ internal static class FontRedirectResolver
         bool hasAtPrefix)
     {
         if (kind == FontRedirectKind.TrueType)
-            return IsAvailableTrueType(hasAtPrefix ? lookupName : original);
+            return IsAvailableTrueType(original);
 
         string shxName = NormalizeShxPreserveAt(original);
         if (!FontAvailabilityIndex.IsExactKnownAvailableFont(shxName))

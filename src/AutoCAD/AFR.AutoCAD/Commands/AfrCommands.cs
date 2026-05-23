@@ -123,7 +123,7 @@ public class AfrCommands
             List<FontCheckResult>? results;
             HashSet<string>? stillMissingStyleNames = null;
             Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? currentFonts = null;
-            List<RuntimeFontMappingRecord>? runtimeFontMappings = null;
+            List<RuntimeFontMappingResultRecord>? runtimeFontMappings = null;
             var config = ConfigService.Instance;
 
             using (doc.LockDocument())
@@ -211,7 +211,7 @@ public class AfrCommands
                 List<FontCheckResult> freshResults;
                 HashSet<string>? freshMissing = null;
                 Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? freshFonts = null;
-                List<RuntimeFontMappingRecord>? freshRuntimeMappings = null;
+                List<RuntimeFontMappingResultRecord>? freshRuntimeMappings = null;
 
                 using (doc.LockDocument())
                 {

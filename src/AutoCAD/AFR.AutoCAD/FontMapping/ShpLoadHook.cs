@@ -87,7 +87,7 @@ internal static class ShpLoadHook
         string ReplacementFont,
         string Source,
         InlineFontType? InlineType,
-        bool RegisteredBridge);
+        FontRuntimeRequest? Request);
 
     internal static bool IsInstalled => _hook?.IsInstalled == true;
 
@@ -196,6 +196,9 @@ internal static class ShpLoadHook
             return trampoline(fileName, param2, db, flag, arg5, arg6, arg7, arg8, charset, pitch, family);
         }
 
+        if (!FontRuntimeRequestRegistry.HasTrueTypeRequests)
+            return trampoline(fileName, param2, db, flag, arg5, arg6, arg7, arg8, charset, pitch, family);
+
         _inHook = true;
         string requestName = FormatPointer(fileName);
         string arg5Text = FormatPointer(arg5);
@@ -234,15 +237,15 @@ internal static class ShpLoadHook
                         $"style={styleScope} mtext={mTextScope}");
                 }
 
-                if (TryCreateDiagnosticRedirect(arg6Value, "arg6", allowDirectTrueType: true, out redirect))
+                if (TryCreateRegisteredRedirect(arg6Value, "arg6", out redirect))
                 {
                     effectiveArg6 = GetNativeString(redirect!.ReplacementFont);
                 }
-                else if (TryCreateDiagnosticRedirect(fileNameValue, "fileName", allowDirectTrueType: false, out redirect))
+                else if (TryCreateRegisteredRedirect(fileNameValue, "fileName", out redirect))
                 {
                     effectiveFileName = GetNativeString(redirect!.ReplacementFont);
                 }
-                else if (TryCreateDiagnosticRedirect(arg5Value, "arg5", allowDirectTrueType: false, out redirect))
+                else if (TryCreateRegisteredRedirect(arg5Value, "arg5", out redirect))
                 {
                     effectiveArg5 = GetNativeString(redirect!.ReplacementFont);
                 }
@@ -267,18 +270,9 @@ internal static class ShpLoadHook
                             $"style={styleScope} mtext={mTextScope}");
                     }
 
-                    if (redirect.RegisteredBridge)
-                    {
-                        LdFileHook.MarkRegisteredRedirectHit(redirect.NormalizedRequest, FontRedirectKind.TrueType);
-                    }
-
-                    if (redirect.InlineType.HasValue)
-                    {
-                        FontRuntimeMappingStore.RecordInlineMapping(
-                            redirect.OriginalDisplayFont,
-                            redirect.ReplacementFont,
-                            redirect.InlineType.Value);
-                    }
+                    FontRuntimeRequestRegistry.MarkHit(redirect.NormalizedRequest, FontRedirectKind.TrueType);
+                    if (redirect.Request != null)
+                        FontRuntimeMappingStore.RecordRuntimeMapping(redirect.Request, "ShpLoadHook", "已映射");
                 }
             }
             catch (Exception ex)
@@ -488,70 +482,36 @@ internal static class ShpLoadHook
         return new NativeStringValue(text, $"{text}@{pointer}");
     }
 
-    private static bool TryCreateDiagnosticRedirect(
+    private static bool TryCreateRegisteredRedirect(
         NativeStringValue value,
         string argumentName,
-        bool allowDirectTrueType,
         out ShpLoadRedirectApplication? redirect)
     {
         redirect = null;
         if (string.IsNullOrWhiteSpace(value.Text))
             return false;
 
-        if (LdFileHook.TryGetRegisteredTrueTypeRedirect(
+        if (FontRuntimeRequestRegistry.TryGetTrueTypeRequest(
                 value.Text,
-                out LdFileHook.RuntimeBridgeRedirect? match)
+                out FontRuntimeRequest? match,
+                out string normalized)
             && match != null)
         {
+            if (string.Equals(normalized, match.ReplacementFont, StringComparison.OrdinalIgnoreCase))
+                return false;
+
             redirect = new ShpLoadRedirectApplication(
                 argumentName,
-                match.NormalizedRequest,
+                normalized,
                 match.OriginalDisplayFont,
                 match.ReplacementFont,
                 match.Source,
                 match.InlineType,
-                RegisteredBridge: true);
+                match);
             return true;
         }
 
-        return allowDirectTrueType && TryCreateDirectTrueTypeRedirect(value, argumentName, out redirect);
-    }
-
-    private static bool TryCreateDirectTrueTypeRedirect(
-        NativeStringValue value,
-        string argumentName,
-        out ShpLoadRedirectApplication? redirect)
-    {
-        redirect = null;
-        string original = MTextFontParser.NormalizeTrueTypeFontName(value.Text);
-        if (string.IsNullOrWhiteSpace(original) || original[0] == '@' || IsShxFontName(original))
-            return false;
-
-        FontLogicalReplacement resolution = FontRedirectResolver.ResolveLogicalFont(
-            original,
-            FontRedirectKind.TrueType,
-            preserveOriginalLoadRequest: false);
-        if (resolution.Action != FontLogicalReplacementAction.DirectLogicalReplacement)
-            return false;
-
-        string replacement = FontRedirectResolver.NormalizeInputName(resolution.ReplacementName).TrimStart('@');
-        string lookup = original.TrimStart('@');
-        if (string.IsNullOrWhiteSpace(replacement)
-            || string.Equals(original, replacement, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(lookup, replacement, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        redirect = new ShpLoadRedirectApplication(
-            argumentName,
-            original,
-            value.Text,
-            replacement,
-            "ShpLoadHook:directTrueType",
-            InlineFontType.TrueType,
-            RegisteredBridge: false);
-        return true;
+        return false;
     }
 
     private static bool IsShxFontName(string fontName)

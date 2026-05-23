@@ -4,80 +4,83 @@ using AFR.Models;
 namespace AFR.FontMapping;
 
 /// <summary>
-/// 记录当前执行周期内两个字体 Hook 实际命中的运行时映射。
+/// 记录当前执行周期内文件级字体 Hook 实际命中的运行时映射。
 /// </summary>
 internal static class FontRuntimeMappingStore
 {
-    private static readonly ConcurrentDictionary<string, RuntimeFontMappingRecord> StyleMappings =
-        new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, InlineFontFixRecord> InlineMappings =
+    private static readonly ConcurrentDictionary<string, RuntimeFontMappingResultRecord> RuntimeMappings =
         new(StringComparer.OrdinalIgnoreCase);
 
     internal static void Clear()
     {
-        ClearStyleMappings();
-        ClearInlineMappings();
+        RuntimeMappings.Clear();
     }
 
-    internal static void ClearStyleMappings() => StyleMappings.Clear();
-
-    internal static void ClearInlineMappings() => InlineMappings.Clear();
-
-    internal static void RecordStyleMapping(RuntimeFontMappingRecord record)
+    internal static void RecordRuntimeMapping(
+        FontRuntimeRequest request,
+        string executingHook,
+        string result)
     {
-        if (string.IsNullOrWhiteSpace(record.StyleName)
-            || string.IsNullOrWhiteSpace(record.OriginalFont)
-            || string.IsNullOrWhiteSpace(record.ReplacementFont))
+        if (string.IsNullOrWhiteSpace(request.OriginalDisplayFont)
+            || string.IsNullOrWhiteSpace(request.ReplacementFont))
         {
             return;
         }
 
-        StyleMappings[GetStyleKey(record)] = record;
+        string source = NormalizeSource(request.Source);
+        string owner = !string.IsNullOrWhiteSpace(request.Owner)
+            ? request.Owner
+            : source == "样式表" ? string.Empty : "多行文字";
+        string hook = string.IsNullOrWhiteSpace(executingHook) ? request.ExecutingHook : executingHook;
+        string normalizedResult = string.IsNullOrWhiteSpace(result) ? "已映射" : result;
+
+        var record = new RuntimeFontMappingResultRecord(
+            source,
+            owner,
+            FontRedirectResolver.NormalizeInputName(request.OriginalDisplayFont),
+            request.BaseFont,
+            GetFontTypeText(request.Kind),
+            FontRedirectResolver.NormalizeInputName(request.ReplacementFont),
+            hook,
+            normalizedResult);
+
+        RuntimeMappings[GetRuntimeKey(record)] = record;
     }
 
-    internal static void RecordInlineMapping(
-        string originalFont,
-        string replacementFont,
-        InlineFontType inlineType)
-    {
-        if (string.IsNullOrWhiteSpace(originalFont) || string.IsNullOrWhiteSpace(replacementFont))
-            return;
-
-        string category = inlineType switch
-        {
-            InlineFontType.ShxBigFont => "SHX大字体",
-            InlineFontType.TrueType => "TrueType映射",
-            _ => "SHX主字体"
-        };
-
-        string normalizedOriginal = FontRedirectResolver.NormalizeInputName(originalFont);
-        if (string.IsNullOrWhiteSpace(normalizedOriginal))
-            return;
-
-        var record = new InlineFontFixRecord(
-            normalizedOriginal,
-            FontRedirectResolver.NormalizeInputName(replacementFont),
-            "MText内联",
-            category);
-
-        InlineMappings[GetInlineKey(record)] = record;
-    }
-
-    internal static List<RuntimeFontMappingRecord> GetStyleMappings()
-        => StyleMappings.Values
-            .OrderBy(x => x.StyleName, StringComparer.Ordinal)
+    internal static List<RuntimeFontMappingResultRecord> GetRuntimeMappingResults()
+        => RuntimeMappings.Values
+            .OrderBy(x => x.Source, StringComparer.Ordinal)
+            .ThenBy(x => x.Owner, StringComparer.Ordinal)
             .ThenBy(x => x.OriginalFont, StringComparer.Ordinal)
             .ToList();
 
-    internal static List<InlineFontFixRecord> GetInlineMappings()
-        => InlineMappings.Values
-            .OrderBy(x => x.MissingFont, StringComparer.Ordinal)
-            .ThenBy(x => x.ReplacementFont, StringComparer.Ordinal)
-            .ToList();
+    private static string NormalizeSource(string source)
+    {
+        if (source.StartsWith("StyleTextStyleHook", StringComparison.OrdinalIgnoreCase))
+            return "样式表";
+        if (source.StartsWith("MText", StringComparison.OrdinalIgnoreCase)
+            || source.StartsWith("AcGiTextStyle", StringComparison.OrdinalIgnoreCase))
+            return "MText";
+        return string.IsNullOrWhiteSpace(source) ? "未知" : source;
+    }
 
-    private static string GetStyleKey(RuntimeFontMappingRecord record)
-        => string.Concat(record.StyleName, "\u001F", record.OriginalFont, "\u001F", record.MappingCategory);
+    private static string GetFontTypeText(FontRedirectKind kind)
+        => kind switch
+        {
+            FontRedirectKind.TrueType => "TrueType字体",
+            FontRedirectKind.ShxBigFont => "SHX大字体",
+            _ => "SHX主字体"
+        };
 
-    private static string GetInlineKey(InlineFontFixRecord record)
-        => string.Concat(record.MissingFont, "\u001F", record.ReplacementFont, "\u001F", record.FontCategory);
+    private static string GetRuntimeKey(RuntimeFontMappingResultRecord record)
+        => string.Concat(
+            record.Source,
+            "\u001F",
+            record.Owner,
+            "\u001F",
+            record.OriginalFont,
+            "\u001F",
+            record.FontType,
+            "\u001F",
+            record.ExecutingHook);
 }

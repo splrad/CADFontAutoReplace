@@ -15,6 +15,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontAvailabilityIndex.cs" Link="FontMapping\FontAvailabilityIndex.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontRedirectResolver.cs" Link="FontMapping\FontRedirectResolver.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontRuntimeMappingStore.cs" Link="FontMapping\FontRuntimeMappingStore.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontRuntimeRequestRegistry.cs" Link="FontMapping\FontRuntimeRequestRegistry.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\LdFileHook.cs" Link="FontMapping\LdFileHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MapFontDiagnosticHook.cs" Link="FontMapping\MapFontDiagnosticHook.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextFontParser.cs" Link="FontMapping\MTextFontParser.cs" />
@@ -35,6 +36,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetectionContext.cs" Link="Services\FontDetectionContext.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontDetector.cs" Link="Services\FontDetector.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\FontReplacer.cs" Link="Services\FontReplacer.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Services\GdiTrueTypeFontFaceIndex.cs" Link="Services\GdiTrueTypeFontFaceIndex.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Services\LogService.cs" Link="Services\LogService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\EmbeddedFontDeployer.cs" Link="Hosting\EmbeddedFontDeployer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AssemblyRegistryDefaults.cs" Link="Hosting\AssemblyRegistryDefaults.cs" />

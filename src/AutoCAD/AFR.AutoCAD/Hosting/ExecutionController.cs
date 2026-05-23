@@ -118,7 +118,7 @@ internal sealed class ExecutionController
 
                 // 第四阶段: 仅登记样式表 @TrueType 缺失字体的临时运行时映射。
                 var runtimeFontMappings = FontDetector.CollectRuntimeFontMappings(postContext, config.TrueTypeFont);
-                List<RuntimeFontMappingRecord> actualStyleRuntimeMappings = [];
+                List<RuntimeFontMappingResultRecord> actualStyleRuntimeMappings = [];
                 if (runtimeFontMappings.Count > 0)
                 {
                     DiagnosticLogger.BeginPhase("样式表运行时映射");
@@ -129,7 +129,9 @@ internal sealed class ExecutionController
                     // 让样式表 @TrueType 映射在 StyleTextStyleHook 中命中，不能与最终视觉刷新合并。
                     doc.Editor.Regen();
 
-                    actualStyleRuntimeMappings = FontRuntimeMappingStore.GetStyleMappings();
+                    actualStyleRuntimeMappings = FontRuntimeMappingStore.GetRuntimeMappingResults()
+                        .Where(item => string.Equals(item.Source, "样式表", StringComparison.OrdinalIgnoreCase))
+                        .ToList();
                     contextMgr.StoreRuntimeFontMappingResults(doc, actualStyleRuntimeMappings);
                     DiagnosticLogger.EndPhase($"登记: {runtimeFontMappings.Count}项, 命中: {actualStyleRuntimeMappings.Count}项");
                 }
@@ -142,17 +144,17 @@ internal sealed class ExecutionController
                 // 不改写 MText.Contents，避免接管 CAD 原生内联格式解析。
                 DiagnosticLogger.BeginPhase("扫描MText内联字体");
                 MTextInlineFontScanResult inlineScanResult;
-                List<InlineFontFixRecord> inlineFixResults;
+                List<RuntimeFontMappingResultRecord> allRuntimeMappingResults;
                 string hookStatsBeforeInlineScan;
                 string hookStatsAfterInlineRegen;
-                int preRegisteredTrueTypeMappings = 0;
+                int preRegisteredInlineMappings = 0;
                 string runtimeBridgeRegistrationSummary;
                 MTextInlineFontHook.Install();
                 try
                 {
                     hookStatsBeforeInlineScan = MTextInlineFontHook.GetDiagnosticsSummary();
                     inlineScanResult = MTextInlineFontScanner.ScanInlineFonts(doc.Database);
-                    preRegisteredTrueTypeMappings = MTextInlineFontHook.PreRegisterTrueTypeRuntimeBridgeMappings();
+                    preRegisteredInlineMappings = MTextInlineFontHook.PreRegisterRuntimeRequests();
                     if (inlineScanResult.InlineFonts.Count > 0)
                     {
                         // 触发型 Regen: MTextInlineFontHook 依赖 CAD 的 MText 展开/绘制流程命中实际内联字体。
@@ -160,10 +162,10 @@ internal sealed class ExecutionController
                         doc.Editor.Regen();
                     }
 
-                    inlineFixResults = FontRuntimeMappingStore.GetInlineMappings();
+                    allRuntimeMappingResults = FontRuntimeMappingStore.GetRuntimeMappingResults();
                     hookStatsAfterInlineRegen = MTextInlineFontHook.GetDiagnosticsSummary();
                     runtimeBridgeRegistrationSummary = BuildInlineRuntimeBridgeRegistrationSummary(
-                        LdFileHook.GetRegisteredRedirectDiagnosticsSnapshot());
+                        FontRuntimeRequestRegistry.GetDiagnosticsSnapshot());
                     DiagnosticLogger.Log("LdFileHook",
                         $"MText内联字体加载桥接登记诊断: {runtimeBridgeRegistrationSummary}");
                 }
@@ -172,15 +174,16 @@ internal sealed class ExecutionController
                     MTextInlineFontHook.Uninstall();
                 }
 
-                contextMgr.StoreInlineFontFixResults(doc, inlineFixResults);
+                contextMgr.StoreInlineFontFixResults(doc, []);
+                contextMgr.StoreRuntimeFontMappingResults(doc, allRuntimeMappingResults);
                 DiagnosticLogger.EndPhase(
                     $"MText: {inlineScanResult.MTextCount}个, " +
                     $"内联字体: {inlineScanResult.InlineFonts.Count}个, " +
                     $"fragment展开: {inlineScanResult.FragmentExpansionSuccesses}/{inlineScanResult.FragmentExpansionAttempts}个, " +
                     $"片段: {inlineScanResult.FragmentCount}个, " +
                     $"失败: {inlineScanResult.FragmentExpansionFailures}个, " +
-                    $"映射: {inlineFixResults.Count}个, " +
-                    $"Regen前@TrueType登记: {preRegisteredTrueTypeMappings}个, " +
+                    $"映射: {allRuntimeMappingResults.Count(item => string.Equals(item.Source, "MText", StringComparison.OrdinalIgnoreCase))}个, " +
+                    $"Regen前内联登记: {preRegisteredInlineMappings}个, " +
                     $"字体加载桥接登记=[{runtimeBridgeRegistrationSummary}], " +
                     $"HookBefore=[{hookStatsBeforeInlineScan}], " +
                     $"HookAfter=[{hookStatsAfterInlineRegen}]");
@@ -211,7 +214,7 @@ internal sealed class ExecutionController
                     missingFonts,
                     stillMissing,
                     styleRuntimeMappingCount: actualStyleRuntimeMappings.Count,
-                    mtextMappingCount: inlineFixResults.Count);
+                    mtextMappingCount: allRuntimeMappingResults.Count(item => string.Equals(item.Source, "MText", StringComparison.OrdinalIgnoreCase)));
                 DiagnosticLogger.WriteSummary();
                 summarized = true;
                 log.Flush();
@@ -295,7 +298,7 @@ internal sealed class ExecutionController
     }
 
     private static string BuildInlineRuntimeBridgeRegistrationSummary(
-        IReadOnlyList<LdFileHook.RegisteredRedirectDiagnostic> diagnostics)
+        IReadOnlyList<FontRuntimeRequestDiagnostic> diagnostics)
     {
         var inlineDiagnostics = diagnostics
             .Where(item => item.InlineType.HasValue)

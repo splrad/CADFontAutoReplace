@@ -110,9 +110,9 @@ public void YourCommand() { }
 
 ### 错误 3：改 Hook 后行为异常
 
-`LdFileHook`、`StyleTextStyleHook`、`MTextInlineFontHook` 涉及非托管逻辑，改动要小、每次改完都实测。数据库读写、样式表检测、字体文件查找应优先使用 AutoCAD 托管 API；字体加载期重定向、样式表 `@TrueType` 运行时映射和 MText 内联字体运行时映射才使用 Hook。
+`LdFileHook`、`ShpLoadHook`、`StyleTextStyleHook`、`MTextInlineFontHook` 涉及非托管逻辑，改动要小、每次改完都实测。数据库读写、样式表检测、SHX 文件查找应优先使用 AutoCAD 托管 API；TrueType face 和 `@TrueType` vertical face 是否存在必须以 Windows GDI 枚举结果为准。
 
-样式表 `@SHX` 主字体和大字体缺失走永久替换；样式表 `@TrueType` 保留运行时映射，不要永久写回样式表。
+样式表 `@SHX` 主字体和大字体缺失走永久替换；样式表 `@TrueType` 保留运行时映射，不要永久写回样式表。运行时映射必须先由 `StyleTextStyleHook` 或 `MTextInlineFontHook` 登记，再由 `LdFileHook`（SHX）或 `ShpLoadHook`（TrueType）执行；未登记字体必须快速放行。
 
 ### 错误 4：改了代码但 CAD 行为没变化
 

@@ -82,15 +82,19 @@ public sealed class FontMappingDisplayRow
         string source,
         string styleName,
         string missingFont,
+        string baseFont,
         string fontType,
         string replacementFont,
+        string executingHook,
         string status)
     {
         Source = source;
         StyleName = styleName;
         MissingFont = missingFont;
+        BaseFont = baseFont;
         FontType = fontType;
         ReplacementFont = replacementFont;
+        ExecutingHook = executingHook;
         Status = status;
     }
 
@@ -100,9 +104,13 @@ public sealed class FontMappingDisplayRow
 
     public string MissingFont { get; }
 
+    public string BaseFont { get; }
+
     public string FontType { get; }
 
     public string ReplacementFont { get; }
+
+    public string ExecutingHook { get; }
 
     public string Status { get; }
 }
@@ -306,7 +314,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         string globalTrueTypeFont,
         Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? currentFonts = null,
         IReadOnlyList<InlineFontFixRecord>? inlineFixResults = null,
-        IReadOnlyList<RuntimeFontMappingRecord>? runtimeMappingResults = null,
+        IReadOnlyList<RuntimeFontMappingResultRecord>? runtimeMappingResults = null,
         HashSet<string>? stillMissingStyleNames = null)
     {
         _applyCommand = new UiRelayCommand(ApplyReplacements, () => HasUserChanges);
@@ -434,17 +442,20 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         if (runtimeMappingResults != null)
         {
             foreach (var r in runtimeMappingResults
-                          .OrderBy(r => r.StyleName, StringComparer.Ordinal)
-                          .ThenBy(r => GetFontTypeOrder(r.MappingCategory))
+                          .OrderBy(r => r.Source, StringComparer.Ordinal)
+                          .ThenBy(r => r.Owner, StringComparer.Ordinal)
+                          .ThenBy(r => GetFontTypeOrder(r.FontType))
                           .ThenBy(r => r.OriginalFont, StringComparer.Ordinal))
             {
                 FontMappingItems.Add(new FontMappingDisplayRow(
-                    "样式表",
-                    r.StyleName,
+                    r.Source,
+                    r.Owner,
                     r.OriginalFont,
-                    NormalizeFontType(r.MappingCategory),
+                    r.BaseFont,
+                    NormalizeFontType(r.FontType),
                     r.ReplacementFont,
-                    r.Status));
+                    r.ExecutingHook,
+                    r.Result));
             }
         }
 
@@ -459,8 +470,10 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
                     "MText",
                     "多行文字",
                     r.MissingFont,
+                    string.Empty,
                     NormalizeFontType(r.FontCategory),
                     r.ReplacementFont,
+                    string.Empty,
                     string.Empty));
             }
         }
@@ -480,7 +493,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         string fontType = NormalizeFontType(category);
         return fontType switch
         {
-            "SHX字体" => 0,
+            "SHX主字体" => 0,
             "SHX大字体" => 1,
             _ => 2
         };
@@ -494,7 +507,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         if (category.Contains("TrueType", StringComparison.OrdinalIgnoreCase))
             return "TrueType字体";
 
-        return "SHX字体";
+        return "SHX主字体";
     }
 
     private void OnRowPropertyChanged(object? sender, PropertyChangedEventArgs e)

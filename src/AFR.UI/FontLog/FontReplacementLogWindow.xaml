@@ -161,10 +161,13 @@
 									<Grid>
 										<Grid.ColumnDefinitions>
 											<ColumnDefinition Width="70"/>
-											<ColumnDefinition Width="2*"/>
-											<ColumnDefinition Width="2*"/>
+											<ColumnDefinition Width="1.4*"/>
+											<ColumnDefinition Width="1.6*"/>
+											<ColumnDefinition Width="1.2*"/>
+											<ColumnDefinition Width="95"/>
+											<ColumnDefinition Width="1.6*"/>
+											<ColumnDefinition Width="88"/>
 											<ColumnDefinition Width="105"/>
-											<ColumnDefinition Width="2*"/>
 										</Grid.ColumnDefinitions>
 										<TextBlock Grid.Column="0" Text="来源" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
@@ -175,10 +178,19 @@
 										<TextBlock Grid.Column="2" Text="缺失字体" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
 												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
-										<TextBlock Grid.Column="3" Text="类型" FontSize="10"
+										<TextBlock Grid.Column="3" Text="基础字体" FontSize="10"
+												   Foreground="{DynamicResource SecondaryTextBrush}"
+												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
+										<TextBlock Grid.Column="4" Text="类型" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
 												   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-										<TextBlock Grid.Column="4" Text="映射字体" FontSize="10"
+										<TextBlock Grid.Column="5" Text="映射字体" FontSize="10"
+												   Foreground="{DynamicResource SecondaryTextBrush}"
+												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
+										<TextBlock Grid.Column="6" Text="执行Hook" FontSize="10"
+												   Foreground="{DynamicResource SecondaryTextBrush}"
+												   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+										<TextBlock Grid.Column="7" Text="结果" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
 												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
 									</Grid>
@@ -327,10 +339,13 @@
 											<Grid>
 												<Grid.ColumnDefinitions>
 													<ColumnDefinition Width="70"/>
-													<ColumnDefinition Width="2*"/>
-													<ColumnDefinition Width="2*"/>
+													<ColumnDefinition Width="1.4*"/>
+													<ColumnDefinition Width="1.6*"/>
+													<ColumnDefinition Width="1.2*"/>
+													<ColumnDefinition Width="95"/>
+													<ColumnDefinition Width="1.6*"/>
+													<ColumnDefinition Width="88"/>
 													<ColumnDefinition Width="105"/>
-													<ColumnDefinition Width="2*"/>
 												</Grid.ColumnDefinitions>
 												<TextBlock Grid.Column="0" Text="来源" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
@@ -341,10 +356,19 @@
 												<TextBlock Grid.Column="2" Text="缺失字体" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
 														   HorizontalAlignment="Left" VerticalAlignment="Center"/>
-												<TextBlock Grid.Column="3" Text="类型" FontSize="10"
+												<TextBlock Grid.Column="3" Text="基础字体" FontSize="10"
+														   Foreground="{DynamicResource SecondaryTextBrush}"
+														   HorizontalAlignment="Left" VerticalAlignment="Center"/>
+												<TextBlock Grid.Column="4" Text="类型" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
 														   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-												<TextBlock Grid.Column="4" Text="映射字体" FontSize="10"
+												<TextBlock Grid.Column="5" Text="映射字体" FontSize="10"
+														   Foreground="{DynamicResource SecondaryTextBrush}"
+														   HorizontalAlignment="Left" VerticalAlignment="Center"/>
+												<TextBlock Grid.Column="6" Text="执行Hook" FontSize="10"
+														   Foreground="{DynamicResource SecondaryTextBrush}"
+														   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+												<TextBlock Grid.Column="7" Text="结果" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
 														   HorizontalAlignment="Left" VerticalAlignment="Center"/>
 											</Grid>
@@ -362,12 +386,15 @@
 												<Grid MinHeight="28">
 													<Grid.ColumnDefinitions>
 														<ColumnDefinition Width="70"/>
-														<ColumnDefinition Width="2*"/>
-														<ColumnDefinition Width="2*"/>
+														<ColumnDefinition Width="1.4*"/>
+														<ColumnDefinition Width="1.6*"/>
+														<ColumnDefinition Width="1.2*"/>
+														<ColumnDefinition Width="95"/>
+														<ColumnDefinition Width="1.6*"/>
+														<ColumnDefinition Width="88"/>
 														<ColumnDefinition Width="105"/>
-														<ColumnDefinition Width="2*"/>
 													</Grid.ColumnDefinitions>
-													<Border Grid.ColumnSpan="5" VerticalAlignment="Bottom" Height="1"
+													<Border Grid.ColumnSpan="8" VerticalAlignment="Bottom" Height="1"
 															Background="{DynamicResource BorderBrush}" Margin="-11,0,-8,-2" />
 													<Border Grid.Column="0" CornerRadius="3"
 															Padding="4,1" Margin="0,0,6,0"
@@ -392,7 +419,11 @@
 															   FontSize="11" VerticalAlignment="Center"
 															   Foreground="{DynamicResource SecondaryTextBrush}"
 															   TextTrimming="CharacterEllipsis"/>
-													<Border Grid.Column="3" CornerRadius="3"
+													<TextBlock Grid.Column="3" Text="{Binding BaseFont}"
+															   FontSize="11" VerticalAlignment="Center"
+															   Foreground="{DynamicResource SecondaryTextBrush}"
+															   TextTrimming="CharacterEllipsis"/>
+													<Border Grid.Column="4" CornerRadius="3"
 															Padding="4,1"
 															HorizontalAlignment="Center" VerticalAlignment="Center">
 														<Border.Style>
@@ -410,10 +441,20 @@
 														</Border.Style>
 														<TextBlock Text="{Binding FontType}" FontSize="9" Foreground="White"/>
 													</Border>
-													<TextBlock Grid.Column="4" Text="{Binding ReplacementFont}"
+													<TextBlock Grid.Column="5" Text="{Binding ReplacementFont}"
 															   FontSize="11" VerticalAlignment="Center"
 															   HorizontalAlignment="Left"
 															   Foreground="{StaticResource RuntimeMappingBrush}"
+															   TextTrimming="CharacterEllipsis"/>
+													<TextBlock Grid.Column="6" Text="{Binding ExecutingHook}"
+															   FontSize="10" VerticalAlignment="Center"
+															   HorizontalAlignment="Center"
+															   Foreground="{DynamicResource SecondaryTextBrush}"
+															   TextTrimming="CharacterEllipsis"/>
+													<TextBlock Grid.Column="7" Text="{Binding Status}"
+															   FontSize="10" VerticalAlignment="Center"
+															   HorizontalAlignment="Left"
+															   Foreground="{DynamicResource PrimaryTextBrush}"
 															   TextTrimming="CharacterEllipsis"/>
 												</Grid>
 											</Border>

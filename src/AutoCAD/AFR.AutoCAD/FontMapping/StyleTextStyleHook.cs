@@ -174,7 +174,6 @@ internal static class StyleTextStyleHook
         _setBigFontFileName = null;
         RuntimeMappingsByStyle.Clear();
         RuntimeApplyHits.Clear();
-        FontRuntimeMappingStore.ClearStyleMappings();
         StyleLoadLogSeen.Clear();
         RuntimeApplyLogSeen.Clear();
         foreach (IntPtr ptr in NativeStringCache.Values)
@@ -225,7 +224,6 @@ internal static class StyleTextStyleHook
             return trampoline(self, db);
 
         bool hasStyleMappings = !RuntimeMappingsByStyle.IsEmpty;
-        bool hasInlineScope = MTextInlineFontHook.IsInsideInlineFontHook;
         bool inStyleRuntimeScope = _styleRuntimeScopeDepth > 0;
 
         _inLoadStyleRecHook = true;
@@ -235,21 +233,10 @@ internal static class StyleTextStyleHook
             string fileName = ReadString(_fileNameGetter, self);
             string bigFontFileName = ReadString(_bigFontFileNameGetter, self);
 
-            bool handledInline = MTextInlineFontHook.HasAnonymousInlineLoadStyleRecCandidate(
-                styleName,
-                fileName,
-                bigFontFileName);
-            if (handledInline)
-                ApplyMTextInlineLoadStyleRecMappings(self);
-            else
-                RegisterObservedAtShxLoadMappings(styleName, fileName, bigFontFileName);
-
             if (hasStyleMappings)
                 ApplyRegisteredStyleMappings(self);
-            if (hasInlineScope && !handledInline)
-                ApplyMTextInlineLoadStyleRecMappings(self);
             int result = trampoline(self, db);
-            if (inStyleRuntimeScope || hasStyleMappings || hasInlineScope || handledInline)
+            if (inStyleRuntimeScope || hasStyleMappings)
                 LogStyleLoad(self, db, result);
             return result;
         }
@@ -492,51 +479,6 @@ internal static class StyleTextStyleHook
         }
     }
 
-    private static bool RegisterObservedAtShxLoadMappings(string styleName, string fileName, string bigFontFileName)
-    {
-        // Only pre-register the ldfile bridge; do not record style runtime mappings or mutate this style.
-        bool registered = false;
-        registered |= RegisterObservedAtShxLoadMapping(styleName, fileName, bigFont: false);
-        registered |= RegisterObservedAtShxLoadMapping(styleName, bigFontFileName, bigFont: true);
-        return registered;
-    }
-
-    private static bool RegisterObservedAtShxLoadMapping(string styleName, string fontName, bool bigFont)
-    {
-        if (string.IsNullOrWhiteSpace(fontName) || !FontRedirectResolver.HasAtPrefix(fontName))
-            return false;
-
-        var kind = bigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
-        string source = string.IsNullOrWhiteSpace(styleName)
-            ? "StyleTextStyleHook:observed"
-            : $"StyleTextStyleHook:observed:{styleName}";
-
-        return LdFileHook.TryPreRegisterRuntimeBridge(
-            fontName,
-            kind,
-            source,
-            null,
-            fontName,
-            out _,
-            out _);
-    }
-
-    private static void ApplyMTextInlineLoadStyleRecMappings(IntPtr self)
-    {
-        string styleName = ReadString(_styleNameGetter, self);
-        string fileName = ReadString(_fileNameGetter, self);
-        string bigFontFileName = ReadString(_bigFontFileNameGetter, self);
-
-        MTextInlineFontHook.TryApplyInlineLoadStyleRecMappings(
-            self,
-            styleName,
-            fileName,
-            bigFontFileName,
-            GetNativeString,
-            _setFileName == null ? null : _setFileName.Invoke,
-            _setBigFontFileName == null ? null : _setBigFontFileName.Invoke);
-    }
-
     private static void ApplyTrueTypeMapping(IntPtr self, string styleName, RuntimeFontMappingRecord mapping)
     {
         bool preserveLoadRequest = FontRedirectResolver.HasAtPrefix(mapping.OriginalFont);
@@ -548,37 +490,29 @@ internal static class StyleTextStyleHook
         if (resolution.Action != FontLogicalReplacementAction.RuntimeLoadBridge)
             return;
 
-        bool registered = LdFileHook.TryPreRegisterRuntimeBridge(
+        bool registered = FontRuntimeRequestRegistry.TryRegisterResolvedRequest(
             mapping.OriginalFont,
             FontRedirectKind.TrueType,
             $"StyleTextStyleHook:{styleName}",
+            styleName,
             null,
             mapping.OriginalFont,
             out _,
-            out string ldFileReplacement);
+            out string registeredReplacement);
         if (!registered)
             return;
 
-        bool runtimeVerticalApplied = false;
-        if (_setVertical != null && preserveLoadRequest)
-        {
-            _setVertical(self, 1);
-            runtimeVerticalApplied = true;
-        }
-
-        RecordRuntimeApplyHit(styleName, mapping);
         LogRuntimeApply(
             styleName,
             mapping,
-            runtimeVerticalApplied ? "registerLdFile+setVertical(TrueType)" : "registerLdFile(TrueType)",
-            ldFileReplacement);
+            "registerShpLoad(TrueType)",
+            registeredReplacement);
     }
 
     private static void RecordRuntimeApplyHit(string styleName, RuntimeFontMappingRecord mapping)
     {
         string key = GetRuntimeMappingKey(mapping.StyleName, mapping.OriginalFont, mapping.MappingCategory);
         RuntimeApplyHits[key] = mapping;
-        FontRuntimeMappingStore.RecordStyleMapping(mapping);
     }
 
     private static string GetRuntimeMappingKey(string styleName, string originalFont, string category)
