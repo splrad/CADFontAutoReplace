@@ -13,6 +13,7 @@ internal sealed record FontRuntimeRequest(
     string Source,
     string Owner,
     InlineFontType? InlineType,
+    IntPtr DbScope,
     string ExecutingHook);
 
 internal sealed record FontRuntimeRequestDiagnostic(
@@ -24,6 +25,7 @@ internal sealed record FontRuntimeRequestDiagnostic(
     string Source,
     string Owner,
     InlineFontType? InlineType,
+    IntPtr DbScope,
     string ExecutingHook,
     bool Hit);
 
@@ -62,12 +64,18 @@ internal static class FontRuntimeRequestRegistry
     }
 
     internal static IReadOnlyList<FontRuntimeRequestDiagnostic> GetDiagnosticsSnapshot()
+        => GetDiagnosticsSnapshot(IntPtr.Zero);
+
+    internal static IReadOnlyList<FontRuntimeRequestDiagnostic> GetDiagnosticsSnapshot(IntPtr dbScope)
     {
         return Requests
-            .Select(pair =>
+            .Values
+            .Where(request => dbScope == IntPtr.Zero
+                              || request.Kind == FontRedirectKind.TrueType
+                              || request.DbScope == dbScope)
+            .Select(request =>
             {
-                FontRuntimeRequest request = pair.Value;
-                bool hit = HitKeys.ContainsKey(GetRequestKey(request.NormalizedRequest, request.Kind));
+                bool hit = HitKeys.ContainsKey(GetRequestKey(request.NormalizedRequest, request.Kind, request.DbScope));
                 return new FontRuntimeRequestDiagnostic(
                     request.NormalizedRequest,
                     request.OriginalDisplayFont,
@@ -77,6 +85,7 @@ internal static class FontRuntimeRequestRegistry
                     request.Source,
                     request.Owner,
                     request.InlineType,
+                    request.DbScope,
                     request.ExecutingHook,
                     hit);
             })
@@ -95,12 +104,35 @@ internal static class FontRuntimeRequestRegistry
         string? originalDisplayName,
         out string sourceKey,
         out string replacement)
+        => TryRegisterResolvedRequest(
+            originalFont,
+            kind,
+            source,
+            owner,
+            inlineType,
+            originalDisplayName,
+            IntPtr.Zero,
+            out sourceKey,
+            out replacement);
+
+    internal static bool TryRegisterResolvedRequest(
+        string originalFont,
+        FontRedirectKind kind,
+        string source,
+        string owner,
+        InlineFontType? inlineType,
+        string? originalDisplayName,
+        IntPtr dbScope,
+        out string sourceKey,
+        out string replacement)
     {
         sourceKey = string.Empty;
         replacement = string.Empty;
 
         string original = NormalizeRequestName(originalFont, kind);
         if (!IsRegisterableRequestName(original, kind))
+            return false;
+        if (kind != FontRedirectKind.TrueType && dbScope == IntPtr.Zero)
             return false;
 
         FontLogicalReplacement resolution = FontRedirectResolver.ResolveLogicalFont(
@@ -137,8 +169,9 @@ internal static class FontRuntimeRequestRegistry
             normalizedSource,
             normalizedOwner,
             inlineType,
+            dbScope,
             executingHook);
-        string key = GetRequestKey(original, kind);
+        string key = GetRequestKey(original, kind, dbScope);
 
         FontRuntimeRequest registered = Requests.AddOrUpdate(
             key,
@@ -166,6 +199,7 @@ internal static class FontRuntimeRequestRegistry
                     ["baseFont"] = baseFont,
                     ["target"] = resolved,
                     ["hook"] = executingHook,
+                    ["dbScope"] = FormatDbScope(dbScope),
                     ["inlineType"] = inlineType?.ToString()
                 });
         }
@@ -182,12 +216,13 @@ internal static class FontRuntimeRequestRegistry
         if (!IsRegisterableRequestName(normalized, FontRedirectKind.TrueType))
             return false;
 
-        return Requests.TryGetValue(GetRequestKey(normalized, FontRedirectKind.TrueType), out request);
+        return Requests.TryGetValue(GetRequestKey(normalized, FontRedirectKind.TrueType, IntPtr.Zero), out request);
     }
 
     internal static bool TryGetShxRequest(
         string fontName,
         FontRedirectKind kind,
+        IntPtr dbScope,
         out FontRuntimeRequest? request,
         out string normalized)
     {
@@ -195,11 +230,13 @@ internal static class FontRuntimeRequestRegistry
         normalized = NormalizeRequestName(fontName, kind);
         if (!IsRegisterableRequestName(normalized, kind))
             return false;
+        if (dbScope == IntPtr.Zero)
+            return false;
 
-        if (Requests.TryGetValue(GetRequestKey(normalized, kind), out request))
+        if (Requests.TryGetValue(GetRequestKey(normalized, kind, dbScope), out request))
             return true;
 
-        string foldedKey = GetFoldedShxKey(normalized, kind);
+        string foldedKey = GetFoldedShxKey(normalized, kind, dbScope);
         if (!FoldedShxRequests.TryGetValue(foldedKey, out request))
             return false;
 
@@ -210,27 +247,59 @@ internal static class FontRuntimeRequestRegistry
         return false;
     }
 
-    internal static bool TryGetUniqueShxRequest(string fontName, out FontRuntimeRequest? request, out string normalized)
-    {
-        request = null;
-        normalized = NormalizeRequestName(fontName, FontRedirectKind.ShxMain);
-        if (!IsRegisterableRequestName(normalized, FontRedirectKind.ShxMain))
-            return false;
+    internal static bool MarkHit(string normalizedFont, FontRedirectKind kind)
+        => MarkHit(normalizedFont, kind, IntPtr.Zero);
 
-        bool foundMain = TryGetShxRequest(normalized, FontRedirectKind.ShxMain, out FontRuntimeRequest? mainRequest, out _);
-        bool foundBig = TryGetShxRequest(normalized, FontRedirectKind.ShxBigFont, out FontRuntimeRequest? bigRequest, out _);
-        if (foundMain == foundBig)
-            return false;
-
-        request = foundMain ? mainRequest : bigRequest;
-        return request != null;
-    }
-
-    internal static void MarkHit(string normalizedFont, FontRedirectKind kind)
+    internal static bool MarkHit(string normalizedFont, FontRedirectKind kind, IntPtr dbScope)
     {
         string normalized = NormalizeRequestName(normalizedFont, kind);
         if (!string.IsNullOrWhiteSpace(normalized))
-            HitKeys.TryAdd(GetRequestKey(normalized, kind), 0);
+            return HitKeys.TryAdd(GetRequestKey(normalized, kind, dbScope), 0);
+
+        return false;
+    }
+
+    internal static void ClearDocumentScopedShxRequests(IntPtr dbScope)
+    {
+        if (dbScope == IntPtr.Zero)
+            return;
+
+        bool removed = false;
+        foreach (var pair in Requests)
+        {
+            FontRuntimeRequest request = pair.Value;
+            if (request.Kind == FontRedirectKind.TrueType || request.DbScope != dbScope)
+                continue;
+
+            removed |= Requests.TryRemove(pair.Key, out _);
+        }
+
+        if (removed)
+        {
+            LogSeen.Clear();
+            FoldedAmbiguityLogSeen.Clear();
+            RebuildDerivedIndexes();
+        }
+    }
+
+    internal static void ClearTransientRequests()
+    {
+        bool removed = false;
+        foreach (var pair in Requests)
+        {
+            FontRuntimeRequest request = pair.Value;
+            if (request.Kind != FontRedirectKind.TrueType && request.DbScope != IntPtr.Zero)
+                continue;
+
+            removed |= Requests.TryRemove(pair.Key, out _);
+        }
+
+        if (removed)
+        {
+            LogSeen.Clear();
+            FoldedAmbiguityLogSeen.Clear();
+            RebuildDerivedIndexes();
+        }
     }
 
     private static FontRuntimeRequest Merge(FontRuntimeRequest existing, FontRuntimeRequest incoming)
@@ -243,7 +312,7 @@ internal static class FontRuntimeRequestRegistry
         if (kind == FontRedirectKind.TrueType)
             return;
 
-        string foldedKey = GetFoldedShxKey(normalized, kind);
+        string foldedKey = GetFoldedShxKey(normalized, kind, request.DbScope);
         FoldedShxRequests.AddOrUpdate(
             foldedKey,
             request,
@@ -251,6 +320,30 @@ internal static class FontRuntimeRequestRegistry
                              && string.Equals(existing.NormalizedRequest, request.NormalizedRequest, StringComparison.OrdinalIgnoreCase)
                 ? Merge(existing, request)
                 : null);
+    }
+
+    private static void RebuildDerivedIndexes()
+    {
+        string[] existingHitKeys = HitKeys.Keys.ToArray();
+        var existingHitSet = new HashSet<string>(existingHitKeys, StringComparer.OrdinalIgnoreCase);
+
+        FoldedShxRequests.Clear();
+        TrueTypeRequestKeys.Clear();
+        ShxRequestKeys.Clear();
+        HitKeys.Clear();
+
+        foreach (FontRuntimeRequest request in Requests.Values)
+        {
+            string key = GetRequestKey(request.NormalizedRequest, request.Kind, request.DbScope);
+            if (request.Kind == FontRedirectKind.TrueType)
+                TrueTypeRequestKeys.TryAdd(key, 0);
+            else
+                ShxRequestKeys.TryAdd(key, 0);
+
+            AddFoldedShxRequest(request.NormalizedRequest, request.Kind, request);
+            if (existingHitSet.Contains(key))
+                HitKeys.TryAdd(key, 0);
+        }
     }
 
     private static void LogFoldedAmbiguity(string normalized, FontRedirectKind kind)
@@ -313,9 +406,14 @@ internal static class FontRuntimeRequestRegistry
             : fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string GetRequestKey(string normalized, FontRedirectKind kind)
-        => string.Concat(normalized, "\u001F", kind);
+    private static string GetRequestKey(string normalized, FontRedirectKind kind, IntPtr dbScope)
+        => kind == FontRedirectKind.TrueType
+            ? string.Concat(normalized, "\u001F", kind)
+            : string.Concat(dbScope.ToInt64().ToString("X"), "\u001F", normalized, "\u001F", kind);
 
-    private static string GetFoldedShxKey(string normalized, FontRedirectKind kind)
-        => string.Concat(kind, "\u001F", normalized.ToUpperInvariant());
+    private static string GetFoldedShxKey(string normalized, FontRedirectKind kind, IntPtr dbScope)
+        => string.Concat(dbScope.ToInt64().ToString("X"), "\u001F", kind, "\u001F", normalized.ToUpperInvariant());
+
+    private static string FormatDbScope(IntPtr dbScope)
+        => dbScope == IntPtr.Zero ? "0x0" : $"0x{dbScope.ToInt64():X}";
 }

@@ -26,6 +26,7 @@ internal static class MTextInlineFontHook
     private static readonly ConcurrentDictionary<string, InlineFontCandidate> InlineFontCandidates = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, InlineFontCandidate?> FoldedInlineFontCandidates = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> FoldedCandidateAmbiguityLogSeen = new(StringComparer.Ordinal);
+    private static IntPtr _inlineFontDbScope;
     private static long _setFontHitCount;
     private static long _setFileNameHitCount;
     private static long _setBigFontFileNameHitCount;
@@ -68,6 +69,7 @@ internal static class MTextInlineFontHook
         InlineFontCandidates.Clear();
         FoldedInlineFontCandidates.Clear();
         FoldedCandidateAmbiguityLogSeen.Clear();
+        _inlineFontDbScope = IntPtr.Zero;
     }
 
     internal static void ResetDiagnosticsCounters()
@@ -96,11 +98,21 @@ internal static class MTextInlineFontHook
         }
     }
 
-    internal static int PreRegisterRuntimeRequests()
+    internal static int PreRegisterRuntimeRequests(IntPtr dbScope)
     {
         if (InlineFontCandidates.IsEmpty)
         {
             DiagnosticLogger.Skip(Tag, "PreRegisterRuntimeRequests", "MText 内联字体候选为空，跳过文件级映射预登记");
+            return 0;
+        }
+
+        _inlineFontDbScope = dbScope;
+        if (dbScope == IntPtr.Zero)
+        {
+            DiagnosticLogger.Skip(
+                Tag,
+                "PreRegisterRuntimeRequests",
+                "MText 内联字体缺少文档 db scope，跳过文件级映射预登记");
             return 0;
         }
 
@@ -145,7 +157,8 @@ internal static class MTextInlineFontHook
                 new Dictionary<string, object?>
                 {
                     ["candidates"] = InlineFontCandidates.Count,
-                    ["registered"] = registered
+                    ["registered"] = registered,
+                    ["dbScope"] = FormatDbScope(dbScope)
                 });
         }
         else
@@ -157,7 +170,8 @@ internal static class MTextInlineFontHook
                 fields: new Dictionary<string, object?>
                 {
                     ["candidates"] = InlineFontCandidates.Count,
-                    ["registered"] = 0
+                    ["registered"] = 0,
+                    ["dbScope"] = FormatDbScope(dbScope)
                 });
         }
 
@@ -733,6 +747,7 @@ internal static class MTextInlineFontHook
             "多行文字",
             InlineFontType.TrueType,
             displayFontName,
+            _inlineFontDbScope,
             out sourceKey,
             out _);
     }
@@ -771,6 +786,7 @@ internal static class MTextInlineFontHook
             "多行文字",
             inlineType,
             displayFontName,
+            _inlineFontDbScope,
             out sourceKey,
             out _);
     }
@@ -965,6 +981,9 @@ internal static class MTextInlineFontHook
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string lpModuleName);
+
+    private static string FormatDbScope(IntPtr dbScope)
+        => dbScope == IntPtr.Zero ? "0x0" : $"0x{dbScope.ToInt64():X}";
 
     private sealed class InlineRuntimeMappingSuppressionScope : IDisposable
     {

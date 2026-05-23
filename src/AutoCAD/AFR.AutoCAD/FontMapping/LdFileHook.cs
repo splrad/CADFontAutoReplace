@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
+using Autodesk.AutoCAD.DatabaseServices;
 using AFR.Platform;
 using AFR.Services;
 
@@ -58,6 +59,30 @@ internal static class LdFileHook
     {
         FontRuntimeRequestRegistry.Clear();
         RedirectLogSeen.Clear();
+    }
+
+    internal static void ClearRegisteredRedirectsForDocument(IntPtr dbScope)
+    {
+        FontRuntimeRequestRegistry.ClearDocumentScopedShxRequests(dbScope);
+        RedirectLogSeen.Clear();
+    }
+
+    internal static void ClearTransientRegisteredRedirects()
+    {
+        FontRuntimeRequestRegistry.ClearTransientRequests();
+        RedirectLogSeen.Clear();
+    }
+
+    internal static IntPtr GetDatabaseScope(Database? db)
+    {
+        try
+        {
+            return db?.UnmanagedObject ?? IntPtr.Zero;
+        }
+        catch
+        {
+            return IntPtr.Zero;
+        }
     }
 
     internal static bool TryGetRegisteredTrueTypeRedirect(
@@ -210,8 +235,9 @@ internal static class LdFileHook
         try
         {
             string original = ReadFontName(fileName);
+            IntPtr dbScope = db;
             // 未登记的字体请求必须原样放行，避免 ldfile 抢走上层 Hook 的决策权。
-            if (!TryGetRegisteredRedirect(original, param2, out FontRuntimeRequest? request, out string normalized)
+            if (!TryGetRegisteredRedirect(original, param2, dbScope, out FontRuntimeRequest? request, out string normalized)
                 || request == null)
             {
                 return trampoline(fileName, param2, db, desc);
@@ -222,16 +248,17 @@ internal static class LdFileHook
                 return trampoline(fileName, param2, db, desc);
 
             Interlocked.Increment(ref _redirectCount);
-            FontRuntimeRequestRegistry.MarkHit(request.NormalizedRequest, request.Kind);
+            bool firstHit = FontRuntimeRequestRegistry.MarkHit(request.NormalizedRequest, request.Kind, request.DbScope);
             FontRuntimeMappingStore.RecordRuntimeMapping(request, "LdFileHook", "已映射");
 
-            string logKey = $"redirect|{normalized}|{replacement}|{param2}|{request.Source}";
+            string hitPhase = firstHit ? "first" : "repeat";
+            string logKey = $"redirect|{hitPhase}|{request.DbScope.ToInt64():X}|{normalized}|{replacement}|{param2}|{request.Source}";
             if (RedirectLogSeen.TryAdd(logKey, 0))
             {
                 DiagnosticLogger.Ok(
                     Tag,
                     "HookHandler",
-                    "执行字体加载桥接",
+                    firstHit ? "执行字体加载桥接" : "执行文档级后续字体加载桥接",
                     new Dictionary<string, object?>
                     {
                         ["source"] = request.Source,
@@ -239,7 +266,9 @@ internal static class LdFileHook
                         ["originalDisplayFont"] = request.OriginalDisplayFont,
                         ["replacement"] = replacement,
                         ["request"] = normalized,
-                        ["param2"] = param2
+                        ["param2"] = param2,
+                        ["dbScope"] = FormatDbScope(request.DbScope),
+                        ["repeatHit"] = !firstHit
                     });
             }
 
@@ -262,6 +291,7 @@ internal static class LdFileHook
     private static bool TryGetRegisteredRedirect(
         string fontName,
         int param2,
+        IntPtr dbScope,
         out FontRuntimeRequest? request,
         out string normalized)
     {
@@ -275,20 +305,17 @@ internal static class LdFileHook
         string shxName = NormalizeLoadShxName(fontName);
         if (!IsRegisterableLoadFontName(shxName, FontRedirectKind.ShxMain))
             return false;
+        if (dbScope == IntPtr.Zero)
+            return false;
 
         if (param2 == FontTypeBigFont)
         {
-            if (FontRuntimeRequestRegistry.TryGetShxRequest(
+            bool found = FontRuntimeRequestRegistry.TryGetShxRequest(
                 shxName,
                 FontRedirectKind.ShxBigFont,
+                dbScope,
                 out request,
-                out _))
-            {
-                normalized = shxName;
-                return true;
-            }
-
-            bool found = FontRuntimeRequestRegistry.TryGetUniqueShxRequest(shxName, out request, out _);
+                out _);
             if (found)
                 normalized = shxName;
             return found;
@@ -296,26 +323,18 @@ internal static class LdFileHook
 
         if (param2 == FontTypeRegular)
         {
-            if (FontRuntimeRequestRegistry.TryGetShxRequest(
+            bool found = FontRuntimeRequestRegistry.TryGetShxRequest(
                 shxName,
                 FontRedirectKind.ShxMain,
+                dbScope,
                 out request,
-                out _))
-            {
-                normalized = shxName;
-                return true;
-            }
-
-            bool found = FontRuntimeRequestRegistry.TryGetUniqueShxRequest(shxName, out request, out _);
+                out _);
             if (found)
                 normalized = shxName;
             return found;
         }
 
-        bool fallback = FontRuntimeRequestRegistry.TryGetUniqueShxRequest(shxName, out request, out _);
-        if (fallback)
-            normalized = shxName;
-        return fallback;
+        return false;
     }
 
     private static bool TryGetExportAddress(
@@ -445,6 +464,9 @@ internal static class LdFileHook
             return string.Empty;
         }
     }
+
+    private static string FormatDbScope(IntPtr dbScope)
+        => dbScope == IntPtr.Zero ? "0x0" : $"0x{dbScope.ToInt64():X}";
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string lpModuleName);

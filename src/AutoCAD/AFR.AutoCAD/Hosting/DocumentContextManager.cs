@@ -68,6 +68,8 @@ internal sealed class DocumentContextManager
         if (doc == null) return;
         var key = GetDocumentKey(doc);
         if (key == null) return;
+        IntPtr dbScope = IntPtr.Zero;
+        try { dbScope = LdFileHook.GetDatabaseScope(doc.Database); } catch { }
         lock (_lock)
         {
             _executedDocuments.Remove(key);
@@ -76,6 +78,7 @@ internal sealed class DocumentContextManager
             _inlineFontFixResults.Remove(key);
             _runtimeFontMappingResults.Remove(key);
         }
+        LdFileHook.ClearRegisteredRedirectsForDocument(dbScope);
         DiagnosticLogger.Ok(
             "DocumentContextManager",
             "Remove",
@@ -84,7 +87,8 @@ internal sealed class DocumentContextManager
             {
                 ["documentKey"] = key,
                 ["documentName"] = ReadDocumentName(doc),
-                ["database"] = ReadDatabaseFilename(doc)
+                ["database"] = ReadDatabaseFilename(doc),
+                ["dbScope"] = dbScope == IntPtr.Zero ? "0x0" : $"0x{dbScope.ToInt64():X}"
             });
         LogService.Instance.ResetHeaderForDocument(key);
     }
@@ -100,6 +104,7 @@ internal sealed class DocumentContextManager
             _inlineFontFixResults.Clear();
             _runtimeFontMappingResults.Clear();
         }
+        LdFileHook.ClearRegisteredRedirects();
     }
 
     /// <summary>

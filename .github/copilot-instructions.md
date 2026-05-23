@@ -140,9 +140,9 @@ MText 内联运行时映射规则：
 当前 Hook 边界：
 
 - `AutoCadFontHook.Install()` 持久安装 `LdFileHook`、`ShpLoadHook`、`StyleTextStyleHook`、`MTextInlineFontHook` 和 Debug `MapFontDiagnosticHook`，并只初始化 `FontAvailabilityIndex`；GDI TrueType face 索引必须按需构建，不能放进 CAD 启动同步热路径。
-- `ExecutionController.Execute()` 不安装或卸载来源 Hook，只在每个文档周期开始和结束清理 `FontRuntimeRequestRegistry`、样式表运行时映射、MText 候选和诊断计数；最终视觉刷新必须发生在文档级登记清理之后。
-- `FontRuntimeRequestRegistry` 是来源 Hook 与文件级 Hook 之间唯一的运行时请求登记表，登记项必须包含来源、字体类型、原始字体、基础字体、目标字体和执行 Hook。
-- `LdFileHook` 是唯一 SHX 文件级映射执行点；它只处理已登记 SHX 请求，未登记请求立即放行。
+- `ExecutionController.Execute()` 不安装或卸载来源 Hook；每个文档周期开始时只清理当前文档的 SHX 文件级登记和瞬时请求，结束时清理瞬时请求、样式表运行时映射、MText 候选和诊断计数；文档级 SHX 文件映射必须保留到最终视觉刷新及后续同文档显示请求。
+- `FontRuntimeRequestRegistry` 是来源 Hook 与文件级 Hook 之间唯一的运行时请求登记表，登记项必须包含文档 db scope、来源、字体类型、原始字体、基础字体、目标字体和执行 Hook。
+- `LdFileHook` 是唯一 SHX 文件级映射执行点；它只处理同一 db scope、同一 SHX 类型、已登记的 SHX 请求，未登记请求立即放行。
 - `ShpLoadHook` 是唯一 TrueType 文件级映射执行点；它只处理已登记 TrueType 请求，未登记请求立即放行。
 - `StyleTextStyleHook` 只负责样式表来源的缺失 `@TrueType` 登记，不处理样式表 `@SHX`，不处理 MText 内联字体。
 - `StyleTextStyleHook` 可能走 `loadStyleRec` thunk Hook 或普通 inline Hook；修改导出符号、RVA、前缀校验或 trampoline 逻辑时必须逐版本验证。

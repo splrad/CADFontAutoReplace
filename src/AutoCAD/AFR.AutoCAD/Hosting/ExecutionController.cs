@@ -97,6 +97,7 @@ internal sealed class ExecutionController
                 bool needsVisualRegen = false;
                 // 创建独立的字体检测上下文 — 缓存生命周期与本次执行绑定，结束后由 GC 自动回收
                 var context = new FontDetectionContext(doc.Database);
+                IntPtr dbScope = LdFileHook.GetDatabaseScope(doc.Database);
 
                 DiagnosticLogger.BeginDocument(doc.Name, config.MainFont, config.BigFont, config.TrueTypeFont);
                 DiagnosticLogger.Ok(
@@ -104,7 +105,7 @@ internal sealed class ExecutionController
                     "DocumentContext",
                     "文档执行上下文已建立",
                     executionFields);
-                var runtimeStateScope = SourceFontRuntimeStateScope.Begin();
+                var runtimeStateScope = SourceFontRuntimeStateScope.Begin(dbScope);
                 var ldFileCountersBefore = LdFileHook.GetCountersSnapshot();
                 var shpLoadCountersBefore = ShpLoadHook.GetCountersSnapshot();
 #if DEBUG
@@ -207,7 +208,7 @@ internal sealed class ExecutionController
                                 ["inlineCandidates"] = inlineScanResult.InlineFonts.Count,
                                 ["candidateSummary"] = inlineCandidateSummary
                             });
-                        preRegisteredInlineMappings = MTextInlineFontHook.PreRegisterRuntimeRequests();
+                        preRegisteredInlineMappings = MTextInlineFontHook.PreRegisterRuntimeRequests(dbScope);
                         DiagnosticLogger.Ok(
                             "MTextInlineFontHook",
                             "PreRegisterRuntimeRequests",
@@ -347,7 +348,7 @@ internal sealed class ExecutionController
                             });
                     }
                     runtimeBridgeRegistrationSummary = BuildInlineRuntimeBridgeRegistrationSummary(
-                        FontRuntimeRequestRegistry.GetDiagnosticsSnapshot());
+                        FontRuntimeRequestRegistry.GetDiagnosticsSnapshot(dbScope));
                     DiagnosticLogger.Ok(
                         "LdFileHook",
                         "InlineRuntimeBridgeRegistration",
@@ -701,17 +702,19 @@ internal sealed class ExecutionController
         {
         }
 
-        internal static SourceFontRuntimeStateScope Begin()
+        internal static SourceFontRuntimeStateScope Begin(IntPtr dbScope)
         {
             DiagnosticLogger.Start(
                 "SourceFontRuntimeStateScope",
                 "Begin",
-                "文档级来源状态清理开始");
-            ClearDocumentRuntimeState();
+                "文档级来源状态清理开始",
+                new Dictionary<string, object?> { ["dbScope"] = FormatDbScope(dbScope) });
+            ClearDocumentRuntimeState(dbScope, clearDocumentFileMappings: true);
             DiagnosticLogger.Ok(
                 "SourceFontRuntimeStateScope",
                 "Begin",
-                "文档级来源状态已清理");
+                "文档级来源状态已清理",
+                new Dictionary<string, object?> { ["dbScope"] = FormatDbScope(dbScope) });
             return new SourceFontRuntimeStateScope();
         }
 
@@ -725,7 +728,7 @@ internal sealed class ExecutionController
                 "SourceFontRuntimeStateScope",
                 "Dispose",
                 "文档级来源状态结束清理开始");
-            ClearDocumentRuntimeState();
+            ClearDocumentRuntimeState(IntPtr.Zero, clearDocumentFileMappings: false);
             DiagnosticLogger.Ok(
                 "SourceFontRuntimeStateScope",
                 "Dispose",
@@ -737,14 +740,19 @@ internal sealed class ExecutionController
                 });
         }
 
-        private static void ClearDocumentRuntimeState()
+        private static void ClearDocumentRuntimeState(IntPtr dbScope, bool clearDocumentFileMappings)
         {
             FontRuntimeMappingStore.Clear();
-            LdFileHook.ClearRegisteredRedirects();
+            if (clearDocumentFileMappings)
+                LdFileHook.ClearRegisteredRedirectsForDocument(dbScope);
+            LdFileHook.ClearTransientRegisteredRedirects();
             StyleTextStyleHook.ReplaceStyleRuntimeFontMappings(Array.Empty<RuntimeFontMappingRecord>());
             MTextInlineFontHook.ClearInlineFontCandidates();
             MTextInlineFontHook.ResetDiagnosticsCounters();
         }
+
+        private static string FormatDbScope(IntPtr dbScope)
+            => dbScope == IntPtr.Zero ? "0x0" : $"0x{dbScope.ToInt64():X}";
     }
 
     private static int MarkAffectedTextGraphicsModified(
