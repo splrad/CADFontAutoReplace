@@ -21,11 +21,8 @@ internal static class GdiTrueTypeFontFaceIndex
 
     internal static bool IsFaceAvailable(string faceName)
     {
-        string normalized = NormalizeFaceName(faceName);
-        if (string.IsNullOrWhiteSpace(normalized))
-            return false;
-
-        return LookupCache.GetOrAdd(normalized, ProbeFaceAvailable);
+        // GDI 枚举在 AutoCAD Regen 期间可能竞争屏幕 DC 合成锁导致主线程挂起，暂时禁用，始终返回 false。
+        return false;
     }
 
     private static bool ProbeFaceAvailable(string faceName)
@@ -34,7 +31,9 @@ internal static class GdiTrueTypeFontFaceIndex
         IntPtr hdc = IntPtr.Zero;
         try
         {
-            hdc = GetDC(IntPtr.Zero);
+            // 使用离屏内存 DC，避免与 AutoCAD Regen 期间屏幕 DC 的 DWM/GDI 合成锁冲突。
+            // EnumFontFamiliesExW 在内存 DC 上的枚举结果与屏幕 DC 完全一致。
+            hdc = CreateCompatibleDC(IntPtr.Zero);
             if (hdc == IntPtr.Zero)
                 return false;
 
@@ -69,7 +68,7 @@ internal static class GdiTrueTypeFontFaceIndex
         finally
         {
             if (hdc != IntPtr.Zero)
-                ReleaseDC(IntPtr.Zero, hdc);
+                DeleteDC(hdc);
         }
 
         return matched;
@@ -123,11 +122,12 @@ internal static class GdiTrueTypeFontFaceIndex
         public string elfScript;
     }
 
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
 
-    [DllImport("user32.dll")]
-    private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeleteDC(IntPtr hdc);
 
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
     private static extern int EnumFontFamiliesExW(
