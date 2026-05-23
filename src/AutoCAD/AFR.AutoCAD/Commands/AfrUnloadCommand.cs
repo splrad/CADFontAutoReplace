@@ -17,7 +17,7 @@ internal static class AfrUnloadCommand
     public static void Execute()
     {
         var log = LogService.Instance;
-        DiagnosticLogger.Info("命令", "AFRUNLOAD 隐藏卸载入口启动");
+        DiagnosticLogger.Start("AfrUnloadCommand", "Execute", "AFRUNLOAD 隐藏卸载入口启动");
 
         try
         {
@@ -29,11 +29,13 @@ internal static class AfrUnloadCommand
             config.DeleteAllApplicationKeys();
 
             log.Info("AFR 已卸载，重启 CAD 后可通过 NETLOAD 重新加载。");
+            DiagnosticLogger.Ok("AfrUnloadCommand", "Execute", "AFRUNLOAD 隐藏卸载完成");
             log.Flush();
         }
         catch (System.Exception ex)
         {
             log.Error("卸载失败", ex);
+            DiagnosticLogger.Fail("AfrUnloadCommand", "Execute", "AFRUNLOAD 隐藏卸载失败", ex);
             log.Flush();
         }
     }

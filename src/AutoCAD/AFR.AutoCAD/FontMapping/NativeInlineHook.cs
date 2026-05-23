@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using AFR.Services;
 
@@ -103,18 +104,39 @@ internal sealed class NativeInlineHook<TDelegate> where TDelegate : Delegate
         byte[]? expectedPrefix = null)
     {
         if (IsInstalled) return true;
-        if (targetAddress == IntPtr.Zero) return false;
+        if (targetAddress == IntPtr.Zero)
+        {
+            DiagnosticLogger.Skip(_tag, "InstallAtAddress", "目标函数地址为空，跳过 Hook 安装", new Dictionary<string, object?> { ["name"] = _name });
+            return false;
+        }
 
         if (!IsCommittedMemory(targetAddress))
         {
-            DiagnosticLogger.Log(_tag, $"{_name} RVA=0x{resolvedRva:X} 内存无效，跳过安装。");
+            DiagnosticLogger.Skip(
+                _tag,
+                "InstallAtAddress",
+                "目标函数内存无效，跳过 Hook 安装",
+                new Dictionary<string, object?>
+                {
+                    ["name"] = _name,
+                    ["rva"] = $"0x{resolvedRva:X}"
+                });
             return false;
         }
 
         if (expectedPrefix != null && !MatchesBytes(targetAddress, expectedPrefix))
         {
             string actual = TryReadBytes(targetAddress, expectedPrefix.Length);
-            DiagnosticLogger.Log(_tag, $"{_name} RVA=0x{resolvedRva:X} 入口字节不匹配，实际: {actual}");
+            DiagnosticLogger.Skip(
+                _tag,
+                "InstallAtAddress",
+                "目标函数入口字节不匹配，跳过 Hook 安装",
+                new Dictionary<string, object?>
+                {
+                    ["name"] = _name,
+                    ["rva"] = $"0x{resolvedRva:X}",
+                    ["actualPrefix"] = actual
+                });
             return false;
         }
 
@@ -123,7 +145,17 @@ internal sealed class NativeInlineHook<TDelegate> where TDelegate : Delegate
             int prologueSize = ScanPrologueSize(targetAddress, minPrologueSize, maxPrologueSize);
             if (prologueSize < minPrologueSize)
             {
-                DiagnosticLogger.Log(_tag, $"{_name} RVA=0x{resolvedRva:X} 序言扫描失败。");
+                DiagnosticLogger.Fail(
+                    _tag,
+                    "InstallAtAddress",
+                    "目标函数序言扫描失败",
+                    fields: new Dictionary<string, object?>
+                    {
+                        ["name"] = _name,
+                        ["rva"] = $"0x{resolvedRva:X}",
+                        ["minPrologueSize"] = minPrologueSize,
+                        ["maxPrologueSize"] = maxPrologueSize
+                    });
                 return false;
             }
 
@@ -135,7 +167,16 @@ internal sealed class NativeInlineHook<TDelegate> where TDelegate : Delegate
             _trampolineAddr = NativeInlineHookInterop.VirtualAlloc(IntPtr.Zero, (uint)(_prologueSize + 14), MemReserveCommit, PageExecuteReadWrite);
             if (_trampolineAddr == IntPtr.Zero)
             {
-                DiagnosticLogger.Log(_tag, $"{_name} trampoline 分配失败。");
+                DiagnosticLogger.Fail(
+                    _tag,
+                    "InstallAtAddress",
+                    "trampoline 分配失败",
+                    fields: new Dictionary<string, object?>
+                    {
+                        ["name"] = _name,
+                        ["rva"] = $"0x{resolvedRva:X}",
+                        ["prologueSize"] = _prologueSize
+                    });
                 ResetState();
                 return false;
             }
@@ -156,12 +197,30 @@ internal sealed class NativeInlineHook<TDelegate> where TDelegate : Delegate
             NativeInlineHookInterop.VirtualProtect(_targetAddr, (uint)_prologueSize, oldProtect, out _);
 
             IsInstalled = true;
-            DiagnosticLogger.Log(_tag, $"{_name} Hook 安装成功。RVA=0x{resolvedRva:X}, PrologueSize={_prologueSize}");
+            DiagnosticLogger.Ok(
+                _tag,
+                "InstallAtAddress",
+                "Hook 安装成功",
+                new Dictionary<string, object?>
+                {
+                    ["name"] = _name,
+                    ["rva"] = $"0x{resolvedRva:X}",
+                    ["prologueSize"] = _prologueSize
+                });
             return true;
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.LogError($"{_tag}: {_name} Hook 安装失败", ex);
+            DiagnosticLogger.Fail(
+                _tag,
+                "InstallAtAddress",
+                "Hook 安装失败",
+                ex,
+                new Dictionary<string, object?>
+                {
+                    ["name"] = _name,
+                    ["rva"] = $"0x{resolvedRva:X}"
+                });
             Uninstall();
             return false;
         }
@@ -185,7 +244,12 @@ internal sealed class NativeInlineHook<TDelegate> where TDelegate : Delegate
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.LogError($"{_tag}: {_name} Hook 卸载失败", ex);
+            DiagnosticLogger.Fail(
+                _tag,
+                "Uninstall",
+                "Hook 卸载失败",
+                ex,
+                new Dictionary<string, object?> { ["name"] = _name });
         }
         finally
         {
@@ -470,7 +534,11 @@ internal static class NativeModulePatternScanner
         {
             if (!TryGetTextSection(module, out uint textRva, out int textSize))
             {
-                DiagnosticLogger.Log(tag, $"{name} 无法解析 .text 段，跳过安装。");
+                DiagnosticLogger.Skip(
+                    tag,
+                    "FindTextPattern",
+                    "无法解析 .text 段，跳过安装",
+                    new Dictionary<string, object?> { ["target"] = name });
                 return false;
             }
 
@@ -496,19 +564,40 @@ internal static class NativeModulePatternScanner
 
             if (hitCount != 1)
             {
-                DiagnosticLogger.Log(tag,
-                    $"{name} 签名匹配数={hitCount}，跳过安装。Hits={hitRvas}");
+                DiagnosticLogger.Skip(
+                    tag,
+                    "FindTextPattern",
+                    "签名匹配数量不唯一，跳过安装",
+                    new Dictionary<string, object?>
+                    {
+                        ["target"] = name,
+                        ["hitCount"] = hitCount,
+                        ["hitRvas"] = hitRvas
+                    });
                 return false;
             }
 
             rva = textRva + (uint)firstOffset;
             address = module + (int)rva;
-            DiagnosticLogger.Log(tag, $"{name} 签名解析成功。RVA=0x{rva:X}");
+            DiagnosticLogger.Ok(
+                tag,
+                "FindTextPattern",
+                "签名解析成功",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = name,
+                    ["rva"] = $"0x{rva:X}"
+                });
             return true;
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.LogError($"{tag}: {name} 签名解析失败", ex);
+            DiagnosticLogger.Fail(
+                tag,
+                "FindTextPattern",
+                "签名解析失败",
+                ex,
+                new Dictionary<string, object?> { ["target"] = name });
             return false;
         }
     }

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using AFR.Platform;
@@ -84,25 +85,41 @@ internal static class LdFileHook
     internal static void Install()
     {
         if (IsInstalled)
+        {
+            DiagnosticLogger.Skip(Tag, "Install", "ldfile Hook 已安装，跳过重复安装");
             return;
+        }
 
+        DiagnosticLogger.Start(Tag, "Install", "开始安装 ldfile 字体加载 Hook");
         if (PlatformManager.Platform is not INativeFontHookExportsProvider exports)
         {
-            DiagnosticLogger.Log(Tag, $"{PlatformManager.Platform.DisplayName} 未提供 ldfile Hook 导出定义，跳过字体加载桥接。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "Install",
+                "当前平台未提供 ldfile Hook 导出定义，跳过字体加载桥接",
+                new Dictionary<string, object?> { ["platform"] = PlatformManager.Platform.DisplayName });
             return;
         }
 
         IntPtr module = GetModuleHandle(PlatformManager.Platform.AcDbDllName);
         if (module == IntPtr.Zero)
         {
-            DiagnosticLogger.Log(Tag, $"{PlatformManager.Platform.AcDbDllName} 未加载，跳过 ldfile 字体加载 Hook。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "Install",
+                "AcDb 模块未加载，跳过 ldfile 字体加载 Hook",
+                new Dictionary<string, object?> { ["module"] = PlatformManager.Platform.AcDbDllName });
             return;
         }
 
         NativeHookTarget target = exports.NativeFontHookProfile.LdFile;
         if (!TryGetExportAddress(module, target, out IntPtr address, out uint resolvedRva))
         {
-            DiagnosticLogger.Log(Tag, "ldfile 入口未通过强校验，跳过字体加载桥接。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "Install",
+                "ldfile 入口未通过强校验，跳过字体加载桥接",
+                new Dictionary<string, object?> { ["target"] = target.Name });
             return;
         }
 
@@ -115,12 +132,51 @@ internal static class LdFileHook
             target.MinPrologueSize,
             target.MaxPrologueSize,
             target.ExpectedPrefix);
+        if (IsInstalled)
+        {
+            DiagnosticLogger.Ok(
+                Tag,
+                "Install",
+                "ldfile 字体加载 Hook 安装成功",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["rva"] = $"0x{resolvedRva:X}"
+                });
+        }
+        else
+        {
+            DiagnosticLogger.Fail(
+                Tag,
+                "Install",
+                "ldfile 字体加载 Hook 安装未成功",
+                fields: new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["rva"] = $"0x{resolvedRva:X}"
+                });
+        }
     }
 
     internal static void Uninstall()
     {
-        DiagnosticLogger.Log(Tag,
-            $"已卸载。HitCount={Interlocked.Read(ref _hitCount)}, Redirects={Interlocked.Read(ref _redirectCount)}");
+        bool installedBefore = IsInstalled;
+        if (installedBefore)
+        {
+            DiagnosticLogger.Start(
+                Tag,
+                "Uninstall",
+                "开始卸载 ldfile 字体加载 Hook",
+                new Dictionary<string, object?>
+                {
+                    ["hitCount"] = Interlocked.Read(ref _hitCount),
+                    ["redirects"] = Interlocked.Read(ref _redirectCount)
+                });
+        }
+        else
+        {
+            DiagnosticLogger.Skip(Tag, "Uninstall", "ldfile Hook 未安装，跳过卸载");
+        }
 
         _hook?.Uninstall();
         _hook = null;
@@ -133,6 +189,8 @@ internal static class LdFileHook
         NativeStringCache.Clear();
         Interlocked.Exchange(ref _hitCount, 0);
         Interlocked.Exchange(ref _redirectCount, 0);
+        if (installedBefore)
+            DiagnosticLogger.Ok(Tag, "Uninstall", "ldfile 字体加载 Hook 卸载完成");
     }
 
     private static int HookHandler(IntPtr fileName, int param2, IntPtr db, IntPtr desc)
@@ -170,9 +228,19 @@ internal static class LdFileHook
             string logKey = $"redirect|{normalized}|{replacement}|{param2}|{request.Source}";
             if (RedirectLogSeen.TryAdd(logKey, 0))
             {
-                DiagnosticLogger.Log(Tag,
-                    $"执行字体加载桥接: source={request.Source} kind={request.Kind} " +
-                    $"'{request.OriginalDisplayFont}' → '{replacement}' request='{normalized}' param2={param2}");
+                DiagnosticLogger.Ok(
+                    Tag,
+                    "HookHandler",
+                    "执行字体加载桥接",
+                    new Dictionary<string, object?>
+                    {
+                        ["source"] = request.Source,
+                        ["kind"] = request.Kind.ToString(),
+                        ["originalDisplayFont"] = request.OriginalDisplayFont,
+                        ["replacement"] = replacement,
+                        ["request"] = normalized,
+                        ["param2"] = param2
+                    });
             }
 
             IntPtr replacementPtr = NativeStringCache.GetOrAdd(
@@ -182,7 +250,7 @@ internal static class LdFileHook
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.LogError(Tag + ": ldfile Hook 异常", ex);
+            DiagnosticLogger.Fail(Tag, "HookHandler", "ldfile Hook 异常", ex);
             return trampoline(fileName, param2, db, desc);
         }
         finally
@@ -261,7 +329,15 @@ internal static class LdFileHook
 
         if (!target.IsEnabled || string.IsNullOrWhiteSpace(target.ExportName))
         {
-            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少导出符号"}");
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveExport",
+                "Hook 目标未启用",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["reason"] = target.DisabledReason ?? "缺少导出符号"
+                });
             return false;
         }
 
@@ -269,14 +345,30 @@ internal static class LdFileHook
         address = NativeInlineHookInterop.GetProcAddress(module, exportName);
         if (address == IntPtr.Zero)
         {
-            DiagnosticLogger.Log(Tag, $"{target.Name} 导出未找到，跳过。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveExport",
+                "Hook 导出未找到",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["exportName"] = exportName
+                });
             return false;
         }
 
         long delta = address.ToInt64() - module.ToInt64();
         if (delta <= 0 || delta > uint.MaxValue)
         {
-            DiagnosticLogger.Log(Tag, $"{target.Name} RVA 解析失败，跳过。Address=0x{address.ToInt64():X}");
+            DiagnosticLogger.Fail(
+                Tag,
+                "ResolveExport",
+                "Hook 导出 RVA 解析失败",
+                fields: new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["address"] = $"0x{address.ToInt64():X}"
+                });
             address = IntPtr.Zero;
             return false;
         }
@@ -284,14 +376,30 @@ internal static class LdFileHook
         rva = (uint)delta;
         if (target.Rva.HasValue && target.Rva.Value != rva)
         {
-            DiagnosticLogger.Log(Tag,
-                $"{target.Name} RVA 不匹配，跳过。Expected=0x{target.Rva.Value:X}, Actual=0x{rva:X}");
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveExport",
+                "Hook 导出 RVA 不匹配",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["expectedRva"] = $"0x{target.Rva.Value:X}",
+                    ["actualRva"] = $"0x{rva:X}"
+                });
             address = IntPtr.Zero;
             rva = 0;
             return false;
         }
 
-        DiagnosticLogger.Log(Tag, $"{target.Name} 导出解析成功。RVA=0x{rva:X}");
+        DiagnosticLogger.Ok(
+            Tag,
+            "ResolveExport",
+            "Hook 导出解析成功",
+            new Dictionary<string, object?>
+            {
+                ["target"] = target.Name,
+                ["rva"] = $"0x{rva:X}"
+            });
         return true;
     }
 

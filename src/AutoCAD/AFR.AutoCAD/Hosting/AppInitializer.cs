@@ -43,7 +43,11 @@ internal static class AppInitializer
             if (profiles.Count == 0)
             {
                 var versionTag = AutoCadBasePath.Substring(AutoCadBasePath.LastIndexOf('\\') + 1);
-                DiagnosticLogger.Log("初始化", $"未找到有效的 AutoCAD {versionTag} 配置文件 (ACAD-xxxx:xxx)");
+                DiagnosticLogger.Skip(
+                    "AppInitializer",
+                    "GetAcadProfiles",
+                    "未找到有效的 AutoCAD 配置文件",
+                    new Dictionary<string, object?> { ["versionTag"] = versionTag });
                 return false;
             }
 
@@ -113,14 +117,32 @@ internal static class AppInitializer
         {
             MigrateConfiguration(appPath, installedConfigSchemaVersion);
             WriteIfChanged(appPath, ConfigSchemaVersionValueName, currentConfigSchemaVersion);
-            DiagnosticLogger.Log("初始化",
-                $"配置版本已迁移: {installedConfigSchemaVersion?.ToString() ?? "未设置"} → {currentConfigSchemaVersion}");
+            DiagnosticLogger.Ok(
+                "AppInitializer",
+                "MigrateConfiguration",
+                "配置版本已迁移",
+                new Dictionary<string, object?>
+                {
+                    ["appPath"] = appPath,
+                    ["fromConfigSchemaVersion"] = installedConfigSchemaVersion,
+                    ["toConfigSchemaVersion"] = currentConfigSchemaVersion
+                });
         }
         else if (!string.Equals(installedPluginVersion, currentPluginVersion, StringComparison.Ordinal)
               || !string.Equals(installedBuildId, currentBuildId, StringComparison.Ordinal))
         {
-            DiagnosticLogger.Log("初始化",
-                $"插件版本已更新: {installedPluginVersion ?? "未设置"}+{installedBuildId ?? "未设置"} → {currentPluginVersion}+{currentBuildId}");
+            DiagnosticLogger.Ok(
+                "AppInitializer",
+                "InitializeProfile",
+                "插件版本已更新",
+                new Dictionary<string, object?>
+                {
+                    ["appPath"] = appPath,
+                    ["fromPluginVersion"] = installedPluginVersion,
+                    ["fromBuildId"] = installedBuildId,
+                    ["toPluginVersion"] = currentPluginVersion,
+                    ["toBuildId"] = currentBuildId
+                });
         }
         return isNewKey;
     }
@@ -143,10 +165,22 @@ internal static class AppInitializer
         EnsureStringValue(appPath, "TrueTypeFont", EmbeddedFontDeployer.DefaultTrueTypeFont);
 
         RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", deployed ? 1 : 0);
-        DiagnosticLogger.Log("初始化",
-            deployed
-                ? "部署工具预创建键 — 已释放内嵌字体并完成初始化"
-                : "部署工具预创建键 — 字体释放失败，等待用户手动配置");
+        if (deployed)
+        {
+            DiagnosticLogger.Ok(
+                "AppInitializer",
+                "CompleteDeployerInitialization",
+                "部署工具预创建键已完成初始化",
+                new Dictionary<string, object?> { ["appPath"] = appPath });
+        }
+        else
+        {
+            DiagnosticLogger.Fail(
+                "AppInitializer",
+                "CompleteDeployerInitialization",
+                "部署工具预创建键字体释放失败，等待用户手动配置",
+                fields: new Dictionary<string, object?> { ["appPath"] = appPath });
+        }
     }
 
     /// <summary>当注册表中字符串值缺失或为空白时写入默认值，否则保留用户已有值。</summary>
@@ -170,7 +204,11 @@ internal static class AppInitializer
             RegistryService.WriteString(Registry.CurrentUser, appPath, "BigFont", EmbeddedFontDeployer.DefaultBigFont);
             RegistryService.WriteString(Registry.CurrentUser, appPath, "TrueTypeFont", EmbeddedFontDeployer.DefaultTrueTypeFont);
             RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", 1);
-            DiagnosticLogger.Log("初始化", "首次安装 — 已部署默认字体并写入配置");
+            DiagnosticLogger.Ok(
+                "AppInitializer",
+                "WriteDefaultConfiguration",
+                "首次安装已部署默认字体并写入配置",
+                new Dictionary<string, object?> { ["appPath"] = appPath });
         }
         else
         {
@@ -179,7 +217,11 @@ internal static class AppInitializer
             RegistryService.WriteString(Registry.CurrentUser, appPath, "BigFont", string.Empty);
             RegistryService.WriteString(Registry.CurrentUser, appPath, "TrueTypeFont", string.Empty);
             RegistryService.WriteDword(Registry.CurrentUser, appPath, "IsInitialized", 0);
-            DiagnosticLogger.Log("初始化", "首次安装 — 字体部署失败，等待用户手动配置");
+            DiagnosticLogger.Fail(
+                "AppInitializer",
+                "WriteDefaultConfiguration",
+                "首次安装字体部署失败，等待用户手动配置",
+                fields: new Dictionary<string, object?> { ["appPath"] = appPath });
         }
     }
 

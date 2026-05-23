@@ -69,8 +69,17 @@ public static class MTextInsertCommand
                 tr.Commit();
             }
 
-            DiagnosticLogger.Log("AFRINSERT",
-                $"已插入 MText: 位置=({insertPoint.X:F1},{insertPoint.Y:F1}) 高度={textHeight:F2} 内容长度={contents.Length}");
+            DiagnosticLogger.Ok(
+                "MTextInsertCommand",
+                "InsertMText",
+                "已插入 MText",
+                new Dictionary<string, object?>
+                {
+                    ["x"] = insertPoint.X,
+                    ["y"] = insertPoint.Y,
+                    ["textHeight"] = textHeight,
+                    ["contentLength"] = contents.Length
+                });
             ed.WriteMessage($"\n已插入 MText（内容长度={contents.Length}，文字高度={textHeight:F2}）。");
         }
         catch (System.Exception ex)

@@ -67,9 +67,15 @@ internal static class FontReplacer
         {
             string requestedTrueTypeFont = trueTypeFont!;
             trueTypeFont = NormalizeTrueTypeName(requestedTrueTypeFont, context);
-            DiagnosticLogger.Log(
-                "替换",
-                $"TrueType替换字体 '{requestedTrueTypeFont}' 解析为 TypeFace='{trueTypeFont}'");
+            DiagnosticLogger.Ok(
+                "FontReplacer",
+                "NormalizeTrueTypeReplacement",
+                "TrueType 替换字体已解析为 TypeFace",
+                new Dictionary<string, object?>
+                {
+                    ["requestedTrueTypeFont"] = requestedTrueTypeFont,
+                    ["typeFace"] = trueTypeFont
+                });
         }
 
         // 预构建字典—O(1)查找替代线性搜索
@@ -177,7 +183,12 @@ internal static class FontReplacer
             }
             catch (Exception ex)
             {
-                DiagnosticLogger.LogError($"替换样式 {id} 的字体失败（已跳过）", ex);
+                DiagnosticLogger.Fail(
+                    "FontReplacer",
+                    "ReplaceMissingFonts",
+                    "替换样式字体失败，已跳过",
+                    ex,
+                    new Dictionary<string, object?> { ["objectId"] = id.ToString() });
             }
         }
 
@@ -300,7 +311,12 @@ internal static class FontReplacer
             }
             catch (Exception ex)
             {
-                DiagnosticLogger.LogError($"手动替换样式 {id} 的字体失败（已跳过）", ex);
+                DiagnosticLogger.Fail(
+                    "FontReplacer",
+                    "ReplaceByStyleMapping",
+                    "手动替换样式字体失败，已跳过",
+                    ex,
+                    new Dictionary<string, object?> { ["objectId"] = id.ToString() });
             }
         }
 
@@ -326,7 +342,10 @@ internal static class FontReplacer
         // 系统字体索引未就绪时跳过清理，避免误判
         if (!FontDetector.IsSystemFontIndexReady)
         {
-            DiagnosticLogger.Log("清理", "系统字体索引尚未就绪，跳过残留 SHX 清理");
+            DiagnosticLogger.Skip(
+                "FontReplacer",
+                "CleanupStaleShxReferences",
+                "系统字体索引尚未就绪，跳过残留 SHX 清理");
             return 0;
         }
 
@@ -344,7 +363,15 @@ internal static class FontReplacer
                 try { safeFont = style.Font; }
                 catch (Exception fontEx)
                 {
-                    DiagnosticLogger.Log("清理", $"样式 '{style.Name}' 的 TrueType 描述符损坏，已跳过: {fontEx.Message}");
+                    DiagnosticLogger.Skip(
+                        "FontReplacer",
+                        "CleanupStaleShxReferences",
+                        "TrueType 描述符损坏，已跳过清理",
+                        new Dictionary<string, object?>
+                        {
+                            ["styleName"] = style.Name,
+                            ["error"] = fontEx.Message
+                        });
                     continue;
                 }
                 var font = safeFont.Value;
@@ -370,7 +397,17 @@ internal static class FontReplacer
 
                 // TrueType 可用 + SHX 缺失 → 清除残留 SHX 引用
                 style.UpgradeOpen();
-                DiagnosticLogger.Log("清理", $"样式='{style.Name}' TrueType='{font.TypeFace}' 清除残留 FileName='{fileName}' BigFont='{style.BigFontFileName}'");
+                DiagnosticLogger.Ok(
+                    "FontReplacer",
+                    "CleanupStaleShxReferences",
+                    "样式残留 SHX 引用已清理",
+                    new Dictionary<string, object?>
+                    {
+                        ["styleName"] = style.Name,
+                        ["typeFace"] = font.TypeFace,
+                        ["fileName"] = fileName,
+                        ["bigFontFileName"] = style.BigFontFileName
+                    });
                 // 清空顺序: 先 BigFont 再 FileName，避免 eInvalidInput
                 style.BigFontFileName = string.Empty;
                 style.FileName = string.Empty;
@@ -378,7 +415,12 @@ internal static class FontReplacer
             }
             catch (Exception ex)
             {
-                DiagnosticLogger.Log("清理", $"处理样式 {id} 时出错（已跳过）: {ex.Message}");
+                DiagnosticLogger.Fail(
+                    "FontReplacer",
+                    "CleanupStaleShxReferences",
+                    "处理样式时出错，已跳过",
+                    ex,
+                    new Dictionary<string, object?> { ["objectId"] = id.ToString() });
             }
         }
 

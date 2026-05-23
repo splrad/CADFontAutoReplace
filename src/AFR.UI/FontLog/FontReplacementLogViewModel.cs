@@ -242,25 +242,67 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         try
         {
             var replacements = BuildReplacementRequests();
-            DiagnosticLogger.Info("UI", $"应用替换: 从 {Items.Count} 行构建 {replacements.Count} 条替换指令");
+            DiagnosticLogger.Ok(
+                "FontReplacementLogViewModel",
+                "BuildReplacementRequests",
+                "手动替换指令已构建",
+                new Dictionary<string, object?>
+                {
+                    ["rows"] = Items.Count,
+                    ["replacementCount"] = replacements.Count
+                });
             foreach (var replacement in replacements)
             {
-                DiagnosticLogger.Info("UI",
-                    $"  样式='{replacement.StyleName}' Main='{replacement.MainFontReplacement}' Big='{replacement.BigFontReplacement}' IsTT={replacement.IsTrueType}");
+                DiagnosticLogger.Ok(
+                    "FontReplacementLogViewModel",
+                    "ReplacementRequest",
+                    "手动替换指令明细",
+                    new Dictionary<string, object?>
+                    {
+                        ["styleName"] = replacement.StyleName,
+                        ["mainFont"] = replacement.MainFontReplacement,
+                        ["bigFont"] = replacement.BigFontReplacement,
+                        ["isTrueType"] = replacement.IsTrueType
+                    });
             }
 
             if (replacements.Count == 0)
+            {
+                DiagnosticLogger.Skip(
+                    "FontReplacementLogViewModel",
+                    "ApplyReplacements",
+                    "没有可应用的手动替换指令");
                 return;
+            }
 
             int count = ApplyReplacementsHandler(replacements);
             AppliedCount += count;
             LastAppliedReplacements = replacements;
-            DiagnosticLogger.Info("UI", $"Handler 返回: {count}, 累计 AppliedCount={AppliedCount}");
+            DiagnosticLogger.Ok(
+                "FontReplacementLogViewModel",
+                "ApplyReplacementsHandler",
+                "手动替换处理器已返回",
+                new Dictionary<string, object?>
+                {
+                    ["replacedCount"] = count,
+                    ["appliedCount"] = AppliedCount
+                });
             OnPropertyChanged(nameof(AppliedCount));
             OnPropertyChanged(nameof(LastAppliedReplacements));
 
             if (count <= 0 || RefreshHandler == null)
+            {
+                DiagnosticLogger.Skip(
+                    "FontReplacementLogViewModel",
+                    "RefreshAfterApply",
+                    "无需刷新替换日志视图",
+                    new Dictionary<string, object?>
+                    {
+                        ["replacedCount"] = count,
+                        ["hasRefreshHandler"] = RefreshHandler != null
+                    });
                 return;
+            }
 
             try
             {
@@ -269,17 +311,33 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
                 newViewModel.RefreshHandler = RefreshHandler;
                 newViewModel.AppliedCount = AppliedCount;
                 newViewModel.LastAppliedReplacements = LastAppliedReplacements;
-                DiagnosticLogger.Info("UI", $"刷新完成: Items={newViewModel.Items.Count} 未替换={newViewModel.FailedCount}");
+                DiagnosticLogger.Ok(
+                    "FontReplacementLogViewModel",
+                    "RefreshAfterApply",
+                    "替换日志视图刷新完成",
+                    new Dictionary<string, object?>
+                    {
+                        ["items"] = newViewModel.Items.Count,
+                        ["failedCount"] = newViewModel.FailedCount
+                    });
                 ViewModelRefreshed?.Invoke(this, newViewModel);
             }
             catch (Exception refreshEx)
             {
-                DiagnosticLogger.LogError("UI 刷新失败", refreshEx);
+                DiagnosticLogger.Fail(
+                    "FontReplacementLogViewModel",
+                    "RefreshAfterApply",
+                    "替换日志视图刷新失败",
+                    refreshEx);
             }
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.LogError("UI 应用替换失败", ex);
+            DiagnosticLogger.Fail(
+                "FontReplacementLogViewModel",
+                "ApplyReplacements",
+                "UI 应用手动替换失败",
+                ex);
             PlatformManager.Logger?.Error("手动替换字体失败", ex);
         }
     }

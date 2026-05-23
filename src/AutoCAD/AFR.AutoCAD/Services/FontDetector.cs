@@ -75,7 +75,15 @@ internal static class FontDetector
                 try { safeFont = style.Font; }
                 catch (Exception fontEx)
                 {
-                    DiagnosticLogger.Log("检测", $"样式 '{styleName}' 的 TrueType 描述符损坏，已跳过 TrueType 验证: {fontEx.Message}");
+                    DiagnosticLogger.Skip(
+                        "FontDetector",
+                        "ReadFontDescriptor",
+                        "TrueType 描述符损坏，已跳过 TrueType 验证",
+                        new Dictionary<string, object?>
+                        {
+                            ["styleName"] = styleName,
+                            ["error"] = fontEx.Message
+                        });
                 }
 
                 bool hasTT = safeFont.HasValue && !string.IsNullOrWhiteSpace(safeFont.Value.TypeFace);
@@ -93,7 +101,15 @@ internal static class FontDetector
                 // 且 FontReplacer 始终跳过此类样式，检测阶段直接排除避免产生永远无法消除的"未替换"条目
                 if (style.IsShapeFile)
                 {
-                    DiagnosticLogger.Log("检测", $"跳过 ShapeFile 样式 '{styleName}'（FileName='{fileName}'）");
+                    DiagnosticLogger.Skip(
+                        "FontDetector",
+                        "DetectMissingFonts",
+                        "跳过 ShapeFile 样式",
+                        new Dictionary<string, object?>
+                        {
+                            ["styleName"] = styleName,
+                            ["fileName"] = fileName
+                        });
                     continue;
                 }
 
@@ -106,8 +122,16 @@ internal static class FontDetector
                     if (FontRedirectResolver.HasAtPrefix(typeFace)
                         || FontRedirectResolver.HasAtPrefix(fileName))
                     {
-                        DiagnosticLogger.Log("检测",
-                            $"样式 '{styleName}' 使用 @TrueType '{typeFace}'，交由样式表运行时 Hook 处理，跳过样式表永久替换");
+                        DiagnosticLogger.Skip(
+                            "FontDetector",
+                            "DetectMissingFonts",
+                            "@TrueType 交由样式表运行时 Hook 处理，跳过永久替换",
+                            new Dictionary<string, object?>
+                            {
+                                ["styleName"] = styleName,
+                                ["typeFace"] = typeFace,
+                                ["fileName"] = fileName
+                            });
                         continue;
                     }
 
@@ -137,7 +161,15 @@ internal static class FontDetector
                     results.Add(new FontCheckResult(styleName, fileName, bigFontName, isMainMissing, isBigMissing, isTrueType, isTrueType ? (safeFont?.TypeFace ?? string.Empty) : string.Empty));
                 }
             }
-            catch (Exception ex) { DiagnosticLogger.Log("检测", $"检查样式时出错 {id}: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                DiagnosticLogger.Fail(
+                    "FontDetector",
+                    "DetectMissingFonts",
+                    "检查样式时出错",
+                    ex,
+                    new Dictionary<string, object?> { ["objectId"] = id.ToString() });
+            }
         }
         tr.Commit();
         return results;
@@ -190,7 +222,12 @@ internal static class FontDetector
             }
             catch (Exception ex)
             {
-                DiagnosticLogger.Log("检测", $"收集运行时字体映射时出错 {id}: {ex.Message}");
+                DiagnosticLogger.Fail(
+                    "FontDetector",
+                    "CollectRuntimeFontMappings",
+                    "收集运行时字体映射时出错",
+                    ex,
+                    new Dictionary<string, object?> { ["objectId"] = id.ToString() });
             }
         }
 
@@ -238,8 +275,15 @@ internal static class FontDetector
 
         if (FontRedirectResolver.IsAvailableTrueType(original))
         {
-            DiagnosticLogger.Log("检测",
-                $"样式 '{styleName}' 的 @TrueType '{original}' 已由 GDI 枚举到，跳过样式表运行时映射");
+            DiagnosticLogger.Skip(
+                "FontDetector",
+                "CreateTrueTypeRuntimeFontRecord",
+                "@TrueType 已由 GDI 枚举到，跳过样式表运行时映射",
+                new Dictionary<string, object?>
+                {
+                    ["styleName"] = styleName,
+                    ["original"] = original
+                });
             return null;
         }
 
@@ -541,7 +585,14 @@ internal static class FontDetector
             }
 
         }
-        catch (Exception ex) { DiagnosticLogger.LogError("系统字体索引构建失败", ex); }
+        catch (Exception ex)
+        {
+            DiagnosticLogger.Fail(
+                "FontDetector",
+                "BuildSystemFontIndex",
+                "系统字体索引构建失败",
+                ex);
+        }
         return names;
     }
 
@@ -558,11 +609,24 @@ internal static class FontDetector
         var result = QueryFontMetricsFromGdi(fontName);
         if (result.CharacterSet == 0 && result.PitchAndFamily == 0)
         {
-            DiagnosticLogger.Log("FontMetrics", $"'{fontName}' GDI 查询失败，返回默认值 (0,0)，未缓存");
+            DiagnosticLogger.Fail(
+                "FontDetector",
+                "GetTrueTypeFontMetrics",
+                "GDI 字体度量查询失败，返回默认值且不缓存",
+                fields: new Dictionary<string, object?> { ["fontName"] = fontName });
             return result;
         }
         context.FontMetricsCache.TryAdd(fontName, result);
-        DiagnosticLogger.Log("FontMetrics", $"'{fontName}' CharSet={result.CharacterSet} Pitch={result.PitchAndFamily}");
+        DiagnosticLogger.Ok(
+            "FontDetector",
+            "GetTrueTypeFontMetrics",
+            "GDI 字体度量查询完成",
+            new Dictionary<string, object?>
+            {
+                ["fontName"] = fontName,
+                ["characterSet"] = result.CharacterSet,
+                ["pitchAndFamily"] = result.PitchAndFamily
+            });
         return result;
     }
 

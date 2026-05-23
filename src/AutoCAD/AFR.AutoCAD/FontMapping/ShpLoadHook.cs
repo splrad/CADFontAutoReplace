@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 using AFR.Platform;
@@ -103,27 +104,42 @@ internal static class ShpLoadHook
     internal static void Install()
     {
         if (IsInstalled)
+        {
+            DiagnosticLogger.Skip(Tag, "Install", "shpload Hook 已安装，跳过重复安装");
             return;
+        }
 
-        DiagnosticLogger.Log(Tag, "开始安装 shpload TrueType Hook。");
+        DiagnosticLogger.Start(Tag, "Install", "开始安装 shpload TrueType Hook");
 
         if (PlatformManager.Platform is not INativeFontHookExportsProvider exports)
         {
-            DiagnosticLogger.Log(Tag, $"{PlatformManager.Platform.DisplayName} 未提供 native Hook profile，跳过 shpload Hook。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "Install",
+                "当前平台未提供 native Hook profile，跳过 shpload Hook",
+                new Dictionary<string, object?> { ["platform"] = PlatformManager.Platform.DisplayName });
             return;
         }
 
         IntPtr module = GetModuleHandle(PlatformManager.Platform.AcDbDllName);
         if (module == IntPtr.Zero)
         {
-            DiagnosticLogger.Log(Tag, $"{PlatformManager.Platform.AcDbDllName} 未加载，跳过 shpload Hook。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "Install",
+                "AcDb 模块未加载，跳过 shpload Hook",
+                new Dictionary<string, object?> { ["module"] = PlatformManager.Platform.AcDbDllName });
             return;
         }
 
         NativeHookTarget target = exports.NativeFontHookProfile.ShpLoad;
         if (!TryGetExportAddress(module, target, out IntPtr address, out uint rva))
         {
-            DiagnosticLogger.Log(Tag, "shpload 入口未通过强校验，跳过 TrueType Hook。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "Install",
+                "shpload 入口未通过强校验，跳过 TrueType Hook",
+                new Dictionary<string, object?> { ["target"] = target.Name });
             return;
         }
 
@@ -137,6 +153,30 @@ internal static class ShpLoadHook
             target.MinPrologueSize,
             target.MaxPrologueSize,
             target.ExpectedPrefix);
+        if (IsInstalled)
+        {
+            DiagnosticLogger.Ok(
+                Tag,
+                "Install",
+                "shpload TrueType Hook 安装成功",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["rva"] = $"0x{rva:X}"
+                });
+        }
+        else
+        {
+            DiagnosticLogger.Fail(
+                Tag,
+                "Install",
+                "shpload TrueType Hook 安装未成功",
+                fields: new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["rva"] = $"0x{rva:X}"
+                });
+        }
     }
 
     internal static void Uninstall()
@@ -144,16 +184,29 @@ internal static class ShpLoadHook
         if (IsInstalled)
         {
             CounterSnapshot counters = GetCountersSnapshot();
-            DiagnosticLogger.Log(Tag,
-                $"已卸载。HitCount={counters.HitCount}, Redirects={counters.RedirectCount}, " +
-                $"StyleScopeHits={counters.StyleScopeHitCount}, " +
-                $"MTextScopeHits={counters.MTextScopeHitCount}, SampleOverflow={counters.SampleOverflowCount}");
+            DiagnosticLogger.Start(
+                Tag,
+                "Uninstall",
+                "开始卸载 shpload TrueType Hook",
+                new Dictionary<string, object?>
+                {
+                    ["hitCount"] = counters.HitCount,
+                    ["redirects"] = counters.RedirectCount,
+                    ["styleScopeHits"] = counters.StyleScopeHitCount,
+                    ["mTextScopeHits"] = counters.MTextScopeHitCount,
+                    ["sampleOverflow"] = counters.SampleOverflowCount
+                });
+        }
+        else
+        {
+            DiagnosticLogger.Skip(Tag, "Uninstall", "shpload Hook 未安装，跳过卸载");
         }
 
         _hook?.Uninstall();
         _hook = null;
         _hookDelegate = null;
         ResetDiagnostics();
+        DiagnosticLogger.Ok(Tag, "Uninstall", "shpload TrueType Hook 卸载流程完成");
     }
 
     internal static void LogDocumentSummary(CounterSnapshot before)
@@ -169,9 +222,19 @@ internal static class ShpLoadHook
         long overflow = after.SampleOverflowCount - before.SampleOverflowCount;
 
         string sampleText = BuildSampleText(before.SampleSequence);
-        DiagnosticLogger.Log(Tag,
-            $"本次文档 shpload 计数: hits={hits}, redirects={redirects}, styleScopeHits={styleHits}, " +
-            $"mTextScopeHits={mTextHits}, sampleOverflow={overflow}, samples=[{sampleText}]");
+        DiagnosticLogger.Ok(
+            Tag,
+            "DocumentSummary",
+            "本次文档 shpload 计数已采集",
+            new Dictionary<string, object?>
+            {
+                ["hits"] = hits,
+                ["redirects"] = redirects,
+                ["styleScopeHits"] = styleHits,
+                ["mTextScopeHits"] = mTextHits,
+                ["sampleOverflow"] = overflow,
+                ["samples"] = sampleText
+            });
     }
 
     private static int HookHandler(
@@ -230,11 +293,27 @@ internal static class ShpLoadHook
                     Interlocked.Increment(ref _mTextScopeHitCount);
                 if (hitIndex <= FirstHitLogLimit)
                 {
-                    DiagnosticLogger.Log(Tag,
-                        $"shpload 入站#{hitIndex}: file='{requestName}' param2={param2} db={FormatPointer(db)} " +
-                        $"flag={flag} arg5='{arg5Text}' arg6='{arg6Text}' args={arg7}/{arg8} " +
-                        $"charset={charset} pitch={pitch} family={family} " +
-                        $"style={styleScope} mtext={mTextScope}");
+                    DiagnosticLogger.Ok(
+                        Tag,
+                        "HookHandler",
+                        "shpload 入站命中",
+                        new Dictionary<string, object?>
+                        {
+                            ["hitIndex"] = hitIndex,
+                            ["fileName"] = requestName,
+                            ["param2"] = param2,
+                            ["db"] = FormatPointer(db),
+                            ["flag"] = flag,
+                            ["arg5"] = arg5Text,
+                            ["arg6"] = arg6Text,
+                            ["arg7"] = arg7,
+                            ["arg8"] = arg8,
+                            ["charset"] = charset,
+                            ["pitch"] = pitch,
+                            ["family"] = family,
+                            ["styleScope"] = styleScope,
+                            ["mTextScope"] = mTextScope
+                        });
                 }
 
                 if (TryCreateRegisteredRedirect(arg6Value, "arg6", out redirect))
@@ -263,11 +342,23 @@ internal static class ShpLoadHook
                         redirect.Source);
                     if (redirectIndex <= FirstRedirectLogLimit || RedirectLogSeen.TryAdd(logKey, 0))
                     {
-                        DiagnosticLogger.Log(Tag,
-                            $"shpload TrueType 重定向#{redirectIndex}: arg={redirect.ArgumentName} " +
-                            $"source={redirect.Source} kind=TrueType '{redirect.OriginalDisplayFont}' → " +
-                            $"'{redirect.ReplacementFont}' request='{redirect.NormalizedRequest}' param2={param2} " +
-                            $"style={styleScope} mtext={mTextScope}");
+                        DiagnosticLogger.Ok(
+                            Tag,
+                            "HookHandler",
+                            "shpload TrueType 重定向",
+                            new Dictionary<string, object?>
+                            {
+                                ["redirectIndex"] = redirectIndex,
+                                ["argument"] = redirect.ArgumentName,
+                                ["source"] = redirect.Source,
+                                ["kind"] = "TrueType",
+                                ["originalDisplayFont"] = redirect.OriginalDisplayFont,
+                                ["replacement"] = redirect.ReplacementFont,
+                                ["request"] = redirect.NormalizedRequest,
+                                ["param2"] = param2,
+                                ["styleScope"] = styleScope,
+                                ["mTextScope"] = mTextScope
+                            });
                     }
 
                     FontRuntimeRequestRegistry.MarkHit(redirect.NormalizedRequest, FontRedirectKind.TrueType);
@@ -277,7 +368,7 @@ internal static class ShpLoadHook
             }
             catch (Exception ex)
             {
-                DiagnosticLogger.LogError(Tag + ": shpload TrueType 处理前置异常", ex);
+                DiagnosticLogger.Fail(Tag, "HookHandler.Preprocess", "shpload TrueType 处理前置异常", ex);
             }
 
             int result = trampoline(effectiveFileName, param2, db, flag, effectiveArg5, effectiveArg6, arg7, arg8, charset, pitch, family);
@@ -303,7 +394,7 @@ internal static class ShpLoadHook
             }
             catch (Exception ex)
             {
-                DiagnosticLogger.LogError(Tag + ": shpload TrueType 采样后置异常", ex);
+                DiagnosticLogger.Fail(Tag, "HookHandler.PostSample", "shpload TrueType 采样后置异常", ex);
             }
 
             return result;
@@ -419,21 +510,45 @@ internal static class ShpLoadHook
 
         if (!target.IsEnabled || string.IsNullOrWhiteSpace(target.ExportName))
         {
-            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少导出符号"}");
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveExport",
+                "Hook 目标未启用",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["reason"] = target.DisabledReason ?? "缺少导出符号"
+                });
             return false;
         }
 
         address = NativeInlineHookInterop.GetProcAddress(module, target.ExportName!);
         if (address == IntPtr.Zero)
         {
-            DiagnosticLogger.Log(Tag, $"{target.Name} 导出未找到，跳过。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveExport",
+                "Hook 导出未找到",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["exportName"] = target.ExportName
+                });
             return false;
         }
 
         long delta = address.ToInt64() - module.ToInt64();
         if (delta <= 0 || delta > uint.MaxValue)
         {
-            DiagnosticLogger.Log(Tag, $"{target.Name} RVA 解析失败，跳过。Address=0x{address.ToInt64():X}");
+            DiagnosticLogger.Fail(
+                Tag,
+                "ResolveExport",
+                "Hook 导出 RVA 解析失败",
+                fields: new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["address"] = $"0x{address.ToInt64():X}"
+                });
             address = IntPtr.Zero;
             return false;
         }
@@ -441,14 +556,30 @@ internal static class ShpLoadHook
         rva = (uint)delta;
         if (target.Rva.HasValue && target.Rva.Value != rva)
         {
-            DiagnosticLogger.Log(Tag,
-                $"{target.Name} RVA 不匹配，跳过。Expected=0x{target.Rva.Value:X}, Actual=0x{rva:X}");
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveExport",
+                "Hook 导出 RVA 不匹配",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["expectedRva"] = $"0x{target.Rva.Value:X}",
+                    ["actualRva"] = $"0x{rva:X}"
+                });
             address = IntPtr.Zero;
             rva = 0;
             return false;
         }
 
-        DiagnosticLogger.Log(Tag, $"{target.Name} 导出解析成功。RVA=0x{rva:X}");
+        DiagnosticLogger.Ok(
+            Tag,
+            "ResolveExport",
+            "Hook 导出解析成功",
+            new Dictionary<string, object?>
+            {
+                ["target"] = target.Name,
+                ["rva"] = $"0x{rva:X}"
+            });
         return true;
     }
 

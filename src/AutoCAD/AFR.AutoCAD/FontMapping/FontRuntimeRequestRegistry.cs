@@ -153,9 +153,21 @@ internal static class FontRuntimeRequestRegistry
         string logKey = $"register|{key}|{resolved}|{normalizedSource}|{normalizedOwner}|{inlineType}";
         if (LogSeen.TryAdd(logKey, 0))
         {
-            DiagnosticLogger.Log(Tag,
-                $"登记文件级字体请求: source={normalizedSource} owner='{normalizedOwner}' kind={kind} " +
-                $"original='{displayOriginal}' base='{baseFont}' target='{resolved}' hook={executingHook} inline={inlineType?.ToString() ?? "none"}");
+            DiagnosticLogger.Ok(
+                Tag,
+                "RegisterRequest",
+                "文件级字体请求已登记",
+                new Dictionary<string, object?>
+                {
+                    ["source"] = normalizedSource,
+                    ["owner"] = normalizedOwner,
+                    ["kind"] = kind.ToString(),
+                    ["original"] = displayOriginal,
+                    ["baseFont"] = baseFont,
+                    ["target"] = resolved,
+                    ["hook"] = executingHook,
+                    ["inlineType"] = inlineType?.ToString()
+                });
         }
 
         sourceKey = original;
@@ -246,8 +258,15 @@ internal static class FontRuntimeRequestRegistry
         string logKey = string.Concat("folded-ambiguous|", kind, "|", normalized.ToUpperInvariant());
         if (FoldedAmbiguityLogSeen.TryAdd(logKey, 0))
         {
-            DiagnosticLogger.Log(Tag,
-                $"SHX 请求大小写恢复存在歧义，已跳过: kind={kind} request='{normalized}'");
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveFoldedShxRequest",
+                "SHX 请求大小写恢复存在歧义，已跳过",
+                new Dictionary<string, object?>
+                {
+                    ["kind"] = kind.ToString(),
+                    ["request"] = normalized
+                });
         }
     }
 

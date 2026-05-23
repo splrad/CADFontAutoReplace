@@ -44,11 +44,20 @@ internal sealed class CadDialogSystemVariableScope : IDisposable
         try
         {
             AcadApp.SetSystemVariable(variableName, 1);
-            DiagnosticLogger.Log("系统变量", $"{variableName} 已恢复为 1");
+            DiagnosticLogger.Ok(
+                "CadDialogSystemVariableScope",
+                "RestoreSystemVariable",
+                "CAD 对话框系统变量已恢复",
+                new Dictionary<string, object?> { ["variable"] = variableName });
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.LogError($"恢复 {variableName} 失败", ex);
+            DiagnosticLogger.Fail(
+                "CadDialogSystemVariableScope",
+                "RestoreSystemVariable",
+                "恢复 CAD 对话框系统变量失败",
+                ex,
+                new Dictionary<string, object?> { ["variable"] = variableName });
         }
     }
 

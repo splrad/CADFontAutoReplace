@@ -64,7 +64,15 @@ public class MTextEditorCommand
                 tr.Commit();
             }
 
-            DiagnosticLogger.Log("AFRVIEW", $"已读取对象内容 (长度={contents.Length})");
+            DiagnosticLogger.Ok(
+                "MTextEditorCommand",
+                "ReadObjectContent",
+                "已读取对象内容",
+                new Dictionary<string, object?>
+                {
+                    ["objectId"] = objectId.ToString(),
+                    ["contentLength"] = contents.Length
+                });
 
             var window = new MTextEditorWindow(contents);
             PlatformManager.Host.ShowModalWindow(window);

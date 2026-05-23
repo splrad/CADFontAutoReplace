@@ -45,7 +45,7 @@ docs                      使用与开发文档
 
 `PluginEntryBase.Initialize` 的当前顺序：
 
-1. Debug 构建启用 `DiagnosticLogger`。
+1. Debug 构建启用 `DiagnosticLogger`，输出 `AFR_Diag_*.jsonl`，每行一个结构化时序事件。
 2. 注册嵌入程序集解析回调，只为插件 DLL 内嵌的 `HandyControl` 服务。
 3. 注册隐藏 `AFRUNLOAD` 路由；该路由必须在首次 `NETLOAD`、自动加载和部署加载场景下都可用。
 4. 初始化 `PlatformManager`。
@@ -59,6 +59,14 @@ docs                      使用与开发文档
 - `Terminate()` 用于 AutoCAD 正常卸载：卸载 Hook、关闭诊断日志、注销事件、解除嵌入程序集解析。
 - `AFRUNLOAD` 只由 `UnknownCommand` 精确匹配触发；执行时注销事件、卸载 Hook、清空执行队列和文档上下文、清理 AFR 自动加载注册表项，并清理由插件写入的 `FixedProfile.aws` 节点。
 - `AFRUNLOAD` 会把 `FONTALT` 尝试恢复为 `simplex.shx`。
+
+## Debug 诊断日志
+
+- Debug 诊断文件为插件目录下的 `AFR_Diag_*.jsonl` JSONL 事件流，不再输出旧文本格式。
+- 每行 JSON 事件包含 `seq`、`timestamp`、`level`、`status`、`module`、`operation`、`message`、`threadId`、`context`、`durationMs` 和 `error`。
+- `status` 固定使用 `START`、`OK`、`FAIL`、`SKIP`；排查问题时先按 `seq` 还原插件时序，再过滤 `FAIL` / `SKIP` 定位失败或跳过分支。
+- 新增诊断只能使用 `Start`、`Ok`、`Fail`、`Skip`、`RunStep` 或现有结构化领域方法；旧文本日志兼容入口已移除。
+- 字体映射是否真正生效仍以文件级 Hook 的真实命中记录和最终 `redirects` 计数为准，不能只看预登记事件。
 
 ## 当前命令
 

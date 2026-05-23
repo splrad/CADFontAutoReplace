@@ -1,5 +1,6 @@
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Runtime;
+using System.Diagnostics;
 using System.Reflection;
 using AFR.Abstractions;
 using AFR.Commands;
@@ -114,22 +115,32 @@ public abstract class PluginEntryBase : IExtensionApplication
     public void Initialize()
     {
         _unloaded = false;
+        var initTimer = Stopwatch.StartNew();
         using var dialogSystemVariables = CadDialogSystemVariableScope.Capture();
 
         // 诊断日志仅在 Debug 构建时自动启用，用于开发调试
 #if DEBUG
         DiagnosticLogger.Enable();
 #endif
+        DiagnosticLogger.Start("PluginEntry", "Initialize", "插件初始化开始");
 
         // 注册嵌入程序集解析回调，使 HandyControl 等打包在 DLL 资源中的依赖可被加载
         AppDomain.CurrentDomain.AssemblyResolve += OnResolveEmbeddedAssembly;
+        DiagnosticLogger.Ok("PluginEntry", "RegisterEmbeddedAssemblyResolver", "嵌入程序集解析回调已注册");
 
         // 隐藏卸载入口必须在首次 NETLOAD、自动加载和部署加载场景下都可用。
         // 它不进入 CommandMethod/命令栈，只由 UnknownCommand 的完整名称匹配触发。
         RegisterHiddenUnloadCommand();
+        DiagnosticLogger.Ok("PluginEntry", "RegisterHiddenUnloadCommand", "隐藏卸载入口已注册");
 
         // 第负一阶段: 注册平台服务 — 必须最先执行，后续所有功能依赖 PlatformManager
+        DiagnosticLogger.Start("PluginEntry", "InitializePlatform", "开始初始化平台服务");
         PlatformManager.Initialize(CreatePlatform(), CreateFontHook(), CreateHost(), CreateLogger(), CreateFontScanner());
+        DiagnosticLogger.Ok(
+            "PluginEntry",
+            "InitializePlatform",
+            "平台服务初始化完成",
+            new Dictionary<string, object?> { ["platform"] = PlatformManager.Platform.DisplayName });
 
         var log = LogService.Instance;
         try
@@ -138,14 +149,32 @@ public abstract class PluginEntryBase : IExtensionApplication
 
             // 第一阶段: 注册表初始化 — 检查/创建自动加载注册表项和默认配置
             // 首次安装时还会部署内嵌字体到 CAD Fonts 目录并写入默认替换字体
+            DiagnosticLogger.Start("PluginEntry", "AppInitializer", "开始执行注册表和默认字体初始化");
             bool isFirstRun = AppInitializer.Initialize();
+            DiagnosticLogger.Ok(
+                "PluginEntry",
+                "AppInitializer",
+                "注册表和默认字体初始化完成",
+                new Dictionary<string, object?> { ["isFirstRun"] = isFirstRun });
             if (isFirstRun)
             {
                 // 首次通过 NETLOAD 加载：CAD 已启动，Hook 无法拦截已加载的字体。
                 // 仅完成注册表写入和字体部署，提示用户重启 CAD 后自动生效。
                 try { AcadApp.SetSystemVariable("FONTMAP", ""); } catch { }
+                DiagnosticLogger.Skip(
+                    "PluginEntry",
+                    "RuntimeStartup",
+                    "首次加载跳过 Hook 安装、文档事件注册和替换调度",
+                    new Dictionary<string, object?> { ["isFirstRun"] = true });
                 log.Info("首次加载完成，默认替换字体已部署。请重启 CAD 使插件自动生效。");
                 log.Flush();
+                initTimer.Stop();
+                DiagnosticLogger.Ok(
+                    "PluginEntry",
+                    "Initialize",
+                    "插件首次加载初始化完成",
+                    new Dictionary<string, object?> { ["isFirstRun"] = true },
+                    initTimer.ElapsedMilliseconds);
                 return;
             }
 
@@ -153,22 +182,55 @@ public abstract class PluginEntryBase : IExtensionApplication
 
             // 第零阶段 A: 预热系统 TrueType 字族索引。
             // Hook 侧的 FontAvailabilityIndex 只保留 CAD 字体目录兜底索引，不再同步枚举系统字体。
+            DiagnosticLogger.Start("PluginEntry", "PrewarmSystemFonts", "开始预热系统 TrueType 字族索引");
             FontDetector.PrewarmSystemFonts();
+            DiagnosticLogger.Ok("PluginEntry", "PrewarmSystemFonts", "系统 TrueType 字族索引预热已调度");
 
             // 第零阶段 B: 安装字体 Hook — 在字体解析前就位，才能拦截缺失字体请求
             if (PlatformManager.Platform.SupportsNativeFontHooks)
+            {
+                DiagnosticLogger.Start("PluginEntry", "InstallFontHooks", "开始安装插件级持久字体 Hook");
                 PlatformManager.FontHook.Install();
+                DiagnosticLogger.Ok(
+                    "PluginEntry",
+                    "InstallFontHooks",
+                    "插件级持久字体 Hook 安装流程完成",
+                    new Dictionary<string, object?> { ["isInstalled"] = PlatformManager.FontHook.IsInstalled });
+            }
+            else
+            {
+                DiagnosticLogger.Skip(
+                    "PluginEntry",
+                    "InstallFontHooks",
+                    "当前平台不支持 native 字体 Hook",
+                    new Dictionary<string, object?> { ["platform"] = PlatformManager.Platform.DisplayName });
+            }
 
             // 第二阶段: 注册文档事件 — 监听新建/关闭文档，自动触发字体替换
             var docMgr = AcadApp.DocumentManager;
             docMgr.DocumentCreated += OnDocumentCreated;
             docMgr.DocumentToBeDestroyed += OnDocumentToBeDestroyed;
+            DiagnosticLogger.Ok("PluginEntry", "RegisterDocumentEvents", "文档事件已注册");
 
             // 第三阶段: 延迟启动执行 — 对当前已打开的文档安排字体替换
             ScheduleExecution(null, "Startup");
+            initTimer.Stop();
+            DiagnosticLogger.Ok(
+                "PluginEntry",
+                "Initialize",
+                "插件初始化完成",
+                new Dictionary<string, object?> { ["isFirstRun"] = false },
+                initTimer.ElapsedMilliseconds);
         }
         catch (System.Exception ex)
         {
+            initTimer.Stop();
+            DiagnosticLogger.Fail(
+                "PluginEntry",
+                "Initialize",
+                "插件初始化失败",
+                ex,
+                durationMs: initTimer.ElapsedMilliseconds);
             log.Error("插件初始化失败", ex);
             log.Flush();
         }
@@ -177,11 +239,28 @@ public abstract class PluginEntryBase : IExtensionApplication
     /// <summary>AutoCAD 卸载插件时调用（通常在 CAD 退出时）。</summary>
     public void Terminate()
     {
-        PlatformManager.FontHook.Uninstall();
-        DiagnosticLogger.Disable();
-        UnregisterEvents();
-        AppDomain.CurrentDomain.AssemblyResolve -= OnResolveEmbeddedAssembly;
-        ResolvedEmbeddedAssemblies.Clear();
+        var timer = Stopwatch.StartNew();
+        DiagnosticLogger.Start("PluginEntry", "Terminate", "插件正常卸载开始");
+        try
+        {
+            PlatformManager.FontHook.Uninstall();
+            DiagnosticLogger.Ok("PluginEntry", "UninstallFontHooks", "字体 Hook 卸载流程完成");
+            UnregisterEvents();
+            DiagnosticLogger.Ok("PluginEntry", "UnregisterEvents", "事件处理器已注销");
+            AppDomain.CurrentDomain.AssemblyResolve -= OnResolveEmbeddedAssembly;
+            ResolvedEmbeddedAssemblies.Clear();
+            timer.Stop();
+            DiagnosticLogger.Ok("PluginEntry", "Terminate", "插件正常卸载完成", durationMs: timer.ElapsedMilliseconds);
+        }
+        catch (System.Exception ex)
+        {
+            timer.Stop();
+            DiagnosticLogger.Fail("PluginEntry", "Terminate", "插件正常卸载失败", ex, durationMs: timer.ElapsedMilliseconds);
+        }
+        finally
+        {
+            DiagnosticLogger.Disable();
+        }
     }
 
     /// <summary>
@@ -190,6 +269,8 @@ public abstract class PluginEntryBase : IExtensionApplication
     /// </summary>
     internal static void Unload()
     {
+        var timer = Stopwatch.StartNew();
+        DiagnosticLogger.Start("PluginEntry", "Unload", "隐藏卸载开始");
         lock (_scheduleLock)
         {
             _unloaded = true;
@@ -202,12 +283,17 @@ public abstract class PluginEntryBase : IExtensionApplication
                 _idleHandlerRegistered = false;
             }
         }
+        DiagnosticLogger.Ok("PluginEntry", "ClearExecutionQueue", "延迟执行队列和事件状态已清理");
 
         try
         {
             AcadApp.SetSystemVariable("FONTALT", "simplex.shx");
+            DiagnosticLogger.Ok("PluginEntry", "RestoreFontAlt", "FONTALT 已恢复为 simplex.shx");
         }
-        catch { }
+        catch (System.Exception ex)
+        {
+            DiagnosticLogger.Fail("PluginEntry", "RestoreFontAlt", "FONTALT 恢复失败", ex);
+        }
 
         #if AFR_EXTERNAL_REGISTRY
         // 按所有权标记反向清理外部注册表值（默认禁用；旧版残留交由手动清理）。
@@ -215,34 +301,64 @@ public abstract class PluginEntryBase : IExtensionApplication
         #endif
 
         // 清理 FixedProfile.aws 中带 AFR 所有权标记的弹窗抑制节点。
-        try { Diagnostics.AwsHideableDialogPatcher.Cleanup(); } catch { }
+        try
+        {
+            Diagnostics.AwsHideableDialogPatcher.Cleanup();
+            DiagnosticLogger.Ok("PluginEntry", "CleanupAwsPatcher", "FixedProfile.aws AFR 节点清理完成");
+        }
+        catch (System.Exception ex)
+        {
+            DiagnosticLogger.Fail("PluginEntry", "CleanupAwsPatcher", "FixedProfile.aws AFR 节点清理失败", ex);
+        }
 
         PlatformManager.FontHook.Uninstall();
+        DiagnosticLogger.Ok("PluginEntry", "UninstallFontHooks", "字体 Hook 卸载流程完成");
         DocumentContextManager.Instance.Clear();
-        DiagnosticLogger.Disable();
+        DiagnosticLogger.Ok("PluginEntry", "ClearDocumentContext", "文档上下文已清理");
 
         // 注销嵌入程序集解析回调并释放缓存的嵌入程序集。
         // 否则 NETLOAD → AFRUNLOAD → NETLOAD 的反复加载会在 AppDomain.AssemblyResolve
         // 上累加多份回调；同时静态字段持有旧 HandyControl 实例的引用会阻止旧 DLL 卸载。
         AppDomain.CurrentDomain.AssemblyResolve -= OnResolveEmbeddedAssembly;
         ResolvedEmbeddedAssemblies.Clear();
+        timer.Stop();
+        DiagnosticLogger.Ok("PluginEntry", "Unload", "隐藏卸载完成", durationMs: timer.ElapsedMilliseconds);
+        DiagnosticLogger.Disable();
     }
 
     private static void EnsureFontAltDisabled(ILogService log)
     {
+        DiagnosticLogger.Start("PluginEntry", "EnsureFontAltDisabled", "开始检查 FONTALT");
         try
         {
             object currentValue = AcadApp.GetSystemVariable(FontAltVariableName);
             string? current = currentValue?.ToString();
             if (IsFontAltDisabled(current))
+            {
+                DiagnosticLogger.Ok(
+                    "PluginEntry",
+                    "EnsureFontAltDisabled",
+                    "FONTALT 已处于禁用状态",
+                    new Dictionary<string, object?> { ["current"] = current ?? "<null>" });
                 return;
+            }
 
             string normalized = current!.Trim();
             AcadApp.SetSystemVariable(FontAltVariableName, DisabledFontAltValue);
+            DiagnosticLogger.Ok(
+                "PluginEntry",
+                "EnsureFontAltDisabled",
+                "FONTALT 已重设为禁用值",
+                new Dictionary<string, object?>
+                {
+                    ["oldValue"] = normalized,
+                    ["newValue"] = DisabledFontAltValue
+                });
             log.Info($"FONTALT 已从 \"{normalized}\" 重设为 \"{DisabledFontAltValue}\"");
         }
         catch (System.Exception ex)
         {
+            DiagnosticLogger.Fail("PluginEntry", "EnsureFontAltDisabled", "FONTALT 检测或重设失败", ex);
             log.Warning("FONTALT 检测或重设失败：" + ex.Message);
         }
     }
@@ -381,13 +497,33 @@ public abstract class PluginEntryBase : IExtensionApplication
     {
         lock (_scheduleLock)
         {
-            if (_unloaded) return;
+            if (_unloaded)
+            {
+                DiagnosticLogger.Skip(
+                    "PluginEntry",
+                    "ScheduleExecution",
+                    "插件已卸载，跳过延迟执行调度",
+                    new Dictionary<string, object?> { ["trigger"] = trigger });
+                return;
+            }
+
             _pendingExecutions.Enqueue((doc, trigger));
             if (!_idleHandlerRegistered)
             {
                 _idleHandlerRegistered = true;
                 AcadApp.Idle += OnDeferredIdle;
             }
+            DiagnosticLogger.Ok(
+                "PluginEntry",
+                "ScheduleExecution",
+                "已加入延迟执行队列",
+                new Dictionary<string, object?>
+                {
+                    ["trigger"] = trigger,
+                    ["pendingCount"] = _pendingExecutions.Count,
+                    ["idleHandlerRegistered"] = _idleHandlerRegistered,
+                    ["hasDocument"] = doc != null
+                });
         }
     }
 
@@ -403,33 +539,95 @@ public abstract class PluginEntryBase : IExtensionApplication
             // 重入防护：Regen() 抽消息泵时可能再次触发 Idle，
             // 若当前已在执行中则保留队列，待本次执行完成后的下一次 Idle 再处理。
             if (_executeInProgress)
+            {
+                DiagnosticLogger.Skip("PluginEntry", "OnDeferredIdle", "当前已有执行在进行，保留队列等待下一次 Idle");
                 return;
+            }
 
             AcadApp.Idle -= OnDeferredIdle;
             _idleHandlerRegistered = false;
-            if (_unloaded || _pendingExecutions.Count == 0) return;
+            if (_unloaded || _pendingExecutions.Count == 0)
+            {
+                DiagnosticLogger.Skip(
+                    "PluginEntry",
+                    "OnDeferredIdle",
+                    "插件已卸载或延迟执行队列为空",
+                    new Dictionary<string, object?> { ["unloaded"] = _unloaded });
+                return;
+            }
             pending = [.. _pendingExecutions];
             _pendingExecutions.Clear();
             _executeInProgress = true;
         }
 
+        DiagnosticLogger.Start(
+            "PluginEntry",
+            "OnDeferredIdle",
+            "开始处理延迟执行队列",
+            new Dictionary<string, object?> { ["pendingCount"] = pending.Length });
         try
         {
             for (int i = 0; i < pending.Length; i++)
             {
                 var (doc, trigger) = pending[i];
                 doc ??= AcadApp.DocumentManager.MdiActiveDocument;
-                if (doc == null || doc.IsDisposed) continue;
+                if (doc == null || doc.IsDisposed)
+                {
+                    DiagnosticLogger.Skip(
+                        "PluginEntry",
+                        "DeferredExecutionItem",
+                        "延迟执行目标文档为空或已释放",
+                        new Dictionary<string, object?>
+                        {
+                            ["trigger"] = trigger,
+                            ["index"] = i
+                        });
+                    continue;
+                }
 
                 try
                 {
+                    DiagnosticLogger.Start(
+                        "PluginEntry",
+                        "DeferredExecutionItem",
+                        "开始执行延迟文档任务",
+                        new Dictionary<string, object?>
+                        {
+                            ["trigger"] = trigger,
+                            ["index"] = i,
+                            ["doc"] = DocumentContextManager.ReadDocumentName(doc)
+                        });
                     ExecutionController.Instance.Execute(doc, trigger);
+                    DiagnosticLogger.Ok(
+                        "PluginEntry",
+                        "DeferredExecutionItem",
+                        "延迟文档任务执行完成",
+                        new Dictionary<string, object?>
+                        {
+                            ["trigger"] = trigger,
+                            ["index"] = i,
+                            ["doc"] = DocumentContextManager.ReadDocumentName(doc)
+                        });
                 }
                 catch (System.Exception ex)
                 {
-                    DiagnosticLogger.LogError($"{trigger} 延迟执行失败", ex);
+                    DiagnosticLogger.Fail(
+                        "PluginEntry",
+                        "DeferredExecutionItem",
+                        "延迟文档任务执行失败",
+                        ex,
+                        new Dictionary<string, object?>
+                        {
+                            ["trigger"] = trigger,
+                            ["index"] = i
+                        });
                 }
             }
+            DiagnosticLogger.Ok(
+                "PluginEntry",
+                "OnDeferredIdle",
+                "延迟执行队列处理完成",
+                new Dictionary<string, object?> { ["pendingCount"] = pending.Length });
         }
         finally
         {

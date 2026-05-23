@@ -57,13 +57,25 @@ internal static class GdiTrueTypeFontFaceIndex
             if (faceName.StartsWith("@", StringComparison.Ordinal)
                 && ProbeLogSeen.TryAdd(faceName, 0))
             {
-                DiagnosticLogger.Log("GDI字体",
-                    $"EnumFontFamiliesExW vertical face 查询: '{faceName}' exists={matched}");
+                DiagnosticLogger.Ok(
+                    "GdiTrueTypeFontFaceIndex",
+                    "ProbeFaceAvailable",
+                    "GDI vertical face 查询完成",
+                    new Dictionary<string, object?>
+                    {
+                        ["faceName"] = faceName,
+                        ["exists"] = matched
+                    });
             }
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.LogError($"GDI字体 face 查询失败: '{faceName}'", ex);
+            DiagnosticLogger.Fail(
+                "GdiTrueTypeFontFaceIndex",
+                "ProbeFaceAvailable",
+                "GDI face 查询失败",
+                ex,
+                new Dictionary<string, object?> { ["faceName"] = faceName });
         }
         finally
         {

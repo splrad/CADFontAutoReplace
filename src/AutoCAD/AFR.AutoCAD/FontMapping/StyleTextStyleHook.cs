@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using AFR.Models;
 using AFR.Platform;
@@ -104,18 +105,30 @@ internal static class StyleTextStyleHook
     internal static void Install()
     {
         if (IsInstalled)
+        {
+            DiagnosticLogger.Skip(Tag, "Install", "样式表字体 Hook 已安装，跳过重复安装");
             return;
+        }
 
+        DiagnosticLogger.Start(Tag, "Install", "开始安装样式表字体 Hook");
         if (PlatformManager.Platform is not INativeFontHookExportsProvider exports)
         {
-            DiagnosticLogger.Log(Tag, $"{PlatformManager.Platform.DisplayName} 未提供字体 Hook 导出定义，跳过样式表字体 Hook。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "Install",
+                "当前平台未提供字体 Hook 导出定义，跳过样式表字体 Hook",
+                new Dictionary<string, object?> { ["platform"] = PlatformManager.Platform.DisplayName });
             return;
         }
 
         IntPtr module = GetModuleHandle(PlatformManager.Platform.AcDbDllName);
         if (module == IntPtr.Zero)
         {
-            DiagnosticLogger.Log(Tag, $"{PlatformManager.Platform.AcDbDllName} 未加载，跳过样式表字体 Hook。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "Install",
+                "AcDb 模块未加载，跳过样式表字体 Hook",
+                new Dictionary<string, object?> { ["module"] = PlatformManager.Platform.AcDbDllName });
             return;
         }
 
@@ -127,21 +140,47 @@ internal static class StyleTextStyleHook
         TryResolveSetFont(module, exports.AcGiTextStyleSetFontExport, out _setFont);
         TryResolveSetFileName(module, exports.AcGiTextStyleSetFileNameExport, out _setFileName);
         TryResolveSetFileName(module, exports.AcGiTextStyleSetBigFontFileNameExport, out _setBigFontFileName);
-        DiagnosticLogger.Log(Tag,
-            $"AcGiTextStyle getter 状态: styleName={_styleNameGetter != null}, fileName={_fileNameGetter != null}, " +
-            $"bigFontFileName={_bigFontFileNameGetter != null}, isVertical={_isVerticalGetter != null}, " +
-            $"setFont={_setFont != null}, setFileName={_setFileName != null}, setBigFontFileName={_setBigFontFileName != null}, setVertical={_setVertical != null}");
+        DiagnosticLogger.Ok(
+            Tag,
+            "ResolveAcGiTextStyleAccessors",
+            "AcGiTextStyle getter/setter 解析完成",
+            new Dictionary<string, object?>
+            {
+                ["styleName"] = _styleNameGetter != null,
+                ["fileName"] = _fileNameGetter != null,
+                ["bigFontFileName"] = _bigFontFileNameGetter != null,
+                ["isVertical"] = _isVerticalGetter != null,
+                ["setFont"] = _setFont != null,
+                ["setFileName"] = _setFileName != null,
+                ["setBigFontFileName"] = _setBigFontFileName != null,
+                ["setVertical"] = _setVertical != null
+            });
 
         NativeHookTarget loadStyleRecTarget = exports.NativeFontHookProfile.AcGiTextStyleLoadStyleRec;
         if (!TryGetExportAddress(module, loadStyleRecTarget, out var address, out uint rva))
         {
-            DiagnosticLogger.Log(Tag, "AcGiTextStyle::loadStyleRec 入口未通过强校验，跳过样式表字体 Hook。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "Install",
+                "AcGiTextStyle::loadStyleRec 入口未通过强校验，跳过样式表字体 Hook",
+                new Dictionary<string, object?> { ["target"] = loadStyleRecTarget.Name });
             return;
         }
 
         _loadStyleRecHookDelegate = LoadStyleRecHookHandler;
         if (TryInstallLoadStyleRecThunkHook(address, rva, _loadStyleRecHookDelegate, loadStyleRecTarget.ExpectedPrefix))
+        {
+            DiagnosticLogger.Ok(
+                Tag,
+                "Install",
+                "样式表字体 thunk Hook 安装成功",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = loadStyleRecTarget.Name,
+                    ["rva"] = $"0x{rva:X}"
+                });
             return;
+        }
 
         _loadStyleRecHook = new NativeInlineHook<AcGiTextStyleLoadStyleRecDelegate>(
             Tag,
@@ -155,10 +194,40 @@ internal static class StyleTextStyleHook
             loadStyleRecTarget.MinPrologueSize,
             loadStyleRecTarget.MaxPrologueSize,
             loadStyleRecTarget.ExpectedPrefix);
+        if (IsInstalled)
+        {
+            DiagnosticLogger.Ok(
+                Tag,
+                "Install",
+                "样式表字体 inline Hook 安装成功",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = loadStyleRecTarget.Name,
+                    ["rva"] = $"0x{rva:X}"
+                });
+        }
+        else
+        {
+            DiagnosticLogger.Fail(
+                Tag,
+                "Install",
+                "样式表字体 Hook 安装未成功",
+                fields: new Dictionary<string, object?>
+                {
+                    ["target"] = loadStyleRecTarget.Name,
+                    ["rva"] = $"0x{rva:X}"
+                });
+        }
     }
 
     internal static void Uninstall()
     {
+        bool installedBefore = IsInstalled;
+        if (installedBefore)
+            DiagnosticLogger.Start(Tag, "Uninstall", "开始卸载样式表字体 Hook");
+        else
+            DiagnosticLogger.Skip(Tag, "Uninstall", "样式表字体 Hook 未安装，跳过卸载");
+
         _loadStyleRecHook?.Uninstall();
         _loadStyleRecHook = null;
         UninstallLoadStyleRecThunkHook();
@@ -182,6 +251,8 @@ internal static class StyleTextStyleHook
         }
         NativeStringCache.Clear();
         _styleLoadLogCount = 0;
+        if (installedBefore)
+            DiagnosticLogger.Ok(Tag, "Uninstall", "样式表字体 Hook 卸载完成");
     }
 
     internal static void ReplaceStyleRuntimeFontMappings(IEnumerable<RuntimeFontMappingRecord> mappings)
@@ -244,7 +315,7 @@ internal static class StyleTextStyleHook
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.LogError(Tag + ": AcGiTextStyle::loadStyleRec Hook 异常", ex);
+            DiagnosticLogger.Fail(Tag, "LoadStyleRecHookHandler", "AcGiTextStyle::loadStyleRec Hook 异常", ex);
             return -1;
         }
         finally
@@ -263,8 +334,15 @@ internal static class StyleTextStyleHook
 
         if (!MatchesBytes(address, expectedPrefix))
         {
-            DiagnosticLogger.Log(Tag,
-                $"AcGiTextStyle::loadStyleRec RVA=0x{rva:X} 入口字节不匹配，实际: {TryReadBytes(address, expectedPrefix.Length)}");
+            DiagnosticLogger.Skip(
+                Tag,
+                "InstallLoadStyleRecThunkHook",
+                "AcGiTextStyle::loadStyleRec 入口字节不匹配，跳过 thunk Hook 安装",
+                new Dictionary<string, object?>
+                {
+                    ["rva"] = $"0x{rva:X}",
+                    ["actualBytes"] = TryReadBytes(address, expectedPrefix.Length)
+                });
             return false;
         }
 
@@ -286,7 +364,10 @@ internal static class StyleTextStyleHook
                 0x40);
             if (_loadStyleRecThunkTrampoline == IntPtr.Zero)
             {
-                DiagnosticLogger.Log(Tag, "AcGiTextStyle::loadStyleRec thunk trampoline 分配失败。");
+                DiagnosticLogger.Fail(
+                    Tag,
+                    "InstallLoadStyleRecThunkHook",
+                    "AcGiTextStyle::loadStyleRec thunk trampoline 分配失败");
                 _loadStyleRecThunkSavedBytes = null;
                 return false;
             }
@@ -309,13 +390,25 @@ internal static class StyleTextStyleHook
 
             _loadStyleRecThunkTarget = address;
             _loadStyleRecThunkInstalled = true;
-            DiagnosticLogger.Log(Tag,
-                $"AcGiTextStyle::loadStyleRec thunk Hook 安装成功。RVA=0x{rva:X}, JumpTarget=0x{jumpTarget.ToInt64():X}, PrologueSize={patchSize}");
+            DiagnosticLogger.Ok(
+                Tag,
+                "InstallLoadStyleRecThunkHook",
+                "AcGiTextStyle::loadStyleRec thunk Hook 安装成功",
+                new Dictionary<string, object?>
+                {
+                    ["rva"] = $"0x{rva:X}",
+                    ["jumpTarget"] = $"0x{jumpTarget.ToInt64():X}",
+                    ["prologueSize"] = patchSize
+                });
             return true;
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.LogError(Tag + ": AcGiTextStyle::loadStyleRec thunk Hook 安装失败", ex);
+            DiagnosticLogger.Fail(
+                Tag,
+                "InstallLoadStyleRecThunkHook",
+                "AcGiTextStyle::loadStyleRec thunk Hook 安装失败",
+                ex);
             UninstallLoadStyleRecThunkHook();
             return false;
         }
@@ -344,7 +437,11 @@ internal static class StyleTextStyleHook
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.LogError(Tag + ": AcGiTextStyle::loadStyleRec thunk Hook 卸载失败", ex);
+            DiagnosticLogger.Fail(
+                Tag,
+                "UninstallLoadStyleRecThunkHook",
+                "AcGiTextStyle::loadStyleRec thunk Hook 卸载失败",
+                ex);
         }
         finally
         {
@@ -456,9 +553,21 @@ internal static class StyleTextStyleHook
             : string.Empty;
         string verticalText = isVertical.HasValue ? isVertical.Value.ToString() : "unknown";
 
-        DiagnosticLogger.Log(Tag,
-            $"AcGiTextStyle.loadStyleRec: style='{styleName}' result={result} file='{fileName}' " +
-            $"big='{bigFontFileName}' vertical={verticalText} registered={registered}{mappingText} db=0x{db.ToInt64():X}");
+        DiagnosticLogger.Ok(
+            Tag,
+            "LoadStyleRec",
+            "AcGiTextStyle.loadStyleRec 命中",
+            new Dictionary<string, object?>
+            {
+                ["styleName"] = styleName,
+                ["result"] = result,
+                ["fileName"] = fileName,
+                ["bigFontFileName"] = bigFontFileName,
+                ["vertical"] = verticalText,
+                ["registered"] = registered,
+                ["mapping"] = mappingText,
+                ["db"] = $"0x{db.ToInt64():X}"
+            });
     }
 
     private static void ApplyRegisteredStyleMappings(IntPtr self)
@@ -540,9 +649,20 @@ internal static class StyleTextStyleHook
         if (!RuntimeApplyLogSeen.TryAdd(key, 0))
             return;
 
-        DiagnosticLogger.Log(Tag,
-            $"样式表运行时映射: style='{styleName}' action={action} original='{mapping.OriginalFont}' " +
-            $"target='{mapping.ReplacementFont}' applied='{appliedTarget}' category='{mapping.MappingCategory}' status='{mapping.Status}'");
+        DiagnosticLogger.Ok(
+            Tag,
+            "ApplyRuntimeMapping",
+            "样式表运行时映射已应用",
+            new Dictionary<string, object?>
+            {
+                ["styleName"] = styleName,
+                ["action"] = action,
+                ["original"] = mapping.OriginalFont,
+                ["target"] = mapping.ReplacementFont,
+                ["applied"] = appliedTarget,
+                ["category"] = mapping.MappingCategory,
+                ["mappingStatus"] = mapping.Status
+            });
     }
 
     private static IntPtr GetNativeString(string value)
@@ -667,7 +787,15 @@ internal static class StyleTextStyleHook
 
         if (!target.IsEnabled || string.IsNullOrWhiteSpace(target.ExportName))
         {
-            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少导出符号"}");
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveExport",
+                "Hook 目标未启用",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["reason"] = target.DisabledReason ?? "缺少导出符号"
+                });
             return false;
         }
 
@@ -675,14 +803,30 @@ internal static class StyleTextStyleHook
         address = NativeInlineHookInterop.GetProcAddress(module, exportName);
         if (address == IntPtr.Zero)
         {
-            DiagnosticLogger.Log(Tag, $"{target.Name} 导出未找到，跳过。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveExport",
+                "Hook 导出未找到",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["exportName"] = exportName
+                });
             return false;
         }
 
         long delta = address.ToInt64() - module.ToInt64();
         if (delta <= 0 || delta > uint.MaxValue)
         {
-            DiagnosticLogger.Log(Tag, $"{target.Name} RVA 解析失败，跳过。Address=0x{address.ToInt64():X}");
+            DiagnosticLogger.Fail(
+                Tag,
+                "ResolveExport",
+                "Hook 导出 RVA 解析失败",
+                fields: new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["address"] = $"0x{address.ToInt64():X}"
+                });
             address = IntPtr.Zero;
             return false;
         }
@@ -690,14 +834,30 @@ internal static class StyleTextStyleHook
         rva = (uint)delta;
         if (target.Rva.HasValue && target.Rva.Value != rva)
         {
-            DiagnosticLogger.Log(Tag,
-                $"{target.Name} RVA 不匹配，跳过。Expected=0x{target.Rva.Value:X}, Actual=0x{rva:X}");
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveExport",
+                "Hook 导出 RVA 不匹配",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["expectedRva"] = $"0x{target.Rva.Value:X}",
+                    ["actualRva"] = $"0x{rva:X}"
+                });
             address = IntPtr.Zero;
             rva = 0;
             return false;
         }
 
-        DiagnosticLogger.Log(Tag, $"{target.Name} 导出解析成功。RVA=0x{rva:X}");
+        DiagnosticLogger.Ok(
+            Tag,
+            "ResolveExport",
+            "Hook 导出解析成功",
+            new Dictionary<string, object?>
+            {
+                ["target"] = target.Name,
+                ["rva"] = $"0x{rva:X}"
+            });
         return true;
     }
 

@@ -76,9 +76,16 @@ internal sealed class DocumentContextManager
             _inlineFontFixResults.Remove(key);
             _runtimeFontMappingResults.Remove(key);
         }
-        DiagnosticLogger.Log(
+        DiagnosticLogger.Ok(
             "DocumentContextManager",
-            $"Remove: key='{key}' name='{ReadDocumentName(doc)}' database='{ReadDatabaseFilename(doc)}'");
+            "Remove",
+            "文档跟踪数据已移除",
+            new Dictionary<string, object?>
+            {
+                ["documentKey"] = key,
+                ["documentName"] = ReadDocumentName(doc),
+                ["database"] = ReadDatabaseFilename(doc)
+            });
         LogService.Instance.ResetHeaderForDocument(key);
     }
 

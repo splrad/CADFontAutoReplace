@@ -19,10 +19,11 @@ internal static class FontAvailabilityIndex
     internal static void Initialize()
     {
         bool scanned = EnsureInitialized();
-        DiagnosticLogger.Log("FontMapping",
-            scanned
-                ? "字体可用性索引已初始化。"
-                : "字体可用性索引已复用。");
+        DiagnosticLogger.Ok(
+            "FontAvailabilityIndex",
+            "Initialize",
+            scanned ? "字体可用性索引已初始化" : "字体可用性索引已复用",
+            new Dictionary<string, object?> { ["scanned"] = scanned });
     }
 
     internal static bool IsKnownAvailableFont(string fontName)
@@ -100,8 +101,11 @@ internal static class FontAvailabilityIndex
         foreach (var dir in CadEnvironmentSettings.GetAllFontSearchPaths())
             ScanDirectory(dir);
 
-        DiagnosticLogger.Log("FontMapping",
-            $"Hook 侧字体兜底索引 {AvailableFonts.Count} 项；系统 TrueType 字族由 FontDetector 后台索引处理。");
+        DiagnosticLogger.Ok(
+            "FontAvailabilityIndex",
+            "ScanAvailableFonts",
+            "Hook 侧字体兜底索引已构建",
+            new Dictionary<string, object?> { ["availableFonts"] = AvailableFonts.Count });
     }
 
     private static void ScanDirectory(string dir)

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 using AFR.Platform;
@@ -98,7 +99,10 @@ internal static class MTextInlineFontHook
     internal static int PreRegisterRuntimeRequests()
     {
         if (InlineFontCandidates.IsEmpty)
+        {
+            DiagnosticLogger.Skip(Tag, "PreRegisterRuntimeRequests", "MText 内联字体候选为空，跳过文件级映射预登记");
             return 0;
+        }
 
         int registered = 0;
         foreach (InlineFontCandidate candidate in InlineFontCandidates.Values)
@@ -134,8 +138,27 @@ internal static class MTextInlineFontHook
 
         if (registered > 0)
         {
-            DiagnosticLogger.Log(Tag,
-                $"MText 内联缺失字体已在 Regen 前登记文件级映射: {registered}项");
+            DiagnosticLogger.Ok(
+                Tag,
+                "PreRegisterRuntimeRequests",
+                "MText 内联缺失字体已在 Regen 前登记文件级映射",
+                new Dictionary<string, object?>
+                {
+                    ["candidates"] = InlineFontCandidates.Count,
+                    ["registered"] = registered
+                });
+        }
+        else
+        {
+            DiagnosticLogger.Fail(
+                Tag,
+                "PreRegisterRuntimeRequests",
+                "MText 内联字体候选未产生任何文件级映射预登记",
+                fields: new Dictionary<string, object?>
+                {
+                    ["candidates"] = InlineFontCandidates.Count,
+                    ["registered"] = 0
+                });
         }
 
         return registered;
@@ -173,16 +196,31 @@ internal static class MTextInlineFontHook
 
     internal static void Install()
     {
+        if (IsInstalled)
+        {
+            DiagnosticLogger.Skip(Tag, "Install", "MText 内联字体 Hook 已安装，跳过重复安装");
+            return;
+        }
+
+        DiagnosticLogger.Start(Tag, "Install", "开始安装 MText 内联字体 Hook");
         if (PlatformManager.Platform is not INativeFontHookExportsProvider exports)
         {
-            DiagnosticLogger.Log(Tag, $"{PlatformManager.Platform.DisplayName} 未提供字体 Hook 导出定义，跳过 MText 内联字体 Hook。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "Install",
+                "当前平台未提供字体 Hook 导出定义，跳过 MText 内联字体 Hook",
+                new Dictionary<string, object?> { ["platform"] = PlatformManager.Platform.DisplayName });
             return;
         }
 
         IntPtr module = GetModuleHandle(PlatformManager.Platform.AcDbDllName);
         if (module == IntPtr.Zero)
         {
-            DiagnosticLogger.Log(Tag, $"{PlatformManager.Platform.AcDbDllName} 未加载，跳过 MText 内联字体 Hook。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "Install",
+                "AcDb 模块未加载，跳过 MText 内联字体 Hook",
+                new Dictionary<string, object?> { ["module"] = PlatformManager.Platform.AcDbDllName });
             return;
         }
 
@@ -191,13 +229,41 @@ internal static class MTextInlineFontHook
         TryInstallFileNameCtorHook(module, profile.AcGiTextStyleFileNameCtor);
         TryInstallSetFileNameHook(module, profile.AcGiTextStyleSetFileName);
         TryInstallSetBigFontFileNameHook(module, profile.AcGiTextStyleSetBigFontFileName);
+        if (IsInstalled)
+        {
+            DiagnosticLogger.Ok(
+                Tag,
+                "Install",
+                "MText 内联字体 Hook 安装流程完成",
+                new Dictionary<string, object?>
+                {
+                    ["setFont"] = _setFontHook?.IsInstalled == true,
+                    ["fileNameCtor"] = _fileNameCtorHook?.IsInstalled == true,
+                    ["setFileName"] = _setFileNameHook?.IsInstalled == true,
+                    ["setBigFontFileName"] = _setBigFontFileNameHook?.IsInstalled == true
+                });
+        }
+        else
+        {
+            DiagnosticLogger.Fail(Tag, "Install", "MText 内联字体 Hook 安装流程未安装任何入口");
+        }
     }
 
     internal static void Uninstall()
     {
-        DiagnosticLogger.Log(Tag,
-            "已卸载。"
-            + GetDiagnosticsSummary());
+        bool installedBefore = IsInstalled;
+        if (installedBefore)
+        {
+            DiagnosticLogger.Start(
+                Tag,
+                "Uninstall",
+                "开始卸载 MText 内联字体 Hook",
+                new Dictionary<string, object?> { ["diagnostics"] = GetDiagnosticsSummary() });
+        }
+        else
+        {
+            DiagnosticLogger.Skip(Tag, "Uninstall", "MText 内联字体 Hook 未安装，跳过卸载");
+        }
 
         _setFontHook?.Uninstall();
         _setFontHook = null;
@@ -213,6 +279,8 @@ internal static class MTextInlineFontHook
         _setBigFontFileNameHookDelegate = null;
         ClearInlineFontCandidates();
         ResetDiagnosticsCounters();
+        if (installedBefore)
+            DiagnosticLogger.Ok(Tag, "Uninstall", "MText 内联字体 Hook 卸载完成");
     }
 
     private static void TryInstallSetFontHook(IntPtr module, NativeHookTarget target)
@@ -222,7 +290,7 @@ internal static class MTextInlineFontHook
 
         if (!TryGetExportAddress(module, target, out var address, out uint rva))
         {
-            DiagnosticLogger.Log(Tag, "AcGiTextStyle::setFont 导出未找到，跳过 MText 内联 TrueType Hook。");
+            DiagnosticLogger.Skip(Tag, "InstallSetFontHook", "AcGiTextStyle::setFont 导出未找到，跳过 MText 内联 TrueType Hook");
             return;
         }
 
@@ -239,6 +307,8 @@ internal static class MTextInlineFontHook
             target.MinPrologueSize,
             target.MaxPrologueSize,
             target.ExpectedPrefix);
+        if (_setFontHook.IsInstalled)
+            DiagnosticLogger.Ok(Tag, "InstallSetFontHook", "AcGiTextStyle::setFont Hook 安装成功", new Dictionary<string, object?> { ["rva"] = $"0x{rva:X}" });
     }
 
     private static void TryInstallFileNameCtorHook(IntPtr module, NativeHookTarget target)
@@ -248,7 +318,7 @@ internal static class MTextInlineFontHook
 
         if (!TryGetExportAddress(module, target, out var address, out uint rva))
         {
-            DiagnosticLogger.Log(Tag, "AcGiTextStyle::AcGiTextStyle(font,bigFont) 导出未找到，跳过构造函数 Hook。");
+            DiagnosticLogger.Skip(Tag, "InstallFileNameCtorHook", "AcGiTextStyle::AcGiTextStyle(font,bigFont) 导出未找到，跳过构造函数 Hook");
             return;
         }
 
@@ -265,6 +335,8 @@ internal static class MTextInlineFontHook
             target.MinPrologueSize,
             target.MaxPrologueSize,
             target.ExpectedPrefix);
+        if (_fileNameCtorHook.IsInstalled)
+            DiagnosticLogger.Ok(Tag, "InstallFileNameCtorHook", "AcGiTextStyle 构造函数 Hook 安装成功", new Dictionary<string, object?> { ["rva"] = $"0x{rva:X}" });
     }
 
     private static void TryInstallSetFileNameHook(IntPtr module, NativeHookTarget target)
@@ -274,7 +346,7 @@ internal static class MTextInlineFontHook
 
         if (!TryGetExportAddress(module, target, out var address, out uint rva))
         {
-            DiagnosticLogger.Log(Tag, "AcGiTextStyle::setFileName 导出未找到，跳过 MText 内联 SHX 主字体 Hook。");
+            DiagnosticLogger.Skip(Tag, "InstallSetFileNameHook", "AcGiTextStyle::setFileName 导出未找到，跳过 MText 内联 SHX 主字体 Hook");
             return;
         }
 
@@ -291,6 +363,8 @@ internal static class MTextInlineFontHook
             target.MinPrologueSize,
             target.MaxPrologueSize,
             target.ExpectedPrefix);
+        if (_setFileNameHook.IsInstalled)
+            DiagnosticLogger.Ok(Tag, "InstallSetFileNameHook", "AcGiTextStyle::setFileName Hook 安装成功", new Dictionary<string, object?> { ["rva"] = $"0x{rva:X}" });
     }
 
     private static void TryInstallSetBigFontFileNameHook(IntPtr module, NativeHookTarget target)
@@ -300,7 +374,7 @@ internal static class MTextInlineFontHook
 
         if (!TryGetExportAddress(module, target, out var address, out uint rva))
         {
-            DiagnosticLogger.Log(Tag, "AcGiTextStyle::setBigFontFileName 导出未找到，跳过 MText 内联 SHX 大字体 Hook。");
+            DiagnosticLogger.Skip(Tag, "InstallSetBigFontFileNameHook", "AcGiTextStyle::setBigFontFileName 导出未找到，跳过 MText 内联 SHX 大字体 Hook");
             return;
         }
 
@@ -317,6 +391,8 @@ internal static class MTextInlineFontHook
             target.MinPrologueSize,
             target.MaxPrologueSize,
             target.ExpectedPrefix);
+        if (_setBigFontFileNameHook.IsInstalled)
+            DiagnosticLogger.Ok(Tag, "InstallSetBigFontFileNameHook", "AcGiTextStyle::setBigFontFileName Hook 安装成功", new Dictionary<string, object?> { ["rva"] = $"0x{rva:X}" });
     }
 
     private static int SetFontHookHandler(
@@ -378,7 +454,7 @@ internal static class MTextInlineFontHook
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.LogError(Tag + ": AcGiTextStyle::setFont Hook 异常", ex);
+            DiagnosticLogger.Fail(Tag, "SetFontHookHandler", "AcGiTextStyle::setFont Hook 异常", ex);
             return trampoline(self, typeface, bold, italic, charset, pitch, family);
         }
         finally
@@ -488,7 +564,7 @@ internal static class MTextInlineFontHook
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.LogError(Tag + ": AcGiTextStyle 构造函数 Hook 异常", ex);
+            DiagnosticLogger.Fail(Tag, "FileNameCtorHookHandler", "AcGiTextStyle 构造函数 Hook 异常", ex);
             trampoline(
                 self, fontName, bigFontName, textSize, xScale, obliqueAngle, trackingPercent,
                 isBackward, isUpsideDown, isVertical, isOverlined, isUnderlined, isStrikethrough, styleName);
@@ -587,7 +663,7 @@ internal static class MTextInlineFontHook
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.LogError(Tag + ": " + hookName + " Hook 异常", ex);
+            DiagnosticLogger.Fail(Tag, hookName + "HookHandler", hookName + " Hook 异常", ex);
             trampoline(self, fontName);
         }
         finally
@@ -779,8 +855,15 @@ internal static class MTextInlineFontHook
         string logKey = string.Concat("folded-ambiguous|", fontType, "|", key.ToUpperInvariant());
         if (FoldedCandidateAmbiguityLogSeen.TryAdd(logKey, 0))
         {
-            DiagnosticLogger.Log(Tag,
-                $"MText 内联字体回调大小写恢复存在歧义，已跳过: kind={fontType} request='{key}'");
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveFoldedInlineCandidate",
+                "MText 内联字体回调大小写恢复存在歧义，已跳过",
+                new Dictionary<string, object?>
+                {
+                    ["kind"] = fontType.ToString(),
+                    ["request"] = key
+                });
         }
     }
 
@@ -806,7 +889,15 @@ internal static class MTextInlineFontHook
 
         if (!target.IsEnabled || string.IsNullOrWhiteSpace(target.ExportName))
         {
-            DiagnosticLogger.Log(Tag, $"{target.Name} 未启用：{target.DisabledReason ?? "缺少导出符号"}");
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveExport",
+                "Hook 目标未启用",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["reason"] = target.DisabledReason ?? "缺少导出符号"
+                });
             return false;
         }
 
@@ -814,14 +905,30 @@ internal static class MTextInlineFontHook
         address = NativeInlineHookInterop.GetProcAddress(module, exportName);
         if (address == IntPtr.Zero)
         {
-            DiagnosticLogger.Log(Tag, $"{target.Name} 导出未找到，跳过。");
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveExport",
+                "Hook 导出未找到",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["exportName"] = exportName
+                });
             return false;
         }
 
         long delta = address.ToInt64() - module.ToInt64();
         if (delta <= 0 || delta > uint.MaxValue)
         {
-            DiagnosticLogger.Log(Tag, $"{target.Name} RVA 解析失败，跳过。Address=0x{address.ToInt64():X}");
+            DiagnosticLogger.Fail(
+                Tag,
+                "ResolveExport",
+                "Hook 导出 RVA 解析失败",
+                fields: new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["address"] = $"0x{address.ToInt64():X}"
+                });
             address = IntPtr.Zero;
             return false;
         }
@@ -829,14 +936,30 @@ internal static class MTextInlineFontHook
         rva = (uint)delta;
         if (target.Rva.HasValue && target.Rva.Value != rva)
         {
-            DiagnosticLogger.Log(Tag,
-                $"{target.Name} RVA 不匹配，跳过。Expected=0x{target.Rva.Value:X}, Actual=0x{rva:X}");
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveExport",
+                "Hook 导出 RVA 不匹配",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["expectedRva"] = $"0x{target.Rva.Value:X}",
+                    ["actualRva"] = $"0x{rva:X}"
+                });
             address = IntPtr.Zero;
             rva = 0;
             return false;
         }
 
-        DiagnosticLogger.Log(Tag, $"{target.Name} 导出解析成功。RVA=0x{rva:X}");
+        DiagnosticLogger.Ok(
+            Tag,
+            "ResolveExport",
+            "Hook 导出解析成功",
+            new Dictionary<string, object?>
+            {
+                ["target"] = target.Name,
+                ["rva"] = $"0x{rva:X}"
+            });
         return true;
     }
 

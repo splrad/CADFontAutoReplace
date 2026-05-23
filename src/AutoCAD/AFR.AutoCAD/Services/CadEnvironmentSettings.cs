@@ -35,10 +35,25 @@ internal static class CadEnvironmentSettings
         AddHostApplicationPaths(paths, seen);
         AddProcessFontsPath(paths, seen);
 
-        DiagnosticLogger.Log("CadEnvironment",
-            paths.Count == 0
-                ? "CAD 字体搜索路径为空。"
-                : "CAD 字体搜索路径: " + string.Join(" | ", paths));
+        if (paths.Count == 0)
+        {
+            DiagnosticLogger.Skip(
+                "CadEnvironmentSettings",
+                "GetAllFontSearchPaths",
+                "CAD 字体搜索路径为空");
+        }
+        else
+        {
+            DiagnosticLogger.Ok(
+                "CadEnvironmentSettings",
+                "GetAllFontSearchPaths",
+                "CAD 字体搜索路径已收集",
+                new Dictionary<string, object?>
+                {
+                    ["pathCount"] = paths.Count,
+                    ["paths"] = string.Join(" | ", paths)
+                });
+        }
 
         return paths;
     }
