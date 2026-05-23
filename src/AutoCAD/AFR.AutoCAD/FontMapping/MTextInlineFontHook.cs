@@ -62,11 +62,25 @@ internal static class MTextInlineFontHook
            + $"CtorHits={Interlocked.Read(ref _fileNameCtorHitCount)}, "
            + $"SuppressedSetterHits={Interlocked.Read(ref _suppressedSetterHitCount)}";
 
-    internal static void ReplaceInlineFontCandidates(IReadOnlyDictionary<string, InlineFontCandidate> inlineFonts)
+    internal static void ClearInlineFontCandidates()
     {
         InlineFontCandidates.Clear();
         FoldedInlineFontCandidates.Clear();
         FoldedCandidateAmbiguityLogSeen.Clear();
+    }
+
+    internal static void ResetDiagnosticsCounters()
+    {
+        Interlocked.Exchange(ref _setFontHitCount, 0);
+        Interlocked.Exchange(ref _setFileNameHitCount, 0);
+        Interlocked.Exchange(ref _setBigFontFileNameHitCount, 0);
+        Interlocked.Exchange(ref _fileNameCtorHitCount, 0);
+        Interlocked.Exchange(ref _suppressedSetterHitCount, 0);
+    }
+
+    internal static void ReplaceInlineFontCandidates(IReadOnlyDictionary<string, InlineFontCandidate> inlineFonts)
+    {
+        ClearInlineFontCandidates();
 
         foreach (var candidate in inlineFonts.Values)
         {
@@ -197,14 +211,8 @@ internal static class MTextInlineFontHook
         _setBigFontFileNameHook?.Uninstall();
         _setBigFontFileNameHook = null;
         _setBigFontFileNameHookDelegate = null;
-        InlineFontCandidates.Clear();
-        FoldedInlineFontCandidates.Clear();
-        FoldedCandidateAmbiguityLogSeen.Clear();
-        Interlocked.Exchange(ref _setFontHitCount, 0);
-        Interlocked.Exchange(ref _setFileNameHitCount, 0);
-        Interlocked.Exchange(ref _setBigFontFileNameHitCount, 0);
-        Interlocked.Exchange(ref _fileNameCtorHitCount, 0);
-        Interlocked.Exchange(ref _suppressedSetterHitCount, 0);
+        ClearInlineFontCandidates();
+        ResetDiagnosticsCounters();
     }
 
     private static void TryInstallSetFontHook(IntPtr module, NativeHookTarget target)
@@ -324,20 +332,24 @@ internal static class MTextInlineFontHook
         if (trampoline == null)
             return 0;
 
-        string scopedFontName = ReadNativeString(typeface);
-        bool inlineCandidate = TryGetInlineCandidate(
-            scopedFontName,
-            InlineFontType.TrueType,
-            out InlineFontCandidate? candidate);
         if (_inSetFontHook
             || _suppressInlineRuntimeMapping
-            || !inlineCandidate)
+            || StyleTextStyleHook.IsInsideStyleRuntimeOperation
+            || InlineFontCandidates.IsEmpty)
         {
             if (_suppressInlineRuntimeMapping)
                 Interlocked.Increment(ref _suppressedSetterHitCount);
 
             return trampoline(self, typeface, bold, italic, charset, pitch, family);
         }
+
+        string scopedFontName = ReadNativeString(typeface);
+        bool inlineCandidate = TryGetInlineCandidate(
+            scopedFontName,
+            InlineFontType.TrueType,
+            out InlineFontCandidate? candidate);
+        if (!inlineCandidate)
+            return trampoline(self, typeface, bold, italic, charset, pitch, family);
 
         Interlocked.Increment(ref _setFontHitCount);
         _inSetFontHook = true;
@@ -408,15 +420,24 @@ internal static class MTextInlineFontHook
         if (trampoline == null)
             return;
 
-        bool inlineCandidate = IsInlineCandidate(ReadNativeString(fontName), InlineFontType.ShxMain)
-                               || IsInlineCandidate(ReadNativeString(bigFontName), InlineFontType.ShxBigFont);
         if (_inFileNameCtorHook
             || _suppressInlineRuntimeMapping
-            || !inlineCandidate)
+            || StyleTextStyleHook.IsInsideStyleRuntimeOperation
+            || InlineFontCandidates.IsEmpty)
         {
             if (_suppressInlineRuntimeMapping)
                 Interlocked.Increment(ref _suppressedSetterHitCount);
 
+            trampoline(
+                self, fontName, bigFontName, textSize, xScale, obliqueAngle, trackingPercent,
+                isBackward, isUpsideDown, isVertical, isOverlined, isUnderlined, isStrikethrough, styleName);
+            return;
+        }
+
+        bool inlineCandidate = IsInlineCandidate(ReadNativeString(fontName), InlineFontType.ShxMain)
+                               || IsInlineCandidate(ReadNativeString(bigFontName), InlineFontType.ShxBigFont);
+        if (!inlineCandidate)
+        {
             trampoline(
                 self, fontName, bigFontName, textSize, xScale, obliqueAngle, trackingPercent,
                 isBackward, isUpsideDown, isVertical, isOverlined, isUnderlined, isStrikethrough, styleName);
@@ -505,18 +526,25 @@ internal static class MTextInlineFontHook
         if (trampoline == null)
             return;
 
+        if (inHook
+            || _suppressInlineRuntimeMapping
+            || StyleTextStyleHook.IsInsideStyleRuntimeOperation
+            || InlineFontCandidates.IsEmpty)
+        {
+            if (_suppressInlineRuntimeMapping)
+                Interlocked.Increment(ref _suppressedSetterHitCount);
+
+            trampoline(self, fontName);
+            return;
+        }
+
         string originalForScope = ReadNativeString(fontName);
         bool inlineCandidate = TryGetInlineCandidate(
             originalForScope,
             inlineType,
             out InlineFontCandidate? candidate);
-        if (inHook
-            || _suppressInlineRuntimeMapping
-            || !inlineCandidate)
+        if (!inlineCandidate)
         {
-            if (_suppressInlineRuntimeMapping)
-                Interlocked.Increment(ref _suppressedSetterHitCount);
-
             trampoline(self, fontName);
             return;
         }

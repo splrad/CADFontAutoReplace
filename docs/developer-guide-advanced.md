@@ -36,7 +36,7 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - `StyleTextStyleHook`：只识别样式表来源的缺失 `@TrueType` 并登记到 `ShpLoadHook`。
 - `MTextInlineFontHook`：只识别 MText 内联字体来源并按字体类型登记到 `LdFileHook` 或 `ShpLoadHook`。
 
-`LdFileHook` 和 `ShpLoadHook` 随插件持久安装；`StyleTextStyleHook` 和 `MTextInlineFontHook` 只在 `ExecutionController.Execute()` 的文档处理周期内临时安装。文档执行顺序必须保持为：安装来源 Hook → 原始样式表检测 → 样式表 `@TrueType` 运行时映射 → MText 内联运行时映射 → 样式表最终写回 → 替换后二次检测 → 卸载来源 Hook → 最终图形刷新。
+`LdFileHook`、`ShpLoadHook`、`StyleTextStyleHook` 和 `MTextInlineFontHook` 均随插件持久安装；`ExecutionController.Execute()` 只管理文档级运行时状态。文档执行顺序必须保持为：清理运行时登记和候选 → 原始样式表检测 → 样式表 `@TrueType` 运行时映射 → MText 内联运行时映射 → 样式表最终写回 → 替换后二次检测 → 清理运行时登记和候选 → 最终图形刷新。
 
 普通样式表检测和永久写回应优先使用 AutoCAD 托管 API，例如当前 `Database` 上的 `HostApplicationServices.Current.FindFile`；`FontAvailabilityIndex` 只是 native Hook 路径无法安全取得托管 `Database` 时的 SHX 兜底索引。TrueType face 可用性由 `GdiTrueTypeFontFaceIndex` 通过 `EnumFontFamiliesExW` 按字体名精确查询，不能用基础字体存在推断 `@TrueType` 存在，也不能在 CAD 启动同步热路径中预热全量 GDI face 索引。
 
@@ -54,8 +54,8 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 
 关键链路（执行阶段）：
 
-1. 文档处理周期开始时临时安装 `MTextInlineFontHook`。
-2. `MTextInlineFontScanner.ScanInlineFonts` 只读扫描 `\F` / `\f`，并把候选写入 `MTextInlineFontHook.ReplaceInlineFontCandidates()`。
+1. `MTextInlineFontHook` 随插件持久安装，但没有内联候选时必须快速放行。
+2. `MTextInlineFontScanner.ScanInlineFonts` 在文档处理周期内只读扫描 `\F` / `\f`，并把候选写入 `MTextInlineFontHook.ReplaceInlineFontCandidates()`。
 3. `MTextInlineFontHook.PreRegisterRuntimeRequests()` 按候选类型登记文件级运行时请求；未登记时不触发 MText Regen。
 4. `Editor.Regen()` 只在有文件级登记时触发 CAD MText 展开/绘制流程，让 Hook 命中实际内联字体。
 5. `FontRuntimeMappingStore.GetRuntimeMappingResults` 读取 `LdFileHook` / `ShpLoadHook` 实际命中的文件级映射。

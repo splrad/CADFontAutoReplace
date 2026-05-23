@@ -20,7 +20,7 @@ internal sealed class AutoCadFontHook : IFontHook
 #endif
         ;
 
-    /// <summary>安装插件级持久文件加载 Hook，并初始化 CAD 字体兜底索引。</summary>
+    /// <summary>安装插件级持久字体 Hook，并初始化 CAD 字体兜底索引。</summary>
     public void Install()
     {
         FontAvailabilityIndex.Initialize();
@@ -29,6 +29,8 @@ internal sealed class AutoCadFontHook : IFontHook
 #endif
         LdFileHook.Install();
         ShpLoadHook.Install();
+        StyleTextStyleHook.Install();
+        MTextInlineFontHook.Install();
     }
 
     /// <summary>卸载 Hook，恢复被拦截的 AcGiTextStyle 函数。</summary>

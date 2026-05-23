@@ -24,7 +24,7 @@ internal sealed class ExecutionController
     /// <summary>
     /// 对指定文档执行字体检测与替换的完整流程。
     /// <para>
-    /// 执行阶段：检测缺失字体 → 运行时映射 → MText 内联字体扫描 → 样式表最终写回 → 二次验证 → 统计输出。
+    /// 执行阶段：检测缺失字体 → 样式表运行时映射 → MText 内联运行时映射 → 样式表最终写回 → 二次验证 → 统计输出。
     /// 遵守 IsInitialized 门控（未配置则跳过）和重复执行防护（同文档只执行一次）。
     /// </para>
     /// </summary>
@@ -67,14 +67,12 @@ internal sealed class ExecutionController
                 bool needsVisualRegen = false;
                 // 创建独立的字体检测上下文 — 缓存生命周期与本次执行绑定，结束后由 GC 自动回收
                 var context = new FontDetectionContext(doc.Database);
-                FontRuntimeMappingStore.Clear();
-                LdFileHook.ClearRegisteredRedirects();
-                StyleTextStyleHook.ReplaceStyleRuntimeFontMappings(Array.Empty<RuntimeFontMappingRecord>());
 
                 DiagnosticLogger.BeginDocument(doc.Name, config.MainFont, config.BigFont, config.TrueTypeFont);
                 DiagnosticLogger.Log(
                     "文档",
                     $"执行触发: trigger='{triggerSource}' key='{documentKey}' name='{documentName}' database='{databaseFilename}'");
+                var runtimeStateScope = SourceFontRuntimeStateScope.Begin();
                 var ldFileCountersBefore = LdFileHook.GetCountersSnapshot();
                 var shpLoadCountersBefore = ShpLoadHook.GetCountersSnapshot();
 #if DEBUG
@@ -87,11 +85,8 @@ internal sealed class ExecutionController
                 List<RuntimeFontMappingResultRecord> actualStyleRuntimeMappings = [];
                 List<RuntimeFontMappingResultRecord> allRuntimeMappingResults = [];
 
-                SourceFontHookScope? sourceHookScope = null;
                 try
                 {
-                    sourceHookScope = SourceFontHookScope.Install();
-
                     // 第一阶段: 检测缺失字体（读取样式表原始状态，判断哪些字体在系统中不可用）。
                     // 此阶段不做永久写回，保证运行时映射先处理原始图纸状态。
                     DiagnosticLogger.BeginPhase("检测缺失字体");
@@ -221,7 +216,7 @@ internal sealed class ExecutionController
                 }
                 finally
                 {
-                    sourceHookScope?.Dispose();
+                    runtimeStateScope.Dispose();
                 }
 
                 // 最终视觉刷新: 只处理永久样式写回后的显示更新。
@@ -231,7 +226,7 @@ internal sealed class ExecutionController
                     int markedGraphics = MarkAffectedTextGraphicsModified(doc.Database, missingFonts);
                     DiagnosticLogger.Log(
                         "图形刷新",
-                        $"样式表最终写回后执行来源Hook卸载后的最终Regen: marked={markedGraphics}");
+                        $"样式表最终写回后执行文档级登记已清理的最终Regen: marked={markedGraphics}");
                     doc.Editor.Regen();
                 }
 
@@ -385,32 +380,19 @@ internal sealed class ExecutionController
         return $"TrueType={trueTypeCount}, SHX主字体={shxMainCount}, SHX大字体={shxBigFontCount}";
     }
 
-    private sealed class SourceFontHookScope : IDisposable
+    private sealed class SourceFontRuntimeStateScope : IDisposable
     {
         private bool _disposed;
 
-        private SourceFontHookScope()
+        private SourceFontRuntimeStateScope()
         {
         }
 
-        internal static SourceFontHookScope Install()
+        internal static SourceFontRuntimeStateScope Begin()
         {
-            DiagnosticLogger.Log("来源Hook", "文档级来源 Hook 作用域开始，安装 StyleTextStyleHook / MTextInlineFontHook。");
-            var scope = new SourceFontHookScope();
-            try
-            {
-                StyleTextStyleHook.Install();
-                MTextInlineFontHook.Install();
-                DiagnosticLogger.Log(
-                    "来源Hook",
-                    $"文档级来源 Hook 已安装: style={StyleTextStyleHook.IsInstalled}, mtext={MTextInlineFontHook.IsInstalled}");
-                return scope;
-            }
-            catch
-            {
-                scope.Dispose();
-                throw;
-            }
+            DiagnosticLogger.Log("来源状态", "文档级来源状态开始，清理运行时登记、样式映射、MText候选和诊断计数。");
+            ClearDocumentRuntimeState();
+            return new SourceFontRuntimeStateScope();
         }
 
         public void Dispose()
@@ -419,29 +401,20 @@ internal sealed class ExecutionController
                 return;
 
             _disposed = true;
-            DiagnosticLogger.Log("来源Hook", "文档级来源 Hook 作用域结束，开始卸载 MTextInlineFontHook / StyleTextStyleHook。");
-
-            try
-            {
-                MTextInlineFontHook.Uninstall();
-            }
-            catch (Exception ex)
-            {
-                DiagnosticLogger.LogError("卸载 MTextInlineFontHook 失败", ex);
-            }
-
-            try
-            {
-                StyleTextStyleHook.Uninstall();
-            }
-            catch (Exception ex)
-            {
-                DiagnosticLogger.LogError("卸载 StyleTextStyleHook 失败", ex);
-            }
-
+            DiagnosticLogger.Log("来源状态", "文档级来源状态结束，清理运行时登记、样式映射和MText候选。");
+            ClearDocumentRuntimeState();
             DiagnosticLogger.Log(
-                "来源Hook",
-                $"文档级来源 Hook 已卸载: style={StyleTextStyleHook.IsInstalled}, mtext={MTextInlineFontHook.IsInstalled}");
+                "来源状态",
+                $"文档级来源状态已清理: styleHook={StyleTextStyleHook.IsInstalled}, mtextHook={MTextInlineFontHook.IsInstalled}");
+        }
+
+        private static void ClearDocumentRuntimeState()
+        {
+            FontRuntimeMappingStore.Clear();
+            LdFileHook.ClearRegisteredRedirects();
+            StyleTextStyleHook.ReplaceStyleRuntimeFontMappings(Array.Empty<RuntimeFontMappingRecord>());
+            MTextInlineFontHook.ClearInlineFontCandidates();
+            MTextInlineFontHook.ResetDiagnosticsCounters();
         }
     }
 

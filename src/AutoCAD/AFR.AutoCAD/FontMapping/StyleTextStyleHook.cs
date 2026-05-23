@@ -225,6 +225,8 @@ internal static class StyleTextStyleHook
 
         bool hasStyleMappings = !RuntimeMappingsByStyle.IsEmpty;
         bool inStyleRuntimeScope = _styleRuntimeScopeDepth > 0;
+        if (!hasStyleMappings && !inStyleRuntimeScope)
+            return trampoline(self, db);
 
         _inLoadStyleRecHook = true;
         try
