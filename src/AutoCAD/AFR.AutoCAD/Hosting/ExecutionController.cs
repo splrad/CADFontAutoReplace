@@ -96,29 +96,17 @@ internal sealed class ExecutionController
                     contextMgr.StoreDetectionResults(doc, missingFonts);
                     DiagnosticLogger.EndPhase($"缺失: {missingFonts.Count}个");
 
-                    // 第二阶段: 仅登记样式表 @TrueType 缺失字体的临时运行时映射。
+                    // 第二阶段: 仅登记样式表 @TrueType 缺失字体的临时运行时映射（不立即 Regen）。
+                    // 与第三阶段的 MText 内联登记合并后，用一次触发型 Regen 统一命中两类 Hook，
+                    // 避免连续多次 Regen 触发 NVIDIA GPU 驱动（nvgpucomp64.dll）渲染管线竞态。
                     var runtimeFontMappings = FontDetector.CollectRuntimeFontMappings(context, config.TrueTypeFont);
-                    if (runtimeFontMappings.Count > 0)
+                    bool hasStyleRuntimeMappings = runtimeFontMappings.Count > 0;
+                    if (hasStyleRuntimeMappings)
                     {
-                        DiagnosticLogger.BeginPhase("样式表运行时映射");
+                        DiagnosticLogger.BeginPhase("样式表运行时映射登记");
                         ActivateStyleRuntimeFontMappings(runtimeFontMappings);
                         ForceLoadStyleRuntimeMappings(doc.Database, runtimeFontMappings);
-
-                        // 触发型 Regen: 这里必须立即触发 AcGiTextStyle::loadStyleRec，
-                        // 让样式表 @TrueType 映射在 StyleTextStyleHook 中命中，不能与最终视觉刷新合并。
-                        DiagnosticLogger.Log("样式表运行时映射", "触发样式表运行时 Regen 开始。");
-                        doc.Editor.Regen();
-                        DiagnosticLogger.Log("样式表运行时映射", "触发样式表运行时 Regen 结束。");
-
-                        actualStyleRuntimeMappings = FontRuntimeMappingStore.GetRuntimeMappingResults()
-                            .Where(item => string.Equals(item.Source, "样式表", StringComparison.OrdinalIgnoreCase))
-                            .ToList();
-                        contextMgr.StoreRuntimeFontMappingResults(doc, actualStyleRuntimeMappings);
-                        DiagnosticLogger.EndPhase($"登记: {runtimeFontMappings.Count}项, 命中: {actualStyleRuntimeMappings.Count}项");
-                    }
-                    else
-                    {
-                        contextMgr.StoreRuntimeFontMappingResults(doc, actualStyleRuntimeMappings);
+                        DiagnosticLogger.EndPhase($"登记: {runtimeFontMappings.Count}项（等待合并触发型 Regen）");
                     }
 
                     // 第三阶段: 只读扫描 MText 内联字体；实际映射结果由文件级 Hook 记录。
@@ -143,25 +131,39 @@ internal sealed class ExecutionController
                         preRegisteredInlineMappings = MTextInlineFontHook.PreRegisterRuntimeRequests();
                         DiagnosticLogger.Log("MTextInlineFontHook",
                             $"MText预登记结束: 登记={preRegisteredInlineMappings}, 候选={inlineScanResult.InlineFonts.Count}, {inlineCandidateSummary}");
-
-                        if (preRegisteredInlineMappings > 0)
-                        {
-                            // 触发型 Regen: MTextInlineFontHook 依赖 CAD 的 MText 展开/绘制流程命中实际内联字体。
-                            // 这一步负责收集真实 Hook 映射结果，不改写 MText.Contents。
-                            DiagnosticLogger.Log("MTextInlineFontHook", "MText触发Regen开始。");
-                            doc.Editor.Regen();
-                            DiagnosticLogger.Log("MTextInlineFontHook", "MText触发Regen结束。");
-                            hookStatsAfterInlineRegen = MTextInlineFontHook.GetDiagnosticsSummary();
-                        }
-                        else
-                        {
-                            DiagnosticLogger.Log("MTextInlineFontHook", "MText无文件级登记，跳过触发Regen。");
-                            hookStatsAfterInlineRegen = MTextInlineFontHook.GetDiagnosticsSummary();
-                        }
                     }
                     else
                     {
-                        DiagnosticLogger.Log("MTextInlineFontHook", "MText无内联字体候选，跳过预登记和触发Regen。");
+                        DiagnosticLogger.Log("MTextInlineFontHook", "MText无内联字体候选，跳过预登记。");
+                    }
+
+                    // 合并触发型 Regen：样式表运行时映射（StyleTextStyleHook）和
+                    // MText 内联运行时映射（MTextInlineFontHook）共用一次 Regen，
+                    // 将单文档最大 Regen 次数从 3 次降为 2 次，避免 GPU 驱动堆损坏。
+                    bool needsCombinedRegen = hasStyleRuntimeMappings || preRegisteredInlineMappings > 0;
+                    if (needsCombinedRegen)
+                    {
+                        DiagnosticLogger.Log("运行时映射", $"合并触发型 Regen 开始（样式表={hasStyleRuntimeMappings}, MText登记={preRegisteredInlineMappings}）。");
+                        doc.Editor.Regen();
+                        DiagnosticLogger.Log("运行时映射", "合并触发型 Regen 结束。");
+                        hookStatsAfterInlineRegen = MTextInlineFontHook.GetDiagnosticsSummary();
+                    }
+                    else
+                    {
+                        DiagnosticLogger.Log("运行时映射", "无样式表运行时映射且无MText文件级登记，跳过触发型 Regen。");
+                    }
+
+                    if (hasStyleRuntimeMappings)
+                    {
+                        actualStyleRuntimeMappings = FontRuntimeMappingStore.GetRuntimeMappingResults()
+                            .Where(item => string.Equals(item.Source, "样式表", StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+                        contextMgr.StoreRuntimeFontMappingResults(doc, actualStyleRuntimeMappings);
+                        DiagnosticLogger.Log("样式表运行时映射", $"命中: {actualStyleRuntimeMappings.Count}项");
+                    }
+                    else
+                    {
+                        contextMgr.StoreRuntimeFontMappingResults(doc, actualStyleRuntimeMappings);
                     }
 
                     allRuntimeMappingResults = FontRuntimeMappingStore.GetRuntimeMappingResults();
@@ -171,6 +173,8 @@ internal sealed class ExecutionController
                         $"MText内联字体加载桥接登记诊断: {runtimeBridgeRegistrationSummary}");
 
                     contextMgr.StoreInlineFontFixResults(doc, []);
+                    // 用包含所有来源（样式表 + MText）的全量结果覆盖写入，
+                    // 前面各阶段的分阶段写入在此被最终结果替换。
                     contextMgr.StoreRuntimeFontMappingResults(doc, allRuntimeMappingResults);
                     DiagnosticLogger.EndPhase(
                         $"MText: {inlineScanResult.MTextCount}个, " +

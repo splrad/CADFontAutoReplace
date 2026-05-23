@@ -27,6 +27,12 @@ public abstract class PluginEntryBase : IExtensionApplication
     private static bool _idleHandlerRegistered;
     // 标记插件是否已卸载，卸载后不再处理任何事件
     private static volatile bool _unloaded;
+    // 重入防护：ExecutionController.Execute 内部会调用 Regen()，Regen() 会泵送
+    // Windows 消息队列，可能在当前执行尚未结束时再次触发 OnDeferredIdle，
+    // 导致 doc2 的 ClearDocumentRuntimeState 污染 doc1 正在使用的全局单例状态，
+    // 并引发嵌套 LockDocument + 嵌套 Regen 造成 UI 线程死锁。
+    // 通过此标志阻断重入：重入期间到来的请求重新调度到下一次 Idle。
+    private static bool _executeInProgress;
     private static readonly object _scheduleLock = new();
     private static readonly object _hiddenUnloadLock = new();
     private static readonly HashSet<Document> _hiddenUnloadDocuments = new();
@@ -187,6 +193,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         lock (_scheduleLock)
         {
             _unloaded = true;
+            _executeInProgress = false;
             UnregisterEvents();
             _pendingExecutions.Clear();
             if (_idleHandlerRegistered)
@@ -393,26 +400,49 @@ public abstract class PluginEntryBase : IExtensionApplication
         (Document? Doc, string Trigger)[] pending;
         lock (_scheduleLock)
         {
+            // 重入防护：Regen() 抽消息泵时可能再次触发 Idle，
+            // 若当前已在执行中则保留队列，待本次执行完成后的下一次 Idle 再处理。
+            if (_executeInProgress)
+                return;
+
             AcadApp.Idle -= OnDeferredIdle;
             _idleHandlerRegistered = false;
             if (_unloaded || _pendingExecutions.Count == 0) return;
             pending = [.. _pendingExecutions];
             _pendingExecutions.Clear();
+            _executeInProgress = true;
         }
 
-        for (int i = 0; i < pending.Length; i++)
+        try
         {
-            var (doc, trigger) = pending[i];
-            doc ??= AcadApp.DocumentManager.MdiActiveDocument;
-            if (doc == null || doc.IsDisposed) continue;
+            for (int i = 0; i < pending.Length; i++)
+            {
+                var (doc, trigger) = pending[i];
+                doc ??= AcadApp.DocumentManager.MdiActiveDocument;
+                if (doc == null || doc.IsDisposed) continue;
 
-            try
-            {
-                ExecutionController.Instance.Execute(doc, trigger);
+                try
+                {
+                    ExecutionController.Instance.Execute(doc, trigger);
+                }
+                catch (System.Exception ex)
+                {
+                    DiagnosticLogger.LogError($"{trigger} 延迟执行失败", ex);
+                }
             }
-            catch (System.Exception ex)
+        }
+        finally
+        {
+            lock (_scheduleLock)
             {
-                DiagnosticLogger.LogError($"{trigger} 延迟执行失败", ex);
+                _executeInProgress = false;
+                // 若执行期间有新文档入队（Regen 消息泵触发的 DocumentCreated），
+                // 此处重新注册 Idle，确保下一轮空闲时处理这些请求。
+                if (!_unloaded && _pendingExecutions.Count > 0 && !_idleHandlerRegistered)
+                {
+                    _idleHandlerRegistered = true;
+                    AcadApp.Idle += OnDeferredIdle;
+                }
             }
         }
     }
