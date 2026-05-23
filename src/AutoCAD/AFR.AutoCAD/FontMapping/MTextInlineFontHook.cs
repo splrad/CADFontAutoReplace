@@ -18,12 +18,10 @@ internal static class MTextInlineFontHook
     private static NativeInlineHook<AcGiTextStyleFileNameCtorDelegate>? _fileNameCtorHook;
     private static NativeInlineHook<AcGiTextStyleSetFileNameDelegate>? _setFileNameHook;
     private static NativeInlineHook<AcGiTextStyleSetFileNameDelegate>? _setBigFontFileNameHook;
-    private static NativeInlineHook<AcDbMTextExplodeFragmentsDelegate>? _explodeFragmentsHook;
     private static AcGiTextStyleSetFontDelegate? _setFontHookDelegate;
     private static AcGiTextStyleFileNameCtorDelegate? _fileNameCtorHookDelegate;
     private static AcGiTextStyleSetFileNameDelegate? _setFileNameHookDelegate;
     private static AcGiTextStyleSetFileNameDelegate? _setBigFontFileNameHookDelegate;
-    private static AcDbMTextExplodeFragmentsDelegate? _explodeFragmentsHookDelegate;
     private static readonly ConcurrentDictionary<string, IntPtr> NativeTypefaceCache = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, IntPtr> NativeFileNameCache = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen = new(StringComparer.Ordinal);
@@ -31,9 +29,6 @@ internal static class MTextInlineFontHook
     private static readonly ConcurrentDictionary<string, InlineFontCandidate?> FoldedInlineFontCandidates = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> LoadStyleRecRedirectLogSeen = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> FoldedCandidateAmbiguityLogSeen = new(StringComparer.Ordinal);
-    private static long _explodeFragmentsHitCount;
-    private static long _explodeFragmentsCallbackHitCount;
-    private static long _explodeFragmentsWorldDrawHitCount;
     private static long _loadStyleRecInlineHitCount;
     private static long _loadStyleRecInlineApplyCount;
     private static long _setFontHitCount;
@@ -41,48 +36,40 @@ internal static class MTextInlineFontHook
     private static long _setBigFontFileNameHitCount;
     private static long _fileNameCtorHitCount;
     private static long _suppressedSetterHitCount;
+    private static long _setFontDirectTrueTypeBypassCount;
 
     [ThreadStatic] private static bool _inSetFontHook;
     [ThreadStatic] private static bool _inFileNameCtorHook;
     [ThreadStatic] private static bool _inSetFileNameHook;
     [ThreadStatic] private static bool _inSetBigFontFileNameHook;
     [ThreadStatic] private static bool _inInlineFontRedirect;
-    [ThreadStatic] private static bool _inExplodeFragmentsHook;
     [ThreadStatic] private static bool _suppressInlineRuntimeMapping;
-    [ThreadStatic] private static int _mTextScopeDepth;
 
     internal static bool IsInsideInlineFontHook
     {
         get
         {
-            return _inInlineFontRedirect
-                   || _mTextScopeDepth > 0;
+            return _inInlineFontRedirect;
         }
     }
-
-    private static bool IsInsideMTextScope => _mTextScopeDepth > 0;
 
     internal static bool IsInstalled =>
         _setFontHook?.IsInstalled == true
         || _fileNameCtorHook?.IsInstalled == true
         || _setFileNameHook?.IsInstalled == true
-        || _setBigFontFileNameHook?.IsInstalled == true
-        || _explodeFragmentsHook?.IsInstalled == true
-        ;
+        || _setBigFontFileNameHook?.IsInstalled == true;
 
     internal static IDisposable SuppressInlineRuntimeMapping()
         => new InlineRuntimeMappingSuppressionScope();
 
     internal static string GetDiagnosticsSummary()
-        => $"ExplodeFragmentsHits={Interlocked.Read(ref _explodeFragmentsHitCount)}, "
-           + $"CallbackHits={Interlocked.Read(ref _explodeFragmentsCallbackHitCount)}, "
-           + $"WorldDrawHits={Interlocked.Read(ref _explodeFragmentsWorldDrawHitCount)}, "
-           + $"LoadStyleRecInlineHits={Interlocked.Read(ref _loadStyleRecInlineHitCount)}, "
+        => $"LoadStyleRecInlineHits={Interlocked.Read(ref _loadStyleRecInlineHitCount)}, "
            + $"LoadStyleRecInlineApplies={Interlocked.Read(ref _loadStyleRecInlineApplyCount)}, "
            + $"SetFontHits={Interlocked.Read(ref _setFontHitCount)}, "
            + $"SetFileNameHits={Interlocked.Read(ref _setFileNameHitCount)}, "
            + $"SetBigFontFileNameHits={Interlocked.Read(ref _setBigFontFileNameHitCount)}, "
            + $"CtorHits={Interlocked.Read(ref _fileNameCtorHitCount)}, "
+           + $"SetFontDirectTrueTypeBypass={Interlocked.Read(ref _setFontDirectTrueTypeBypassCount)}, "
            + $"SuppressedSetterHits={Interlocked.Read(ref _suppressedSetterHitCount)}";
 
     internal static void ReplaceInlineFontCandidates(IReadOnlyDictionary<string, InlineFontCandidate> inlineFonts)
@@ -102,6 +89,36 @@ internal static class MTextInlineFontHook
                 AddFoldedInlineCandidate(key, normalizedCandidate);
             }
         }
+    }
+
+    internal static int PreRegisterTrueTypeRuntimeBridgeMappings()
+    {
+        if (InlineFontCandidates.IsEmpty)
+            return 0;
+
+        int registered = 0;
+        foreach (InlineFontCandidate candidate in InlineFontCandidates.Values)
+        {
+            if (candidate.FontType != InlineFontType.TrueType)
+                continue;
+
+            if (TryRegisterLdFileTrueTypeMapping(
+                    candidate.LookupName,
+                    candidate.OriginalFont,
+                    "MTextInlineFontScanner:preRegen:TrueType",
+                    out _))
+            {
+                registered++;
+            }
+        }
+
+        if (registered > 0)
+        {
+            DiagnosticLogger.Log(Tag,
+                $"MText 内联 @TrueType 已在 Regen 前登记字体加载桥接: {registered}项");
+        }
+
+        return registered;
     }
 
     internal static bool HasAnonymousInlineLoadStyleRecCandidate(
@@ -189,13 +206,6 @@ internal static class MTextInlineFontHook
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void AcGiTextStyleSetFileNameDelegate(IntPtr self, IntPtr fontName);
 
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate void AcDbMTextExplodeFragmentsDelegate(
-        IntPtr self,
-        IntPtr callback,
-        IntPtr callbackParam,
-        IntPtr worldDraw);
-
     internal static void Install()
     {
         if (PlatformManager.Platform is not INativeFontHookExportsProvider exports)
@@ -212,13 +222,6 @@ internal static class MTextInlineFontHook
         }
 
         NativeFontHookProfile profile = exports.NativeFontHookProfile;
-        TryInstallExplodeFragmentsScope(module, profile.AcDbMTextExplodeFragments);
-        if (_explodeFragmentsHook?.IsInstalled != true)
-        {
-            DiagnosticLogger.Log(Tag, "MText 作用域 Hook 未安装，MText 内联字体映射 fail closed。");
-            return;
-        }
-
         TryInstallSetFontHook(module, profile.AcGiTextStyleSetFont);
         TryInstallFileNameCtorHook(module, profile.AcGiTextStyleFileNameCtor);
         TryInstallSetFileNameHook(module, profile.AcGiTextStyleSetFileName);
@@ -230,10 +233,6 @@ internal static class MTextInlineFontHook
         DiagnosticLogger.Log(Tag,
             "已卸载。"
             + GetDiagnosticsSummary());
-
-        _explodeFragmentsHook?.Uninstall();
-        _explodeFragmentsHook = null;
-        _explodeFragmentsHookDelegate = null;
 
         _setFontHook?.Uninstall();
         _setFontHook = null;
@@ -252,15 +251,13 @@ internal static class MTextInlineFontHook
         InlineFontCandidates.Clear();
         FoldedInlineFontCandidates.Clear();
         FoldedCandidateAmbiguityLogSeen.Clear();
-        Interlocked.Exchange(ref _explodeFragmentsHitCount, 0);
-        Interlocked.Exchange(ref _explodeFragmentsCallbackHitCount, 0);
-        Interlocked.Exchange(ref _explodeFragmentsWorldDrawHitCount, 0);
         Interlocked.Exchange(ref _loadStyleRecInlineHitCount, 0);
         Interlocked.Exchange(ref _loadStyleRecInlineApplyCount, 0);
         Interlocked.Exchange(ref _setFontHitCount, 0);
         Interlocked.Exchange(ref _setFileNameHitCount, 0);
         Interlocked.Exchange(ref _setBigFontFileNameHitCount, 0);
         Interlocked.Exchange(ref _fileNameCtorHitCount, 0);
+        Interlocked.Exchange(ref _setFontDirectTrueTypeBypassCount, 0);
         Interlocked.Exchange(ref _suppressedSetterHitCount, 0);
     }
 
@@ -368,32 +365,6 @@ internal static class MTextInlineFontHook
             target.ExpectedPrefix);
     }
 
-    private static void TryInstallExplodeFragmentsScope(IntPtr module, NativeHookTarget target)
-    {
-        if (_explodeFragmentsHook?.IsInstalled == true)
-            return;
-
-        if (!TryGetExportAddress(module, target, out var address, out uint rva))
-        {
-            DiagnosticLogger.Log(Tag, "AcDbMText::explodeFragments 导出未找到，跳过 MText 作用域 Hook。");
-            return;
-        }
-
-        _explodeFragmentsHookDelegate = ExplodeFragmentsHookHandler;
-        _explodeFragmentsHook = new NativeInlineHook<AcDbMTextExplodeFragmentsDelegate>(
-            Tag,
-            target.Name,
-            target.Rva ?? rva);
-
-        _explodeFragmentsHook.InstallAtAddress(
-            address,
-            rva,
-            _explodeFragmentsHookDelegate,
-            target.MinPrologueSize,
-            target.MaxPrologueSize,
-            target.ExpectedPrefix);
-    }
-
     private static int SetFontHookHandler(
         IntPtr self,
         IntPtr typeface,
@@ -414,8 +385,7 @@ internal static class MTextInlineFontHook
             out InlineFontCandidate? candidate);
         if (_inSetFontHook
             || _suppressInlineRuntimeMapping
-            || (!IsInsideMTextScope && !inlineCandidate)
-            || (StyleTextStyleHook.IsInsideStyleRuntimeOperation && !inlineCandidate))
+            || !inlineCandidate)
         {
             if (_suppressInlineRuntimeMapping)
                 Interlocked.Increment(ref _suppressedSetterHitCount);
@@ -441,6 +411,20 @@ internal static class MTextInlineFontHook
             string? replacement = ResolveMissingTrueTypeReplacement(fontName);
             if (replacement != null)
             {
+                if (ShpLoadHook.IsInstalled)
+                {
+                    Interlocked.Increment(ref _setFontDirectTrueTypeBypassCount);
+                    string bypassKey = $"setFont-bypass|{displayFontName}|{replacement}|{bold}|{italic}|{charset}|{pitch}|{family}";
+                    if (RedirectLogSeen.TryAdd(bypassKey, 0))
+                    {
+                        DiagnosticLogger.Log(Tag,
+                            $"shpload TrueType 接管: setFont 直接重定向已旁路，等待 shpload 处理 " +
+                            $"'{displayFontName}' → '{replacement}' bold={bold != 0} italic={italic != 0} " +
+                            $"charset={charset} pitch={pitch} family={family}");
+                    }
+
+                    return trampoline(self, typeface, bold, italic, charset, pitch, family);
+                }
                 IntPtr replacementPtr = NativeTypefaceCache.GetOrAdd(
                     replacement,
                     static name => Marshal.StringToHGlobalUni(name));
@@ -516,8 +500,7 @@ internal static class MTextInlineFontHook
                                || IsInlineCandidate(ReadNativeString(bigFontName), InlineFontType.ShxBigFont);
         if (_inFileNameCtorHook
             || _suppressInlineRuntimeMapping
-            || (!IsInsideMTextScope && !inlineCandidate)
-            || (StyleTextStyleHook.IsInsideStyleRuntimeOperation && !inlineCandidate))
+            || !inlineCandidate)
         {
             if (_suppressInlineRuntimeMapping)
                 Interlocked.Increment(ref _suppressedSetterHitCount);
@@ -620,8 +603,7 @@ internal static class MTextInlineFontHook
             out InlineFontCandidate? candidate);
         if (inHook
             || _suppressInlineRuntimeMapping
-            || (!IsInsideMTextScope && !inlineCandidate)
-            || (StyleTextStyleHook.IsInsideStyleRuntimeOperation && !inlineCandidate))
+            || !inlineCandidate)
         {
             if (_suppressInlineRuntimeMapping)
                 Interlocked.Increment(ref _suppressedSetterHitCount);
@@ -631,9 +613,13 @@ internal static class MTextInlineFontHook
         }
 
         if (bigFont)
+        {
             Interlocked.Increment(ref _setBigFontFileNameHitCount);
+        }
         else
+        {
             Interlocked.Increment(ref _setFileNameHitCount);
+        }
 
         inHook = true;
         try
@@ -1028,46 +1014,6 @@ internal static class MTextInlineFontHook
         catch
         {
             return string.Empty;
-        }
-    }
-
-    private static void ExplodeFragmentsHookHandler(
-        IntPtr self,
-        IntPtr callback,
-        IntPtr callbackParam,
-        IntPtr worldDraw)
-    {
-        var trampoline = _explodeFragmentsHook?.TrampolineDelegate;
-        if (trampoline == null)
-            return;
-
-        if (_inExplodeFragmentsHook)
-        {
-            trampoline(self, callback, callbackParam, worldDraw);
-            return;
-        }
-
-        Interlocked.Increment(ref _explodeFragmentsHitCount);
-        if (callback != IntPtr.Zero)
-            Interlocked.Increment(ref _explodeFragmentsCallbackHitCount);
-        if (worldDraw != IntPtr.Zero)
-            Interlocked.Increment(ref _explodeFragmentsWorldDrawHitCount);
-
-        _inExplodeFragmentsHook = true;
-        _mTextScopeDepth++;
-        try
-        {
-            trampoline(self, callback, callbackParam, worldDraw);
-        }
-        catch (Exception ex)
-        {
-            DiagnosticLogger.LogError(Tag + ": AcDbMText::explodeFragments 作用域 Hook 异常", ex);
-        }
-        finally
-        {
-            if (_mTextScopeDepth > 0)
-                _mTextScopeDepth--;
-            _inExplodeFragmentsHook = false;
         }
     }
 

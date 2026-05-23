@@ -24,8 +24,6 @@ internal interface INativeFontHookExportsProvider
 
     string AcGiTextStyleFileNameCtorExport { get; }
 
-    string AcDbMTextExplodeFragmentsExport { get; }
-
     string LdFileExport { get; }
 
     uint? LdFileRva { get; }
@@ -39,16 +37,18 @@ internal sealed class NativeFontHookProfile
         NativeHookTarget acGiTextStyleSetFileName,
         NativeHookTarget acGiTextStyleSetBigFontFileName,
         NativeHookTarget acGiTextStyleFileNameCtor,
-        NativeHookTarget acDbMTextExplodeFragments,
-        NativeHookTarget ldFile)
+        NativeHookTarget ldFile,
+        NativeHookTarget? shpLoad = null,
+        NativeHookTarget? mapFont = null)
     {
         AcGiTextStyleLoadStyleRec = acGiTextStyleLoadStyleRec;
         AcGiTextStyleSetFont = acGiTextStyleSetFont;
         AcGiTextStyleSetFileName = acGiTextStyleSetFileName;
         AcGiTextStyleSetBigFontFileName = acGiTextStyleSetBigFontFileName;
         AcGiTextStyleFileNameCtor = acGiTextStyleFileNameCtor;
-        AcDbMTextExplodeFragments = acDbMTextExplodeFragments;
         LdFile = ldFile;
+        ShpLoad = shpLoad ?? NativeHookTarget.Disabled("shpload", "未提供已验证的 shpload TrueType 入口");
+        MapFont = mapFont ?? NativeHookTarget.Disabled("mapFont", "未提供已验证的 mapFont 诊断入口");
     }
 
     public NativeHookTarget AcGiTextStyleLoadStyleRec { get; }
@@ -61,9 +61,11 @@ internal sealed class NativeFontHookProfile
 
     public NativeHookTarget AcGiTextStyleFileNameCtor { get; }
 
-    public NativeHookTarget AcDbMTextExplodeFragments { get; }
-
     public NativeHookTarget LdFile { get; }
+
+    public NativeHookTarget ShpLoad { get; }
+
+    public NativeHookTarget MapFont { get; }
 }
 
 internal sealed class NativeHookTarget

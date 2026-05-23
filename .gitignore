@@ -387,3 +387,6 @@ FodyWeavers.xsd
 *.png
 /chore/project-bolt-sb1-yrdzmnib.zip
 /chore/project-bolt-sb1-yrdzmnib (1).zip
+/chore/TrueTypeHookProbe/acdb25.exports.raw.txt
+/chore/TrueTypeHookProbe/acdb25.exports.demangled.txt
+/docs/探索结论：acdb25 文件级字体映射 HOOK 候选.md

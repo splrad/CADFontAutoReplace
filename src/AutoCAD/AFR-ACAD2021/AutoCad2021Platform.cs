@@ -28,7 +28,6 @@ internal sealed class AutoCad2021Platform : ICadPlatform, INativeFontHookExports
     public string AcGiTextStyleSetFileNameExport => "?setFileName@AcGiTextStyle@@UEAAXPEB_W@Z";
     public string AcGiTextStyleSetBigFontFileNameExport => "?setBigFontFileName@AcGiTextStyle@@UEAAXPEB_W@Z";
     public string AcGiTextStyleFileNameCtorExport => "??0AcGiTextStyle@@QEAA@PEB_W0NNNN_N111110@Z";
-    public string AcDbMTextExplodeFragmentsExport => "?explodeFragments@AcDbMText@@QEBAXP6AHPEAUAcDbMTextFragment@@PEAX@Z1PEAVAcGiWorldDraw@@@Z";
     public string LdFileExport => "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z";
     public uint? LdFileRva => 0x527BC;
 
@@ -64,12 +63,6 @@ internal sealed class AutoCad2021Platform : ICadPlatform, INativeFontHookExports
                 0xAB25C4,
                 [0x48, 0x8B, 0xC4, 0x48, 0x89, 0x48, 0x08, 0x57, 0x48, 0x81, 0xEC, 0x90, 0x00, 0x00, 0x00, 0x48],
                 maxPrologueSize: 96),
-            NativeHookTarget.Export(
-                "AcDbMText::explodeFragments",
-                AcDbMTextExplodeFragmentsExport,
-                0xA3DA9C,
-                [0x48, 0x8B, 0xC1, 0x33, 0xC9, 0x48, 0x85, 0xC0, 0x74, 0x04, 0x48, 0x8B, 0x48, 0x10, 0xE9, 0x25],
-                maxPrologueSize: 64),
             NativeHookTarget.Export(
                 "ldfile",
                 LdFileExport,

@@ -76,6 +76,10 @@ internal sealed class ExecutionController
                     "文档",
                     $"执行触发: trigger='{triggerSource}' key='{documentKey}' name='{documentName}' database='{databaseFilename}'");
                 var ldFileCountersBefore = LdFileHook.GetCountersSnapshot();
+                var shpLoadCountersBefore = ShpLoadHook.GetCountersSnapshot();
+#if DEBUG
+                var mapFontCountersBefore = MapFontDiagnosticHook.GetCountersSnapshot();
+#endif
 
                 // 第一阶段: 检测缺失字体（读取样式表原始状态，判断哪些字体在系统中不可用）
                 DiagnosticLogger.BeginPhase("检测缺失字体");
@@ -141,11 +145,14 @@ internal sealed class ExecutionController
                 List<InlineFontFixRecord> inlineFixResults;
                 string hookStatsBeforeInlineScan;
                 string hookStatsAfterInlineRegen;
+                int preRegisteredTrueTypeMappings = 0;
+                string runtimeBridgeRegistrationSummary;
                 MTextInlineFontHook.Install();
                 try
                 {
                     hookStatsBeforeInlineScan = MTextInlineFontHook.GetDiagnosticsSummary();
                     inlineScanResult = MTextInlineFontScanner.ScanInlineFonts(doc.Database);
+                    preRegisteredTrueTypeMappings = MTextInlineFontHook.PreRegisterTrueTypeRuntimeBridgeMappings();
                     if (inlineScanResult.InlineFonts.Count > 0)
                     {
                         // 触发型 Regen: MTextInlineFontHook 依赖 CAD 的 MText 展开/绘制流程命中实际内联字体。
@@ -155,6 +162,10 @@ internal sealed class ExecutionController
 
                     inlineFixResults = FontRuntimeMappingStore.GetInlineMappings();
                     hookStatsAfterInlineRegen = MTextInlineFontHook.GetDiagnosticsSummary();
+                    runtimeBridgeRegistrationSummary = BuildInlineRuntimeBridgeRegistrationSummary(
+                        LdFileHook.GetRegisteredRedirectDiagnosticsSnapshot());
+                    DiagnosticLogger.Log("LdFileHook",
+                        $"MText内联字体加载桥接登记诊断: {runtimeBridgeRegistrationSummary}");
                 }
                 finally
                 {
@@ -169,6 +180,8 @@ internal sealed class ExecutionController
                     $"片段: {inlineScanResult.FragmentCount}个, " +
                     $"失败: {inlineScanResult.FragmentExpansionFailures}个, " +
                     $"映射: {inlineFixResults.Count}个, " +
+                    $"Regen前@TrueType登记: {preRegisteredTrueTypeMappings}个, " +
+                    $"字体加载桥接登记=[{runtimeBridgeRegistrationSummary}], " +
                     $"HookBefore=[{hookStatsBeforeInlineScan}], " +
                     $"HookAfter=[{hookStatsAfterInlineRegen}]");
 
@@ -189,6 +202,10 @@ internal sealed class ExecutionController
                     $"本次文档 ldfile 计数: hits={ldFileCountersAfter.HitCount - ldFileCountersBefore.HitCount}, " +
                     $"redirects={ldFileCountersAfter.RedirectCount - ldFileCountersBefore.RedirectCount}, " +
                     $"sessionHits={ldFileCountersAfter.HitCount}, sessionRedirects={ldFileCountersAfter.RedirectCount}");
+#if DEBUG
+                MapFontDiagnosticHook.LogDocumentSummary(mapFontCountersBefore);
+#endif
+                ShpLoadHook.LogDocumentSummary(shpLoadCountersBefore);
 
                 log.AddStatistics(
                     missingFonts,
@@ -275,6 +292,32 @@ internal sealed class ExecutionController
 
         tr.Commit();
         DiagnosticLogger.Log("样式表运行时映射", $"主动加载样式完成: attempted={attempted}, loaded={loaded}");
+    }
+
+    private static string BuildInlineRuntimeBridgeRegistrationSummary(
+        IReadOnlyList<LdFileHook.RegisteredRedirectDiagnostic> diagnostics)
+    {
+        var inlineDiagnostics = diagnostics
+            .Where(item => item.InlineType.HasValue)
+            .ToArray();
+        if (inlineDiagnostics.Length == 0)
+            return "登记=0, 命中=0, 未命中=0";
+
+        int hitCount = inlineDiagnostics.Count(item => item.Hit);
+        int missedCount = inlineDiagnostics.Length - hitCount;
+        if (missedCount == 0)
+            return $"登记={inlineDiagnostics.Length}, 命中={hitCount}, 未命中=0";
+
+        var missed = inlineDiagnostics
+            .Where(item => !item.Hit)
+            .Take(8)
+            .Select(item =>
+                $"{item.InlineType}:{item.OriginalDisplayFont}->{item.ReplacementFont} source={item.Source}");
+        string missedText = string.Join("; ", missed);
+        if (missedCount > 8)
+            missedText += $"; ...+{missedCount - 8}";
+
+        return $"登记={inlineDiagnostics.Length}, 命中={hitCount}, 未命中={missedCount}, 未命中项=[{missedText}]";
     }
 
     private static int MarkAffectedTextGraphicsModified(

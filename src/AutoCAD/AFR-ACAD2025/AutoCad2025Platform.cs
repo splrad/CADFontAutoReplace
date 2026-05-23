@@ -28,8 +28,9 @@ internal sealed class AutoCad2025Platform : ICadPlatform, INativeFontHookExports
     public string AcGiTextStyleSetFileNameExport => "?setFileName@AcGiTextStyle@@UEAAXPEB_W@Z";
     public string AcGiTextStyleSetBigFontFileNameExport => "?setBigFontFileName@AcGiTextStyle@@UEAAXPEB_W@Z";
     public string AcGiTextStyleFileNameCtorExport => "??0AcGiTextStyle@@QEAA@PEB_W0NNNN_N111110@Z";
-    public string AcDbMTextExplodeFragmentsExport => "?explodeFragments@AcDbMText@@QEBAXP6AHPEAUAcDbMTextFragment@@PEAX@Z1PEAVAcGiWorldDraw@@@Z";
     public string LdFileExport => "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z";
+    public string ShpLoadExport => "?shpload@@YAHPEB_WHPEAVAcDbDatabase@@_N00HHW4Charset@@W4FontPitch@FontUtils@PAL@AutoCAD@Autodesk@@W4FontFamily@4567@@Z";
+    public string MapFontExport => "?mapFont@@YAHPEB_WPEAVAcFontDescription@@PEAVAcDbDatabase@@@Z";
     public uint? LdFileRva => 0xD2988;
 
     public NativeFontHookProfile NativeFontHookProfile
@@ -65,15 +66,21 @@ internal sealed class AutoCad2025Platform : ICadPlatform, INativeFontHookExports
                 [0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x10, 0x48, 0x89, 0x68, 0x18, 0x48, 0x89, 0x70, 0x20, 0x48],
                 maxPrologueSize: 96),
             NativeHookTarget.Export(
-                "AcDbMText::explodeFragments",
-                AcDbMTextExplodeFragmentsExport,
-                0xB09804,
-                [0x48, 0x8B, 0xC1, 0x33, 0xC9, 0x48, 0x85, 0xC0, 0x74, 0x04, 0x48, 0x8B, 0x48, 0x08, 0xE9, 0x7D],
-                maxPrologueSize: 64),
-            NativeHookTarget.Export(
                 "ldfile",
                 LdFileExport,
                 0xD2988,
                 [0x40, 0x55, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x48, 0x8D, 0xAC],
+                maxPrologueSize: 64),
+            NativeHookTarget.Export(
+                "shpload",
+                ShpLoadExport,
+                0x4F834,
+                [0x48, 0x89, 0x5C, 0x24, 0x20, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57],
+                maxPrologueSize: 64),
+            NativeHookTarget.Export(
+                "mapFont",
+                MapFontExport,
+                0x4E8FC,
+                [0x48, 0x89, 0x5C, 0x24, 0x20, 0x55, 0x56, 0x57, 0x41, 0x56, 0x41, 0x57, 0x48, 0x81, 0xEC, 0x50],
                 maxPrologueSize: 64));
 }
