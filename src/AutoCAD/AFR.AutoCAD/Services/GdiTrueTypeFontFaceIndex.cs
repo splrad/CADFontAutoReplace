@@ -1,12 +1,11 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Threading;
 
 namespace AFR.Services;
 
 /// <summary>
-/// Windows GDI TrueType face 索引。
+/// Windows GDI TrueType face 按需查询器。
 /// <para>
 /// @TrueType 是 GDI 枚举出的 vertical face 名称；只有 EnumFontFamiliesExW 实际返回 @face 时才视为可用。
 /// </para>
@@ -17,8 +16,8 @@ internal static class GdiTrueTypeFontFaceIndex
     private const int LfFaceSize = 32;
     private const int LfFullFaceSize = 64;
 
-    private static readonly Lazy<HashSet<string>> Faces = new(BuildFaceIndex, LazyThreadSafetyMode.ExecutionAndPublication);
     private static readonly ConcurrentDictionary<string, bool> LookupCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, byte> ProbeLogSeen = new(StringComparer.OrdinalIgnoreCase);
 
     internal static bool IsFaceAvailable(string faceName)
     {
@@ -26,40 +25,46 @@ internal static class GdiTrueTypeFontFaceIndex
         if (string.IsNullOrWhiteSpace(normalized))
             return false;
 
-        return LookupCache.GetOrAdd(normalized, static name => Faces.Value.Contains(name));
+        return LookupCache.GetOrAdd(normalized, ProbeFaceAvailable);
     }
 
-    internal static void Prewarm() => _ = Faces.Value;
-
-    private static HashSet<string> BuildFaceIndex()
+    private static bool ProbeFaceAvailable(string faceName)
     {
-        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool matched = false;
         IntPtr hdc = IntPtr.Zero;
         try
         {
             hdc = GetDC(IntPtr.Zero);
             if (hdc == IntPtr.Zero)
-                return result;
+                return false;
 
             var logFont = new LOGFONTW
             {
                 lfCharSet = DefaultCharset,
-                lfFaceName = string.Empty
+                lfFaceName = faceName
             };
 
             FontEnumProc callback = (ref ENUMLOGFONTEXW lpelfe, IntPtr _, uint __, IntPtr ___) =>
             {
-                AddFace(result, lpelfe.elfLogFont.lfFaceName);
-                return 1;
+                string enumerated = NormalizeFaceName(lpelfe.elfLogFont.lfFaceName);
+                if (!string.Equals(enumerated, faceName, StringComparison.OrdinalIgnoreCase))
+                    return 1;
+
+                matched = true;
+                return 0;
             };
 
             _ = EnumFontFamiliesExW(hdc, ref logFont, callback, IntPtr.Zero, 0);
-            DiagnosticLogger.Log("GDI字体",
-                $"EnumFontFamiliesExW TrueType face 索引已构建: {result.Count}项, vertical={result.Count(x => x.StartsWith("@", StringComparison.Ordinal))}项");
+            if (faceName.StartsWith("@", StringComparison.Ordinal)
+                && ProbeLogSeen.TryAdd(faceName, 0))
+            {
+                DiagnosticLogger.Log("GDI字体",
+                    $"EnumFontFamiliesExW vertical face 查询: '{faceName}' exists={matched}");
+            }
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.LogError("GDI字体索引构建失败", ex);
+            DiagnosticLogger.LogError($"GDI字体 face 查询失败: '{faceName}'", ex);
         }
         finally
         {
@@ -67,14 +72,7 @@ internal static class GdiTrueTypeFontFaceIndex
                 ReleaseDC(IntPtr.Zero, hdc);
         }
 
-        return result;
-    }
-
-    private static void AddFace(ISet<string> faces, string? value)
-    {
-        string normalized = NormalizeFaceName(value ?? string.Empty);
-        if (!string.IsNullOrWhiteSpace(normalized))
-            faces.Add(normalized);
+        return matched;
     }
 
     private static string NormalizeFaceName(string faceName)

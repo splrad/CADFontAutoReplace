@@ -20,17 +20,15 @@ internal sealed class AutoCadFontHook : IFontHook
 #endif
         ;
 
-    /// <summary>安装全局字体加载 Hook，并初始化共享字体索引。</summary>
+    /// <summary>安装插件级持久文件加载 Hook，并初始化 CAD 字体兜底索引。</summary>
     public void Install()
     {
         FontAvailabilityIndex.Initialize();
-        GdiTrueTypeFontFaceIndex.Prewarm();
 #if DEBUG
         MapFontDiagnosticHook.Install();
 #endif
         LdFileHook.Install();
         ShpLoadHook.Install();
-        StyleTextStyleHook.Install();
     }
 
     /// <summary>卸载 Hook，恢复被拦截的 AcGiTextStyle 函数。</summary>
@@ -49,6 +47,5 @@ internal sealed class AutoCadFontHook : IFontHook
     public void UpdateConfig()
     {
         FontAvailabilityIndex.Initialize();
-        GdiTrueTypeFontFaceIndex.Prewarm();
     }
 }

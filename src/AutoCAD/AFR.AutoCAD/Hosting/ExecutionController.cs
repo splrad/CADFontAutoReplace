@@ -24,7 +24,7 @@ internal sealed class ExecutionController
     /// <summary>
     /// 对指定文档执行字体检测与替换的完整流程。
     /// <para>
-    /// 执行阶段：检测缺失字体 → 替换 → 二次验证 → MText 内联字体扫描 → 统计输出。
+    /// 执行阶段：检测缺失字体 → 运行时映射 → MText 内联字体扫描 → 样式表最终写回 → 二次验证 → 统计输出。
     /// 遵守 IsInitialized 门控（未配置则跳过）和重复执行防护（同文档只执行一次）。
     /// </para>
     /// </summary>
@@ -81,112 +81,148 @@ internal sealed class ExecutionController
                 var mapFontCountersBefore = MapFontDiagnosticHook.GetCountersSnapshot();
 #endif
 
-                // 第一阶段: 检测缺失字体（读取样式表原始状态，判断哪些字体在系统中不可用）
-                DiagnosticLogger.BeginPhase("检测缺失字体");
-                var missingFonts = FontDetector.DetectMissingFonts(context);
-
-                // 存储检测结果供 AFRLOG 命令使用
-                contextMgr.StoreDetectionResults(doc, missingFonts);
-                DiagnosticLogger.EndPhase($"缺失: {missingFonts.Count}个");
-
-                // 第二阶段: 恢复样式表永久替换。FontDetector 仅排除 @TrueType，
-                // SHX 缺失字体（包含 @SHX）在这里永久写回样式表。
                 int replacedStyleCount = 0;
-                if (missingFonts.Count > 0)
-                {
-                    DiagnosticLogger.BeginPhase("替换样式表缺失字体");
-                    replacedStyleCount = FontReplacer.ReplaceMissingFonts(
-                        missingFonts,
-                        config.MainFont,
-                        config.BigFont,
-                        config.TrueTypeFont,
-                        context);
-                    DiagnosticLogger.EndPhase($"替换: {replacedStyleCount}项");
-
-                    if (replacedStyleCount > 0)
-                    {
-                        needsVisualRegen = true;
-                    }
-                }
-
-                // 第三阶段: 二次检测替换后的样式表状态，供 AFRLOG 标记仍缺失样式。
-                DiagnosticLogger.BeginPhase("替换后二次检测");
-                var postContext = new FontDetectionContext(doc.Database);
-                var stillMissing = FontDetector.DetectMissingFonts(postContext);
-                contextMgr.StoreStillMissingResults(doc, stillMissing);
-                DiagnosticLogger.EndPhase($"仍缺失: {stillMissing.Count}个");
-
-                // 第四阶段: 仅登记样式表 @TrueType 缺失字体的临时运行时映射。
-                var runtimeFontMappings = FontDetector.CollectRuntimeFontMappings(postContext, config.TrueTypeFont);
+                List<FontCheckResult> missingFonts = [];
+                List<FontCheckResult> stillMissing = [];
                 List<RuntimeFontMappingResultRecord> actualStyleRuntimeMappings = [];
-                if (runtimeFontMappings.Count > 0)
-                {
-                    DiagnosticLogger.BeginPhase("样式表运行时映射");
-                    ActivateStyleRuntimeFontMappings(runtimeFontMappings);
-                    ForceLoadStyleRuntimeMappings(doc.Database, runtimeFontMappings);
+                List<RuntimeFontMappingResultRecord> allRuntimeMappingResults = [];
 
-                    // 触发型 Regen: 这里必须立即触发 AcGiTextStyle::loadStyleRec，
-                    // 让样式表 @TrueType 映射在 StyleTextStyleHook 中命中，不能与最终视觉刷新合并。
-                    doc.Editor.Regen();
-
-                    actualStyleRuntimeMappings = FontRuntimeMappingStore.GetRuntimeMappingResults()
-                        .Where(item => string.Equals(item.Source, "样式表", StringComparison.OrdinalIgnoreCase))
-                        .ToList();
-                    contextMgr.StoreRuntimeFontMappingResults(doc, actualStyleRuntimeMappings);
-                    DiagnosticLogger.EndPhase($"登记: {runtimeFontMappings.Count}项, 命中: {actualStyleRuntimeMappings.Count}项");
-                }
-                else
-                {
-                    contextMgr.StoreRuntimeFontMappingResults(doc, actualStyleRuntimeMappings);
-                }
-
-                // 第五阶段: 只读扫描 MText 内联字体；实际映射结果由 MText Hook 自身记录。
-                // 不改写 MText.Contents，避免接管 CAD 原生内联格式解析。
-                DiagnosticLogger.BeginPhase("扫描MText内联字体");
-                MTextInlineFontScanResult inlineScanResult;
-                List<RuntimeFontMappingResultRecord> allRuntimeMappingResults;
-                string hookStatsBeforeInlineScan;
-                string hookStatsAfterInlineRegen;
-                int preRegisteredInlineMappings = 0;
-                string runtimeBridgeRegistrationSummary;
-                MTextInlineFontHook.Install();
+                SourceFontHookScope? sourceHookScope = null;
                 try
                 {
-                    hookStatsBeforeInlineScan = MTextInlineFontHook.GetDiagnosticsSummary();
+                    sourceHookScope = SourceFontHookScope.Install();
+
+                    // 第一阶段: 检测缺失字体（读取样式表原始状态，判断哪些字体在系统中不可用）。
+                    // 此阶段不做永久写回，保证运行时映射先处理原始图纸状态。
+                    DiagnosticLogger.BeginPhase("检测缺失字体");
+                    missingFonts = FontDetector.DetectMissingFonts(context);
+
+                    // 存储检测结果供 AFRLOG 命令使用
+                    contextMgr.StoreDetectionResults(doc, missingFonts);
+                    DiagnosticLogger.EndPhase($"缺失: {missingFonts.Count}个");
+
+                    // 第二阶段: 仅登记样式表 @TrueType 缺失字体的临时运行时映射。
+                    var runtimeFontMappings = FontDetector.CollectRuntimeFontMappings(context, config.TrueTypeFont);
+                    if (runtimeFontMappings.Count > 0)
+                    {
+                        DiagnosticLogger.BeginPhase("样式表运行时映射");
+                        ActivateStyleRuntimeFontMappings(runtimeFontMappings);
+                        ForceLoadStyleRuntimeMappings(doc.Database, runtimeFontMappings);
+
+                        // 触发型 Regen: 这里必须立即触发 AcGiTextStyle::loadStyleRec，
+                        // 让样式表 @TrueType 映射在 StyleTextStyleHook 中命中，不能与最终视觉刷新合并。
+                        DiagnosticLogger.Log("样式表运行时映射", "触发样式表运行时 Regen 开始。");
+                        doc.Editor.Regen();
+                        DiagnosticLogger.Log("样式表运行时映射", "触发样式表运行时 Regen 结束。");
+
+                        actualStyleRuntimeMappings = FontRuntimeMappingStore.GetRuntimeMappingResults()
+                            .Where(item => string.Equals(item.Source, "样式表", StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+                        contextMgr.StoreRuntimeFontMappingResults(doc, actualStyleRuntimeMappings);
+                        DiagnosticLogger.EndPhase($"登记: {runtimeFontMappings.Count}项, 命中: {actualStyleRuntimeMappings.Count}项");
+                    }
+                    else
+                    {
+                        contextMgr.StoreRuntimeFontMappingResults(doc, actualStyleRuntimeMappings);
+                    }
+
+                    // 第三阶段: 只读扫描 MText 内联字体；实际映射结果由文件级 Hook 记录。
+                    // 不改写 MText.Contents，避免接管 CAD 原生内联格式解析。
+                    DiagnosticLogger.BeginPhase("扫描MText内联字体");
+                    MTextInlineFontScanResult inlineScanResult;
+                    string hookStatsBeforeInlineScan = MTextInlineFontHook.GetDiagnosticsSummary();
+                    string hookStatsAfterInlineRegen = hookStatsBeforeInlineScan;
+                    int preRegisteredInlineMappings = 0;
+                    string runtimeBridgeRegistrationSummary;
+                    DiagnosticLogger.Log("MTextInlineFontScanner", "开始只读扫描 MText.Contents。");
                     inlineScanResult = MTextInlineFontScanner.ScanInlineFonts(doc.Database);
-                    preRegisteredInlineMappings = MTextInlineFontHook.PreRegisterRuntimeRequests();
+                    string inlineCandidateSummary = BuildInlineCandidateSummary(inlineScanResult.InlineFonts);
+                    DiagnosticLogger.Log("MTextInlineFontScanner",
+                        $"只读扫描完成: MText={inlineScanResult.MTextCount}, 内联字体候选={inlineScanResult.InlineFonts.Count}, {inlineCandidateSummary}");
+
                     if (inlineScanResult.InlineFonts.Count > 0)
                     {
-                        // 触发型 Regen: MTextInlineFontHook 依赖 CAD 的 MText 展开/绘制流程命中实际内联字体。
-                        // 这一步负责收集真实 Hook 映射结果，不改写 MText.Contents。
-                        doc.Editor.Regen();
+                        hookStatsBeforeInlineScan = MTextInlineFontHook.GetDiagnosticsSummary();
+                        DiagnosticLogger.Log("MTextInlineFontHook",
+                            $"MText预登记开始: 候选={inlineScanResult.InlineFonts.Count}, {inlineCandidateSummary}");
+                        preRegisteredInlineMappings = MTextInlineFontHook.PreRegisterRuntimeRequests();
+                        DiagnosticLogger.Log("MTextInlineFontHook",
+                            $"MText预登记结束: 登记={preRegisteredInlineMappings}, 候选={inlineScanResult.InlineFonts.Count}, {inlineCandidateSummary}");
+
+                        if (preRegisteredInlineMappings > 0)
+                        {
+                            // 触发型 Regen: MTextInlineFontHook 依赖 CAD 的 MText 展开/绘制流程命中实际内联字体。
+                            // 这一步负责收集真实 Hook 映射结果，不改写 MText.Contents。
+                            DiagnosticLogger.Log("MTextInlineFontHook", "MText触发Regen开始。");
+                            doc.Editor.Regen();
+                            DiagnosticLogger.Log("MTextInlineFontHook", "MText触发Regen结束。");
+                            hookStatsAfterInlineRegen = MTextInlineFontHook.GetDiagnosticsSummary();
+                        }
+                        else
+                        {
+                            DiagnosticLogger.Log("MTextInlineFontHook", "MText无文件级登记，跳过触发Regen。");
+                            hookStatsAfterInlineRegen = MTextInlineFontHook.GetDiagnosticsSummary();
+                        }
+                    }
+                    else
+                    {
+                        DiagnosticLogger.Log("MTextInlineFontHook", "MText无内联字体候选，跳过预登记和触发Regen。");
                     }
 
                     allRuntimeMappingResults = FontRuntimeMappingStore.GetRuntimeMappingResults();
-                    hookStatsAfterInlineRegen = MTextInlineFontHook.GetDiagnosticsSummary();
                     runtimeBridgeRegistrationSummary = BuildInlineRuntimeBridgeRegistrationSummary(
                         FontRuntimeRequestRegistry.GetDiagnosticsSnapshot());
                     DiagnosticLogger.Log("LdFileHook",
                         $"MText内联字体加载桥接登记诊断: {runtimeBridgeRegistrationSummary}");
+
+                    contextMgr.StoreInlineFontFixResults(doc, []);
+                    contextMgr.StoreRuntimeFontMappingResults(doc, allRuntimeMappingResults);
+                    DiagnosticLogger.EndPhase(
+                        $"MText: {inlineScanResult.MTextCount}个, " +
+                        $"内联字体: {inlineScanResult.InlineFonts.Count}个, " +
+                        $"fragment展开: {inlineScanResult.FragmentExpansionSuccesses}/{inlineScanResult.FragmentExpansionAttempts}个, " +
+                        $"片段: {inlineScanResult.FragmentCount}个, " +
+                        $"失败: {inlineScanResult.FragmentExpansionFailures}个, " +
+                        $"映射: {allRuntimeMappingResults.Count(item => string.Equals(item.Source, "MText", StringComparison.OrdinalIgnoreCase))}个, " +
+                        $"Regen前内联登记: {preRegisteredInlineMappings}个, " +
+                        $"字体加载桥接登记=[{runtimeBridgeRegistrationSummary}], " +
+                        $"HookBefore=[{hookStatsBeforeInlineScan}], " +
+                        $"HookAfter=[{hookStatsAfterInlineRegen}]");
+
+                    // 第四阶段: 样式表最终写回。FontDetector 仅排除 @TrueType，
+                    // SHX 缺失字体（包含 @SHX）在这里永久写回样式表。
+                    DiagnosticLogger.BeginPhase("样式表最终写回阶段");
+                    if (missingFonts.Count > 0)
+                    {
+                        using (MTextInlineFontHook.SuppressInlineRuntimeMapping())
+                        {
+                            replacedStyleCount = FontReplacer.ReplaceMissingFonts(
+                                missingFonts,
+                                config.MainFont,
+                                config.BigFont,
+                                config.TrueTypeFont,
+                                context);
+                        }
+
+                        if (replacedStyleCount > 0)
+                        {
+                            needsVisualRegen = true;
+                        }
+                    }
+
+                    DiagnosticLogger.EndPhase($"最终写回替换: {replacedStyleCount}项");
+
+                    // 第五阶段: 二次检测替换后的样式表状态，供 AFRLOG 标记仍缺失样式。
+                    DiagnosticLogger.BeginPhase("替换后二次检测");
+                    var postContext = new FontDetectionContext(doc.Database);
+                    stillMissing = FontDetector.DetectMissingFonts(postContext);
+                    contextMgr.StoreStillMissingResults(doc, stillMissing);
+                    DiagnosticLogger.EndPhase($"仍缺失: {stillMissing.Count}个");
                 }
                 finally
                 {
-                    MTextInlineFontHook.Uninstall();
+                    sourceHookScope?.Dispose();
                 }
-
-                contextMgr.StoreInlineFontFixResults(doc, []);
-                contextMgr.StoreRuntimeFontMappingResults(doc, allRuntimeMappingResults);
-                DiagnosticLogger.EndPhase(
-                    $"MText: {inlineScanResult.MTextCount}个, " +
-                    $"内联字体: {inlineScanResult.InlineFonts.Count}个, " +
-                    $"fragment展开: {inlineScanResult.FragmentExpansionSuccesses}/{inlineScanResult.FragmentExpansionAttempts}个, " +
-                    $"片段: {inlineScanResult.FragmentCount}个, " +
-                    $"失败: {inlineScanResult.FragmentExpansionFailures}个, " +
-                    $"映射: {allRuntimeMappingResults.Count(item => string.Equals(item.Source, "MText", StringComparison.OrdinalIgnoreCase))}个, " +
-                    $"Regen前内联登记: {preRegisteredInlineMappings}个, " +
-                    $"字体加载桥接登记=[{runtimeBridgeRegistrationSummary}], " +
-                    $"HookBefore=[{hookStatsBeforeInlineScan}], " +
-                    $"HookAfter=[{hookStatsAfterInlineRegen}]");
 
                 // 最终视觉刷新: 只处理永久样式写回后的显示更新。
                 // 前面的两个触发型 Regen 负责 Hook 命中顺序，不在这里合并。
@@ -195,7 +231,7 @@ internal sealed class ExecutionController
                     int markedGraphics = MarkAffectedTextGraphicsModified(doc.Database, missingFonts);
                     DiagnosticLogger.Log(
                         "图形刷新",
-                        $"样式表替换后执行 Hook 卸载后的最终 Regen: marked={markedGraphics}");
+                        $"样式表最终写回后执行来源Hook卸载后的最终Regen: marked={markedGraphics}");
                     doc.Editor.Regen();
                 }
 
@@ -321,6 +357,92 @@ internal sealed class ExecutionController
             missedText += $"; ...+{missedCount - 8}";
 
         return $"登记={inlineDiagnostics.Length}, 命中={hitCount}, 未命中={missedCount}, 未命中项=[{missedText}]";
+    }
+
+    private static string BuildInlineCandidateSummary(
+        IReadOnlyDictionary<string, InlineFontCandidate> inlineFonts)
+    {
+        int trueTypeCount = 0;
+        int shxMainCount = 0;
+        int shxBigFontCount = 0;
+
+        foreach (var candidate in inlineFonts.Values)
+        {
+            switch (candidate.FontType)
+            {
+                case InlineFontType.TrueType:
+                    trueTypeCount++;
+                    break;
+                case InlineFontType.ShxMain:
+                    shxMainCount++;
+                    break;
+                case InlineFontType.ShxBigFont:
+                    shxBigFontCount++;
+                    break;
+            }
+        }
+
+        return $"TrueType={trueTypeCount}, SHX主字体={shxMainCount}, SHX大字体={shxBigFontCount}";
+    }
+
+    private sealed class SourceFontHookScope : IDisposable
+    {
+        private bool _disposed;
+
+        private SourceFontHookScope()
+        {
+        }
+
+        internal static SourceFontHookScope Install()
+        {
+            DiagnosticLogger.Log("来源Hook", "文档级来源 Hook 作用域开始，安装 StyleTextStyleHook / MTextInlineFontHook。");
+            var scope = new SourceFontHookScope();
+            try
+            {
+                StyleTextStyleHook.Install();
+                MTextInlineFontHook.Install();
+                DiagnosticLogger.Log(
+                    "来源Hook",
+                    $"文档级来源 Hook 已安装: style={StyleTextStyleHook.IsInstalled}, mtext={MTextInlineFontHook.IsInstalled}");
+                return scope;
+            }
+            catch
+            {
+                scope.Dispose();
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+
+            _disposed = true;
+            DiagnosticLogger.Log("来源Hook", "文档级来源 Hook 作用域结束，开始卸载 MTextInlineFontHook / StyleTextStyleHook。");
+
+            try
+            {
+                MTextInlineFontHook.Uninstall();
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLogger.LogError("卸载 MTextInlineFontHook 失败", ex);
+            }
+
+            try
+            {
+                StyleTextStyleHook.Uninstall();
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLogger.LogError("卸载 StyleTextStyleHook 失败", ex);
+            }
+
+            DiagnosticLogger.Log(
+                "来源Hook",
+                $"文档级来源 Hook 已卸载: style={StyleTextStyleHook.IsInstalled}, mtext={MTextInlineFontHook.IsInstalled}");
+        }
     }
 
     private static int MarkAffectedTextGraphicsModified(
