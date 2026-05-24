@@ -19,12 +19,9 @@
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\LdFileHook.cs" Link="FontMapping\LdFileHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MapFontDiagnosticHook.cs" Link="FontMapping\MapFontDiagnosticHook.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextFontParser.cs" Link="FontMapping\MTextFontParser.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontHook.cs" Link="FontMapping\MTextInlineFontHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextInlineFontScanner.cs" Link="FontMapping\MTextInlineFontScanner.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeFontHookProfile.cs" Link="FontMapping\NativeFontHookProfile.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeInlineHook.cs" Link="FontMapping\NativeInlineHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\ShpLoadHook.cs" Link="FontMapping\ShpLoadHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\StyleTextStyleHook.cs" Link="FontMapping\StyleTextStyleHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AppInitializer.cs" Link="Hosting\AppInitializer.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AutoCadHost.cs" Link="Hosting\AutoCadHost.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\CadDialogSystemVariableScope.cs" Link="Hosting\CadDialogSystemVariableScope.cs" />

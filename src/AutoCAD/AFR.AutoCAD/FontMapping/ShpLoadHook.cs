@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 using AFR.Platform;
@@ -8,7 +7,7 @@ using AFR.Services;
 namespace AFR.FontMapping;
 
 /// <summary>
-/// Handles AutoCAD shpload TrueType runtime remapping while keeping ldfile focused on SHX loading.
+/// 处理 AutoCAD shpload 阶段的 TrueType / @TrueType 运行时文件级映射。
 /// </summary>
 internal static class ShpLoadHook
 {
@@ -29,8 +28,6 @@ internal static class ShpLoadHook
         new(StringComparer.OrdinalIgnoreCase);
     private static long _hitCount;
     private static long _redirectCount;
-    private static long _styleScopeHitCount;
-    private static long _mTextScopeHitCount;
     private static long _sampleSequence;
     private static long _sampleOverflowCount;
 
@@ -69,8 +66,6 @@ internal static class ShpLoadHook
         int Charset,
         int Pitch,
         int Family,
-        bool StyleScope,
-        bool MTextScope,
         bool Redirected,
         string RedirectArgument,
         string RedirectReplacement,
@@ -83,12 +78,9 @@ internal static class ShpLoadHook
 
     private sealed record ShpLoadRedirectApplication(
         string ArgumentName,
-        string NormalizedRequest,
-        string OriginalDisplayFont,
+        string OriginalFont,
         string ReplacementFont,
-        string Source,
-        InlineFontType? InlineType,
-        FontRuntimeRequest? Request);
+        string Reason);
 
     internal static bool IsInstalled => _hook?.IsInstalled == true;
 
@@ -96,8 +88,8 @@ internal static class ShpLoadHook
         => new(
             Interlocked.Read(ref _hitCount),
             Interlocked.Read(ref _redirectCount),
-            Interlocked.Read(ref _styleScopeHitCount),
-            Interlocked.Read(ref _mTextScopeHitCount),
+            0,
+            0,
             Interlocked.Read(ref _sampleSequence),
             Interlocked.Read(ref _sampleOverflowCount));
 
@@ -153,6 +145,7 @@ internal static class ShpLoadHook
             target.MinPrologueSize,
             target.MaxPrologueSize,
             target.ExpectedPrefix);
+
         if (IsInstalled)
         {
             DiagnosticLogger.Ok(
@@ -192,8 +185,6 @@ internal static class ShpLoadHook
                 {
                     ["hitCount"] = counters.HitCount,
                     ["redirects"] = counters.RedirectCount,
-                    ["styleScopeHits"] = counters.StyleScopeHitCount,
-                    ["mTextScopeHits"] = counters.MTextScopeHitCount,
                     ["sampleOverflow"] = counters.SampleOverflowCount
                 });
         }
@@ -217,8 +208,6 @@ internal static class ShpLoadHook
         CounterSnapshot after = GetCountersSnapshot();
         long hits = after.HitCount - before.HitCount;
         long redirects = after.RedirectCount - before.RedirectCount;
-        long styleHits = after.StyleScopeHitCount - before.StyleScopeHitCount;
-        long mTextHits = after.MTextScopeHitCount - before.MTextScopeHitCount;
         long overflow = after.SampleOverflowCount - before.SampleOverflowCount;
 
         string sampleText = BuildSampleText(before.SampleSequence);
@@ -230,8 +219,6 @@ internal static class ShpLoadHook
             {
                 ["hits"] = hits,
                 ["redirects"] = redirects,
-                ["styleScopeHits"] = styleHits,
-                ["mTextScopeHits"] = mTextHits,
                 ["sampleOverflow"] = overflow,
                 ["samples"] = sampleText
             });
@@ -255,11 +242,6 @@ internal static class ShpLoadHook
             return -1;
 
         if (_inHook)
-        {
-            return trampoline(fileName, param2, db, flag, arg5, arg6, arg7, arg8, charset, pitch, family);
-        }
-
-        if (!FontRuntimeRequestRegistry.HasTrueTypeRequests)
             return trampoline(fileName, param2, db, flag, arg5, arg6, arg7, arg8, charset, pitch, family);
 
         _inHook = true;
@@ -267,8 +249,6 @@ internal static class ShpLoadHook
         string arg5Text = FormatPointer(arg5);
         string arg6Text = FormatPointer(arg6);
         ShpLoadRedirectApplication? redirect = null;
-        bool styleScope = false;
-        bool mTextScope = false;
         try
         {
             IntPtr effectiveFileName = fileName;
@@ -283,14 +263,8 @@ internal static class ShpLoadHook
                 requestName = fileNameValue.Display;
                 arg5Text = arg5Value.Display;
                 arg6Text = arg6Value.Display;
-                styleScope = StyleTextStyleHook.IsInsideStyleRuntimeOperation;
-                mTextScope = MTextInlineFontHook.IsInsideInlineFontHook;
 
                 long hitIndex = Interlocked.Increment(ref _hitCount);
-                if (styleScope)
-                    Interlocked.Increment(ref _styleScopeHitCount);
-                if (mTextScope)
-                    Interlocked.Increment(ref _mTextScopeHitCount);
                 if (hitIndex <= FirstHitLogLimit)
                 {
                     DiagnosticLogger.Ok(
@@ -310,21 +284,19 @@ internal static class ShpLoadHook
                             ["arg8"] = arg8,
                             ["charset"] = charset,
                             ["pitch"] = pitch,
-                            ["family"] = family,
-                            ["styleScope"] = styleScope,
-                            ["mTextScope"] = mTextScope
+                            ["family"] = family
                         });
                 }
 
-                if (TryCreateRegisteredRedirect(arg6Value, "arg6", out redirect))
+                if (TryCreateDirectRedirect(arg6Value, "arg6", out redirect))
                 {
                     effectiveArg6 = GetNativeString(redirect!.ReplacementFont);
                 }
-                else if (TryCreateRegisteredRedirect(fileNameValue, "fileName", out redirect))
+                else if (TryCreateDirectRedirect(fileNameValue, "fileName", out redirect))
                 {
                     effectiveFileName = GetNativeString(redirect!.ReplacementFont);
                 }
-                else if (TryCreateRegisteredRedirect(arg5Value, "arg5", out redirect))
+                else if (TryCreateDirectRedirect(arg5Value, "arg5", out redirect))
                 {
                     effectiveArg5 = GetNativeString(redirect!.ReplacementFont);
                 }
@@ -335,11 +307,9 @@ internal static class ShpLoadHook
                     string logKey = string.Concat(
                         redirect.ArgumentName,
                         "|",
-                        redirect.NormalizedRequest,
+                        redirect.OriginalFont,
                         "|",
-                        redirect.ReplacementFont,
-                        "|",
-                        redirect.Source);
+                        redirect.ReplacementFont);
                     if (redirectIndex <= FirstRedirectLogLimit || RedirectLogSeen.TryAdd(logKey, 0))
                     {
                         DiagnosticLogger.Ok(
@@ -350,20 +320,23 @@ internal static class ShpLoadHook
                             {
                                 ["redirectIndex"] = redirectIndex,
                                 ["argument"] = redirect.ArgumentName,
-                                ["source"] = redirect.Source,
                                 ["kind"] = "TrueType",
-                                ["originalDisplayFont"] = redirect.OriginalDisplayFont,
+                                ["original"] = redirect.OriginalFont,
                                 ["replacement"] = redirect.ReplacementFont,
-                                ["request"] = redirect.NormalizedRequest,
                                 ["param2"] = param2,
-                                ["styleScope"] = styleScope,
-                                ["mTextScope"] = mTextScope
+                                ["reason"] = redirect.Reason
                             });
                     }
 
-                    FontRuntimeRequestRegistry.MarkHit(redirect.NormalizedRequest, FontRedirectKind.TrueType);
-                    if (redirect.Request != null)
-                        FontRuntimeMappingStore.RecordRuntimeMapping(redirect.Request, "ShpLoadHook", "已映射");
+                    FontRuntimeMappingStore.RecordRuntimeMapping(
+                        "文件级",
+                        string.Empty,
+                        redirect.OriginalFont,
+                        GetBaseFont(redirect.OriginalFont),
+                        "TrueType字体",
+                        redirect.ReplacementFont,
+                        "ShpLoadHook",
+                        "已映射");
                 }
             }
             catch (Exception ex)
@@ -385,8 +358,6 @@ internal static class ShpLoadHook
                     charset,
                     pitch,
                     family,
-                    styleScope,
-                    mTextScope,
                     redirect != null,
                     redirect?.ArgumentName ?? string.Empty,
                     redirect?.ReplacementFont ?? string.Empty,
@@ -416,8 +387,6 @@ internal static class ShpLoadHook
         int charset,
         int pitch,
         int family,
-        bool styleScope,
-        bool mTextScope,
         bool redirected,
         string redirectArgument,
         string redirectReplacement,
@@ -436,8 +405,6 @@ internal static class ShpLoadHook
             charset,
             pitch,
             family,
-            styleScope,
-            mTextScope,
             redirected,
             redirectArgument,
             redirectReplacement);
@@ -453,8 +420,6 @@ internal static class ShpLoadHook
             charset,
             pitch,
             family,
-            styleScope,
-            mTextScope,
             redirected,
             redirectArgument,
             redirectReplacement,
@@ -493,7 +458,7 @@ internal static class ShpLoadHook
     }
 
     private static string FormatSample(SampleRecord sample)
-        => $"file='{sample.FileName}' param2={sample.Param2} style={sample.StyleScope} mtext={sample.MTextScope} " +
+        => $"file='{sample.FileName}' param2={sample.Param2} " +
            $"flag={sample.Flag} arg5='{sample.Arg5}' arg6='{sample.Arg6}' args={sample.Arg7}/{sample.Arg8} " +
            $"charset={sample.Charset} pitch={sample.Pitch} family={sample.Family} " +
            $"redirect={sample.Redirected}:{sample.RedirectArgument}->{sample.RedirectReplacement} " +
@@ -595,8 +560,6 @@ internal static class ShpLoadHook
         RedirectLogSeen.Clear();
         Interlocked.Exchange(ref _hitCount, 0);
         Interlocked.Exchange(ref _redirectCount, 0);
-        Interlocked.Exchange(ref _styleScopeHitCount, 0);
-        Interlocked.Exchange(ref _mTextScopeHitCount, 0);
         Interlocked.Exchange(ref _sampleSequence, 0);
         Interlocked.Exchange(ref _sampleOverflowCount, 0);
     }
@@ -613,40 +576,67 @@ internal static class ShpLoadHook
         return new NativeStringValue(text, $"{text}@{pointer}");
     }
 
-    private static bool TryCreateRegisteredRedirect(
+    private static bool TryCreateDirectRedirect(
         NativeStringValue value,
         string argumentName,
         out ShpLoadRedirectApplication? redirect)
     {
         redirect = null;
-        if (string.IsNullOrWhiteSpace(value.Text))
+
+        string original = FontRedirectResolver.NormalizeInputName(value.Text);
+        if (string.IsNullOrWhiteSpace(original))
+            return false;
+        if (FontRedirectResolver.IsTrueTypeFontFileName(original))
+            return false;
+        if (original.EndsWith(".shx", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (IsTrueTypeLoadAvailable(original))
+            return false;
+        if (!TryGetConfiguredTrueTypeReplacement(original, out string replacement))
+            return false;
+        if (string.Equals(original, replacement, StringComparison.OrdinalIgnoreCase))
             return false;
 
-        if (FontRuntimeRequestRegistry.TryGetTrueTypeRequest(
-                value.Text,
-                out FontRuntimeRequest? match,
-                out string normalized)
-            && match != null)
-        {
-            if (string.Equals(normalized, match.ReplacementFont, StringComparison.OrdinalIgnoreCase))
-                return false;
-
-            redirect = new ShpLoadRedirectApplication(
-                argumentName,
-                normalized,
-                match.OriginalDisplayFont,
-                match.ReplacementFont,
-                match.Source,
-                match.InlineType,
-                match);
-            return true;
-        }
-
-        return false;
+        redirect = new ShpLoadRedirectApplication(
+            argumentName,
+            original,
+            replacement,
+            "配置 TrueType 兜底");
+        return true;
     }
 
-    private static bool IsShxFontName(string fontName)
-        => fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase);
+    private static bool TryGetConfiguredTrueTypeReplacement(string original, out string replacement)
+    {
+        replacement = string.Empty;
+        if (!FontRedirectResolver.TryResolveConfiguredReplacement(FontRedirectKind.TrueType, out string configured))
+            return false;
+
+        configured = FontRedirectResolver.NormalizeInputName(configured).TrimStart('@');
+        if (string.IsNullOrWhiteSpace(configured))
+            return false;
+
+        bool preserveAtPrefix = FontRedirectResolver.HasAtPrefix(original);
+        replacement = preserveAtPrefix ? "@" + configured : configured;
+        return true;
+    }
+
+    private static bool IsTrueTypeLoadAvailable(string fontName)
+    {
+        string normalized = FontRedirectResolver.NormalizeInputName(fontName);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return true;
+
+        if (FontRedirectResolver.HasAtPrefix(normalized))
+            return GdiTrueTypeFontFaceIndex.IsFaceAvailable(normalized);
+
+        return FontRedirectResolver.IsAvailableTrueType(normalized)
+               || FontDetector.IsSystemFont(normalized);
+    }
+
+    private static string GetBaseFont(string fontName)
+        => FontRedirectResolver.HasAtPrefix(fontName)
+            ? FontRedirectResolver.NormalizeInputName(fontName).TrimStart('@')
+            : string.Empty;
 
     private static IntPtr GetNativeString(string value)
         => NativeStringCache.GetOrAdd(value, static text => Marshal.StringToHGlobalUni(text));

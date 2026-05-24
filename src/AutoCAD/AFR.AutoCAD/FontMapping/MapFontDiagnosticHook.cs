@@ -18,18 +18,17 @@ internal static class MapFontDiagnosticHook
     private const int MaxDocumentSamples = 16;
     private const int MaxNameChars = 260;
     private const long FirstHitLogLimit = 16;
-    private const long FirstRedirectLogLimit = 16;
+    private const long FirstEarlyRegisterLogLimit = 16;
 
     private static NativeInlineHook<MapFontDelegate>? _hook;
     private static MapFontDelegate? _hookDelegate;
     private static readonly ConcurrentDictionary<string, SampleRecord> Samples =
         new(StringComparer.Ordinal);
-    private static readonly ConcurrentDictionary<string, IntPtr> NativeStringCache =
-        new(StringComparer.Ordinal);
-    private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen =
+    private static readonly ConcurrentDictionary<string, byte> EarlyRegisterLogSeen =
         new(StringComparer.OrdinalIgnoreCase);
     private static long _hitCount;
     private static long _redirectCount;
+    private static long _earlyRegisterCount;
     private static long _styleScopeHitCount;
     private static long _mTextScopeHitCount;
     private static long _sampleSequence;
@@ -43,6 +42,7 @@ internal static class MapFontDiagnosticHook
     internal sealed record CounterSnapshot(
         long HitCount,
         long RedirectCount,
+        long EarlyRegisterCount,
         long StyleScopeHitCount,
         long MTextScopeHitCount,
         long SampleSequence,
@@ -63,12 +63,11 @@ internal static class MapFontDiagnosticHook
 
     private readonly record struct NativeStringValue(string Text, string Display);
 
-    private sealed record DiagnosticRedirectApplication(
-        string NormalizedRequest,
-        string OriginalDisplayFont,
+    private sealed record EarlyRegistration(
+        string OriginalFont,
         string ReplacementFont,
-        string Source,
-        InlineFontType? InlineType);
+        FontRedirectKind Kind,
+        string Reason);
 
     internal static bool IsInstalled => _hook?.IsInstalled == true;
 
@@ -76,6 +75,7 @@ internal static class MapFontDiagnosticHook
         => new(
             Interlocked.Read(ref _hitCount),
             Interlocked.Read(ref _redirectCount),
+            Interlocked.Read(ref _earlyRegisterCount),
             Interlocked.Read(ref _styleScopeHitCount),
             Interlocked.Read(ref _mTextScopeHitCount),
             Interlocked.Read(ref _sampleSequence),
@@ -89,7 +89,7 @@ internal static class MapFontDiagnosticHook
             return;
         }
 
-        DiagnosticLogger.Start(Tag, "Install", "Debug 构建默认启用，开始安装 mapFont 诊断 Hook");
+        DiagnosticLogger.Start(Tag, "Install", "开始安装可选 mapFont 诊断 Hook");
 
         if (PlatformManager.Platform is not INativeFontHookExportsProvider exports)
         {
@@ -152,6 +152,7 @@ internal static class MapFontDiagnosticHook
                 {
                     ["hitCount"] = counters.HitCount,
                     ["redirects"] = counters.RedirectCount,
+                    ["earlyRegisters"] = counters.EarlyRegisterCount,
                     ["styleScopeHits"] = counters.StyleScopeHitCount,
                     ["mTextScopeHits"] = counters.MTextScopeHitCount,
                     ["sampleOverflow"] = counters.SampleOverflowCount
@@ -177,6 +178,7 @@ internal static class MapFontDiagnosticHook
         CounterSnapshot after = GetCountersSnapshot();
         long hits = after.HitCount - before.HitCount;
         long redirects = after.RedirectCount - before.RedirectCount;
+        long earlyRegisters = after.EarlyRegisterCount - before.EarlyRegisterCount;
         long styleHits = after.StyleScopeHitCount - before.StyleScopeHitCount;
         long mTextHits = after.MTextScopeHitCount - before.MTextScopeHitCount;
         long overflow = after.SampleOverflowCount - before.SampleOverflowCount;
@@ -190,6 +192,7 @@ internal static class MapFontDiagnosticHook
             {
                 ["hits"] = hits,
                 ["redirects"] = redirects,
+                ["earlyRegisters"] = earlyRegisters,
                 ["styleScopeHits"] = styleHits,
                 ["mTextScopeHits"] = mTextHits,
                 ["sampleOverflow"] = overflow,
@@ -212,19 +215,16 @@ internal static class MapFontDiagnosticHook
         string requestName = FormatPointer(name);
         string descText = FormatPointer(desc);
         string dbText = FormatPointer(db);
-        DiagnosticRedirectApplication? redirect = null;
         bool styleScope = false;
         bool mTextScope = false;
         try
         {
-            IntPtr effectiveName = name;
+            EarlyRegistration? earlyRegistration = null;
 
             try
             {
                 NativeStringValue nameValue = ReadNativeStringValue(name);
                 requestName = nameValue.Display;
-                styleScope = StyleTextStyleHook.IsInsideStyleRuntimeOperation;
-                mTextScope = MTextInlineFontHook.IsInsideInlineFontHook;
 
                 long hitIndex = Interlocked.Increment(ref _hitCount);
                 if (styleScope)
@@ -248,32 +248,32 @@ internal static class MapFontDiagnosticHook
                         });
                 }
 
-                if (TryCreateDiagnosticRedirect(nameValue, out redirect))
+                if (TryRegisterEarlyRuntimeRequest(nameValue, db, out earlyRegistration))
                 {
-                    effectiveName = GetNativeString(redirect!.ReplacementFont);
-                    long redirectIndex = Interlocked.Increment(ref _redirectCount);
+                    long registerIndex = Interlocked.Increment(ref _earlyRegisterCount);
                     string logKey = string.Concat(
-                        redirect.NormalizedRequest,
+                        db.ToInt64().ToString("X"),
                         "|",
-                        redirect.ReplacementFont,
+                        earlyRegistration!.Kind,
                         "|",
-                        redirect.Source);
-                    if (redirectIndex <= FirstRedirectLogLimit || RedirectLogSeen.TryAdd(logKey, 0))
+                        earlyRegistration.OriginalFont,
+                        "|",
+                        earlyRegistration.ReplacementFont);
+                    if (registerIndex <= FirstEarlyRegisterLogLimit || EarlyRegisterLogSeen.TryAdd(logKey, 0))
                     {
                         DiagnosticLogger.Ok(
                             Tag,
-                            "HookRedirect",
-                            "mapFont 诊断重定向命中",
+                            "EarlyRegister",
+                            "mapFont 早期登记运行时字体请求",
                             new Dictionary<string, object?>
                             {
-                                ["redirectIndex"] = redirectIndex,
-                                ["source"] = redirect.Source,
-                                ["kind"] = "TrueType",
-                                ["original"] = redirect.OriginalDisplayFont,
-                                ["replacement"] = redirect.ReplacementFont,
-                                ["request"] = redirect.NormalizedRequest,
-                                ["styleScope"] = styleScope,
-                                ["mTextScope"] = mTextScope
+                                ["registerIndex"] = registerIndex,
+                                ["source"] = "MapFontEarlyRegister",
+                                ["kind"] = earlyRegistration.Kind.ToString(),
+                                ["original"] = earlyRegistration.OriginalFont,
+                                ["replacement"] = earlyRegistration.ReplacementFont,
+                                ["reason"] = earlyRegistration.Reason,
+                                ["dbScope"] = dbText
                             });
                     }
                 }
@@ -283,7 +283,7 @@ internal static class MapFontDiagnosticHook
                 DiagnosticLogger.Fail(Tag, "HookHandlerPreSample", "mapFont 诊断采样前置异常", ex);
             }
 
-            int result = trampoline(effectiveName, desc, db);
+            int result = trampoline(name, desc, db);
             try
             {
                 RecordSample(
@@ -292,8 +292,8 @@ internal static class MapFontDiagnosticHook
                     dbText,
                     styleScope,
                     mTextScope,
-                    redirect != null,
-                    redirect?.ReplacementFont ?? string.Empty,
+                    false,
+                    string.Empty,
                     result);
             }
             catch (Exception ex)
@@ -465,15 +465,10 @@ internal static class MapFontDiagnosticHook
     private static void ResetDiagnostics()
     {
         Samples.Clear();
-        foreach (IntPtr ptr in NativeStringCache.Values)
-        {
-            try { Marshal.FreeHGlobal(ptr); } catch { }
-        }
-
-        NativeStringCache.Clear();
-        RedirectLogSeen.Clear();
+        EarlyRegisterLogSeen.Clear();
         Interlocked.Exchange(ref _hitCount, 0);
         Interlocked.Exchange(ref _redirectCount, 0);
+        Interlocked.Exchange(ref _earlyRegisterCount, 0);
         Interlocked.Exchange(ref _styleScopeHitCount, 0);
         Interlocked.Exchange(ref _mTextScopeHitCount, 0);
         Interlocked.Exchange(ref _sampleSequence, 0);
@@ -492,33 +487,125 @@ internal static class MapFontDiagnosticHook
         return new NativeStringValue(text, $"{text}@{pointer}");
     }
 
-    private static bool TryCreateDiagnosticRedirect(
+    private static bool TryRegisterEarlyRuntimeRequest(
         NativeStringValue value,
-        out DiagnosticRedirectApplication? redirect)
+        IntPtr dbScope,
+        out EarlyRegistration? registration)
     {
-        redirect = null;
-        if (string.IsNullOrWhiteSpace(value.Text))
+        registration = null;
+
+        string original = FontRedirectResolver.NormalizeInputName(value.Text);
+        if (!FontRedirectResolver.HasAtPrefix(original))
             return false;
 
-        if (!LdFileHook.TryGetRegisteredTrueTypeRedirect(
-                value.Text,
-                out LdFileHook.RuntimeBridgeRedirect? match)
-            || match == null)
+        if (dbScope == IntPtr.Zero)
         {
+            LogEarlyRegisterSkip(original, dbScope, "缺少 db scope");
             return false;
         }
 
-        redirect = new DiagnosticRedirectApplication(
-            match.NormalizedRequest,
-            match.OriginalDisplayFont,
-            match.ReplacementFont,
-            match.Source,
-            match.InlineType);
+        string lookup = FontRedirectResolver.StripLeadingAtPrefix(original);
+        if (string.IsNullOrWhiteSpace(lookup))
+        {
+            LogEarlyRegisterSkip(original, dbScope, "空基础字体名");
+            return false;
+        }
+
+        if (TryRegisterEarlyShxRequest(original, lookup, dbScope, out registration))
+            return true;
+
+        if (TryRegisterEarlyTrueTypeRequest(original, lookup, dbScope, out registration))
+            return true;
+
+        LogEarlyRegisterSkip(original, dbScope, "未找到可用基础字体或类型不匹配");
+        return false;
+    }
+
+    private static bool TryRegisterEarlyShxRequest(
+        string original,
+        string lookup,
+        IntPtr dbScope,
+        out EarlyRegistration? registration)
+    {
+        registration = null;
+        if (FontRedirectResolver.IsTrueTypeFontFileName(lookup))
+            return false;
+
+        bool hasExtension = lookup.IndexOf('.') >= 0;
+        if (hasExtension && !lookup.EndsWith(".shx", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        string shxName = FontRedirectResolver.EnsureShx(lookup);
+        if (!FontAvailabilityIndex.TryGetKnownShxFontKind(shxName, out bool isBigFont))
+            return false;
+
+        var kind = isBigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
+        if (!FontRuntimeRequestRegistry.TryRegisterResolvedRequest(
+                original,
+                kind,
+                "MapFontEarlyRegister",
+                "mapFont",
+                null,
+                original,
+                dbScope,
+                out _,
+                out string replacement))
+        {
+            LogEarlyRegisterSkip(original, dbScope, "SHX registry rejected");
+            return false;
+        }
+
+        registration = new EarlyRegistration(original, replacement, kind, "基础SHX可用");
         return true;
     }
 
-    private static IntPtr GetNativeString(string value)
-        => NativeStringCache.GetOrAdd(value, static text => Marshal.StringToHGlobalUni(text));
+    private static bool TryRegisterEarlyTrueTypeRequest(
+        string original,
+        string lookup,
+        IntPtr dbScope,
+        out EarlyRegistration? registration)
+    {
+        registration = null;
+        if (!FontRedirectResolver.IsAvailableTrueType(lookup))
+            return false;
+
+        if (!FontRuntimeRequestRegistry.TryRegisterResolvedRequest(
+                original,
+                FontRedirectKind.TrueType,
+                "MapFontEarlyRegister",
+                "mapFont",
+                null,
+                original,
+                dbScope,
+                out _,
+                out string replacement))
+        {
+            LogEarlyRegisterSkip(original, dbScope, "TrueType registry rejected");
+            return false;
+        }
+
+        registration = new EarlyRegistration(original, replacement, FontRedirectKind.TrueType, "基础TrueType可用");
+        return true;
+    }
+
+    private static void LogEarlyRegisterSkip(string original, IntPtr dbScope, string reason)
+    {
+        string logKey = string.Concat("skip|", dbScope.ToInt64().ToString("X"), "|", original, "|", reason);
+        if (!EarlyRegisterLogSeen.TryAdd(logKey, 0))
+            return;
+
+        DiagnosticLogger.Skip(
+            Tag,
+            "EarlyRegister",
+            "mapFont 早期登记跳过",
+            new Dictionary<string, object?>
+            {
+                ["source"] = "MapFontEarlyRegister",
+                ["original"] = original,
+                ["dbScope"] = FormatPointer(dbScope),
+                ["reason"] = reason
+            });
+    }
 
     private static bool TryReadUtf16String(IntPtr value, int maxChars, out string text)
     {

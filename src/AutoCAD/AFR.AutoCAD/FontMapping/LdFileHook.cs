@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Autodesk.AutoCAD.DatabaseServices;
 using AFR.Platform;
 using AFR.Services;
@@ -9,21 +9,12 @@ using AFR.Services;
 namespace AFR.FontMapping;
 
 /// <summary>
-/// 处理 AutoCAD ldfile 阶段的 SHX 运行时字体加载重定向。
-/// <para>
-/// 上层 Hook 先按 Style/MText 各自规则判断是否需要登记桥接；
-/// TrueType 登记由 shpload 消费，ldfile 仅保留 SHX 主字体/大字体执行路径。
-/// </para>
-/// <para>
-/// 登记后仅在 ldfile 实际请求同一个原始加载字体时替换加载文件名，
-/// 保留 AcGiTextStyle/MText 原始字体名，避免破坏竖排 TrueType 和大字体解码上下文。
-/// </para>
+/// 处理 AutoCAD ldfile 阶段的 SHX 主字体/大字体运行时文件加载重定向。
 /// </summary>
 internal static class LdFileHook
 {
     private const string Tag = "LdFileHook";
 
-    // ldfile 的 param2 用于区分普通字体、ShapeFile 和大字体；ShapeFile 不参与字体兜底。
     private const int FontTypeRegular = 0;
     private const int FontTypeShape = 2;
     private const int FontTypeBigFont = 4;
@@ -32,8 +23,10 @@ internal static class LdFileHook
     private static LdFileDelegate? _hookDelegate;
     private static readonly ConcurrentDictionary<string, IntPtr> NativeStringCache =
         new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, (string Replacement, int FontType)> RedirectLog =
+        new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen =
-        new(StringComparer.Ordinal);
+        new(StringComparer.OrdinalIgnoreCase);
     private static long _hitCount;
     private static long _redirectCount;
 
@@ -42,34 +35,28 @@ internal static class LdFileHook
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int LdFileDelegate(IntPtr fileName, int param2, IntPtr db, IntPtr desc);
 
-    internal sealed record RuntimeBridgeRedirect(
-        string NormalizedRequest,
-        string OriginalDisplayFont,
-        string ReplacementFont,
-        FontRedirectKind Kind,
-        string Source,
-        InlineFontType? InlineType);
-
     internal static bool IsInstalled => _hook?.IsInstalled == true;
 
     internal static (long HitCount, long RedirectCount) GetCountersSnapshot()
         => (Interlocked.Read(ref _hitCount), Interlocked.Read(ref _redirectCount));
 
+    internal static IReadOnlyDictionary<string, (string Replacement, int FontType)> GetRawRedirectLog()
+        => RedirectLog;
+
     internal static void ClearRegisteredRedirects()
     {
-        FontRuntimeRequestRegistry.Clear();
+        RedirectLog.Clear();
         RedirectLogSeen.Clear();
     }
 
-    internal static void ClearRegisteredRedirectsForDocument(IntPtr dbScope)
+    internal static void ClearRegisteredRedirectsForDocument(IntPtr _)
     {
-        FontRuntimeRequestRegistry.ClearDocumentScopedShxRequests(dbScope);
+        RedirectLog.Clear();
         RedirectLogSeen.Clear();
     }
 
     internal static void ClearTransientRegisteredRedirects()
     {
-        FontRuntimeRequestRegistry.ClearTransientRequests();
         RedirectLogSeen.Clear();
     }
 
@@ -83,28 +70,6 @@ internal static class LdFileHook
         {
             return IntPtr.Zero;
         }
-    }
-
-    internal static bool TryGetRegisteredTrueTypeRedirect(
-        string fontName,
-        out RuntimeBridgeRedirect? redirect)
-    {
-        redirect = null;
-        if (!FontRuntimeRequestRegistry.TryGetTrueTypeRequest(fontName, out FontRuntimeRequest? request, out string normalized)
-            || request == null)
-            return false;
-
-        if (string.Equals(normalized, request.ReplacementFont, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        redirect = new RuntimeBridgeRedirect(
-            normalized,
-            request.OriginalDisplayFont,
-            request.ReplacementFont,
-            request.Kind,
-            request.Source,
-            request.InlineType);
-        return true;
     }
 
     internal static void Install()
@@ -157,6 +122,7 @@ internal static class LdFileHook
             target.MinPrologueSize,
             target.MaxPrologueSize,
             target.ExpectedPrefix);
+
         if (IsInstalled)
         {
             DiagnosticLogger.Ok(
@@ -211,6 +177,7 @@ internal static class LdFileHook
         {
             try { Marshal.FreeHGlobal(ptr); } catch { }
         }
+
         NativeStringCache.Clear();
         Interlocked.Exchange(ref _hitCount, 0);
         Interlocked.Exchange(ref _redirectCount, 0);
@@ -228,47 +195,66 @@ internal static class LdFileHook
             return trampoline(fileName, param2, db, desc);
 
         Interlocked.Increment(ref _hitCount);
-        if (!FontRuntimeRequestRegistry.HasShxRequests)
+        if (param2 == FontTypeShape)
             return trampoline(fileName, param2, db, desc);
 
         _inHook = true;
         try
         {
-            string original = ReadFontName(fileName);
-            IntPtr dbScope = db;
-            // 未登记的字体请求必须原样放行，避免 ldfile 抢走上层 Hook 的决策权。
-            if (!TryGetRegisteredRedirect(original, param2, dbScope, out FontRuntimeRequest? request, out string normalized)
-                || request == null)
+            string original = NormalizeLoadName(ReadFontName(fileName));
+            if (string.IsNullOrWhiteSpace(original))
+                return trampoline(fileName, param2, db, desc);
+
+            if (IsKnownAvailableLoadFont(original))
+                return trampoline(fileName, param2, db, desc);
+
+            if (!IsShxLoadRequest(original, param2))
+                return trampoline(fileName, param2, db, desc);
+
+            if (!TryResolveMissingShxFont(
+                    original,
+                    param2,
+                    out string replacement,
+                    out FontRedirectKind kind,
+                    out string reason))
             {
                 return trampoline(fileName, param2, db, desc);
             }
 
-            string replacement = request.ReplacementFont;
-            if (string.Equals(normalized, replacement, StringComparison.OrdinalIgnoreCase))
+            string normalized = NormalizeShxName(original.TrimStart('@'));
+            bool hasAtPrefix = original.Length > 1 && original[0] == '@';
+            if (!hasAtPrefix && string.Equals(normalized, replacement, StringComparison.OrdinalIgnoreCase))
                 return trampoline(fileName, param2, db, desc);
 
             Interlocked.Increment(ref _redirectCount);
-            bool firstHit = FontRuntimeRequestRegistry.MarkHit(request.NormalizedRequest, request.Kind, request.DbScope);
-            FontRuntimeMappingStore.RecordRuntimeMapping(request, "LdFileHook", "已映射");
+            RedirectLog[normalized] = (replacement, param2);
+            RedirectLog[original] = (replacement, param2);
+            FontRuntimeMappingStore.RecordRuntimeMapping(
+                "文件级",
+                string.Empty,
+                original,
+                hasAtPrefix ? normalized : string.Empty,
+                GetFontTypeText(kind),
+                replacement,
+                "LdFileHook",
+                "已映射");
 
-            string hitPhase = firstHit ? "first" : "repeat";
-            string logKey = $"redirect|{hitPhase}|{request.DbScope.ToInt64():X}|{normalized}|{replacement}|{param2}|{request.Source}";
+            string logKey = $"{original}|{replacement}|{param2}|{reason}";
             if (RedirectLogSeen.TryAdd(logKey, 0))
             {
                 DiagnosticLogger.Ok(
                     Tag,
                     "HookHandler",
-                    firstHit ? "执行字体加载桥接" : "执行文档级后续字体加载桥接",
+                    "执行 SHX 字体加载重定向",
                     new Dictionary<string, object?>
                     {
-                        ["source"] = request.Source,
-                        ["kind"] = request.Kind.ToString(),
-                        ["originalDisplayFont"] = request.OriginalDisplayFont,
+                        ["kind"] = kind.ToString(),
+                        ["original"] = original,
                         ["replacement"] = replacement,
                         ["request"] = normalized,
                         ["param2"] = param2,
-                        ["dbScope"] = FormatDbScope(request.DbScope),
-                        ["repeatHit"] = !firstHit
+                        ["reason"] = reason,
+                        ["dbScope"] = FormatPointer(db)
                     });
             }
 
@@ -286,55 +272,6 @@ internal static class LdFileHook
         {
             _inHook = false;
         }
-    }
-
-    private static bool TryGetRegisteredRedirect(
-        string fontName,
-        int param2,
-        IntPtr dbScope,
-        out FontRuntimeRequest? request,
-        out string normalized)
-    {
-        request = null;
-        normalized = string.Empty;
-
-        // TrueType 已交给 shpload 处理；ldfile 仅保留 SHX 主字体/大字体桥接。
-        if (param2 == FontTypeShape)
-            return false;
-
-        string shxName = NormalizeLoadShxName(fontName);
-        if (!IsRegisterableLoadFontName(shxName, FontRedirectKind.ShxMain))
-            return false;
-        if (dbScope == IntPtr.Zero)
-            return false;
-
-        if (param2 == FontTypeBigFont)
-        {
-            bool found = FontRuntimeRequestRegistry.TryGetShxRequest(
-                shxName,
-                FontRedirectKind.ShxBigFont,
-                dbScope,
-                out request,
-                out _);
-            if (found)
-                normalized = shxName;
-            return found;
-        }
-
-        if (param2 == FontTypeRegular)
-        {
-            bool found = FontRuntimeRequestRegistry.TryGetShxRequest(
-                shxName,
-                FontRedirectKind.ShxMain,
-                dbScope,
-                out request,
-                out _);
-            if (found)
-                normalized = shxName;
-            return found;
-        }
-
-        return false;
     }
 
     private static bool TryGetExportAddress(
@@ -360,8 +297,7 @@ internal static class LdFileHook
             return false;
         }
 
-        string exportName = target.ExportName!;
-        address = NativeInlineHookInterop.GetProcAddress(module, exportName);
+        address = NativeInlineHookInterop.GetProcAddress(module, target.ExportName!);
         if (address == IntPtr.Zero)
         {
             DiagnosticLogger.Skip(
@@ -371,7 +307,7 @@ internal static class LdFileHook
                 new Dictionary<string, object?>
                 {
                     ["target"] = target.Name,
-                    ["exportName"] = exportName
+                    ["exportName"] = target.ExportName
                 });
             return false;
         }
@@ -422,33 +358,133 @@ internal static class LdFileHook
         return true;
     }
 
-    private static bool IsRegisterableLoadFontName(string fontName, FontRedirectKind kind)
+    private static bool IsKnownAvailableLoadFont(string fontName)
     {
         if (string.IsNullOrWhiteSpace(fontName))
-            return false;
+            return true;
 
-        return kind == FontRedirectKind.TrueType
-            ? !fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase)
-            : fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase);
-    }
+        if (FontAvailabilityIndex.IsExactKnownAvailableFont(fontName))
+            return true;
 
-    private static string NormalizeLoadShxName(string fontName)
-    {
-        string normalized = FontRedirectResolver.NormalizeInputName(fontName);
-        if (string.IsNullOrWhiteSpace(normalized))
-            return string.Empty;
-
-        string extension = Path.GetExtension(normalized);
-        if (!string.IsNullOrEmpty(extension)
-            && !normalized.EndsWith(".shx", StringComparison.OrdinalIgnoreCase))
+        if (!Path.HasExtension(fontName)
+            && FontAvailabilityIndex.IsExactKnownAvailableFont(fontName + ".shx"))
         {
-            return normalized;
+            return true;
         }
 
+        return false;
+    }
+
+    private static bool IsShxLoadRequest(string fontName, int param2)
+    {
+        return param2 == FontTypeRegular
+               || param2 == FontTypeBigFont
+               || fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryResolveMissingShxFont(
+        string fontName,
+        int param2,
+        out string replacement,
+        out FontRedirectKind kind,
+        out string reason)
+    {
+        replacement = string.Empty;
+        kind = param2 == FontTypeBigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
+        reason = string.Empty;
+
+        bool hasAtPrefix = fontName.Length > 1 && fontName[0] == '@';
+        string lookup = hasAtPrefix ? fontName.TrimStart('@') : fontName;
+        string baseShx = NormalizeShxName(lookup);
+
+        if (hasAtPrefix
+            && TryUseAvailableShx(baseShx, kind, out replacement))
+        {
+            reason = "基础 SHX 可用";
+            return true;
+        }
+
+        if (FontRedirectResolver.TryResolveConfiguredReplacement(kind, out replacement))
+        {
+            reason = "配置 SHX 兜底";
+            return true;
+        }
+
+        if (kind == FontRedirectKind.ShxBigFont
+            && TryFindCachedShx(expectBigFont: true, out replacement))
+        {
+            reason = "已知大字体兜底";
+            return true;
+        }
+
+        if (kind == FontRedirectKind.ShxMain
+            && TryFindCachedShx(expectBigFont: false, out replacement))
+        {
+            reason = "已知主字体兜底";
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryUseAvailableShx(
+        string shxName,
+        FontRedirectKind kind,
+        out string replacement)
+    {
+        replacement = string.Empty;
+        if (!FontAvailabilityIndex.IsExactKnownAvailableFont(shxName))
+            return false;
+
+        if (!FontAvailabilityIndex.TryGetKnownShxFontKind(shxName, out bool isBigFont))
+            return false;
+
+        if (kind == FontRedirectKind.ShxBigFont && !isBigFont)
+            return false;
+        if (kind == FontRedirectKind.ShxMain && isBigFont)
+            return false;
+
+        replacement = shxName;
+        return true;
+    }
+
+    private static bool TryFindCachedShx(bool expectBigFont, out string replacement)
+    {
+        foreach (var pair in FontManager.FontCache)
+        {
+            if (pair.Value != expectBigFont)
+                continue;
+            if (!FontAvailabilityIndex.IsExactKnownAvailableFont(pair.Key))
+                continue;
+
+            replacement = pair.Key;
+            return true;
+        }
+
+        replacement = string.Empty;
+        return false;
+    }
+
+    private static string NormalizeLoadName(string fontName)
+    {
+        if (string.IsNullOrWhiteSpace(fontName))
+            return string.Empty;
+
+        string trimmed = fontName.Trim();
+        string fileName = Path.GetFileName(trimmed);
+        return string.IsNullOrWhiteSpace(fileName) ? trimmed : fileName;
+    }
+
+    private static string NormalizeShxName(string fontName)
+    {
+        string normalized = NormalizeLoadName(fontName).TrimStart('@');
         return normalized.EndsWith(".shx", StringComparison.OrdinalIgnoreCase)
             ? normalized
             : normalized + ".shx";
     }
+
+    private static string GetFontTypeText(FontRedirectKind kind)
+        => kind == FontRedirectKind.ShxBigFont ? "SHX大字体" : "SHX主字体";
 
     private static string ReadFontName(IntPtr value)
     {
@@ -465,8 +501,8 @@ internal static class LdFileHook
         }
     }
 
-    private static string FormatDbScope(IntPtr dbScope)
-        => dbScope == IntPtr.Zero ? "0x0" : $"0x{dbScope.ToInt64():X}";
+    private static string FormatPointer(IntPtr value)
+        => value == IntPtr.Zero ? "0x0" : $"0x{value.ToInt64():X}";
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string lpModuleName);

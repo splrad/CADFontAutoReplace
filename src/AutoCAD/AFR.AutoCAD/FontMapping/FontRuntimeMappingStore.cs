@@ -27,20 +27,46 @@ internal static class FontRuntimeMappingStore
             return;
         }
 
-        string source = NormalizeSource(request.Source);
-        string owner = !string.IsNullOrWhiteSpace(request.Owner)
-            ? request.Owner
-            : source == "样式表" ? string.Empty : "多行文字";
         string hook = string.IsNullOrWhiteSpace(executingHook) ? request.ExecutingHook : executingHook;
-        string normalizedResult = string.IsNullOrWhiteSpace(result) ? "已映射" : result;
-
-        var record = new RuntimeFontMappingResultRecord(
-            source,
-            owner,
-            FontRedirectResolver.NormalizeInputName(request.OriginalDisplayFont),
+        RecordRuntimeMapping(
+            NormalizeSource(request.Source),
+            request.Owner,
+            request.OriginalDisplayFont,
             request.BaseFont,
             GetFontTypeText(request.Kind),
-            FontRedirectResolver.NormalizeInputName(request.ReplacementFont),
+            request.ReplacementFont,
+            hook,
+            result);
+    }
+
+    internal static void RecordRuntimeMapping(
+        string source,
+        string owner,
+        string originalFont,
+        string baseFont,
+        string fontType,
+        string replacementFont,
+        string executingHook,
+        string result)
+    {
+        if (string.IsNullOrWhiteSpace(originalFont)
+            || string.IsNullOrWhiteSpace(replacementFont))
+        {
+            return;
+        }
+
+        string normalizedSource = NormalizeSource(source);
+        string normalizedOwner = string.IsNullOrWhiteSpace(owner) ? string.Empty : owner.Trim();
+        string hook = string.IsNullOrWhiteSpace(executingHook) ? string.Empty : executingHook.Trim();
+        string normalizedResult = string.IsNullOrWhiteSpace(result) ? "已映射" : result.Trim();
+
+        var record = new RuntimeFontMappingResultRecord(
+            normalizedSource,
+            normalizedOwner,
+            FontRedirectResolver.NormalizeInputName(originalFont),
+            FontRedirectResolver.NormalizeInputName(baseFont),
+            string.IsNullOrWhiteSpace(fontType) ? "未知" : fontType.Trim(),
+            FontRedirectResolver.NormalizeInputName(replacementFont),
             hook,
             normalizedResult);
 
@@ -56,8 +82,6 @@ internal static class FontRuntimeMappingStore
 
     private static string NormalizeSource(string source)
     {
-        if (source.StartsWith("StyleTextStyleHook", StringComparison.OrdinalIgnoreCase))
-            return "样式表";
         if (source.StartsWith("MText", StringComparison.OrdinalIgnoreCase)
             || source.StartsWith("AcGiTextStyle", StringComparison.OrdinalIgnoreCase))
             return "MText";

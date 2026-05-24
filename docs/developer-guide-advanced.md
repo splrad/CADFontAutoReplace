@@ -30,19 +30,17 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 
 - `NativeInlineHook`：底层 inline patch 基础设施。
 - `NativeHookTarget`、`NativeFontHookProfile`、`INativeFontHookExportsProvider`：字体 Hook profile 与平台导出/RVA 信息。
-- `FontRuntimeRequestRegistry`：来源 Hook 与文件级 Hook 之间的统一登记表。
-- `LdFileHook`：唯一 SHX 文件级映射执行点，未登记请求立即放行。
-- `ShpLoadHook`：唯一 TrueType 文件级映射执行点，未登记请求立即放行。
-- `StyleTextStyleHook`：只识别样式表来源的缺失 `@TrueType` 并登记到 `ShpLoadHook`。
-- `MTextInlineFontHook`：只识别 MText 内联字体来源并按字体类型登记到 `LdFileHook` 或 `ShpLoadHook`。
+- `LdFileHook`：SHX 文件级映射执行点，处理 `param2=0/4` 的主字体/大字体请求，跳过 `param2=2` shape 文件。
+- `ShpLoadHook`：TrueType / `@TrueType` 文件级映射执行点，采样 `fileName`、`arg5`、`arg6` 并只记录真实 redirect。
+- `MapFontDiagnosticHook`：Debug 可选诊断点，只用于观察 `mapFont` 入站样本，不进入默认修复链路。
 
-`LdFileHook`、`ShpLoadHook`、`StyleTextStyleHook` 和 `MTextInlineFontHook` 均随插件持久安装；`ExecutionController.Execute()` 只管理文档级运行时状态。文档执行顺序必须保持为：清理运行时登记和候选 → 原始样式表检测 → 样式表 `@TrueType` 运行时映射 → MText 内联运行时映射 → 样式表最终写回 → 替换后二次检测 → 清理运行时登记和候选 → 最终图形刷新。
+`LdFileHook` 和 `ShpLoadHook` 随插件默认持久安装；`StyleTextStyleHook` 和 `MTextInlineFontHook` 已从默认安装、编译和执行路径删除。`ExecutionController.Execute()` 只管理文档级运行时状态。文档执行顺序必须保持为：清理运行时结果 → 原始样式表检测 → 样式表写回前 `Regen` 触发文件级运行时映射 → 采集真实 Hook redirect 结果 → 样式表最终写回 → 替换后二次检测 → 必要最终图形刷新。
 
 普通样式表检测和永久写回应优先使用 AutoCAD 托管 API，例如当前 `Database` 上的 `HostApplicationServices.Current.FindFile`；`FontAvailabilityIndex` 只是 native Hook 路径无法安全取得托管 `Database` 时的 SHX 兜底索引。TrueType face 可用性由 `GdiTrueTypeFontFaceIndex` 通过 `EnumFontFamiliesExW` 按字体名精确查询，不能用基础字体存在推断 `@TrueType` 存在，也不能在 CAD 启动同步热路径中预热全量 GDI face 索引。
 
-样式表 `@SHX` 主字体和大字体缺失走永久替换；样式表 `@TrueType` 保留运行时映射，不要永久写回样式表。
+样式表 `@SHX` 主字体和大字体缺失走永久替换，但永久写回必须排在运行时文件级映射之后；样式表 `@TrueType` 保留运行时映射，不要永久写回样式表。
 
-所有文件级映射都必须先写入 `FontRuntimeRequestRegistry` 再进入可能触发 `ldfile` / `shpload` 的原生 trampoline、`LoadStyleRec` 或 `Regen`。`LdFileHook` / `ShpLoadHook` 不允许扫描全局字体、不允许推导来源，也不允许处理未登记请求。
+运行时映射成功标准只看真实文件级 Hook：`LdFileHook.HookHandler` / `ShpLoadHook.HookHandler` 的 redirect 日志、非零计数和 `FontRuntimeMappingStore` 结果。预登记、扫描候选或 `mapFont` 入站样本都不能算成功。
 
 风险点：
 
@@ -52,15 +50,9 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 
 ## 4. MText 内联字体链路
 
-关键链路（执行阶段）：
+当前默认链路不再安装 MText 来源 Hook，也不运行 MText 内联候选预登记作为修复关键路径。多行文字仍通过 CAD 原生展开/绘制流程触发文件级字体加载；只有 `LdFileHook` / `ShpLoadHook` 实际 redirect 的记录才进入 AFRLOG。
 
-1. `MTextInlineFontHook` 随插件持久安装，但没有内联候选时必须快速放行。
-2. `MTextInlineFontScanner.ScanInlineFonts` 在文档处理周期内只读扫描 `\F` / `\f`，并把候选写入 `MTextInlineFontHook.ReplaceInlineFontCandidates()`。
-3. `MTextInlineFontHook.PreRegisterRuntimeRequests()` 按候选类型登记文件级运行时请求；未登记时不触发 MText Regen。
-4. `Editor.Regen()` 只在有文件级登记时触发 CAD MText 展开/绘制流程，让 Hook 命中实际内联字体。
-5. `FontRuntimeMappingStore.GetRuntimeMappingResults` 读取 `LdFileHook` / `ShpLoadHook` 实际命中的文件级映射。
-
-注意：若 DWG 文字内容本身编码已损坏，字体替换无法恢复原文。不要恢复改写 `MText.Contents` 的旧转换器，也不要恢复 setter 直接替换；当前策略是扫描内容、登记缺失字体、触发 CAD 原生展开流程、由文件级 Hook 记录真实运行时映射。
+注意：若 DWG 文字内容本身编码已损坏，字体替换无法恢复原文。不要恢复改写 `MText.Contents` 的旧转换器，也不要恢复 setter 直接替换；当前策略是让文件级 Hook 记录真实运行时映射。
 
 ## 5. 多版本支持扩展
 

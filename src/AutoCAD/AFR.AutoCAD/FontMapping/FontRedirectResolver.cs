@@ -247,6 +247,20 @@ internal static class FontRedirectResolver
             return true;
         }
 
+        if (hadAtPrefix
+            && kind == FontRedirectKind.TrueType
+            && TryResolveAvailableBase(lookupName, kind, out string baseTrueType))
+        {
+            resolution = new FontRedirectResolution(
+                original,
+                lookupName,
+                baseTrueType,
+                kind,
+                hadAtPrefix,
+                "基础字体可用");
+            return true;
+        }
+
         if (TryResolveConfiguredReplacement(kind, out string configured))
         {
             resolution = new FontRedirectResolution(
@@ -374,6 +388,9 @@ internal static class FontRedirectResolver
             return FontAvailabilityIndex.IsExactKnownAvailableFont(normalized);
 
         if (GdiTrueTypeFontFaceIndex.IsFaceAvailable(normalized))
+            return true;
+
+        if (!HasAtPrefix(normalized) && FontDetector.IsSystemFont(normalized))
             return true;
 
         return false;

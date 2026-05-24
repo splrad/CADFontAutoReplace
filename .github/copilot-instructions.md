@@ -95,16 +95,15 @@ Debug 命令：
 
 主链路在 `ExecutionController.Execute`：
 
-1. `AutoCadFontHook.Install()` 在插件启动时持久安装 `LdFileHook`、`ShpLoadHook`、`StyleTextStyleHook` 和 `MTextInlineFontHook`；文档处理只清理运行时登记、样式映射、MText 候选和诊断计数。
-2. 使用 `FontDetector.DetectMissingFonts()` 检测样式表缺失字体，并把原始检测结果存入 `DocumentContextManager` 供 `AFRLOG` 使用。
-3. 使用 `FontDetector.CollectRuntimeFontMappings()` 只收集样式表 `@TrueType` 缺失字体的临时映射，随后通过 `StyleTextStyleHook.EnterStyleRuntimeOperation()` 主动触发 `LoadStyleRec`，并立即 `Regen` 让文件级 Hook 命中。
-4. 样式表运行时映射结果只接受 `FontRuntimeMappingStore.GetRuntimeMappingResults()` 中的实际 Hook 命中记录。
-5. 只读扫描 MText 内联字体，把候选交给 `MTextInlineFontHook.ReplaceInlineFontCandidates()` 并预登记运行时请求；只有产生文件级登记时才触发 MText `Regen`。
-6. MText 内联映射结果同样只接受 `FontRuntimeMappingStore.GetRuntimeMappingResults()` 中的实际文件级 Hook 命中记录。
-7. 最后使用 `FontReplacer.ReplaceMissingFonts()` 对普通缺失字体和 `@SHX` 缺失字体执行样式表永久替换；替换前必须校验替换字体可用性。
-8. 替换后重新检测并存储仍缺失结果，供 `AFRLOG` 标记当前状态。
-9. 清理文档级运行时登记和候选后，如果发生样式表永久替换，通过 `MarkAffectedTextGraphicsModified()` 标记受影响文字、属性和块引用，再做最终视觉刷新。
-10. 写入统计、诊断汇总和 `DocumentContextManager.MarkExecuted(doc)`，避免同一文档重复执行。
+1. `AutoCadFontHook.Install()` 在插件启动时默认只持久安装 `LdFileHook` 和 `ShpLoadHook`，并初始化 `FontAvailabilityIndex`。
+2. 文档处理开始时清理上一文档的运行时映射结果、`LdFileHook` 文档级记录和诊断计数基线。
+3. 使用 `FontDetector.DetectMissingFonts()` 只读检测样式表原始缺失字体，并把原始检测结果存入 `DocumentContextManager` 供 `AFRLOG` 使用。
+4. 在任何样式表写回前先执行 `Editor.Regen()`，让 `LdFileHook` / `ShpLoadHook` 看到原始字体加载请求。
+5. 运行时映射结果只接受 `FontRuntimeMappingStore.GetRuntimeMappingResults()` 中由 `HookHandler` 实际 redirect 写入的记录；预登记、扫描候选和 `mapFont` 入站样本都不能计为成功映射。
+6. 最后使用 `FontReplacer.ReplaceMissingFonts()` 对仍需写回的普通缺失字体和 `@SHX` 缺失字体执行样式表永久替换；替换前必须校验替换字体可用性。
+7. 替换后重新检测并存储仍缺失结果，供 `AFRLOG` 标记当前状态。
+8. 如果发生样式表永久替换，通过 `MarkAffectedTextGraphicsModified()` 标记受影响文字、属性和块引用，再做最终视觉刷新。
+9. 写入 `LdFileHook` / `ShpLoadHook` 计数、统计汇总和 `DocumentContextManager.MarkExecuted(doc)`，避免同一文档重复执行。
 
 该流程不包含任何单行文字修复、AI 推理、训练或补绘阶段。
 
@@ -115,17 +114,16 @@ Debug 命令：
 - `ShapeFile` 样式用于复杂线型，检测和替换都必须跳过。
 - 样式表非 `@` 缺失字体必须走永久替换。
 - 样式表 `@SHX` 主字体和 `@SHX` 大字体缺失也必须走永久替换。
-- 样式表 `@TrueType` 不写回；只有 Windows GDI `EnumFontFamiliesExW` 实际枚举到同名 `@face` 才放行，否则通过 `StyleTextStyleHook -> ShpLoadHook` 映射到配置 TrueType。
+- 样式表 `@TrueType` 不永久写回，必须先通过样式表写回前的文件级运行时映射尝试显示修复。
 - TrueType face 可用性以 Windows GDI 枚举为准，不能用“基础字体存在”推断 `@TrueType` 存在；SHX 可用性使用 `HostApplicationServices.Current.FindFile` 和 SHX 文件头分类。
 - 替换 TrueType 时必须先清空 `BigFontFileName`、`FileName`，再写入 `FontDescriptor`；替换 SHX 时必须清空残留 `FontDescriptor`。
 
 MText 内联运行时映射规则：
 
 - MText 内联字体不改写 `MText.Contents`。
-- `MTextInlineFontHook` 随插件持久安装；`MTextInlineFontScanner` 只读扫描 MText 内容，再把候选交给 `MTextInlineFontHook.ReplaceInlineFontCandidates()`；只有预登记出文件级请求后才触发 Regen。
-- `MTextInlineFontHook` 只作为 MText 内联字体来源识别域，负责把缺失请求登记到统一运行时登记表，不做 setter/构造函数直接替换。
-- MText 内联 SHX 主字体 / SHX 大字体只登记给 `LdFileHook`；MText 内联 TrueType 只登记给 `ShpLoadHook`。
-- MText 内联 `@SHX` 先尝试去 `@` 后基础 SHX，基础存在则映射基础 SHX，否则映射配置 SHX；`@TrueType` 必须由 GDI 精确判断同名 `@face` 是否存在。
+- 当前默认链路不安装来源级 MText Hook，也不运行 MText 候选预登记作为修复关键路径。
+- MText 内联 SHX / TrueType 只有在 CAD 原生加载过程中真实进入 `LdFileHook` 或 `ShpLoadHook` 并发生 redirect 时，才写入运行时映射结果。
+- MText 内联 `@SHX` 由 `LdFileHook` 先尝试去 `@` 后基础 SHX，基础不存在再映射配置 SHX；`@TrueType` 必须由 GDI 精确判断同名 `@face` 是否存在。
 - AFRLOG 展示记录必须来自 `LdFileHook` / `ShpLoadHook` 实际命中的文件级映射结果，不在界面层重新推导候选映射。
 
 ## Hook 职责边界
@@ -139,19 +137,16 @@ MText 内联运行时映射规则：
 
 当前 Hook 边界：
 
-- `AutoCadFontHook.Install()` 持久安装 `LdFileHook`、`ShpLoadHook`、`StyleTextStyleHook`、`MTextInlineFontHook` 和 Debug `MapFontDiagnosticHook`，并只初始化 `FontAvailabilityIndex`；GDI TrueType face 索引必须按需构建，不能放进 CAD 启动同步热路径。
-- `ExecutionController.Execute()` 不安装或卸载来源 Hook；每个文档周期开始时只清理当前文档的 SHX 文件级登记和瞬时请求，结束时清理瞬时请求、样式表运行时映射、MText 候选和诊断计数；文档级 SHX 文件映射必须保留到最终视觉刷新及后续同文档显示请求。
-- `FontRuntimeRequestRegistry` 是来源 Hook 与文件级 Hook 之间唯一的运行时请求登记表，登记项必须包含文档 db scope、来源、字体类型、原始字体、基础字体、目标字体和执行 Hook。
-- `LdFileHook` 是唯一 SHX 文件级映射执行点；它只处理同一 db scope、同一 SHX 类型、已登记的 SHX 请求，未登记请求立即放行。
-- `ShpLoadHook` 是唯一 TrueType 文件级映射执行点；它只处理已登记 TrueType 请求，未登记请求立即放行。
-- `StyleTextStyleHook` 只负责样式表来源的缺失 `@TrueType` 登记，不处理样式表 `@SHX`，不处理 MText 内联字体。
-- `StyleTextStyleHook` 可能走 `loadStyleRec` thunk Hook 或普通 inline Hook；修改导出符号、RVA、前缀校验或 trampoline 逻辑时必须逐版本验证。
-- `MTextInlineFontHook` 只负责 MText 内联缺失字体登记，不处理样式表字体，不直接替换 CAD 当前显示参数。
-- MText Hook 不能处理样式表字体；样式表 Hook 不能处理 MText 内联字体。
+- `AutoCadFontHook.Install()` 默认只持久安装 `LdFileHook` 和 `ShpLoadHook`；Debug `MapFontDiagnosticHook` 只能作为可选诊断，不进入默认安装或修复链路。
+- `ExecutionController.Execute()` 不安装或卸载来源 Hook；开始时清理运行时映射结果和文件级文档状态，样式表写回前触发一次运行时刷新，最后才做样式表永久替换。
+- `LdFileHook` 是 SHX 文件级映射执行点；处理 `param2=0/4` 的 SHX 主字体/大字体，跳过 `param2=2` shape 文件，`@SHX` 先尝试基础 SHX 回退，再使用配置 SHX。
+- `ShpLoadHook` 是 TrueType / `@TrueType` 文件级映射执行点；采样 `fileName`、`arg5`、`arg6`，缺失 TrueType 映射到配置 TrueType，`@` 请求保留 `@` 前缀。
+- `MapFontDiagnosticHook` 只用于 Debug 观察 `mapFont` 入站样本和噪声，不能把入站样本或预登记当作映射成功。
+- `StyleTextStyleHook` 和 `MTextInlineFontHook` 已从默认架构删除；不要恢复安装、编译或执行路径，除非先重新定义证据、边界和 CAD 实测验收。
 - 普通样式表检测、永久替换和二次验证必须优先使用当前 `Database` 上的 CAD 托管 API。
 - `FontAvailabilityIndex` 只是 Hook 侧无法安全取得托管 `Database` 时的进程级 CAD 字体兜底索引；系统 TrueType face，尤其 `@TrueType` vertical face，由 `GdiTrueTypeFontFaceIndex` 按字体名精确查询并缓存。
 
-典型回归：把来源识别和文件级执行混在同一个 Hook 中，会导致未登记字体被全局兜底、`@TrueType` 被错误地按基础字体判断，或 MText setter 直接替换绕过文件级 Hook。今后重构 Style/MText/LdFile/ShpLoad 边界时，必须保持“来源限定、登记驱动、未登记快速放行”。
+典型回归：把样式表永久写回放到运行时映射之前，会提前改变原始字体请求，导致真实文件级 Hook 证据消失。今后重构 LdFile/ShpLoad 边界时，必须保持“映射在前，样式表永久替换在最后”，并只用真实 `HookHandler` redirect 与非零计数证明成功。
 
 ## AFRLOG 与文档上下文
 
@@ -207,7 +202,7 @@ artifacts/ReleaseAssets/Fonts.zip
 
 - 常规变更：`dotnet build CADFontAutoReplace.slnx -c Debug` 与 `dotnet build CADFontAutoReplace.slnx -c Release` 能通过，或明确说明本机缺失 SDK/AutoCAD 依赖。
 - 发布相关变更应验证 `tools/Publish-ReleaseAssets.ps1`。
-- Hook 变更应验证 `LdFileHook`、`StyleTextStyleHook`、`MTextInlineFontHook` 的触发边界。
+- Hook 变更应验证 `LdFileHook`、`ShpLoadHook` 的真实 `HookHandler` 命中、redirect 计数和样式表写回顺序。
 - 命令变更应验证 `CommandNames.cs`、`CommandMethod`、`CommandClass` 和 Debug/Release 暴露范围。
 - 部署器变更应验证 UAC、注册表扫描、安装/卸载、内嵌插件资源和 `.cad.json` 解析。
 - 文档变更至少运行 `git diff --check`，确保没有空白错误。

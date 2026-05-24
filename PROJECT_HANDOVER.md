@@ -5,9 +5,8 @@
 CADFontAutoReplace 当前只维护 AutoCAD 缺失字体自动替换和字体运行时映射能力：
 
 - 样式表缺失字体检测与永久替换。
-- 样式表 `@TrueType` 字体运行时映射。
-- `LdFileHook` 字体加载重定向。
-- `MTextInlineFontHook` 内联字体运行时映射。
+- `LdFileHook` SHX 文件级运行时映射。
+- `ShpLoadHook` TrueType / `@TrueType` 文件级运行时映射。
 - `AFR` 字体配置、`AFRLOG` 替换日志、`AFRUNLOAD` 隐藏卸载入口。
 - `AFR.Deployer` 一键安装、卸载和发布资产生成。
 
@@ -37,12 +36,13 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 
 `ExecutionController.Execute` 是字体处理主流程：
 
-1. 检测样式表缺失字体。
-2. 永久替换普通缺失字体和 `@SHX` 缺失字体。
-3. 二次检测并记录仍缺失样式。
-4. 登记并触发样式表 `@TrueType` 字体运行时映射。
-5. 扫描 MText 内联字体，临时安装 MText Hook，通过 Regen 收集实际映射结果。
-6. 需要时执行最终 Regen，输出统计并写入 `AFRLOG` 可读取的上下文。
+1. 清理上一文档运行时结果和诊断计数基线。
+2. 只读检测样式表原始缺失字体。
+3. 样式表写回前执行 `Regen`，让 `LdFileHook` / `ShpLoadHook` 先看到原始字体加载请求。
+4. 采集真实文件级 Hook redirect 结果。
+5. 最后永久替换普通缺失字体和 `@SHX` 缺失字体。
+6. 二次检测并记录仍缺失样式。
+7. 需要时执行最终 Regen，输出统计并写入 `AFRLOG` 可读取的上下文。
 
 该流程不包含任何单行文字修复阶段。
 
@@ -58,10 +58,9 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 必须保留的字体 Hook：
 
 - `LdFileHook`
-- `StyleTextStyleHook`
-- `MTextInlineFontHook`
+- `ShpLoadHook`
 
-这些 Hook 只服务字体加载、样式表运行时映射和 MText 内联字体映射，不作为任何文字编码修复信号。
+`LdFileHook` 负责 SHX 文件级加载重定向；`ShpLoadHook` 负责 TrueType / `@TrueType` 文件级映射。`mapFont` 只作为 Debug 证据对象，不默认安装。`StyleTextStyleHook` 和 `MTextInlineFontHook` 已从默认安装、编译和执行路径删除。
 
 ## 发布
 
@@ -88,8 +87,8 @@ artifacts/ReleaseAssets/Fonts.zip
 - 新增命令先登记到 `CommandNames.cs`，再在目标版本壳 `PluginEntry.cs` 注册。
 - Debug-only 命令必须同时在命令文件和注册处用 `#if DEBUG` 控制。
 - 修改 Hook 热路径时保持小范围变更，并用真实 CAD 图纸验证。
-- 样式表普通缺失字体和 `@SHX` 缺失字体走永久替换；样式表 `@TrueType` 只做运行时映射。
-- MText 内联字体不改写 `MText.Contents`，映射记录以 Hook 实际命中为准。
+- 样式表普通缺失字体和 `@SHX` 缺失字体走永久替换，但必须在运行时文件级映射之后执行；样式表 `@TrueType` 只做运行时映射。
+- MText 内联字体不改写 `MText.Contents`，映射记录以 `LdFileHook` / `ShpLoadHook` 实际命中为准。
 - 文档入口为 `README.md`、`docs/developer-guide-beginner.md`、`docs/developer-guide-advanced.md` 和 `.github/copilot-instructions.md`。
 
 ## 验证清单
@@ -97,6 +96,6 @@ artifacts/ReleaseAssets/Fonts.zip
 - `dotnet build CADFontAutoReplace.slnx -c Debug`
 - `dotnet build CADFontAutoReplace.slnx -c Release`
 - `AFR` 能完成字体配置和当前图纸处理。
-- `AFRLOG` 能展示样式表检测、替换状态、样式表运行时映射和 MText 内联映射。
-- `LdFileHook`、`StyleTextStyleHook`、`MTextInlineFontHook` 在各自边界内工作。
+- `AFRLOG` 能展示样式表检测、替换状态和真实文件级运行时映射。
+- `LdFileHook`、`ShpLoadHook` 在各自边界内工作，`mapFont` 默认无安装日志。
 - 发布脚本能生成部署器、DLL 包和字体包。

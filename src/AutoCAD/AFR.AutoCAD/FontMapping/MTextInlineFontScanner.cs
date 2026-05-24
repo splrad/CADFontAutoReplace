@@ -91,8 +91,6 @@ internal static class MTextInlineFontScanner
             tr.Commit();
         }
 
-        MTextInlineFontHook.ReplaceInlineFontCandidates(result);
-
         return new MTextInlineFontScanResult(
             result,
             mTextCount,

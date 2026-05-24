@@ -13,13 +13,7 @@ internal sealed class AutoCadFontHook : IFontHook
     /// <summary>Hook 是否已安装并处于拦截状态。</summary>
     public bool IsInstalled =>
         LdFileHook.IsInstalled
-        || ShpLoadHook.IsInstalled
-        || StyleTextStyleHook.IsInstalled
-        || MTextInlineFontHook.IsInstalled
-#if DEBUG
-        || MapFontDiagnosticHook.IsInstalled
-#endif
-        ;
+        || ShpLoadHook.IsInstalled;
 
     /// <summary>安装插件级持久字体 Hook，并初始化 CAD 字体兜底索引。</summary>
     public void Install()
@@ -27,13 +21,8 @@ internal sealed class AutoCadFontHook : IFontHook
         DiagnosticLogger.Start("AutoCadFontHook", "Install", "开始安装插件级持久字体 Hook");
         FontAvailabilityIndex.Initialize();
         DiagnosticLogger.Ok("AutoCadFontHook", "InitializeFontAvailabilityIndex", "Hook 侧字体兜底索引初始化完成");
-#if DEBUG
-        InstallOne("MapFontDiagnosticHook", MapFontDiagnosticHook.Install, () => MapFontDiagnosticHook.IsInstalled);
-#endif
         InstallOne("LdFileHook", LdFileHook.Install, () => LdFileHook.IsInstalled);
         InstallOne("ShpLoadHook", ShpLoadHook.Install, () => ShpLoadHook.IsInstalled);
-        InstallOne("StyleTextStyleHook", StyleTextStyleHook.Install, () => StyleTextStyleHook.IsInstalled);
-        InstallOne("MTextInlineFontHook", MTextInlineFontHook.Install, () => MTextInlineFontHook.IsInstalled);
         DiagnosticLogger.Ok(
             "AutoCadFontHook",
             "Install",
@@ -137,13 +126,8 @@ internal sealed class AutoCadFontHook : IFontHook
     public void Uninstall()
     {
         DiagnosticLogger.Start("AutoCadFontHook", "Uninstall", "开始卸载插件级持久字体 Hook");
-        UninstallOne("MTextInlineFontHook", MTextInlineFontHook.Uninstall, () => MTextInlineFontHook.IsInstalled);
-        UninstallOne("StyleTextStyleHook", StyleTextStyleHook.Uninstall, () => StyleTextStyleHook.IsInstalled);
         UninstallOne("ShpLoadHook", ShpLoadHook.Uninstall, () => ShpLoadHook.IsInstalled);
         UninstallOne("LdFileHook", LdFileHook.Uninstall, () => LdFileHook.IsInstalled);
-#if DEBUG
-        UninstallOne("MapFontDiagnosticHook", MapFontDiagnosticHook.Uninstall, () => MapFontDiagnosticHook.IsInstalled);
-#endif
         DiagnosticLogger.Ok(
             "AutoCadFontHook",
             "Uninstall",
