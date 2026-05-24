@@ -15,12 +15,13 @@ internal sealed class AutoCadFontHook : IFontHook
         LdFileHook.IsInstalled
         || ShpLoadHook.IsInstalled;
 
-    /// <summary>安装插件级持久字体 Hook，并初始化 CAD 字体兜底索引。</summary>
+    /// <summary>安装插件级持久字体 Hook，并初始化 Hook 侧字体索引。</summary>
     public void Install()
     {
         DiagnosticLogger.Start("AutoCadFontHook", "Install", "开始安装插件级持久字体 Hook");
-        FontAvailabilityIndex.Initialize();
-        DiagnosticLogger.Ok("AutoCadFontHook", "InitializeFontAvailabilityIndex", "Hook 侧字体兜底索引初始化完成");
+        HookShxFontIndex.Initialize();
+        HookTrueTypeFontIndex.Initialize();
+        DiagnosticLogger.Ok("AutoCadFontHook", "InitializeHookFontIndexes", "Hook 侧字体索引初始化完成");
         InstallOne("LdFileHook", LdFileHook.Install, () => LdFileHook.IsInstalled);
         InstallOne("ShpLoadHook", ShpLoadHook.Install, () => ShpLoadHook.IsInstalled);
         DiagnosticLogger.Ok(
@@ -139,7 +140,8 @@ internal sealed class AutoCadFontHook : IFontHook
     public void UpdateConfig()
     {
         DiagnosticLogger.Start("AutoCadFontHook", "UpdateConfig", "开始更新 Hook 字体兜底索引");
-        FontAvailabilityIndex.Initialize();
+        HookShxFontIndex.Initialize();
+        HookTrueTypeFontIndex.Initialize();
         DiagnosticLogger.Ok("AutoCadFontHook", "UpdateConfig", "Hook 字体兜底索引更新完成");
     }
 }

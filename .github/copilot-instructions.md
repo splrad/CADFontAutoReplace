@@ -95,7 +95,7 @@ Debug 命令：
 
 主链路在 `ExecutionController.Execute`：
 
-1. `AutoCadFontHook.Install()` 在插件启动时默认只持久安装 `LdFileHook` 和 `ShpLoadHook`，并初始化 `FontAvailabilityIndex`。
+1. `AutoCadFontHook.Install()` 在插件启动时默认只持久安装 `LdFileHook` 和 `ShpLoadHook`，并初始化 `HookShxFontIndex` 与 `HookTrueTypeFontIndex`。
 2. 文档处理开始时清理上一文档的运行时映射结果、`LdFileHook` 文档级记录和诊断计数基线。
 3. 使用 `FontDetector.DetectMissingFonts()` 只读检测样式表原始缺失字体，并把原始检测结果存入 `DocumentContextManager` 供 `AFRLOG` 使用。
 4. 在任何样式表写回前先执行 `Editor.Regen()`，让 `LdFileHook` / `ShpLoadHook` 看到原始字体加载请求。
@@ -115,7 +115,7 @@ Debug 命令：
 - 样式表非 `@` 缺失字体必须走永久替换。
 - 样式表 `@SHX` 主字体和 `@SHX` 大字体缺失也必须走永久替换。
 - 样式表 `@TrueType` 不永久写回，必须先通过样式表写回前的文件级运行时映射尝试显示修复。
-- TrueType face 可用性以 Windows GDI 枚举为准，不能用“基础字体存在”推断 `@TrueType` 存在；SHX 可用性使用 `HostApplicationServices.Current.FindFile` 和 SHX 文件头分类。
+- TrueType 可用性以 `HookTrueTypeFontIndex` 的 DirectWrite 系统字体索引和 CAD TrueType 文件兜底为准；`@TrueType` 不判断 `@face`，只按去掉 `@` 后的基础 TrueType 是否存在决定是否映射。
 - 替换 TrueType 时必须先清空 `BigFontFileName`、`FileName`，再写入 `FontDescriptor`；替换 SHX 时必须清空残留 `FontDescriptor`。
 
 MText 内联运行时映射规则：
@@ -123,7 +123,7 @@ MText 内联运行时映射规则：
 - MText 内联字体不改写 `MText.Contents`。
 - 当前默认链路不安装来源级 MText Hook，也不运行 MText 候选预登记作为修复关键路径。
 - MText 内联 SHX / TrueType 只有在 CAD 原生加载过程中真实进入 `LdFileHook` 或 `ShpLoadHook` 并发生 redirect 时，才写入运行时映射结果。
-- MText 内联 `@SHX` 由 `LdFileHook` 先尝试去 `@` 后基础 SHX，基础不存在再映射配置 SHX；`@TrueType` 必须由 GDI 精确判断同名 `@face` 是否存在。
+- MText 内联 `@SHX` 由 `LdFileHook` 先尝试去 `@` 后基础 SHX，基础不存在再映射配置 SHX；`@TrueType` 由 `ShpLoadHook` 按基础 TrueType 是否存在决定保留原请求或映射到 `@` + 配置 TrueType。
 - AFRLOG 展示记录必须来自 `LdFileHook` / `ShpLoadHook` 实际命中的文件级映射结果，不在界面层重新推导候选映射。
 
 ## Hook 职责边界
@@ -144,7 +144,7 @@ MText 内联运行时映射规则：
 - `MapFontDiagnosticHook` 只用于 Debug 观察 `mapFont` 入站样本和噪声，不能把入站样本或预登记当作映射成功。
 - `StyleTextStyleHook` 和 `MTextInlineFontHook` 已从默认架构删除；不要恢复安装、编译或执行路径，除非先重新定义证据、边界和 CAD 实测验收。
 - 普通样式表检测、永久替换和二次验证必须优先使用当前 `Database` 上的 CAD 托管 API。
-- `FontAvailabilityIndex` 只是 Hook 侧无法安全取得托管 `Database` 时的进程级 CAD 字体兜底索引；系统 TrueType face，尤其 `@TrueType` vertical face，由 `GdiTrueTypeFontFaceIndex` 按字体名精确查询并缓存。
+- `HookShxFontIndex` 只服务 SHX Hook 路径，负责 CAD 字体目录 `.shx` 兜底和主/大字体分类；`HookTrueTypeFontIndex` 只服务 TrueType Hook 路径，负责 DirectWrite 系统字体族索引和 CAD TrueType 文件兜底。
 
 典型回归：把样式表永久写回放到运行时映射之前，会提前改变原始字体请求，导致真实文件级 Hook 证据消失。今后重构 LdFile/ShpLoad 边界时，必须保持“映射在前，样式表永久替换在最后”，并只用真实 `HookHandler` redirect 与非零计数证明成功。
 

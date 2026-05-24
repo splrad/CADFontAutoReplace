@@ -536,7 +536,7 @@ internal static class MapFontDiagnosticHook
             return false;
 
         string shxName = FontRedirectResolver.EnsureShx(lookup);
-        if (!FontAvailabilityIndex.TryGetKnownShxFontKind(shxName, out bool isBigFont))
+        if (!HookShxFontIndex.TryGetKind(shxName, out bool isBigFont))
             return false;
 
         var kind = isBigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;

@@ -181,7 +181,7 @@ public abstract class PluginEntryBase : IExtensionApplication
             // ── 以下仅在非首次加载（注册表自动启动）时执行 ──
 
             // 第零阶段 A: 预热系统 TrueType 字族索引。
-            // Hook 侧的 FontAvailabilityIndex 只保留 CAD 字体目录兜底索引，不再同步枚举系统字体。
+            // Hook 侧 TrueType 索引通过 DirectWrite 枚举系统字体，不再使用 GDI face 查询。
             DiagnosticLogger.Start("PluginEntry", "PrewarmSystemFonts", "开始预热系统 TrueType 字族索引");
             FontDetector.PrewarmSystemFonts();
             DiagnosticLogger.Ok("PluginEntry", "PrewarmSystemFonts", "系统 TrueType 字族索引预热已调度");

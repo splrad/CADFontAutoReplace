@@ -54,7 +54,7 @@
 - 不处理 `.shx`、已知 SHX、可归一化为已知 SHX 的无扩展名请求。
 - 不把 `fileName` / `arg5` 上 `param2=0/4` 的无扩展名请求兜底成 TrueType；这类请求默认属于 SHX 主字体/大字体加载槽位。
 - 不把未知无扩展名当作缺失 TrueType。
-- 不把系统基础字体存在等同于 `@TrueType` vertical face 存在；`@face` 仍需要 GDI 精确判断。
+- 不再判断 `@TrueType` vertical face 是否被系统枚举；运行时只按去掉 `@` 后的基础 TrueType 是否存在决定保留原请求或映射到 `@` + 配置 TrueType。
 - 不依赖 `FontRuntimeRequestRegistry` 作为默认修复前置条件。
 
 ## `mapFont`

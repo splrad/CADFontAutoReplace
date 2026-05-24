@@ -317,10 +317,10 @@ internal static class FontRedirectResolver
         }
 
         string shxName = EnsureShx(configured);
-        if (!FontAvailabilityIndex.IsKnownAvailableFont(shxName))
+        if (!HookShxFontIndex.IsAvailableWithAtFallback(shxName))
             return false;
 
-        if (FontAvailabilityIndex.TryGetKnownShxFontKind(shxName, out bool isBigFont))
+        if (HookShxFontIndex.TryGetKind(shxName, out bool isBigFont))
         {
             if (kind == FontRedirectKind.ShxBigFont && !isBigFont)
                 return false;
@@ -356,13 +356,13 @@ internal static class FontRedirectResolver
         }
 
         string shxName = EnsureShx(lookupName);
-        if (!FontAvailabilityIndex.IsExactKnownAvailableFont(shxName)
-            && !FontAvailabilityIndex.IsKnownAvailableFont(shxName))
+        if (!HookShxFontIndex.IsExactAvailable(shxName)
+            && !HookShxFontIndex.IsAvailableWithAtFallback(shxName))
         {
             return false;
         }
 
-        if (FontAvailabilityIndex.TryGetKnownShxFontKind(shxName, out bool isBigFont))
+        if (HookShxFontIndex.TryGetKind(shxName, out bool isBigFont))
         {
             if (kind == FontRedirectKind.ShxBigFont && !isBigFont)
                 return false;
@@ -384,16 +384,7 @@ internal static class FontRedirectResolver
         if (string.IsNullOrWhiteSpace(normalized))
             return false;
 
-        if (FontDetector.IsTrueTypeFontFile(normalized))
-            return FontAvailabilityIndex.IsExactKnownAvailableFont(normalized);
-
-        if (GdiTrueTypeFontFaceIndex.IsFaceAvailable(normalized))
-            return true;
-
-        if (!HasAtPrefix(normalized) && FontDetector.IsSystemFont(normalized))
-            return true;
-
-        return false;
+        return HookTrueTypeFontIndex.IsAvailable(normalized);
     }
 
     internal static bool IsTrueTypeFontFileName(string fontName)
@@ -417,10 +408,10 @@ internal static class FontRedirectResolver
             return IsAvailableTrueType(original);
 
         string shxName = NormalizeShxPreserveAt(original);
-        if (!FontAvailabilityIndex.IsExactKnownAvailableFont(shxName))
+        if (!HookShxFontIndex.IsExactAvailable(shxName))
             return false;
 
-        return FontAvailabilityIndex.TryGetKnownShxFontKind(shxName, out bool isBigFont)
+        return HookShxFontIndex.TryGetKind(shxName, out bool isBigFont)
                && IsExpectedShxKind(kind, isBigFont);
     }
 
@@ -430,10 +421,10 @@ internal static class FontRedirectResolver
             return IsAvailableTrueType(fontName);
 
         string shxName = NormalizeShxPreserveAt(fontName);
-        if (!FontAvailabilityIndex.IsKnownAvailableFont(shxName))
+        if (!HookShxFontIndex.IsAvailableWithAtFallback(shxName))
             return false;
 
-        return FontAvailabilityIndex.TryGetKnownShxFontKind(shxName, out bool isBigFont)
+        return HookShxFontIndex.TryGetKind(shxName, out bool isBigFont)
                && IsExpectedShxKind(kind, isBigFont);
     }
 

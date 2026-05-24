@@ -5,18 +5,17 @@ using AFR.Services;
 namespace AFR.FontMapping;
 
 /// <summary>
-/// Hook 侧进程级字体可用性兜底索引。
+/// Hook 侧进程级 SHX 字体可用性兜底索引。
 /// <para>
 /// 普通样式表检测和写回以当前 Database 上的 HostApplicationServices.FindFile 为权威；
-/// 此索引只服务 ldfile/AcGiTextStyle 等 native 回调附近无法安全取得托管 Database 的路径。
+/// 此索引只服务 ldfile 等 native 回调附近无法安全取得托管 Database 的 SHX 路径。
 /// </para>
 /// </summary>
-internal static class FontAvailabilityIndex
+internal static class HookShxFontIndex
 {
     private const int ConflictSampleLimit = 8;
 
     private static readonly object CacheLock = new();
-    private static readonly HashSet<string> AvailableFonts = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, ShxFontEntry> ShxFonts = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> ConflictNames = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> SizeConflictNames = new(StringComparer.OrdinalIgnoreCase);
@@ -24,7 +23,6 @@ internal static class FontAvailabilityIndex
     private static volatile bool _initialized;
     private static int _pathCount;
     private static int _primaryPathCount;
-    private static int _ttFileCount;
 
     private sealed record ShxFontEntry(
         string FileName,
@@ -47,13 +45,13 @@ internal static class FontAvailabilityIndex
     {
         bool scanned = EnsureInitialized();
         DiagnosticLogger.Ok(
-            "FontAvailabilityIndex",
+            "HookShxFontIndex",
             "Initialize",
-            scanned ? "字体可用性索引已初始化" : "字体可用性索引已复用",
+            scanned ? "Hook 侧 SHX 字体索引已初始化" : "Hook 侧 SHX 字体索引已复用",
             new Dictionary<string, object?> { ["scanned"] = scanned });
     }
 
-    internal static bool IsKnownAvailableFont(string fontName)
+    internal static bool IsAvailableWithAtFallback(string fontName)
     {
         if (string.IsNullOrWhiteSpace(fontName))
             return false;
@@ -61,19 +59,10 @@ internal static class FontAvailabilityIndex
         EnsureInitialized();
 
         string fileName = NormalizeFileName(fontName);
-
-        if (AvailableFonts.Contains(fileName))
-            return true;
-
-        if (TryGetShxEntry(fileName, allowAtFallback: true, out _))
-            return true;
-
-        return fileName.Length > 1
-               && fileName[0] == '@'
-               && AvailableFonts.Contains(fileName.TrimStart('@'));
+        return TryGetShxEntry(fileName, allowAtFallback: true, out _);
     }
 
-    internal static bool IsExactKnownAvailableFont(string fontName)
+    internal static bool IsExactAvailable(string fontName)
     {
         if (string.IsNullOrWhiteSpace(fontName))
             return false;
@@ -81,12 +70,10 @@ internal static class FontAvailabilityIndex
         EnsureInitialized();
 
         string fileName = NormalizeFileName(fontName);
-
-        return AvailableFonts.Contains(fileName)
-               || TryGetExactShxEntry(fileName, out _);
+        return TryGetExactShxEntry(fileName, out _);
     }
 
-    internal static bool TryGetKnownShxFontKind(string fontName, out bool isBigFont)
+    internal static bool TryGetKind(string fontName, out bool isBigFont)
     {
         isBigFont = false;
         if (string.IsNullOrWhiteSpace(fontName))
@@ -138,14 +125,12 @@ internal static class FontAvailabilityIndex
         }
 
         DiagnosticLogger.Ok(
-            "FontAvailabilityIndex",
-            "ScanAvailableFonts",
-            "Hook 侧字体兜底索引已构建",
+            "HookShxFontIndex",
+            "ScanAvailableShxFonts",
+            "Hook 侧 SHX 字体索引已构建",
             new Dictionary<string, object?>
             {
-                ["availableFonts"] = AvailableFonts.Count,
                 ["shxCount"] = ShxFonts.Count,
-                ["ttFileCount"] = _ttFileCount,
                 ["conflictNameCount"] = ConflictNames.Count,
                 ["sizeConflictNameCount"] = SizeConflictNames.Count,
                 ["pathCount"] = _pathCount,
@@ -168,17 +153,6 @@ internal static class FontAvailabilityIndex
                 {
                     AddShxFont(file, sourceRank, sourceOrder);
                 }
-                else if (ext.Equals(".ttf", StringComparison.OrdinalIgnoreCase) ||
-                         ext.Equals(".ttc", StringComparison.OrdinalIgnoreCase) ||
-                         ext.Equals(".otf", StringComparison.OrdinalIgnoreCase))
-                {
-                    string fileName = Path.GetFileName(file);
-                    AvailableFonts.Add(fileName);
-                    _ttFileCount++;
-                    string familyLikeName = Path.GetFileNameWithoutExtension(fileName);
-                    if (!string.IsNullOrWhiteSpace(familyLikeName))
-                        AvailableFonts.Add(familyLikeName);
-                }
             }
         }
         catch
@@ -196,8 +170,6 @@ internal static class FontAvailabilityIndex
         long length = GetFileLength(filePath);
         bool? isBigFont = ShxFontAnalyzer.IsBigFont(filePath);
         var candidate = new ShxFontEntry(fileName, filePath, length, isBigFont, sourceRank, sourceOrder);
-
-        AvailableFonts.Add(fileName);
 
         if (!ShxFonts.TryGetValue(fileName, out ShxFontEntry? existing))
         {
@@ -388,7 +360,7 @@ internal static class FontAvailabilityIndex
         foreach (var sample in ConflictSamples)
         {
             DiagnosticLogger.Skip(
-                "FontAvailabilityIndex",
+                "HookShxFontIndex",
                 "ShxNameConflict",
                 "检测到同名 SHX 文件大小不一致，已按来源优先级选择首选项",
                 new Dictionary<string, object?>

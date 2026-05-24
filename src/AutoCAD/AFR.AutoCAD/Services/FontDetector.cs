@@ -3,7 +3,6 @@ using System.Runtime.InteropServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.GraphicsInterface;
 using AFR.FontMapping;
-using System.Windows.Media;
 using AFR.Models;
 
 namespace AFR.Services;
@@ -19,31 +18,21 @@ namespace AFR.Services;
 /// </summary>
 internal static class FontDetector
 {
-    // 在后台线程异步构建系统字体索引（字族名集合），供 IsSystemFont 快速查询
-    private static readonly Task<HashSet<string>> _systemFontNamesTask = Task.Run(BuildSystemFontIndex);
-
     // FindFile 缓存 key 前缀（预计算，避免每次调用 int.ToString()）
     private static readonly string FindFilePrefixShx = ((int)FindFileHint.CompiledShapeFile).ToString() + ":";
     private static readonly string FindFilePrefixTtf = ((int)FindFileHint.TrueTypeFontFile).ToString() + ":";
 
-    /// <summary>预热系统字体索引。调用此方法会触发后台索引构建（如果尚未开始）。</summary>
-    public static void PrewarmSystemFonts() { }
+    /// <summary>预热系统 TrueType 字体索引。</summary>
+    public static void PrewarmSystemFonts() => HookTrueTypeFontIndex.Initialize();
 
     /// <summary>
     /// 检查指定名称是否为已安装的系统 TrueType 字族名。
-    /// 索引尚未就绪时返回 false（保守策略）。
+    /// @ 前缀会按基础字体名查询，不做 GDI vertical face 判断。
     /// </summary>
-    public static bool IsSystemFont(string name)
-    {
-        if (string.IsNullOrEmpty(name)) return false;
-        var task = _systemFontNamesTask;
-        return task.Status == TaskStatus.RanToCompletion && task.Result.Contains(name);
-    }
+    public static bool IsSystemFont(string name) => HookTrueTypeFontIndex.IsAvailable(name);
 
     /// <summary>系统字体索引是否已构建完成且包含有效数据。</summary>
-    public static bool IsSystemFontIndexReady
-        => _systemFontNamesTask.Status == TaskStatus.RanToCompletion
-           && _systemFontNamesTask.Result.Count > 0;
+    public static bool IsSystemFontIndexReady => HookTrueTypeFontIndex.IsSystemIndexReady;
 
     /// <summary>
     /// 检测指定数据库中所有文字样式的缺失字体。
@@ -114,8 +103,8 @@ internal static class FontDetector
                 }
 
                 // TrueType 样式: 验证字体可用才跳过。
-                // 普通 face 通过 GDI face 索引、系统字体索引、FindFile 和本地化反查验证；
-                // @TrueType 不参与永久写回，后续运行时流程只用 GDI exact face 判断。
+                // 普通 face 通过 DirectWrite TrueType 索引和 FindFile 验证；
+                // @TrueType 不参与永久写回，后续运行时流程只按基础 TrueType 判定。
                 if (isTrueType)
                 {
                     var typeFace = safeFont!.Value.TypeFace!;
@@ -273,16 +262,18 @@ internal static class FontDetector
         if (!FontRedirectResolver.HasAtPrefix(original))
             return null;
 
-        if (FontRedirectResolver.IsAvailableTrueType(original))
+        string baseTrueType = FontRedirectResolver.StripLeadingAtPrefix(original);
+        if (HookTrueTypeFontIndex.IsAvailable(baseTrueType))
         {
             DiagnosticLogger.Skip(
                 "FontDetector",
                 "CreateTrueTypeRuntimeFontRecord",
-                "@TrueType 已由 GDI 枚举到，跳过样式表运行时映射",
+                "@TrueType 基础字体可用，跳过样式表运行时映射",
                 new Dictionary<string, object?>
                 {
                     ["styleName"] = styleName,
-                    ["original"] = original
+                    ["original"] = original,
+                    ["baseTrueType"] = baseTrueType
                 });
             return null;
         }
@@ -312,7 +303,7 @@ internal static class FontDetector
         string fontName,
         FontDetectionContext context)
     {
-        return FontRedirectResolver.IsAvailableTrueType(fontName)
+        return HookTrueTypeFontIndex.IsAvailable(fontName)
                || IsTrueTypeFontAvailable(fontName, context);
     }
 
@@ -387,7 +378,7 @@ internal static class FontDetector
 
     /// <summary>
     /// 检查 TrueType 字体是否可用。
-    /// 依次通过：GDI face 索引 → 系统字体索引 → FindFile（FileName）→ FindFile（.ttf/.ttc/.otf）→ WPF 本地化名称反查。
+    /// 依次通过：DirectWrite TrueType 索引 → FindFile（FileName）→ FindFile（.ttf/.ttc/.otf）。
     /// </summary>
     private static bool IsTrueTypeFontAvailable(string typeface, string fileName, FontDetectionContext context)
     {
@@ -396,35 +387,12 @@ internal static class FontDetector
         if (IsTrueTypeFontFile(typeface))
             return TryFindFile(NormalizeFontName(typeface), context, FindFileHint.TrueTypeFontFile);
 
-        // 一次性快照任务状态，避免 TOCTOU 竞态：
-        // 若在 FindFile 检查期间索引任务恰好完成，不快照会导致
-        // 第一处检查（跳过索引）和第二处检查（跳过 WPF 回退）同时成立，
-        // 使已安装的 TrueType 字体被误判为缺失。
-        var task = _systemFontNamesTask;
-        bool indexReady = task.Status == TaskStatus.RanToCompletion;
-
-        if (GdiTrueTypeFontFaceIndex.IsFaceAvailable(typeface)) return true;
-        if (indexReady && task.Result.Contains(typeface)) return true;
+        if (HookTrueTypeFontIndex.IsAvailable(typeface)) return true;
         if (!string.IsNullOrWhiteSpace(fileName)
             && TryFindFile(NormalizeFontName(fileName), context, FindFileHint.TrueTypeFontFile)) return true;
         if (TryFindFile(typeface + ".ttf", context, FindFileHint.TrueTypeFontFile)) return true;
         if (TryFindFile(typeface + ".ttc", context, FindFileHint.TrueTypeFontFile)) return true;
         if (TryFindFile(typeface + ".otf", context, FindFileHint.TrueTypeFontFile)) return true;
-
-        // 本地化名称反查（同步降级）: 仅当方法入口时异步索引尚未就绪时执行 WPF 全量扫描。
-        // 使用快照值 indexReady 而非重新读取 IsCompletedSuccessfully，
-        // 确保索引未就绪时 WPF 回退始终执行，不会被竞态窗口跳过。
-        if (!indexReady)
-        {
-            try
-            {
-                var family = System.Windows.Media.Fonts.SystemFontFamilies
-                    .FirstOrDefault(f => f.FamilyNames.Values.Any(
-                        n => string.Equals(n, typeface, StringComparison.OrdinalIgnoreCase)));
-                if (family != null) return true;
-            }
-            catch { }
-        }
 
         return false;
     }
@@ -531,26 +499,6 @@ internal static class FontDetector
     /// <summary>去除路径前缀，仅保留文件名并去除首尾空白。</summary>
     private static string NormalizeFontName(string name) => Path.GetFileName(name.Trim());
 
-    private static void AddFontFamilyAlias(ISet<string> aliases, string? value)
-    {
-        string? alias = GetFontFamilySourceName(value);
-        if (alias is { Length: > 0 })
-            aliases.Add(alias);
-    }
-
-    private static string? GetFontFamilySourceName(string? value)
-    {
-        string trimmed = value?.Trim() ?? string.Empty;
-        if (trimmed.Length == 0)
-            return null;
-
-        int hashIndex = trimmed.LastIndexOf('#');
-        string name = hashIndex >= 0 && hashIndex + 1 < trimmed.Length
-            ? trimmed[(hashIndex + 1)..]
-            : trimmed;
-        return string.IsNullOrWhiteSpace(name) ? null : name;
-    }
-
     /// <summary>
     /// 判断文件名是否为 TrueType 字体文件（.ttf/.ttc/.otf）。
     /// </summary>
@@ -559,42 +507,6 @@ internal static class FontDetector
            (fileName.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) ||
             fileName.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase) ||
             fileName.EndsWith(".otf", StringComparison.OrdinalIgnoreCase));
-
-    /// <summary>
-    /// 后台构建系统字体索引：枚举所有已安装的 TrueType 字族名（含本地化名称）。
-    /// 逐字体容错，确保单个损坏字体不会中断后续索引。
-    /// </summary>
-    private static HashSet<string> BuildSystemFontIndex()
-    {
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            foreach (var family in Fonts.SystemFontFamilies)
-            {
-                try
-                {
-                    AddFontFamilyAlias(names, family.Source);
-
-                    foreach (var localizedName in family.FamilyNames.Values)
-                        AddFontFamilyAlias(names, localizedName);
-                }
-                catch
-                {
-                    // 跳过单个损坏字体，继续索引后续字体
-                }
-            }
-
-        }
-        catch (Exception ex)
-        {
-            DiagnosticLogger.Fail(
-                "FontDetector",
-                "BuildSystemFontIndex",
-                "系统字体索引构建失败",
-                ex);
-        }
-        return names;
-    }
 
     #region TrueType 字体特征查询
 

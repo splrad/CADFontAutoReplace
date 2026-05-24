@@ -1,7 +1,6 @@
 using System.IO;
-using System.Windows.Markup;
-using System.Windows.Media;
 using AFR.Abstractions;
+using AFR.FontMapping;
 
 namespace AFR.Services;
 
@@ -9,7 +8,7 @@ namespace AFR.Services;
 /// AutoCAD 平台的 <see cref="IFontScanner"/> 实现。
 /// <para>
 /// 通过 <see cref="CadEnvironmentSettings.GetAllFontSearchPaths"/> 获取 CAD 字体目录，
-/// 扫描可用的 SHX 字体；系统已安装 TrueType 字族由 WPF 字体集合单独枚举。
+/// 扫描可用的 SHX 字体；系统已安装 TrueType 字族由 HookTrueTypeFontIndex 通过 DirectWrite 枚举。
 /// SHX 扫描时同步填充 <see cref="FontManager.FontCache"/>（大字体/常规字体分类）。
 /// 使用会话级缓存 — 字体列表在 CAD 运行期间不变，只扫描一次。
 /// </para>
@@ -39,111 +38,17 @@ internal sealed class AutoCadFontScanner : IFontScanner
     }
 
     /// <summary>
-    /// 扫描系统已安装的 TrueType 字体，返回中文本地化名称（如"宋体"）。
-    /// 会过滤掉无中文名称的字体、包含非法字符的名称，以及文件名与显示名不匹配的伪名称。
+    /// 扫描系统已安装的 TrueType 字体，返回 DirectWrite 枚举到的字体族名和本地化名称。
     /// </summary>
     public IReadOnlyCollection<string> ScanSystemTrueTypeFonts()
     {
         if (_cachedTrueTypeFonts != null) return _cachedTrueTypeFonts;
 
-        var fonts = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            var zhCN = XmlLanguage.GetLanguage("zh-cn");
-            var zh = XmlLanguage.GetLanguage("zh");
-
-            foreach (var family in Fonts.SystemFontFamilies)
-            {
-                string? displayName = null;
-
-                if (family.FamilyNames.TryGetValue(zhCN, out var zhCNName)
-                    && !string.IsNullOrWhiteSpace(zhCNName))
-                {
-                    displayName = zhCNName;
-                }
-                else if (family.FamilyNames.TryGetValue(zh, out var zhName)
-                         && !string.IsNullOrWhiteSpace(zhName))
-                {
-                    displayName = zhName;
-                }
-
-                if (displayName == null) continue;
-                if (HasInvalidChars(displayName)) continue;
-                if (!ValidateFontName(family, displayName)) continue;
-
-                fonts.Add(displayName);
-            }
-        }
-        catch { }
+        var fonts = new SortedSet<string>(
+            HookTrueTypeFontIndex.GetAvailableFontNamesSnapshot(),
+            StringComparer.OrdinalIgnoreCase);
         _cachedTrueTypeFonts = fonts;
         return fonts;
-    }
-
-    /// <summary>
-    /// 验证字体显示名称与实际字体文件的匹配性。
-    /// 当文件名和显示名都包含 CJK 字符时，要求至少有一个共同的汉字，
-    /// 防止系统返回不正确的本地化名称。
-    /// </summary>
-    private static bool ValidateFontName(FontFamily family, string displayName)
-    {
-        try
-        {
-            var typeface = new Typeface(family, System.Windows.FontStyles.Normal, System.Windows.FontWeights.Normal, System.Windows.FontStretches.Normal);
-            if (!typeface.TryGetGlyphTypeface(out var glyph))
-                return true;
-
-            string? filePath = glyph.FontUri?.LocalPath;
-            if (string.IsNullOrEmpty(filePath)) return true;
-
-            string fileName = Path.GetFileNameWithoutExtension(filePath);
-            if (string.IsNullOrEmpty(fileName)) return true;
-
-            if (!ContainsCjk(fileName) || !ContainsCjk(displayName))
-                return true;
-
-            foreach (char c in displayName)
-            {
-                if (c >= '\u4E00' && c <= '\u9FFF' && fileName.Contains(c))
-                    return true;
-            }
-
-            return false;
-        }
-        catch
-        {
-            return true;
-        }
-    }
-
-    /// <summary>检查字符串是否包含 CJK 统一汉字（U+4E00 ~ U+9FFF）。</summary>
-    private static bool ContainsCjk(string s)
-    {
-        foreach (char c in s)
-        {
-            if (c >= '\u4E00' && c <= '\u9FFF') return true;
-        }
-        return false;
-    }
-
-    /// <summary>
-    /// 检查字体名称是否包含非法字符。
-    /// 允许：字母、数字、空格、连字符、下划线、括号、点号、中间点。
-    /// </summary>
-    private static bool HasInvalidChars(string name)
-    {
-        foreach (char c in name)
-        {
-            if (char.IsDigit(c)) continue;
-            if (char.IsLetter(c))
-            {
-                if (char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.ModifierLetter)
-                    return true;
-                continue;
-            }
-            if (c is ' ' or '-' or '_' or '(' or ')' or '（' or '）' or '.' or '·') continue;
-            return true;
-        }
-        return false;
     }
 
     /// <summary>
