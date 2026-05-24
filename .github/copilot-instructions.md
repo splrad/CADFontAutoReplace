@@ -140,7 +140,7 @@ MText 内联运行时映射规则：
 - `AutoCadFontHook.Install()` 默认只持久安装 `LdFileHook` 和 `ShpLoadHook`；Debug `MapFontDiagnosticHook` 只能作为可选诊断，不进入默认安装或修复链路。
 - `ExecutionController.Execute()` 不安装或卸载来源 Hook；开始时清理运行时映射结果和文件级文档状态，样式表写回前触发一次运行时刷新，最后才做样式表永久替换。
 - `LdFileHook` 是 SHX 文件级映射执行点；处理 `param2=0/4` 的 SHX 主字体/大字体，跳过 `param2=2` shape 文件，`@SHX` 先尝试基础 SHX 回退，再使用配置 SHX。
-- `ShpLoadHook` 是 TrueType / `@TrueType` 文件级映射执行点；采样 `fileName`、`arg5`、`arg6`，缺失 TrueType 映射到配置 TrueType，`@` 请求保留 `@` 前缀。
+- `ShpLoadHook` 是严格的 TrueType / `@TrueType` 文件级映射执行点；只处理已确认 TrueType 的请求，未知无扩展名、`.shx`、已知 SHX、`fileName/arg5 + param2=0/4` 一律放行给 SHX 链路，不得兜底成 TrueType。
 - `MapFontDiagnosticHook` 只用于 Debug 观察 `mapFont` 入站样本和噪声，不能把入站样本或预登记当作映射成功。
 - `StyleTextStyleHook` 和 `MTextInlineFontHook` 已从默认架构删除；不要恢复安装、编译或执行路径，除非先重新定义证据、边界和 CAD 实测验收。
 - 普通样式表检测、永久替换和二次验证必须优先使用当前 `Database` 上的 CAD 托管 API。

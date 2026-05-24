@@ -18,6 +18,7 @@ internal static class LdFileHook
     private const int FontTypeRegular = 0;
     private const int FontTypeShape = 2;
     private const int FontTypeBigFont = 4;
+    private const int TrueTypeBypassSampleLimit = 16;
 
     private static NativeInlineHook<LdFileDelegate>? _hook;
     private static LdFileDelegate? _hookDelegate;
@@ -26,6 +27,8 @@ internal static class LdFileHook
     private static readonly ConcurrentDictionary<string, (string Replacement, int FontType)> RedirectLog =
         new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, byte> TrueTypeBypassLogSeen =
         new(StringComparer.OrdinalIgnoreCase);
     private static long _hitCount;
     private static long _redirectCount;
@@ -47,6 +50,7 @@ internal static class LdFileHook
     {
         RedirectLog.Clear();
         RedirectLogSeen.Clear();
+        TrueTypeBypassLogSeen.Clear();
     }
 
     internal static void ClearRegisteredRedirectsForDocument(IntPtr _)
@@ -58,6 +62,7 @@ internal static class LdFileHook
     internal static void ClearTransientRegisteredRedirects()
     {
         RedirectLogSeen.Clear();
+        TrueTypeBypassLogSeen.Clear();
     }
 
     internal static IntPtr GetDatabaseScope(Database? db)
@@ -206,6 +211,9 @@ internal static class LdFileHook
                 return trampoline(fileName, param2, db, desc);
 
             if (IsKnownAvailableLoadFont(original))
+                return trampoline(fileName, param2, db, desc);
+
+            if (ShouldBypassTrueTypeRequest(original, param2))
                 return trampoline(fileName, param2, db, desc);
 
             if (!IsShxLoadRequest(original, param2))
@@ -373,6 +381,65 @@ internal static class LdFileHook
         }
 
         return false;
+    }
+
+    private static bool ShouldBypassTrueTypeRequest(string fontName, int param2)
+    {
+        if (FontDetector.IsTrueTypeFontFile(fontName))
+        {
+            LogTrueTypeBypass(fontName, param2, "TrueType 字体文件");
+            return true;
+        }
+
+        string baseName = fontName.TrimStart('@');
+        if (string.IsNullOrWhiteSpace(baseName) || Path.HasExtension(baseName))
+            return false;
+
+        if (FontDetector.IsSystemFont(baseName))
+        {
+            LogTrueTypeBypass(fontName, param2, "系统 TrueType 字族");
+            return true;
+        }
+
+        if (FontDetector.IsSystemFontIndexReady)
+            return false;
+
+        if (HasKnownShxCandidate(baseName))
+            return false;
+
+        LogTrueTypeBypass(fontName, param2, "系统 TrueType 索引未就绪，无扩展名请求保守放行");
+        return true;
+    }
+
+    private static bool HasKnownShxCandidate(string fontName)
+    {
+        if (string.IsNullOrWhiteSpace(fontName))
+            return false;
+
+        string shxName = NormalizeShxName(fontName);
+        return FontAvailabilityIndex.IsExactKnownAvailableFont(shxName);
+    }
+
+    private static void LogTrueTypeBypass(string fontName, int param2, string reason)
+    {
+        if (TrueTypeBypassLogSeen.Count >= TrueTypeBypassSampleLimit)
+            return;
+
+        string logKey = $"{fontName}|{param2}|{reason}";
+        if (!TrueTypeBypassLogSeen.TryAdd(logKey, 0))
+            return;
+
+        DiagnosticLogger.Skip(
+            Tag,
+            "TrueTypeBypass",
+            "TrueType 请求已放行，LdFileHook 不处理",
+            new Dictionary<string, object?>
+            {
+                ["original"] = fontName,
+                ["param2"] = param2,
+                ["reason"] = reason,
+                ["systemFontIndexReady"] = FontDetector.IsSystemFontIndexReady
+            });
     }
 
     private static bool IsShxLoadRequest(string fontName, int param2)

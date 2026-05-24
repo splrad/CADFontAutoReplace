@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using AFR.Platform;
@@ -17,6 +18,9 @@ internal static class ShpLoadHook
     private const int MaxFileNameChars = 260;
     private const long FirstHitLogLimit = 8;
     private const long FirstRedirectLogLimit = 16;
+    private const int TrueTypeStrictBypassLogLimit = 24;
+    private const int FontTypeRegular = 0;
+    private const int FontTypeBigFont = 4;
 
     private static NativeInlineHook<ShpLoadDelegate>? _hook;
     private static ShpLoadDelegate? _hookDelegate;
@@ -26,10 +30,13 @@ internal static class ShpLoadHook
         new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen =
         new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, byte> TrueTypeStrictBypassLogSeen =
+        new(StringComparer.OrdinalIgnoreCase);
     private static long _hitCount;
     private static long _redirectCount;
     private static long _sampleSequence;
     private static long _sampleOverflowCount;
+    private static long _strictBypassLogCount;
 
     [ThreadStatic] private static bool _inHook;
 
@@ -288,15 +295,15 @@ internal static class ShpLoadHook
                         });
                 }
 
-                if (TryCreateDirectRedirect(arg6Value, "arg6", out redirect))
+                if (TryCreateDirectRedirect(arg6Value, "arg6", param2, out redirect))
                 {
                     effectiveArg6 = GetNativeString(redirect!.ReplacementFont);
                 }
-                else if (TryCreateDirectRedirect(fileNameValue, "fileName", out redirect))
+                else if (TryCreateDirectRedirect(fileNameValue, "fileName", param2, out redirect))
                 {
                     effectiveFileName = GetNativeString(redirect!.ReplacementFont);
                 }
-                else if (TryCreateDirectRedirect(arg5Value, "arg5", out redirect))
+                else if (TryCreateDirectRedirect(arg5Value, "arg5", param2, out redirect))
                 {
                     effectiveArg5 = GetNativeString(redirect!.ReplacementFont);
                 }
@@ -558,10 +565,12 @@ internal static class ShpLoadHook
 
         NativeStringCache.Clear();
         RedirectLogSeen.Clear();
+        TrueTypeStrictBypassLogSeen.Clear();
         Interlocked.Exchange(ref _hitCount, 0);
         Interlocked.Exchange(ref _redirectCount, 0);
         Interlocked.Exchange(ref _sampleSequence, 0);
         Interlocked.Exchange(ref _sampleOverflowCount, 0);
+        Interlocked.Exchange(ref _strictBypassLogCount, 0);
     }
 
     private static NativeStringValue ReadNativeStringValue(IntPtr value)
@@ -579,6 +588,7 @@ internal static class ShpLoadHook
     private static bool TryCreateDirectRedirect(
         NativeStringValue value,
         string argumentName,
+        int param2,
         out ShpLoadRedirectApplication? redirect)
     {
         redirect = null;
@@ -586,10 +596,13 @@ internal static class ShpLoadHook
         string original = FontRedirectResolver.NormalizeInputName(value.Text);
         if (string.IsNullOrWhiteSpace(original))
             return false;
-        if (FontRedirectResolver.IsTrueTypeFontFileName(original))
+
+        if (!IsConfirmedTrueTypeRequest(original, argumentName, param2, out string bypassReason))
+        {
+            LogTrueTypeStrictBypass(original, argumentName, param2, bypassReason);
             return false;
-        if (original.EndsWith(".shx", StringComparison.OrdinalIgnoreCase))
-            return false;
+        }
+
         if (IsTrueTypeLoadAvailable(original))
             return false;
         if (!TryGetConfiguredTrueTypeReplacement(original, out string replacement))
@@ -603,6 +616,109 @@ internal static class ShpLoadHook
             replacement,
             "配置 TrueType 兜底");
         return true;
+    }
+
+    private static bool IsConfirmedTrueTypeRequest(
+        string original,
+        string argumentName,
+        int param2,
+        out string bypassReason)
+    {
+        bypassReason = string.Empty;
+
+        if (FontRedirectResolver.IsTrueTypeFontFileName(original))
+            return true;
+
+        if (IsShxLikeRequest(original))
+        {
+            bypassReason = "SHX 请求";
+            return false;
+        }
+
+        if (HasNonTrueTypeExtension(original))
+        {
+            bypassReason = "非 TrueType 文件扩展名";
+            return false;
+        }
+
+        if (IsFileLoadArgument(argumentName) && IsRegularOrBigFontParam(param2))
+        {
+            bypassReason = "fileName/arg5 的 param2=0/4 按 SHX 加载槽位放行";
+            return false;
+        }
+
+        if (argumentName.Equals("arg6", StringComparison.Ordinal))
+            return true;
+
+        if (FontRuntimeRequestRegistry.TryGetTrueTypeRequest(original, out _, out _))
+            return true;
+
+        if (IsTrueTypeLoadAvailable(original))
+            return true;
+
+        bypassReason = "未确认 TrueType";
+        return false;
+    }
+
+    private static bool IsShxLikeRequest(string original)
+    {
+        string normalized = FontRedirectResolver.NormalizeInputName(original);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return false;
+
+        if (normalized.EndsWith(".shx", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        string lookup = normalized.TrimStart('@');
+        if (lookup.Length == 0 || Path.HasExtension(lookup))
+            return false;
+
+        string shxName = FontRedirectResolver.EnsureShx(lookup);
+        return FontAvailabilityIndex.IsExactKnownAvailableFont(shxName)
+               || FontAvailabilityIndex.IsKnownAvailableFont(shxName);
+    }
+
+    private static bool HasNonTrueTypeExtension(string original)
+    {
+        string lookup = FontRedirectResolver.NormalizeInputName(original).TrimStart('@');
+        return Path.HasExtension(lookup)
+               && !FontRedirectResolver.IsTrueTypeFontFileName(lookup);
+    }
+
+    private static bool IsFileLoadArgument(string argumentName)
+        => argumentName.Equals("fileName", StringComparison.Ordinal)
+           || argumentName.Equals("arg5", StringComparison.Ordinal);
+
+    private static bool IsRegularOrBigFontParam(int param2)
+        => param2 == FontTypeRegular || param2 == FontTypeBigFont;
+
+    private static void LogTrueTypeStrictBypass(
+        string original,
+        string argumentName,
+        int param2,
+        string reason)
+    {
+        if (Interlocked.Read(ref _strictBypassLogCount) >= TrueTypeStrictBypassLogLimit)
+            return;
+
+        string logKey = $"{argumentName}|{original}|{param2}|{reason}";
+        if (!TrueTypeStrictBypassLogSeen.TryAdd(logKey, 0))
+            return;
+
+        if (Interlocked.Increment(ref _strictBypassLogCount) > TrueTypeStrictBypassLogLimit)
+            return;
+
+        DiagnosticLogger.Skip(
+            Tag,
+            "TrueTypeStrictBypass",
+            "非确认 TrueType 请求已放行，ShpLoadHook 不处理",
+            new Dictionary<string, object?>
+            {
+                ["argument"] = argumentName,
+                ["original"] = original,
+                ["param2"] = param2,
+                ["reason"] = reason
+            });
     }
 
     private static bool TryGetConfiguredTrueTypeReplacement(string original, out string replacement)

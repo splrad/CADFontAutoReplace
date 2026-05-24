@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using AFR.Services;
 
@@ -12,9 +13,35 @@ namespace AFR.FontMapping;
 /// </summary>
 internal static class FontAvailabilityIndex
 {
+    private const int ConflictSampleLimit = 8;
+
     private static readonly object CacheLock = new();
     private static readonly HashSet<string> AvailableFonts = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, ShxFontEntry> ShxFonts = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> ConflictNames = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> SizeConflictNames = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly List<ShxConflictSample> ConflictSamples = new();
     private static volatile bool _initialized;
+    private static int _pathCount;
+    private static int _primaryPathCount;
+    private static int _ttFileCount;
+
+    private sealed record ShxFontEntry(
+        string FileName,
+        string FullPath,
+        long Length,
+        bool? IsBigFont,
+        int SourceRank,
+        int SourceOrder);
+
+    private sealed record ShxConflictSample(
+        string FileName,
+        string PreferredPath,
+        long PreferredLength,
+        int PreferredRank,
+        string CandidatePath,
+        long CandidateLength,
+        int CandidateRank);
 
     internal static void Initialize()
     {
@@ -33,11 +60,12 @@ internal static class FontAvailabilityIndex
 
         EnsureInitialized();
 
-        string fileName = Path.GetFileName(fontName);
-        if (string.IsNullOrWhiteSpace(fileName))
-            fileName = fontName.Trim();
+        string fileName = NormalizeFileName(fontName);
 
         if (AvailableFonts.Contains(fileName))
+            return true;
+
+        if (TryGetShxEntry(fileName, allowAtFallback: true, out _))
             return true;
 
         return fileName.Length > 1
@@ -52,11 +80,10 @@ internal static class FontAvailabilityIndex
 
         EnsureInitialized();
 
-        string fileName = Path.GetFileName(fontName);
-        if (string.IsNullOrWhiteSpace(fileName))
-            fileName = fontName.Trim();
+        string fileName = NormalizeFileName(fontName);
 
-        return AvailableFonts.Contains(fileName);
+        return AvailableFonts.Contains(fileName)
+               || TryGetExactShxEntry(fileName, out _);
     }
 
     internal static bool TryGetKnownShxFontKind(string fontName, out bool isBigFont)
@@ -67,17 +94,17 @@ internal static class FontAvailabilityIndex
 
         EnsureInitialized();
 
-        string fileName = Path.GetFileName(fontName);
-        if (string.IsNullOrWhiteSpace(fileName))
-            fileName = fontName.Trim();
+        string fileName = NormalizeFileName(fontName);
 
-        if (fileName.Length > 1 && fileName[0] == '@')
-            fileName = fileName.TrimStart('@');
+        if (!TryGetShxEntry(fileName, allowAtFallback: true, out ShxFontEntry? entry)
+            || entry == null
+            || !entry.IsBigFont.HasValue)
+        {
+            return false;
+        }
 
-        if (!fileName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase))
-            fileName = FontRedirectResolver.EnsureShx(fileName);
-
-        return FontManager.FontCache.TryGetValue(fileName, out isBigFont);
+        isBigFont = entry.IsBigFont.Value;
+        return true;
     }
 
     private static bool EnsureInitialized()
@@ -98,17 +125,37 @@ internal static class FontAvailabilityIndex
 
     private static void ScanAvailableFonts()
     {
-        foreach (var dir in CadEnvironmentSettings.GetAllFontSearchPaths())
-            ScanDirectory(dir);
+        var paths = CadEnvironmentSettings.GetAllFontSearchPaths();
+        _pathCount = paths.Count;
+
+        for (int i = 0; i < paths.Count; i++)
+        {
+            int sourceRank = GetSourceRank(paths[i]);
+            if (IsPrimarySource(sourceRank))
+                _primaryPathCount++;
+
+            ScanDirectory(paths[i], sourceRank, i);
+        }
 
         DiagnosticLogger.Ok(
             "FontAvailabilityIndex",
             "ScanAvailableFonts",
             "Hook 侧字体兜底索引已构建",
-            new Dictionary<string, object?> { ["availableFonts"] = AvailableFonts.Count });
+            new Dictionary<string, object?>
+            {
+                ["availableFonts"] = AvailableFonts.Count,
+                ["shxCount"] = ShxFonts.Count,
+                ["ttFileCount"] = _ttFileCount,
+                ["conflictNameCount"] = ConflictNames.Count,
+                ["sizeConflictNameCount"] = SizeConflictNames.Count,
+                ["pathCount"] = _pathCount,
+                ["primaryPathCount"] = _primaryPathCount
+            });
+
+        LogConflictSamples();
     }
 
-    private static void ScanDirectory(string dir)
+    private static void ScanDirectory(string dir, int sourceRank, int sourceOrder)
     {
         if (!Directory.Exists(dir)) return;
 
@@ -119,9 +166,7 @@ internal static class FontAvailabilityIndex
                 string ext = Path.GetExtension(file);
                 if (ext.Equals(".shx", StringComparison.OrdinalIgnoreCase))
                 {
-                    string fileName = Path.GetFileName(file);
-                    AvailableFonts.Add(fileName);
-                    ClassifyShxFont(file, fileName);
+                    AddShxFont(file, sourceRank, sourceOrder);
                 }
                 else if (ext.Equals(".ttf", StringComparison.OrdinalIgnoreCase) ||
                          ext.Equals(".ttc", StringComparison.OrdinalIgnoreCase) ||
@@ -129,6 +174,7 @@ internal static class FontAvailabilityIndex
                 {
                     string fileName = Path.GetFileName(file);
                     AvailableFonts.Add(fileName);
+                    _ttFileCount++;
                     string familyLikeName = Path.GetFileNameWithoutExtension(fileName);
                     if (!string.IsNullOrWhiteSpace(familyLikeName))
                         AvailableFonts.Add(familyLikeName);
@@ -141,11 +187,220 @@ internal static class FontAvailabilityIndex
         }
     }
 
-    private static void ClassifyShxFont(string filePath, string fileName)
+    private static void AddShxFont(string filePath, int sourceRank, int sourceOrder)
     {
-        if (FontManager.FontCache.ContainsKey(fileName)) return;
-        bool? result = ShxFontAnalyzer.IsBigFont(filePath);
-        if (result.HasValue)
-            FontManager.FontCache.TryAdd(fileName, result.Value);
+        string fileName = Path.GetFileName(filePath);
+        if (string.IsNullOrWhiteSpace(fileName))
+            return;
+
+        long length = GetFileLength(filePath);
+        bool? isBigFont = ShxFontAnalyzer.IsBigFont(filePath);
+        var candidate = new ShxFontEntry(fileName, filePath, length, isBigFont, sourceRank, sourceOrder);
+
+        AvailableFonts.Add(fileName);
+
+        if (!ShxFonts.TryGetValue(fileName, out ShxFontEntry? existing))
+        {
+            ShxFonts[fileName] = candidate;
+            UpdateFontManager(candidate);
+            return;
+        }
+
+        TrackConflict(existing, candidate);
+        if (!IsPreferred(candidate, existing))
+            return;
+
+        ShxFonts[fileName] = candidate;
+        UpdateFontManager(candidate);
+    }
+
+    private static void TrackConflict(ShxFontEntry existing, ShxFontEntry candidate)
+    {
+        if (string.Equals(existing.FullPath, candidate.FullPath, StringComparison.OrdinalIgnoreCase)
+            && existing.Length == candidate.Length)
+        {
+            return;
+        }
+
+        ConflictNames.Add(existing.FileName);
+        bool sizeDiffers = existing.Length != candidate.Length;
+        if (!sizeDiffers)
+            return;
+
+        SizeConflictNames.Add(existing.FileName);
+        if (ConflictSamples.Count >= ConflictSampleLimit)
+            return;
+
+        ShxFontEntry preferred = IsPreferred(candidate, existing) ? candidate : existing;
+        ShxFontEntry other = ReferenceEquals(preferred, candidate) ? existing : candidate;
+        ConflictSamples.Add(new ShxConflictSample(
+            existing.FileName,
+            preferred.FullPath,
+            preferred.Length,
+            preferred.SourceRank,
+            other.FullPath,
+            other.Length,
+            other.SourceRank));
+    }
+
+    private static bool IsPreferred(ShxFontEntry candidate, ShxFontEntry existing)
+    {
+        if (candidate.SourceRank != existing.SourceRank)
+            return candidate.SourceRank < existing.SourceRank;
+
+        return candidate.SourceOrder < existing.SourceOrder;
+    }
+
+    private static void UpdateFontManager(ShxFontEntry entry)
+    {
+        if (entry.IsBigFont.HasValue)
+        {
+            FontManager.FontCache[entry.FileName] = entry.IsBigFont.Value;
+        }
+        else
+        {
+            FontManager.FontCache.TryRemove(entry.FileName, out _);
+        }
+    }
+
+    private static bool TryGetShxEntry(
+        string fileName,
+        bool allowAtFallback,
+        out ShxFontEntry? entry)
+    {
+        if (TryGetExactShxEntry(fileName, out entry))
+            return true;
+
+        if (!allowAtFallback || fileName.Length <= 1 || fileName[0] != '@')
+            return false;
+
+        return TryGetExactShxEntry(fileName.TrimStart('@'), out entry);
+    }
+
+    private static bool TryGetExactShxEntry(string fileName, out ShxFontEntry? entry)
+    {
+        entry = null;
+        string normalized = NormalizeShxKey(fileName);
+        return normalized.Length > 0
+               && ShxFonts.TryGetValue(normalized, out entry);
+    }
+
+    private static string NormalizeShxKey(string fontName)
+    {
+        string fileName = NormalizeFileName(fontName);
+        if (string.IsNullOrWhiteSpace(fileName))
+            return string.Empty;
+
+        if (fileName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase))
+            return fileName;
+
+        if (Path.HasExtension(fileName))
+            return string.Empty;
+
+        return fileName + ".shx";
+    }
+
+    private static string NormalizeFileName(string fontName)
+    {
+        string trimmed = fontName.Trim();
+        try
+        {
+            string fileName = Path.GetFileName(trimmed);
+            return string.IsNullOrWhiteSpace(fileName) ? trimmed : fileName;
+        }
+        catch
+        {
+            return trimmed;
+        }
+    }
+
+    private static long GetFileLength(string filePath)
+    {
+        try
+        {
+            return new FileInfo(filePath).Length;
+        }
+        catch
+        {
+            return -1;
+        }
+    }
+
+    private static int GetSourceRank(string directory)
+    {
+        if (IsProcessFontsDirectory(directory))
+            return 0;
+
+        if (IsFontsDirectory(directory)
+            && directory.Contains("AutoCAD", StringComparison.OrdinalIgnoreCase))
+        {
+            return 1;
+        }
+
+        if (IsFontsDirectory(directory))
+            return 2;
+
+        return 3;
+    }
+
+    private static bool IsPrimarySource(int sourceRank) => sourceRank <= 1;
+
+    private static bool IsProcessFontsDirectory(string directory)
+    {
+        string? processFonts = GetProcessFontsDirectory();
+        return processFonts != null
+               && string.Equals(
+                   NormalizeDirectoryPath(directory),
+                   NormalizeDirectoryPath(processFonts),
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? GetProcessFontsDirectory()
+    {
+        try
+        {
+            string? processPath = Process.GetCurrentProcess().MainModule?.FileName;
+            string? processDirectory = string.IsNullOrEmpty(processPath)
+                ? null
+                : Path.GetDirectoryName(processPath);
+            return string.IsNullOrEmpty(processDirectory)
+                ? null
+                : Path.Combine(processDirectory, "Fonts");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool IsFontsDirectory(string directory)
+    {
+        string normalized = NormalizeDirectoryPath(directory);
+        string leaf = Path.GetFileName(normalized);
+        return leaf.Equals("fonts", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeDirectoryPath(string directory)
+        => directory.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    private static void LogConflictSamples()
+    {
+        foreach (var sample in ConflictSamples)
+        {
+            DiagnosticLogger.Skip(
+                "FontAvailabilityIndex",
+                "ShxNameConflict",
+                "检测到同名 SHX 文件大小不一致，已按来源优先级选择首选项",
+                new Dictionary<string, object?>
+                {
+                    ["fileName"] = sample.FileName,
+                    ["preferredPath"] = sample.PreferredPath,
+                    ["preferredLength"] = sample.PreferredLength,
+                    ["preferredRank"] = sample.PreferredRank,
+                    ["candidatePath"] = sample.CandidatePath,
+                    ["candidateLength"] = sample.CandidateLength,
+                    ["candidateRank"] = sample.CandidateRank
+                });
+        }
     }
 }

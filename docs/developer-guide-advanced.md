@@ -31,7 +31,7 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - `NativeInlineHook`：底层 inline patch 基础设施。
 - `NativeHookTarget`、`NativeFontHookProfile`、`INativeFontHookExportsProvider`：字体 Hook profile 与平台导出/RVA 信息。
 - `LdFileHook`：SHX 文件级映射执行点，处理 `param2=0/4` 的主字体/大字体请求，跳过 `param2=2` shape 文件。
-- `ShpLoadHook`：TrueType / `@TrueType` 文件级映射执行点，采样 `fileName`、`arg5`、`arg6` 并只记录真实 redirect。
+- `ShpLoadHook`：严格的 TrueType / `@TrueType` 文件级映射执行点，只处理已确认 TrueType 的请求；`.shx`、已知 SHX、未知无扩展名和 `fileName/arg5 + param2=0/4` 不得兜底成 TrueType。
 - `MapFontDiagnosticHook`：Debug 可选诊断点，只用于观察 `mapFont` 入站样本，不进入默认修复链路。
 
 `LdFileHook` 和 `ShpLoadHook` 随插件默认持久安装；`StyleTextStyleHook` 和 `MTextInlineFontHook` 已从默认安装、编译和执行路径删除。`ExecutionController.Execute()` 只管理文档级运行时状态。文档执行顺序必须保持为：清理运行时结果 → 原始样式表检测 → 样式表写回前 `Regen` 触发文件级运行时映射 → 采集真实 Hook redirect 结果 → 样式表最终写回 → 替换后二次检测 → 必要最终图形刷新。

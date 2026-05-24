@@ -44,14 +44,16 @@
 
 职责：
 
-- 在 `shpload` 阶段采样 `fileName`、`arg5`、`arg6`。
+- 在 `shpload` 阶段采样 `fileName`、`arg5`、`arg6`，但只有确认是 TrueType 的请求才允许替换。
 - 对缺失普通 TrueType 映射到配置 TrueType。
 - 对缺失 `@TrueType` 保留 `@` 前缀，映射到 `@` + 配置 TrueType。
 - 只有实际替换 native 参数并调用 trampoline 时，才记录 redirect 和运行时映射。
 
 边界：
 
-- 不处理 `.shx` 请求。
+- 不处理 `.shx`、已知 SHX、可归一化为已知 SHX 的无扩展名请求。
+- 不把 `fileName` / `arg5` 上 `param2=0/4` 的无扩展名请求兜底成 TrueType；这类请求默认属于 SHX 主字体/大字体加载槽位。
+- 不把未知无扩展名当作缺失 TrueType。
 - 不把系统基础字体存在等同于 `@TrueType` vertical face 存在；`@face` 仍需要 GDI 精确判断。
 - 不依赖 `FontRuntimeRequestRegistry` 作为默认修复前置条件。
 
