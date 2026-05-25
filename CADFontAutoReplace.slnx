@@ -58,14 +58,14 @@
 
   <Folder Name="/Deployer/">
     <Project Path="src/AFR.Deployer/AFR.Deployer.csproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234567890">
-      <Platform Solution="*|Any CPU" Project="x64" />
-      <Platform Solution="*|x64" Project="x64" />
+      <Platform Project="x64" />
     </Project>
   </Folder>
 
   <Folder Name="/AutoCAD/Shared/">
     <Project Path="src/AutoCAD/AFR.AutoCAD/AFR.AutoCAD.shproj" Id="3ce2a9ba-19c1-4439-9ec8-e68fdb3f533d" />
   </Folder>
+  <Folder Name="/AutoCAD/" />
 
   <Folder Name="/AutoCAD/Build/">
     <File Path="src/AutoCAD/Directory.Build.props" />
@@ -74,46 +74,37 @@
 
   <Folder Name="/AutoCAD/Versions/">
     <Project Path="src/AutoCAD/AFR-ACAD2018/AFR-ACAD2018.csproj" Id="7ab78a85-217e-46d8-bc9c-cebe7062e697">
-      <Platform Solution="*|Any CPU" Project="x64" />
-      <Platform Solution="*|x64" Project="x64" />
+      <Platform Project="x64" />
     </Project>
     <Project Path="src/AutoCAD/AFR-ACAD2019/AFR-ACAD2019.csproj" Id="505904ee-5fda-4e6e-a8c7-f1a743a98017">
-      <Platform Solution="*|Any CPU" Project="x64" />
-      <Platform Solution="*|x64" Project="x64" />
+      <Platform Project="x64" />
     </Project>
     <Project Path="src/AutoCAD/AFR-ACAD2020/AFR-ACAD2020.csproj" Id="71997328-f134-427b-99d2-bac2ef3f7107">
-      <Platform Solution="*|Any CPU" Project="x64" />
-      <Platform Solution="*|x64" Project="x64" />
+      <Platform Project="x64" />
     </Project>
     <Project Path="src/AutoCAD/AFR-ACAD2021/AFR-ACAD2021.csproj" Id="57e003a6-b28c-45e5-839e-90984eb70577">
-      <Platform Solution="*|Any CPU" Project="x64" />
-      <Platform Solution="*|x64" Project="x64" />
+      <Platform Project="x64" />
     </Project>
     <Project Path="src/AutoCAD/AFR-ACAD2022/AFR-ACAD2022.csproj" Id="96831ced-0cff-4431-900d-9aac9f6a0ba1">
-      <Platform Solution="*|Any CPU" Project="x64" />
-      <Platform Solution="*|x64" Project="x64" />
+      <Platform Project="x64" />
     </Project>
     <Project Path="src/AutoCAD/AFR-ACAD2023/AFR-ACAD2023.csproj" Id="f1425e62-3c56-4244-973f-79ba18b6a980">
-      <Platform Solution="*|Any CPU" Project="x64" />
-      <Platform Solution="*|x64" Project="x64" />
+      <Platform Project="x64" />
     </Project>
     <Project Path="src/AutoCAD/AFR-ACAD2024/AFR-ACAD2024.csproj" Id="b2c747d9-1feb-4903-9dfa-81eb8a8a141e">
-      <Platform Solution="*|Any CPU" Project="x64" />
-      <Platform Solution="*|x64" Project="x64" />
+      <Platform Project="x64" />
     </Project>
     <Project Path="src/AutoCAD/AFR-ACAD2025/AFR-ACAD2025.csproj" Id="225a4c7d-deaa-4d89-be89-93afb3920571">
-      <Platform Solution="*|Any CPU" Project="x64" />
-      <Platform Solution="*|x64" Project="x64" />
+      <Platform Project="x64" />
     </Project>
     <Project Path="src/AutoCAD/AFR-ACAD2026/AFR-ACAD2026.csproj" Id="d48e6fcc-a40c-4231-ad10-5383e93241b2">
-      <Platform Solution="*|Any CPU" Project="x64" />
-      <Platform Solution="*|x64" Project="x64" />
+      <Platform Project="x64" />
     </Project>
     <Project Path="src/AutoCAD/AFR-ACAD2027/AFR-ACAD2027.csproj" Id="0067f487-dbb2-4a4c-8c2f-afea74061fe6">
-      <Platform Solution="*|Any CPU" Project="x64" />
-      <Platform Solution="*|x64" Project="x64" />
+      <Platform Project="x64" />
     </Project>
   </Folder>
+  <Project Path="AutoCAD/AFR-ACAD2024.UnitTests/AFR-ACAD2024.UnitTests.csproj" Id="83b02d07-0fc4-4da9-9db2-49ebe2fb2077" />
 
 </Solution>
 

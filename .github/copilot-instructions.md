@@ -1,6 +1,6 @@
 # CADFontAutoReplace 仓库记忆
 
-本文档是本仓库的长期协作记忆，应跟随代码进入 GitHub。代码实现变化时，优先同步本文档、`README.md`、`PROJECT_HANDOVER.md` 与开发者指南。若文档与源码冲突，以当前源码为准，并立即修正文档。
+本文档是本仓库的长期协作记忆，应跟随代码进入 GitHub。代码实现变化时，优先同步本文档、`README.md`、`PROJECT_HANDOVER.md` 与 `docs/developer-guide.md`。若文档与源码冲突，以当前源码为准，并立即修正文档。
 
 ## 当前项目事实
 
@@ -192,7 +192,8 @@ artifacts/ReleaseAssets/Fonts.zip
 
 - README 面向使用者，默认推荐部署器安装；单 DLL/NETLOAD 只作为补充路径。
 - `PROJECT_HANDOVER.md` 是当前维护范围、执行流程和验证清单的短版交接文档。
-- 开发者指南说明构建、调试、命令注册、发布资产和字体 Hook 边界。
+- `docs/developer-guide.md` 是唯一开发者指南，应同时包含新手上手路径和维护边界；不要再恢复 beginner/advanced 两份指南。
+- `docs/font-hook-evidence-and-boundaries.md` 是 Hook 证据档案与验收边界入口，应同时记录当前默认链路和历史已证明事实；历史 acdb25 调查结论如仍有效应合并到该文档，而不是保留独立临时调查文档。
 - Debug 调查文档必须只保留当前代码仍存在的命令、类和流程。
 - 本地临时日志、构建产物、浏览器 profile、截图、反汇编结果不要进入 GitHub。
 - `.github/copilot-instructions.md` 是真正的仓库记忆文件，不要加入 `.gitignore`。
