@@ -386,6 +386,8 @@ FodyWeavers.xsd
 /chore/acdb25_imports.txt
 *.png
 !chore/afr-icon.png
+!chore/assets/
+!chore/assets/**
 /chore/project-bolt-sb1-yrdzmnib.zip
 /chore/project-bolt-sb1-yrdzmnib (1).zip
 /chore/TrueTypeHookProbe/acdb25.exports.raw.txt
