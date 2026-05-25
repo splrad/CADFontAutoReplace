@@ -242,10 +242,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DEEPSEEK_API_KEY: ${{ secrets.DeepSeek_API_KEY }}
+          TAG_NAME: ${{ steps.version.outputs.tag_name }}
         run: |
           # 发布说明优先使用 AI 基于“相对上一 Release 的相关代码差异”生成，并过滤工作流/文档等无关项。
           $notesPath = Join-Path $env:GITHUB_WORKSPACE 'release-notes.md'
-          $tagName = '${{ steps.version.outputs.tag_name }}'
+          $tagName = [string]$env:TAG_NAME
+          if ([string]::IsNullOrWhiteSpace($tagName)) {
+              throw '生成发布说明时未读取到版本标签。'
+          }
           $latestTag = gh release list --repo $env:GITHUB_REPOSITORY --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""'
           $maxDiffChars = 16000
           $fallbackReason = ''
