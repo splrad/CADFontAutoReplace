@@ -257,7 +257,7 @@ internal sealed class LogService : ILogService
                 const string commandsLine = "\n命令: AFR(配置) AFRLOG(日志) AFRUNLOAD(卸载命令)";
                 editor.WriteMessage(
                     "\n==========================================================================" +
-                    $"\nAFR 缺失字体自动替换 v{PluginVersionService.GetDisplayVersion()}" +
+                    $"\nAFR 缺失字体自动替换 v{PluginVersionService.GetDisplayVersionWithBuildMarker()}" +
                     "\n作者: splrad 秋夕寻星" +
                     "\n项目地址GitHub(国外)：github.com/splrad/CADFontAutoReplace" +
                     "\n项目地址Gitee(国内)：gitee.com/splrad/CADFontAutoReplace" +

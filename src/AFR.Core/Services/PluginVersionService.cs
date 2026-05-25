@@ -43,6 +43,18 @@ public static class PluginVersionService
     }
 
     /// <summary>
+    /// 获取带构建标志的显示版本号，用于日志横幅等人类可见输出。
+    /// </summary>
+    public static string GetDisplayVersionWithBuildMarker()
+    {
+#if DEBUG
+        return $"{GetDisplayVersion()} [Debug]";
+#else
+        return GetDisplayVersion();
+#endif
+    }
+
+    /// <summary>
     /// 获取构建标识（形如 <c>20260503.1</c>）
     /// 同一显示版本下用于区分新旧构建；若未设置则返回空字符串。
     /// </summary>
