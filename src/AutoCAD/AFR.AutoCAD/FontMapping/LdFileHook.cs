@@ -1,273 +1,299 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Windows.Media;
+using System.Threading;
+using Autodesk.AutoCAD.DatabaseServices;
 using AFR.Platform;
 using AFR.Services;
 
 namespace AFR.FontMapping;
 
 /// <summary>
-/// Hook acdb DLL 的 ldfile 函数，在 DWG 解析阶段拦截字体加载请求
-/// <para>
-/// 设计分为两个阶段：
-/// <list type="bullet">
-///   <item>DWG 解析阶段（本类）：拦截字体加载并按类型重定向；.shx 请求使用 SHX 替换字体，非 .shx 请求使用 TrueType 替换字体。</item>
-///   <item>Execute 阶段（FontReplacer）：覆盖样式表字体，用户可通过 ST/AFRLOG 调整配置</item>
-/// </list>
-/// </para>
-/// <para>
-/// 关键约束：TrueType 字族名只能重定向到 TrueType 替换字体，不能重定向到 SHX，
-/// 否则会污染 AutoCAD 内部字体缓存，导致文字乱码和 ST 弹窗
-/// </para>
+/// 处理 ldfile 阶段的 SHX 主字体/大字体文件级重定向。
 /// </summary>
 internal static class LdFileHook
 {
-    // 从平台常量获取目标 DLL 名、导出函数名和序言长度
-    private static string AcDbDll => PlatformManager.Platform.AcDbDllName;
-    private static string LdFileExport => PlatformManager.Platform.LdFileExport;
-    private static int PrologueSize => PlatformManager.Platform.PrologueSize;
+    private const string Tag = "LdFileHook";
 
-    // ldfile 原始函数签名：int ldfile(wchar_t* fileName, int param2, void* db, void* desc)
+    private const int FontTypeRegular = 0;
+    private const int FontTypeShape = 2;
+    private const int FontTypeBigFont = 4;
+    private const int TrueTypeBypassSampleLimit = 16;
+
+    private static NativeInlineHook<LdFileDelegate>? _hook;
+    private static LdFileDelegate? _hookDelegate;
+    private static readonly ConcurrentDictionary<string, IntPtr> NativeStringCache =
+        new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, (string Replacement, int FontType)> RedirectLog =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, byte> RedirectLogSeen =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, byte> TrueTypeBypassLogSeen =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static long _hitCount;
+    private static long _redirectCount;
+    private static int _trueTypeBypassCount;
+
+    [ThreadStatic] private static bool _inHook;
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int LdFileDelegate(IntPtr fileName, int param2, IntPtr db, IntPtr desc);
 
-    // ── Hook 基础设施 ──
-    private static LdFileDelegate? _hookDelegate;       // 指向 HookHandler 的委托，避免被 GC 回收
-    private static LdFileDelegate? _trampolineDelegate;  // 指向 Trampoline 的委托，用于调用原始函数
-    private static IntPtr _targetAddr;                   // 原始 ldfile 函数地址
-    private static IntPtr _trampolineAddr;               // Trampoline 内存地址
-    private static byte[]? _savedBytes;                  // 被覆盖的原始字节，卸载时恢复
-    private static volatile bool _installed;
+    internal static bool IsInstalled => _hook?.IsInstalled == true;
 
-    internal static bool IsInstalled => _installed;
+    internal static (long HitCount, long RedirectCount) GetCountersSnapshot()
+        => (Interlocked.Read(ref _hitCount), Interlocked.Read(ref _redirectCount));
 
-    // ── 字体解析状态 ──
-    // 可用字体集合：包含 SHX 文件名、TrueType 文件名和系统字族名
-    private static readonly HashSet<string> _availableFonts = new(StringComparer.OrdinalIgnoreCase);
-    // 用户配置的替换字体运行时副本
-    private static string _repMainFont = "";
-    private static string _repBigFont = "";
-    private static string _repTrueTypeFont = "";
-    // 防递归标志：避免 HookHandler 内部调用 Trampoline 时再次触发 Hook
-    [ThreadStatic] private static bool _inHook;
+    internal static IReadOnlyDictionary<string, (string Replacement, int FontType)> GetRawRedirectLog()
+        => RedirectLog;
 
-    // 重定向日志：记录本次会话内所有被重定向的字体，供 MText 内联字体交叉比对
-    // Key: 归一化字体名；Value: (替换字体名, ldfile param2 字体类型)
-    private static readonly ConcurrentDictionary<string, (string Replacement, int FontType)> _redirectLog = new(StringComparer.OrdinalIgnoreCase);
+    internal static void ClearRegisteredRedirects()
+    {
+        RedirectLog.Clear();
+        RedirectLogSeen.Clear();
+        TrueTypeBypassLogSeen.Clear();
+        Interlocked.Exchange(ref _trueTypeBypassCount, 0);
+    }
 
-    // 重定向字体名的原生指针缓存，必须长期存活
-    // ldfile 可能缓存 fileName 指针；若释放会形成悬空指针
-    private static readonly ConcurrentDictionary<string, IntPtr> _nativeStringCache = new(StringComparer.OrdinalIgnoreCase);
+    internal static void ClearRegisteredRedirectsForDocument(IntPtr _)
+    {
+        RedirectLog.Clear();
+        RedirectLogSeen.Clear();
+    }
 
-    /// <summary>
-    /// 安装 ldfile Hook
-    /// <para>
-    /// 通过 Inline Hook 覆盖 ldfile 函数入口：
-    /// 保存原始指令，创建 Trampoline，再将入口改写为跳转到 HookHandler
-    /// 必须在任何文档打开前调用
-    /// </para>
-    /// </summary>
+    internal static void ClearTransientRegisteredRedirects()
+    {
+        RedirectLogSeen.Clear();
+        TrueTypeBypassLogSeen.Clear();
+        Interlocked.Exchange(ref _trueTypeBypassCount, 0);
+    }
+
+    internal static IntPtr GetDatabaseScope(Database? db)
+    {
+        try
+        {
+            return db?.UnmanagedObject ?? IntPtr.Zero;
+        }
+        catch
+        {
+            return IntPtr.Zero;
+        }
+    }
+
     internal static void Install()
     {
-        if (_installed) return;
-
-        try
+        if (IsInstalled)
         {
-            IntPtr module = GetModuleHandle(AcDbDll);
-            if (module == IntPtr.Zero) { DiagnosticLogger.Log("FontMapping", "acdb25.dll 未加载"); return; }
-
-            _targetAddr = GetProcAddress(module, LdFileExport);
-            if (_targetAddr == IntPtr.Zero) { DiagnosticLogger.Log("FontMapping", "未找到 ldfile 导出"); return; }
-
-            // 加载用户配置的替换字体，SHX 配置统一补齐 .shx 后缀
-            var config = ConfigService.Instance;
-            if (!string.IsNullOrEmpty(config.MainFont))
-                _repMainFont = EnsureShx(config.MainFont);
-            if (!string.IsNullOrEmpty(config.BigFont))
-                _repBigFont = EnsureShx(config.BigFont);
-            if (!string.IsNullOrEmpty(config.TrueTypeFont))
-                _repTrueTypeFont = config.TrueTypeFont;
-
-            if (string.IsNullOrEmpty(_repMainFont) && string.IsNullOrEmpty(_repBigFont))
-            {
-                DiagnosticLogger.Log("FontMapping", "未配置替换字体，Hook 未安装");
-                return;
-            }
-
-            // 扫描可用字体并填充 _availableFonts 与 FontManager.FontCache
-            ScanAvailableFonts();
-
-            // --- Inline Hook 安装流程 ---
-            // 保存原始函数入口字节，供卸载时恢复
-            _savedBytes = new byte[PrologueSize];
-            Marshal.Copy(_targetAddr, _savedBytes, 0, PrologueSize);
-
-            // 创建 Trampoline：复制原始指令，并在尾部补回跳
-            int trampolineSize = PrologueSize + 14; // 14 字节 = 64 位绝对跳转指令
-            _trampolineAddr = VirtualAlloc(IntPtr.Zero, (uint)trampolineSize,
-                0x3000 /* MEM_COMMIT | MEM_RESERVE */, 0x40 /* PAGE_EXECUTE_READWRITE */);
-            if (_trampolineAddr == IntPtr.Zero) { DiagnosticLogger.Log("FontMapping", "VirtualAlloc 失败"); return; }
-
-            // 将原始指令复制到 Trampoline 头部
-            Marshal.Copy(_savedBytes, 0, _trampolineAddr, PrologueSize);
-
-            // 在 Trampoline 尾部写入跳转，回到原函数被覆盖区域之后
-            WriteAbsoluteJump(_trampolineAddr + PrologueSize, _targetAddr + PrologueSize);
-
-            // 将 Trampoline 地址包装为委托，供 HookHandler 调用原始函数
-            _trampolineDelegate = Marshal.GetDelegateForFunctionPointer<LdFileDelegate>(_trampolineAddr);
-
-            // 覆盖原函数入口，改写为跳转到 HookHandler
-            _hookDelegate = HookHandler;
-            IntPtr hookAddr = Marshal.GetFunctionPointerForDelegate(_hookDelegate);
-
-            // 临时开放原函数入口的内存保护
-            VirtualProtect(_targetAddr, (uint)PrologueSize, 0x40, out uint oldProtect);
-
-            // 先用 NOP 清空序言区域，再写入跳转指令，避免残留旧指令
-            byte[] hookPatch = new byte[PrologueSize];
-            for (int i = 0; i < hookPatch.Length; i++) hookPatch[i] = 0x90;
-            WriteAbsoluteJumpBytes(hookPatch, 0, hookAddr);
-            Marshal.Copy(hookPatch, 0, _targetAddr, PrologueSize);
-
-            // 恢复原始内存保护
-            VirtualProtect(_targetAddr, (uint)PrologueSize, oldProtect, out _);
-
-            _installed = true;
-            DiagnosticLogger.Log("FontMapping", "ldfile Hook 已安装");
+            DiagnosticLogger.Skip(Tag, "Install", "ldfile Hook 已安装，跳过重复安装");
+            return;
         }
-        catch (Exception ex)
+
+        DiagnosticLogger.Start(Tag, "Install", "开始安装 ldfile 字体加载 Hook");
+        if (PlatformManager.Platform is not INativeFontHookExportsProvider exports)
         {
-            DiagnosticLogger.LogError("FontMapping: Hook 安装失败", ex);
-            // 部分失败时回滚已分配资源，避免留下半安装状态
-            if (_trampolineAddr != IntPtr.Zero)
-            {
-                try { VirtualFree(_trampolineAddr, 0, 0x8000); } catch { }
-                _trampolineAddr = IntPtr.Zero;
-            }
-            _trampolineDelegate = null;
-            _hookDelegate = null;
-            _savedBytes = null;
+            DiagnosticLogger.Skip(
+                Tag,
+                "Install",
+                "当前平台未提供 ldfile Hook 导出定义，跳过字体加载桥接",
+                new Dictionary<string, object?> { ["platform"] = PlatformManager.Platform.DisplayName });
+            return;
+        }
+
+        IntPtr module = GetModuleHandle(PlatformManager.Platform.AcDbDllName);
+        if (module == IntPtr.Zero)
+        {
+            DiagnosticLogger.Skip(
+                Tag,
+                "Install",
+                "AcDb 模块未加载，跳过 ldfile 字体加载 Hook",
+                new Dictionary<string, object?> { ["module"] = PlatformManager.Platform.AcDbDllName });
+            return;
+        }
+
+        NativeHookTarget target = exports.NativeFontHookProfile.LdFile;
+        if (!TryGetExportAddress(module, target, out IntPtr address, out uint resolvedRva))
+        {
+            DiagnosticLogger.Skip(
+                Tag,
+                "Install",
+                "ldfile 入口未通过强校验，跳过字体加载桥接",
+                new Dictionary<string, object?> { ["target"] = target.Name });
+            return;
+        }
+
+        _hookDelegate = HookHandler;
+        _hook = new NativeInlineHook<LdFileDelegate>(Tag, target.Name, target.Rva ?? resolvedRva);
+        _hook.InstallAtAddress(
+            address,
+            resolvedRva,
+            _hookDelegate,
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
+
+        if (IsInstalled)
+        {
+            DiagnosticLogger.Ok(
+                Tag,
+                "Install",
+                "ldfile 字体加载 Hook 安装成功",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["rva"] = $"0x{resolvedRva:X}"
+                });
+        }
+        else
+        {
+            DiagnosticLogger.Fail(
+                Tag,
+                "Install",
+                "ldfile 字体加载 Hook 安装未成功",
+                fields: new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["rva"] = $"0x{resolvedRva:X}"
+                });
         }
     }
 
-    /// <summary>
-    /// 卸载 Hook，将原始函数入口恢复为安装前的字节，并释放 Trampoline 内存
-    /// </summary>
     internal static void Uninstall()
     {
-        if (!_installed || _savedBytes == null) return;
-
-        try
+        bool installedBefore = IsInstalled;
+        if (installedBefore)
         {
-            VirtualProtect(_targetAddr, (uint)PrologueSize, 0x40, out uint oldProtect);
-            Marshal.Copy(_savedBytes, 0, _targetAddr, PrologueSize);
-            VirtualProtect(_targetAddr, (uint)PrologueSize, oldProtect, out _);
-
-            if (_trampolineAddr != IntPtr.Zero)
-            {
-                VirtualFree(_trampolineAddr, 0, 0x8000);
-                _trampolineAddr = IntPtr.Zero;
-            }
-
-            _installed = false;
-            DiagnosticLogger.Log("FontMapping", "ldfile Hook 已卸载");
+            DiagnosticLogger.Start(
+                Tag,
+                "Uninstall",
+                "开始卸载 ldfile 字体加载 Hook",
+                new Dictionary<string, object?>
+                {
+                    ["hitCount"] = Interlocked.Read(ref _hitCount),
+                    ["redirects"] = Interlocked.Read(ref _redirectCount)
+                });
         }
-        catch { }
+        else
+        {
+            DiagnosticLogger.Skip(Tag, "Uninstall", "ldfile Hook 未安装，跳过卸载");
+        }
+
+        _hook?.Uninstall();
+        _hook = null;
+        _hookDelegate = null;
+        ClearRegisteredRedirects();
+        foreach (IntPtr ptr in NativeStringCache.Values)
+        {
+            try { Marshal.FreeHGlobal(ptr); } catch { }
+        }
+
+        NativeStringCache.Clear();
+        Interlocked.Exchange(ref _hitCount, 0);
+        Interlocked.Exchange(ref _redirectCount, 0);
+        Interlocked.Exchange(ref _trueTypeBypassCount, 0);
+        if (installedBefore)
+            DiagnosticLogger.Ok(Tag, "Uninstall", "ldfile 字体加载 Hook 卸载完成");
     }
 
-    /// <summary>
-    /// 更新替换字体配置
-    /// </summary>
-    internal static void UpdateConfig()
-    {
-        var config = ConfigService.Instance;
-        _repMainFont = !string.IsNullOrEmpty(config.MainFont) ? EnsureShx(config.MainFont) : "";
-        _repBigFont = !string.IsNullOrEmpty(config.BigFont) ? EnsureShx(config.BigFont) : "";
-        _repTrueTypeFont = !string.IsNullOrEmpty(config.TrueTypeFont) ? config.TrueTypeFont : "";
-    }
-
-    /// <summary>
-    /// 获取本次会话的原始重定向记录，供 MText 内联字体交叉比对
-    /// </summary>
-    internal static IReadOnlyDictionary<string, (string Replacement, int FontType)> GetRawRedirectLog()
-        => _redirectLog;
-
-    #region Hook Handler
-
-    // ldfile param2 字体类型常量
-    private const int FontTypeRegular = 0;   // 常规 SHX 主字体
-    private const int FontTypeShape = 2;     // SHX 形文件（Shape File，如线型符号）
-    private const int FontTypeBigFont = 4;   // SHX 大字体（Big Font，用于东亚字符）
-
-    /// <summary>
-    /// Hook 核心处理函数：拦截字体加载请求并决定是否重定向
-    /// <para>
-    /// 处理流程：防递归检查 → 形文件放行 → 字体存在性检查 → 按类型选择替换策略
-    /// </para>
-    /// </summary>
     private static int HookHandler(IntPtr fileName, int param2, IntPtr db, IntPtr desc)
     {
-        // 防止递归：通过 Trampoline 调用原始函数时不应再次进入 Hook
-        if (_inHook || _trampolineDelegate == null)
-            return _trampolineDelegate?.Invoke(fileName, param2, db, desc) ?? -1;
+        var trampoline = _hook?.TrampolineDelegate;
+        if (trampoline == null)
+            return -1;
+
+        if (_inHook)
+            return trampoline(fileName, param2, db, desc);
+
+        Interlocked.Increment(ref _hitCount);
+        if (param2 == FontTypeShape)
+            return trampoline(fileName, param2, db, desc);
 
         _inHook = true;
         try
         {
-            string fontName = Marshal.PtrToStringUni(fileName) ?? "";
-            if (string.IsNullOrEmpty(fontName))
-                return _trampolineDelegate(fileName, param2, db, desc);
+            string original = NormalizeLoadName(ReadFontName(fileName));
+            if (string.IsNullOrWhiteSpace(original))
+                return trampoline(fileName, param2, db, desc);
 
-            // 去掉目录，仅保留文件名或字族名，便于与 _availableFonts 对齐
-            fontName = Path.GetFileName(fontName);
+            if (IsKnownAvailableLoadFont(original))
+                return trampoline(fileName, param2, db, desc);
 
-            // 形文件请求直接放行，由 AutoCAD 自行处理
-            if (param2 == FontTypeShape)
-                return _trampolineDelegate(fileName, param2, db, desc);
+            if (ShouldBypassTrueTypeRequest(original, param2))
+                return trampoline(fileName, param2, db, desc);
 
-            // 先按原名检查；若不是 .shx，再补后缀重试一次
-            if (_availableFonts.Contains(fontName))
-                return _trampolineDelegate(fileName, param2, db, desc);
+            if (!IsShxLoadRequest(original, param2))
+                return trampoline(fileName, param2, db, desc);
 
-            bool isShxRequest = fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase);
-            if (!isShxRequest && _availableFonts.Contains(fontName + ".shx"))
-                return _trampolineDelegate(fileName, param2, db, desc);
-
-            // 系统 TrueType 字族名直接放行
-            bool hasAtPrefix = fontName[0] == '@';
-            string baseName = hasAtPrefix ? fontName.TrimStart('@') : fontName;
-            if (FontDetector.IsSystemFont(baseName))
-                return _trampolineDelegate(fileName, param2, db, desc);
-
-            // 字体缺失后按字体类型选择替换策略
-            // SHX 判定条件：param2 为主字体/大字体，或文件名本身以 .shx 结尾
-            bool isShxFont = param2 == FontTypeRegular || param2 == FontTypeBigFont || isShxRequest;
-            string? resolved = isShxFont
-                ? ResolveMissingShxFont(fontName, param2)
-                : ResolveMissingTrueTypeFont(fontName);
-            if (resolved != null)
+            bool hasAtPrefix = original.Length > 1 && original[0] == '@';
+#if NET8_0_OR_GREATER
+            // 跳过 @ 后直接拼 .shx，避免中间字符串分配。
+            string normalized = NormalizeShxNameDirect(original, hasAtPrefix);
+#else
+            string baseShx = hasAtPrefix ? original[1..] : original;
+            string normalized = NormalizeShxName(baseShx);
+#endif
+            if (!TryResolveMissingShxFont(
+                    original,
+                    normalized,
+                    param2,
+                    out string replacement,
+                    out FontRedirectKind kind,
+                    out string reason))
             {
-                // 归一化记录键：SHX 统一补齐后缀，TrueType 去掉 @ 前缀
-                string normalizedName = isShxFont ? EnsureShx(baseName) : baseName;
-                _redirectLog.TryAdd(normalizedName, (resolved, param2));
-
-                DiagnosticLogger.Log("Hook", $"重定向: '{fontName}' param2={param2} → '{resolved}'");
-
-                // 获取或创建原生字符串指针并缓存，不能释放
-                IntPtr resolvedPtr = _nativeStringCache.GetOrAdd(resolved,
-                    static name => Marshal.StringToHGlobalUni(name));
-
-                return _trampolineDelegate(resolvedPtr, param2, db, desc);
+                FontRuntimeMappingStore.RecordFailedRuntimeMapping(
+                    "文件级",
+                    string.Empty,
+                    original,
+                    hasAtPrefix ? normalized : string.Empty,
+                    GetFontTypeText(kind),
+                    "LdFileHook",
+                    reason);
+                return trampoline(fileName, param2, db, desc);
             }
 
-            DiagnosticLogger.Log("Hook", $"未解析: '{fontName}' param2={param2} isShx={isShxRequest}");
-            return _trampolineDelegate(fileName, param2, db, desc);
+            if (!hasAtPrefix && string.Equals(normalized, replacement, StringComparison.OrdinalIgnoreCase))
+                return trampoline(fileName, param2, db, desc);
+
+            Interlocked.Increment(ref _redirectCount);
+            RedirectLog[normalized] = (replacement, param2);
+            RedirectLog[original] = (replacement, param2);
+            FontRuntimeMappingStore.RecordRuntimeMapping(
+                "文件级",
+                string.Empty,
+                original,
+                hasAtPrefix ? normalized : string.Empty,
+                GetFontTypeText(kind),
+                replacement,
+                "LdFileHook",
+                "已映射");
+
+            string logKey = string.Concat(original, "|", replacement, "|", param2.ToString(), "|", reason);
+            if (RedirectLogSeen.TryAdd(logKey, 0))
+            {
+                DiagnosticLogger.Ok(
+                    Tag,
+                    "HookHandler",
+                    "执行 SHX 字体加载重定向",
+                    new Dictionary<string, object?>
+                    {
+                        ["kind"] = kind.ToString(),
+                        ["original"] = original,
+                        ["replacement"] = replacement,
+                        ["request"] = normalized,
+                        ["param2"] = param2,
+                        ["reason"] = reason,
+                        ["dbScope"] = FormatPointer(db)
+                    });
+            }
+
+            IntPtr replacementPtr = NativeStringCache.GetOrAdd(
+                replacement,
+                static name => Marshal.StringToHGlobalUni(name));
+            return trampoline(replacementPtr, param2, db, desc);
         }
-        catch
+        catch (Exception ex)
         {
-            return _trampolineDelegate!(fileName, param2, db, desc);
+            DiagnosticLogger.Fail(Tag, "HookHandler", "ldfile Hook 异常", ex);
+            return trampoline(fileName, param2, db, desc);
         }
         finally
         {
@@ -275,193 +301,315 @@ internal static class LdFileHook
         }
     }
 
-    /// <summary>
-    /// 解析缺失 SHX 字体的替换目标
-    /// param2 表示 AutoCAD 期望的字体类型，用于决定使用 MainFont 还是 BigFont
-    /// </summary>
-    private static string? ResolveMissingShxFont(string fontName, int fontType)
+    private static bool TryGetExportAddress(
+        IntPtr module,
+        NativeHookTarget target,
+        out IntPtr address,
+        out uint rva)
     {
-        // @xxx.shx 优先尝试去掉 @ 后的基础字体
-        if (fontName[0] == '@')
+        address = IntPtr.Zero;
+        rva = 0;
+
+        if (!target.IsEnabled || string.IsNullOrWhiteSpace(target.ExportName))
         {
-            string baseName = fontName.TrimStart('@');
-            string baseShx = EnsureShx(baseName);
-            if (_availableFonts.Contains(baseShx))
-            {
-                if (fontType != FontTypeBigFont || (FontManager.FontCache.TryGetValue(baseShx, out bool isBaseBig) && isBaseBig))
-                    return baseShx;
-            }
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveExport",
+                "Hook 目标未启用",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["reason"] = target.DisabledReason ?? "缺少导出符号"
+                });
+            return false;
         }
 
-        // TrueType 文件名交给系统字体 API 处理
-        if (IsTrueTypeName(fontName))
-            return null;
-
-        // 大字体优先使用 BigFont，再回退到已知大字体集合
-        if (fontType == FontTypeBigFont)
+        address = NativeInlineHookInterop.GetProcAddress(module, target.ExportName!);
+        if (address == IntPtr.Zero)
         {
-            if (!string.IsNullOrEmpty(_repBigFont) && _availableFonts.Contains(_repBigFont))
-                return _repBigFont;
-
-            foreach (var kvp in FontManager.FontCache)
-            {
-                if (kvp.Value && _availableFonts.Contains(kvp.Key))
-                    return kvp.Key;
-            }
-            return null;
+            DiagnosticLogger.Skip(
+                Tag,
+                "ResolveExport",
+                "Hook 导出未找到",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["exportName"] = target.ExportName
+                });
+            return false;
         }
 
-        if (!string.IsNullOrEmpty(_repMainFont) && _availableFonts.Contains(_repMainFont))
-            return _repMainFont;
+        long delta = address.ToInt64() - module.ToInt64();
+        if (delta <= 0 || delta > uint.MaxValue)
+        {
+            DiagnosticLogger.Fail(
+                Tag,
+                "ResolveExport",
+                "Hook 导出 RVA 解析失败",
+                fields: new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["address"] = $"0x{address.ToInt64():X}"
+                });
+            address = IntPtr.Zero;
+            return false;
+        }
 
-        return null;
+        rva = (uint)delta;
+        string? expectedRva = target.Rva.HasValue ? $"0x{target.Rva.Value:X}" : null;
+        string actualRva = $"0x{rva:X}";
+        bool rvaMatched = !target.Rva.HasValue || target.Rva.Value == rva;
+        // RVA 只作为版本指纹输出；安装安全由导出名、入口字节和序言扫描共同决定。
+        if (!rvaMatched)
+        {
+            DiagnosticLogger.Ok(
+                Tag,
+                "ResolveExport",
+                "Hook 导出 RVA 与版本指纹不匹配，继续按导出地址安装",
+                new Dictionary<string, object?>
+                {
+                    ["target"] = target.Name,
+                    ["expectedRva"] = expectedRva,
+                    ["actualRva"] = actualRva,
+                    ["rva"] = actualRva,
+                    ["rvaMatched"] = false
+                });
+        }
+
+        DiagnosticLogger.Ok(
+            Tag,
+            "ResolveExport",
+            "Hook 导出解析成功",
+            new Dictionary<string, object?>
+            {
+                ["target"] = target.Name,
+                ["expectedRva"] = expectedRva,
+                ["actualRva"] = actualRva,
+                ["rva"] = actualRva,
+                ["rvaMatched"] = rvaMatched
+            });
+        return true;
     }
 
-    /// <summary>
-    /// 解析缺失 TrueType 字体的替换目标（fontName 无 .shx 后缀）
-    /// 来源：样式表缺失 TrueType 的 AutoCAD 回退调用，或 MText 内联 \f 字体
-    /// 必须用 TrueType 字族名替换，避免 SHX 类型污染 AutoCAD 内部缓存
-    /// </summary>
-    private static string? ResolveMissingTrueTypeFont(string fontName)
+    private static bool IsKnownAvailableLoadFont(string fontName)
     {
-        // @xxx → 优先尝试去掉 @ 的基础字族名（竖排 TrueType）
-        if (fontName[0] == '@')
+        if (string.IsNullOrWhiteSpace(fontName))
+            return true;
+
+        if (ShxFontAvailabilityIndex.IsExactAvailable(fontName))
+            return true;
+
+        if (!Path.HasExtension(fontName)
+            && ShxFontAvailabilityIndex.IsExactAvailable(fontName + ".shx"))
         {
-            string baseName = fontName.TrimStart('@');
-            if (FontDetector.IsSystemFont(baseName))
-                return baseName;
+            return true;
         }
 
-        // 使用用户配置的 TrueType 替换字体
-        if (!string.IsNullOrEmpty(_repTrueTypeFont) && FontDetector.IsSystemFont(_repTrueTypeFont))
-            return _repTrueTypeFont;
-
-        return null;
+        return false;
     }
 
-    #endregion
-
-    #region 字体扫描
-
-    /// <summary>
-    /// 扫描所有可能包含字体文件的目录，构建可用字体集合
-    /// 扫描范围包括统一字体搜索路径以及系统 TrueType 字族名
-    /// </summary>
-    private static void ScanAvailableFonts()
+    private static bool ShouldBypassTrueTypeRequest(string fontName, int param2)
     {
-        // 统一扫描 SHX 与 TTF/TTC 文件
-        foreach (var dir in CadEnvironmentSettings.GetAllFontSearchPaths())
-            ScanDirectory(dir);
+        if (FontDetector.IsTrueTypeFontFile(fontName))
+        {
+            LogTrueTypeBypass(fontName, param2, "TrueType 字体文件");
+            return true;
+        }
 
-        // 补充系统 TrueType 字族名，避免将字族名误判为缺失字体
-        int beforeCount = _availableFonts.Count;
+#if NET8_0_OR_GREATER
+        // .NET 8+ 先用 span 做早退检查，只有下游需要 string 时才分配。
+        ReadOnlySpan<char> baseSpan = fontName.AsSpan();
+        if (baseSpan.Length > 0 && baseSpan[0] == '@')
+            baseSpan = baseSpan[1..];
+        if (baseSpan.IsEmpty || baseSpan.IsWhiteSpace() || Path.HasExtension(baseSpan))
+            return false;
+        string baseName = new(baseSpan);
+#else
+        // .NET Framework 用索引跳过 @，无 @ 时不分配。
+        int start = fontName.Length > 0 && fontName[0] == '@' ? 1 : 0;
+        string baseName = start > 0 ? fontName[start..] : fontName;
+        if (string.IsNullOrWhiteSpace(baseName) || Path.HasExtension(baseName))
+            return false;
+#endif
+
+        if (TrueTypeFontAvailabilityIndex.IsAvailable(baseName))
+        {
+            LogTrueTypeBypass(fontName, param2, "系统 TrueType 字族");
+            return true;
+        }
+
+        if (TrueTypeFontAvailabilityIndex.IsSystemIndexReady)
+            return false;
+
+        if (HasKnownShxCandidate(baseName))
+            return false;
+
+        LogTrueTypeBypass(fontName, param2, "系统 TrueType 索引未就绪，无扩展名请求保守放行");
+        return true;
+    }
+
+    private static bool HasKnownShxCandidate(string fontName)
+    {
+        if (string.IsNullOrWhiteSpace(fontName))
+            return false;
+
+        string shxName = NormalizeShxName(fontName);
+        return ShxFontAvailabilityIndex.IsExactAvailable(shxName);
+    }
+
+    private static void LogTrueTypeBypass(string fontName, int param2, string reason)
+    {
+        if (Volatile.Read(ref _trueTypeBypassCount) >= TrueTypeBypassSampleLimit)
+            return;
+
+        string logKey = string.Concat(fontName, "|", param2.ToString(), "|", reason);
+        if (!TrueTypeBypassLogSeen.TryAdd(logKey, 0))
+            return;
+
+        Interlocked.Increment(ref _trueTypeBypassCount);
+
+        DiagnosticLogger.Skip(
+            Tag,
+            "TrueTypeBypass",
+            "TrueType 请求已放行，LdFileHook 不处理",
+            new Dictionary<string, object?>
+            {
+                ["original"] = fontName,
+                ["param2"] = param2,
+                ["reason"] = reason,
+                ["systemTrueTypeIndexReady"] = TrueTypeFontAvailabilityIndex.IsSystemIndexReady
+            });
+    }
+
+    private static bool IsShxLoadRequest(string fontName, int param2)
+    {
+        return param2 == FontTypeRegular
+               || param2 == FontTypeBigFont
+               || fontName.EndsWith(".shx", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryResolveMissingShxFont(
+        string fontName,
+        string precomputedBase,
+        int param2,
+        out string replacement,
+        out FontRedirectKind kind,
+        out string reason)
+    {
+        replacement = string.Empty;
+        kind = param2 == FontTypeBigFont ? FontRedirectKind.ShxBigFont : FontRedirectKind.ShxMain;
+        reason = string.Empty;
+
+        bool hasAtPrefix = fontName.Length > 1 && fontName[0] == '@';
+        // precomputedBase 已归一化，避免重复处理。
+        string baseShx = precomputedBase;
+
+        if (hasAtPrefix
+            && TryUseAvailableShx(baseShx, kind, out replacement))
+        {
+            reason = "基础 SHX 可用";
+            return true;
+        }
+
+        if (FontRedirectResolver.TryResolveConfiguredReplacement(kind, out replacement))
+        {
+            reason = "配置 SHX 兜底";
+            return true;
+        }
+
+        if (kind == FontRedirectKind.ShxBigFont
+            && TryFindCachedShx(expectBigFont: true, out replacement))
+        {
+            reason = "已知大字体兜底";
+            return true;
+        }
+
+        if (kind == FontRedirectKind.ShxMain
+            && TryFindCachedShx(expectBigFont: false, out replacement))
+        {
+            reason = "已知主字体兜底";
+            return true;
+        }
+
+        reason = "未找到可用 SHX 兜底字体";
+        return false;
+    }
+
+    private static bool TryUseAvailableShx(
+        string shxName,
+        FontRedirectKind kind,
+        out string replacement)
+    {
+        replacement = string.Empty;
+        if (!ShxFontAvailabilityIndex.IsExactAvailable(shxName))
+            return false;
+
+        if (!ShxFontAvailabilityIndex.TryGetKind(shxName, out bool isBigFont))
+            return false;
+
+        if (kind == FontRedirectKind.ShxBigFont && !isBigFont)
+            return false;
+        if (kind == FontRedirectKind.ShxMain && isBigFont)
+            return false;
+
+        replacement = shxName;
+        return true;
+    }
+
+    private static bool TryFindCachedShx(bool expectBigFont, out string replacement)
+    {
+        return ShxFontAvailabilityIndex.TryFindFontByKind(expectBigFont, out replacement);
+    }
+
+    private static string NormalizeLoadName(string fontName)
+        => FontRedirectResolver.NormalizeInputName(fontName);
+
+    private static string NormalizeShxName(string fontName)
+        => FontRedirectResolver.EnsureShx(fontName);
+
+#if NET8_0_OR_GREATER
+    /// <summary>
+    /// .NET 8+ 专用：跳过 @ 后直接拼 .shx，减少 Hook 热路径分配。
+    /// </summary>
+    private static string NormalizeShxNameDirect(string fontName, bool hasAtPrefix)
+    {
+        int start = hasAtPrefix ? 1 : 0;
+        ReadOnlySpan<char> body = fontName.AsSpan(start).Trim();
+        if (body.IsEmpty)
+            return ".shx";
+        if (body.EndsWith(".shx", StringComparison.OrdinalIgnoreCase))
+            return new string(body);
+        return string.Concat(body, ".shx".AsSpan());
+    }
+#endif
+
+    private static string GetFontTypeText(FontRedirectKind kind)
+        => kind == FontRedirectKind.ShxBigFont ? "SHX大字体" : "SHX主字体";
+
+    private static string ReadFontName(IntPtr value)
+    {
+        if (value == IntPtr.Zero)
+            return string.Empty;
+
         try
         {
-            foreach (var family in Fonts.SystemFontFamilies)
-            {
-                _availableFonts.Add(family.Source);
-                foreach (var localizedName in family.FamilyNames.Values)
-                    _availableFonts.Add(localizedName);
-            }
+            return Marshal.PtrToStringUni(value) ?? string.Empty;
         }
-        catch (Exception ex)
+        catch
         {
-            DiagnosticLogger.Log("FontMapping", $"系统字体扫描失败: {ex.Message}");
+            return string.Empty;
         }
-        DiagnosticLogger.Log("FontMapping", $"可用字体 {_availableFonts.Count} 项 (系统字族名 {_availableFonts.Count - beforeCount} 项)");
     }
 
-    /// <summary>
-    /// 扫描指定目录中的字体文件，并将文件名加入可用字体集合
-    /// SHX 文件还会通过 <see cref="ClassifyShxFont"/> 判断是否为大字体
-    /// </summary>
-    private static void ScanDirectory(string dir)
-    {
-        if (!Directory.Exists(dir)) return;
-        try
-        {
-            foreach (string file in Directory.EnumerateFiles(dir))
-            {
-                string ext = Path.GetExtension(file);
-                if (ext.Equals(".shx", StringComparison.OrdinalIgnoreCase))
-                {
-                    string fileName = Path.GetFileName(file);
-                    _availableFonts.Add(fileName);
-                    ClassifyShxFont(file, fileName);
-                }
-                else if (ext.Equals(".ttf", StringComparison.OrdinalIgnoreCase) ||
-                         ext.Equals(".ttc", StringComparison.OrdinalIgnoreCase))
-                {
-                    _availableFonts.Add(Path.GetFileName(file));
-                }
-            }
-        }
-        catch { }
-    }
+    private static string FormatPointer(IntPtr value)
+        => value == IntPtr.Zero ? "0x0" : $"0x{value.ToInt64():X}";
 
-    /// <summary>
-    /// 读取 SHX 文件头，识别是否为大字体，并写入 <see cref="FontManager.FontCache"/>
-    /// 文件不可读时跳过，不写入缓存
-    /// </summary>
-    private static void ClassifyShxFont(string filePath, string fileName)
-    {
-        if (FontManager.FontCache.ContainsKey(fileName)) return;
-        bool? result = ShxFontAnalyzer.IsBigFont(filePath);
-        if (result.HasValue)
-            FontManager.FontCache.TryAdd(fileName, result.Value);
-    }
-
-    #endregion
-
-    #region 底层工具
-
-    /// <summary>确保字体名以 .shx 结尾</summary>
-    private static string EnsureShx(string name) =>
-        name.EndsWith(".shx", StringComparison.OrdinalIgnoreCase) ? name : name + ".shx";
-
-    /// <summary>判断字体名是否为 TrueType 文件名</summary>
-    private static bool IsTrueTypeName(string name) =>
-        name.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) ||
-        name.EndsWith(".ttc", StringComparison.OrdinalIgnoreCase) ||
-        name.EndsWith(".otf", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// 在指定内存地址写入 14 字节的 64 位绝对跳转指令
-    /// 指令格式：FF 25 00 00 00 00 + 8 字节目标地址
-    /// </summary>
-    private static void WriteAbsoluteJump(IntPtr location, IntPtr target)
-    {
-        byte[] jmp = new byte[14];
-        WriteAbsoluteJumpBytes(jmp, 0, target);
-        Marshal.Copy(jmp, 0, location, 14);
-    }
-
-    /// <summary>将 14 字节绝对跳转指令写入字节数组的指定偏移位置</summary>
-    private static void WriteAbsoluteJumpBytes(byte[] buffer, int offset, IntPtr target)
-    {
-        buffer[offset] = 0xFF;
-        buffer[offset + 1] = 0x25;
-        buffer[offset + 2] = 0x00;
-        buffer[offset + 3] = 0x00;
-        buffer[offset + 4] = 0x00;
-        buffer[offset + 5] = 0x00;
-        BitConverter.GetBytes(target.ToInt64()).CopyTo(buffer, offset + 6);
-    }
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-    private static extern IntPtr GetModuleHandle(string lpModuleName);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Ansi, ExactSpelling = true)]
-    private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
-
-    [DllImport("kernel32.dll")]
-    private static extern bool VirtualProtect(IntPtr lpAddress, uint dwSize, uint flNewProtect, out uint lpflOldProtect);
-
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr VirtualAlloc(IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
-
-    [DllImport("kernel32.dll")]
-    private static extern bool VirtualFree(IntPtr lpAddress, uint dwSize, uint dwFreeType);
-
-    #endregion
+#if NET8_0_OR_GREATER
+#pragma warning disable SYSLIB1054
+#endif
+    [DllImport("kernel32.dll", EntryPoint = "GetModuleHandleW", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern IntPtr GetModuleHandle([MarshalAs(UnmanagedType.LPWStr)] string lpModuleName);
+#if NET8_0_OR_GREATER
+#pragma warning restore SYSLIB1054
+#endif
 }

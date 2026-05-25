@@ -115,13 +115,14 @@
                         MinWidth="80" Height="32" FontSize="12"
                         Margin="0,0,10,0"
                         hc:BorderElement.CornerRadius="6"
-                        IsCancel="True" Click="OnCancel"/>
+                        IsCancel="True"
+                        Command="{Binding CancelCommand}"/>
                 <Button Content="确认"
                         MinWidth="80" Height="32" FontSize="12"
                         Style="{StaticResource ButtonPrimary}"
                         hc:BorderElement.CornerRadius="6"
-                        IsEnabled="{Binding IsConfirmEnabled}"
-                        IsDefault="True" Click="OnConfirm"/>
+                        IsDefault="True"
+                        Command="{Binding ConfirmCommand}"/>
             </StackPanel>
         </Grid>
     </Border>

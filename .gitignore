@@ -62,6 +62,21 @@ BenchmarkDotNet.Artifacts/
 project.lock.json
 project.fragment.lock.json
 artifacts/
+/output/
+/output/**
+
+**/workbench/frontend/dist/
+**/workbench/frontend/dist/**
+**/workbench/frontend/.npm-cache/
+**/workbench/frontend/.npm-cache/**
+**/node_modules/
+**/node_modules/**
+**/.work/
+**/.work/**
+*.dwg
+*.dxf
+**/.venv/
+**/.venv/**
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
@@ -366,4 +381,17 @@ FodyWeavers.xsd
 /chore/inspect-resources.ps1
 /chore/inspect-types.ps1
 /tools/diff-procmon.ps1
-/chore/inspect-types.ps1
+/chore/acdb25_disasm.txt
+/chore/acdb25_exports.txt
+/chore/acdb25_imports.txt
+*.png
+!chore/afr-icon.png
+/chore/project-bolt-sb1-yrdzmnib.zip
+/chore/project-bolt-sb1-yrdzmnib (1).zip
+/chore/TrueTypeHookProbe/acdb25.exports.raw.txt
+/chore/TrueTypeHookProbe/acdb25.exports.demangled.txt
+*.diagsession
+*.UnitTests.csproj
+*.Benchmarks.csproj
+/src/AFR.Benchmarks/FontHotPathBenchmarks.cs
+*.jsonl

@@ -1,29 +1,28 @@
 using System.Diagnostics;
 using System.IO;
+using Autodesk.AutoCAD.DatabaseServices;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
 namespace AFR.Services;
 
 /// <summary>
-/// AutoCAD 运行环境配置，提供统一的字体搜索路径。
+/// AutoCAD 字体搜索路径来源。
 /// <para>
-/// 作为唯一的路径来源，供 <see cref="AutoCadFontScanner"/> 和 LdFileHook 共用，
-/// 避免两处分别硬编码目录导致扫描范围不一致。
+/// 供共享字体索引使用，避免扫描逻辑散落在检测、UI 和 Hook 中。
 /// </para>
 /// </summary>
 internal static class CadEnvironmentSettings
 {
     /// <summary>
-    /// 获取所有可能包含字体文件（SHX / TTF / TTC）的搜索目录。
+    /// 获取 CAD 字体搜索目录，按 AutoCAD 搜索路径优先。
     /// <para>
     /// 扫描范围（按优先级排列）：
     /// <list type="number">
     ///   <item>ACADPREFIX 系统变量指定的搜索路径（包含 Support 和 Fonts 等目录）。</item>
-    ///   <item>AutoCAD 安装目录下的 Fonts 文件夹。</item>
-    ///   <item>AppData 中用户配置的 Support 目录。</item>
-    ///   <item>Windows 系统字体目录（C:\Windows\Fonts）。</item>
+    ///   <item>HostApplicationServices 暴露的 Roamable/Local/AllUsers 根目录下有限的 Fonts/Support 子目录。</item>
+    ///   <item>AutoCAD 进程目录下的 Fonts 文件夹。</item>
     /// </list>
-    /// 返回值已去重，各目录仅出现一次。
+    /// 不递归扫描 AppData 配置树，避免启动和 Hook 初始化阶段放大 I/O。
     /// </para>
     /// </summary>
     public static List<string> GetAllFontSearchPaths()
@@ -31,7 +30,35 @@ internal static class CadEnvironmentSettings
         var paths = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // ── 1. ACADPREFIX 搜索路径 ──
+        AddAcadPrefixPaths(paths, seen);
+        AddHostApplicationPaths(paths, seen);
+        AddProcessFontsPath(paths, seen);
+
+        if (paths.Count == 0)
+        {
+            DiagnosticLogger.Skip(
+                "CadEnvironmentSettings",
+                "GetAllFontSearchPaths",
+                "CAD 字体搜索路径为空");
+        }
+        else
+        {
+            DiagnosticLogger.Ok(
+                "CadEnvironmentSettings",
+                "GetAllFontSearchPaths",
+                "CAD 字体搜索路径已收集",
+                new Dictionary<string, object?>
+                {
+                    ["pathCount"] = paths.Count,
+                    ["paths"] = string.Join(" | ", paths)
+                });
+        }
+
+        return paths;
+    }
+
+    private static void AddAcadPrefixPaths(List<string> paths, HashSet<string> seen)
+    {
         try
         {
             var prefix = (string)AcadApp.GetSystemVariable("ACADPREFIX");
@@ -42,37 +69,46 @@ internal static class CadEnvironmentSettings
             }
         }
         catch { }
+    }
 
-        // ── 2. AutoCAD 安装目录 Fonts ──
+    private static void AddHostApplicationPaths(List<string> paths, HashSet<string> seen)
+    {
+        try
+        {
+            HostApplicationServices? host = HostApplicationServices.Current;
+            if (host == null)
+                return;
+
+            AddKnownCadFontSubdirectories(host.RoamableRootFolder, paths, seen);
+            AddKnownCadFontSubdirectories(host.LocalRootFolder, paths, seen);
+            AddKnownCadFontSubdirectories(host.AllUsersRootFolder, paths, seen);
+        }
+        catch { }
+    }
+
+    private static void AddProcessFontsPath(List<string> paths, HashSet<string> seen)
+    {
         try
         {
             var processPath = Process.GetCurrentProcess().MainModule?.FileName;
-            if (processPath != null)
-                TryAdd(Path.Combine(Path.GetDirectoryName(processPath)!, "Fonts"), paths, seen);
+            var processDirectory = string.IsNullOrEmpty(processPath)
+                ? null
+                : Path.GetDirectoryName(processPath);
+            if (!string.IsNullOrEmpty(processDirectory))
+                TryAdd(Path.Combine(processDirectory, "Fonts"), paths, seen);
         }
         catch { }
+    }
 
-        // ── 3. AppData 用户 Support 目录 ──
-        try
-        {
-            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            foreach (string dir in Directory.GetDirectories(
-                Path.Combine(appData, "Autodesk"), "AutoCAD *", SearchOption.TopDirectoryOnly))
-            {
-                foreach (string supportDir in Directory.GetDirectories(dir, "Support", SearchOption.AllDirectories))
-                    TryAdd(supportDir, paths, seen);
-            }
-        }
-        catch { }
+    private static void AddKnownCadFontSubdirectories(string? root, List<string> paths, HashSet<string> seen)
+    {
+        string normalizedRoot = root?.Trim() ?? string.Empty;
+        if (normalizedRoot.Length == 0)
+            return;
 
-        // ── 4. Windows 系统字体目录 ──
-        try
-        {
-            TryAdd(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), paths, seen);
-        }
-        catch { }
-
-        return paths;
+        TryAdd(normalizedRoot, paths, seen);
+        TryAdd(Path.Combine(normalizedRoot, "Fonts"), paths, seen);
+        TryAdd(Path.Combine(normalizedRoot, "Support"), paths, seen);
     }
 
     private static void TryAdd(string path, List<string> paths, HashSet<string> seen)

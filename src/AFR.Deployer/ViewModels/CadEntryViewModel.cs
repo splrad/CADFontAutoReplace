@@ -92,7 +92,7 @@ internal sealed partial class CadEntryViewModel : ObservableObject
         _                                    => string.Empty
     };
 
-    /// <summary>是否显示"版本 vX.Y + 徽章"那一行（仅已安装的两种态显示）。</summary>
+    /// <summary>是否显示"版本 vX.Y.Z + 徽章"那一行（仅已安装的两种态显示）。</summary>
     public bool ShowVersionRow => Status is PluginDeployStatus.InstalledCurrent
                                           or PluginDeployStatus.InstalledOutdated;
 

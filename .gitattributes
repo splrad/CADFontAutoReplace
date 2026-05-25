@@ -1,7 +1,14 @@
 ###############################################################################
-# Set default behavior to automatically normalize line endings.
+# Set default behavior for this Windows-oriented repository.
+# Text is normalized in Git and checked out with CRLF line endings.
 ###############################################################################
-* text=auto
+* text=auto eol=crlf
+
+###############################################################################
+# Scripts that must keep LF line endings.
+###############################################################################
+*.sh text eol=lf
+*.bash text eol=lf
 
 ###############################################################################
 # Set default behavior for command prompt diff.
@@ -36,13 +43,25 @@
 #*.wwaproj   merge=binary
 
 ###############################################################################
-# behavior for image files
+# behavior for binary files
 #
-# image files are treated as binary by default.
+# Binary files must not be line-ending normalized.
 ###############################################################################
-#*.jpg   binary
-#*.png   binary
-#*.gif   binary
+*.jpg   binary -eol
+*.jpeg  binary -eol
+*.png   binary -eol
+*.gif   binary -eol
+*.ico   binary -eol
+*.pdf   binary -eol
+*.zip   binary -eol
+*.dll   binary -eol
+*.exe   binary -eol
+*.pdb   binary -eol
+*.onnx  binary -eol
+*.ttf   binary -eol
+*.otf   binary -eol
+*.shx   binary -eol
+*.dwg   binary -eol
 
 ###############################################################################
 # diff behavior for common document formats

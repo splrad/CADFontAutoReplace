@@ -159,7 +159,7 @@
         </Grid.RowDefinitions>
 
         <!-- 标题栏：使用项目主图标 app.ico -->
-        <ui:TitleBar Grid.Row="0" Title="AFR 部署工具" ShowMaximize="False">
+        <ui:TitleBar Grid.Row="0" Title="AFR-CAD缺失字体自动替换插件部署工具" ShowMaximize="False">
             <ui:TitleBar.Icon>
                 <ui:ImageIcon Source="pack://application:,,,/Icons/app.ico" />
             </ui:TitleBar.Icon>
@@ -194,7 +194,7 @@
                     </Border>
                     <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="插件部署" FontSize="22" FontWeight="SemiBold" />
+                            <TextBlock Text="AFR-CAD字体修复" FontSize="22" FontWeight="SemiBold" />
                             <Button Margin="10,2,0,0"
                                     Padding="0"
                                     BorderThickness="0"

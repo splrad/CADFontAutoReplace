@@ -1,10 +1,14 @@
 #if DEBUG
 
+using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading;
 
 namespace AFR.Services;
 
@@ -12,13 +16,12 @@ namespace AFR.Services;
 internal enum DiagLevel { Info, Warn, Error }
 
 /// <summary>
-/// 全场景内部追踪系统 — 记录插件全生命周期的诊断日志。
-/// 涵盖启动/卸载、UI 交互、底层 API 通信、性能监测与异常追踪。
-/// 仅在 DEBUG 编译模式下生效，Release 版本中所有调用被编译器自动移除。
+/// 全场景内部追踪系统 - 以 JSONL 记录插件全生命周期的时序诊断事件。
+/// 仅在 DEBUG 编译模式下生效，Release 版本中常规日志调用被编译器自动移除。
 ///
-/// 格式:  [Timestamp] [Level] [T:ThreadId] [Source.Caller] Message | ContextKey=Value ...
-/// 输出:  插件目录下的 AFR_Diag_*.log 文件（单文件上限 10MB 自动分包，保留 7 天）
-/// 启用:  在 PluginEntryBase.Initialize() 中调用 DiagnosticLogger.Enable()
+/// 格式:  每行一个 JSON 对象，包含 seq/timestamp/level/status/module/operation/message/context/durationMs/error。
+/// 输出:  插件目录下的 AFR_Diag_*.jsonl 文件（单文件上限 10MB 自动分包，保留 7 天）。
+/// 启用:  在 PluginEntryBase.Initialize() 中调用 DiagnosticLogger.Enable()。
 /// </summary>
 internal static class DiagnosticLogger
 {
@@ -26,7 +29,12 @@ internal static class DiagnosticLogger
     private const long MaxFileSize = 10L * 1024 * 1024; // 10MB
     private const int RetentionDays = 7;
     private const string FilePrefix = "AFR_Diag_";
-    private const string FilePattern = "AFR_Diag_*.log";
+    private const string FileExtension = ".jsonl";
+    private const string FilePattern = "AFR_Diag_*.jsonl";
+    private const string StatusStart = "START";
+    private const string StatusOk = "OK";
+    private const string StatusFail = "FAIL";
+    private const string StatusSkip = "SKIP";
     private static readonly string FlushSentinel = new('\0', 1); // 引用相等标记
 
     // ── 异步写入基础设施 ──
@@ -47,17 +55,7 @@ internal static class DiagnosticLogger
     private static readonly Dictionary<string, string> _context = new();
     private static readonly object _contextLock = new();
 
-    // ── 阶段计时 ──
-    private static readonly Stopwatch _phaseTimer = new();
-    private static string? _currentPhase;
-    private static Stopwatch? _sessionTimer;
-
-    // ── 统计计数器（Interlocked 保证线程安全） ──
-    private static int _stylesScanned;
-    private static int _missingDetected;
-    private static int _replacementOps;
-    private static int _skippedCount;
-    private static int _errorCount;
+    private static long _sequence;
 
     /// <summary>诊断日志是否已启用。</summary>
     public static bool IsEnabled => _queue != null;
@@ -80,23 +78,17 @@ internal static class DiagnosticLogger
         Directory.CreateDirectory(outputDir);
         _outputDir = outputDir;
 
-        // 清理过期日志
         CleanupOldLogs(outputDir);
 
-        // 初始化文件
-        _fileTimestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        _fileTimestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
         _fileSequence = 0;
         _currentFileSize = 0;
+        Interlocked.Exchange(ref _sequence, 0);
         OpenNewLogFile();
 
-        // 写入文件头（消费者线程尚未启动，直接写入安全）
         WriteHeaderDirect();
 
-        // 启动异步消费者
         _stopping = false;
-        ResetCounters();
-        _sessionTimer = Stopwatch.StartNew();
-
         var queue = new ConcurrentQueue<string>();
         _signal = new ManualResetEventSlim(false);
         _writerThread = new Thread(WriterLoop)
@@ -105,7 +97,7 @@ internal static class DiagnosticLogger
             Name = "AFR-DiagLog",
             Priority = ThreadPriority.BelowNormal
         };
-        _queue = queue; // IsEnabled 变为 true — 放在最后，保证基础设施就绪
+        _queue = queue; // IsEnabled 变为 true - 放在最后，保证基础设施就绪
         _writerThread.Start();
     }
 
@@ -117,11 +109,11 @@ internal static class DiagnosticLogger
     {
         if (_queue == null) return;
 
+        Ok("DiagnosticLogger", "Disable", "诊断日志关闭");
         _stopping = true;
         _signal?.Set();
         _writerThread?.Join(TimeSpan.FromSeconds(5));
 
-        // 安全网：主线程最终排空
         DrainQueue();
 
         try { _writer?.Dispose(); } catch { }
@@ -130,12 +122,11 @@ internal static class DiagnosticLogger
         _signal?.Dispose();
         _signal = null;
         _queue = null; // IsEnabled 变为 false
-        _sessionTimer = null;
         ClearAllContextInternal();
     }
 
     /// <summary>
-    /// 显式刷盘 — 确保已入队的日志全部写入磁盘。
+    /// 显式刷盘 - 确保已入队的日志全部写入磁盘。
     /// </summary>
     [Conditional("DEBUG")]
     public static void Flush()
@@ -151,7 +142,7 @@ internal static class DiagnosticLogger
     //  环境上下文
     // ══════════════════════════════════════════
 
-    /// <summary>设置环境上下文键值对，自动附加到每条日志末尾。</summary>
+    /// <summary>设置环境上下文键值对，自动写入到每条日志的 context 对象。</summary>
     [Conditional("DEBUG")]
     public static void SetContext(string key, string value)
     {
@@ -173,42 +164,87 @@ internal static class DiagnosticLogger
     }
 
     // ══════════════════════════════════════════
-    //  核心日志 API
+    //  结构化日志 API
     // ══════════════════════════════════════════
 
-    /// <summary>记录 INFO 级别日志。</summary>
     [Conditional("DEBUG")]
-    public static void Info(string source, string message, [CallerMemberName] string caller = "")
-    {
-        if (!IsEnabled) return;
-        EnqueueEntry(DiagLevel.Info, source, caller, message);
-    }
-
-    /// <summary>记录 WARN 级别日志。</summary>
-    [Conditional("DEBUG")]
-    public static void Warn(string source, string message, [CallerMemberName] string caller = "")
-    {
-        if (!IsEnabled) return;
-        EnqueueEntry(DiagLevel.Warn, source, caller, message);
-    }
-
-    /// <summary>记录 ERROR 级别日志，附带异常详情与堆栈。</summary>
-    [Conditional("DEBUG")]
-    public static void Error(string source, string message, Exception? ex = null,
+    public static void Start(
+        string module,
+        string operation,
+        string message,
+        IReadOnlyDictionary<string, object?>? fields = null,
         [CallerMemberName] string caller = "")
     {
         if (!IsEnabled) return;
-        Interlocked.Increment(ref _errorCount);
-        if (ex != null)
+        EnqueueEntry(DiagLevel.Info, StatusStart, module, operation, message, fields, null, null);
+    }
+
+    [Conditional("DEBUG")]
+    public static void Ok(
+        string module,
+        string operation,
+        string message,
+        IReadOnlyDictionary<string, object?>? fields = null,
+        long? durationMs = null,
+        [CallerMemberName] string caller = "")
+    {
+        if (!IsEnabled) return;
+        EnqueueEntry(DiagLevel.Info, StatusOk, module, operation, message, fields, durationMs, null);
+    }
+
+    [Conditional("DEBUG")]
+    public static void Fail(
+        string module,
+        string operation,
+        string message,
+        Exception? ex = null,
+        IReadOnlyDictionary<string, object?>? fields = null,
+        long? durationMs = null,
+        [CallerMemberName] string caller = "")
+    {
+        if (!IsEnabled) return;
+        EnqueueEntry(DiagLevel.Error, StatusFail, module, operation, message, fields, durationMs, ex);
+    }
+
+    [Conditional("DEBUG")]
+    public static void Skip(
+        string module,
+        string operation,
+        string reason,
+        IReadOnlyDictionary<string, object?>? fields = null,
+        [CallerMemberName] string caller = "")
+    {
+        if (!IsEnabled) return;
+        EnqueueEntry(DiagLevel.Warn, StatusSkip, module, operation, reason, fields, null, null);
+    }
+
+    /// <summary>
+    /// 执行一个带时序日志的步骤。Release 分支也会执行 action，但不产生诊断输出。
+    /// </summary>
+    public static void RunStep(
+        string module,
+        string operation,
+        string startMessage,
+        string okMessage,
+        Action action,
+        IReadOnlyDictionary<string, object?>? fields = null,
+        [CallerMemberName] string caller = "")
+    {
+        if (action == null) throw new ArgumentNullException(nameof(action));
+
+        var timer = Stopwatch.StartNew();
+        Start(module, operation, startMessage, fields, caller);
+        try
         {
-            EnqueueEntry(DiagLevel.Error, source, caller,
-                $"{message}: {ex.GetType().Name}: {ex.Message}");
-            if (ex.StackTrace != null)
-                Enqueue($"         {ex.StackTrace.Replace("\n", "\n         ")}");
+            action();
+            timer.Stop();
+            Ok(module, operation, okMessage, fields, timer.ElapsedMilliseconds, caller);
         }
-        else
+        catch (Exception ex)
         {
-            EnqueueEntry(DiagLevel.Error, source, caller, message);
+            timer.Stop();
+            Fail(module, operation, okMessage, ex, fields, timer.ElapsedMilliseconds, caller);
+            throw;
         }
     }
 
@@ -222,35 +258,19 @@ internal static class DiagnosticLogger
         string trueTypeFont, [CallerMemberName] string caller = "")
     {
         if (!IsEnabled) return;
-        SetContext("Doc", Path.GetFileName(docPath));
-        ResetCounters();
-        _sessionTimer?.Restart();
-        EnqueueEntry(DiagLevel.Info, "文档", caller, docPath);
-        EnqueueEntry(DiagLevel.Info, "配置", caller,
-            $"MainFont='{mainFont}' BigFont='{bigFont}' TrueType='{trueTypeFont}'");
-    }
-
-    /// <summary>标记阶段开始，自动开始计时。</summary>
-    [Conditional("DEBUG")]
-    public static void BeginPhase(string phaseName, [CallerMemberName] string caller = "")
-    {
-        if (!IsEnabled) return;
-        _currentPhase = phaseName;
-        _phaseTimer.Restart();
-        EnqueueEntry(DiagLevel.Info, "阶段", caller, $"── 开始: {phaseName} ──");
-    }
-
-    /// <summary>标记阶段结束，输出耗时和可选摘要。</summary>
-    [Conditional("DEBUG")]
-    public static void EndPhase(string? summary = null, [CallerMemberName] string caller = "")
-    {
-        if (!IsEnabled) return;
-        _phaseTimer.Stop();
-        var msg = $"── 结束: {_currentPhase} (耗时: {_phaseTimer.ElapsedMilliseconds}ms)";
-        if (summary != null) msg += $" {summary}";
-        msg += " ──";
-        EnqueueEntry(DiagLevel.Info, "阶段", caller, msg);
-        _currentPhase = null;
+        SetContext("doc", Path.GetFileName(docPath));
+        Start(
+            "Document",
+            "Execute",
+            "文档处理开始",
+            new Dictionary<string, object?>
+            {
+                ["path"] = docPath,
+                ["mainFont"] = mainFont,
+                ["bigFont"] = bigFont,
+                ["trueTypeFont"] = trueTypeFont,
+                ["caller"] = caller
+            });
     }
 
     // ══════════════════════════════════════════
@@ -264,10 +284,19 @@ internal static class DiagnosticLogger
         [CallerMemberName] string caller = "")
     {
         if (!IsEnabled) return;
-        Interlocked.Increment(ref _stylesScanned);
-        EnqueueEntry(DiagLevel.Info, "样式扫描", caller,
-            $"'{styleName}' FileName='{fileName}' BigFont='{bigFont}' " +
-            $"TypeFace='{typeFace}' IsTrueType={isTrueType} IsShapeFile={isShapeFile}");
+        Ok(
+            "StyleScan",
+            caller,
+            "样式扫描完成",
+            new Dictionary<string, object?>
+            {
+                ["styleName"] = styleName,
+                ["fileName"] = fileName,
+                ["bigFont"] = bigFont,
+                ["typeFace"] = typeFace,
+                ["isTrueType"] = isTrueType,
+                ["isShapeFile"] = isShapeFile
+            });
     }
 
     /// <summary>记录字体可用性检查结果。</summary>
@@ -276,9 +305,23 @@ internal static class DiagnosticLogger
         string? detail = null, [CallerMemberName] string caller = "")
     {
         if (!IsEnabled) return;
-        var msg = $"'{fontName}' 类型={checkType} 可用={available}";
-        if (detail != null) msg += $" {detail}";
-        EnqueueEntry(DiagLevel.Info, "可用性", caller, msg);
+        var fields = new Dictionary<string, object?>
+        {
+            ["fontName"] = fontName,
+            ["checkType"] = checkType,
+            ["available"] = available
+        };
+        if (detail != null) fields["detail"] = detail;
+
+        EnqueueEntry(
+            available ? DiagLevel.Info : DiagLevel.Warn,
+            available ? StatusOk : StatusFail,
+            "FontAvailability",
+            caller,
+            available ? "字体可用性检查通过" : "字体可用性检查未通过",
+            fields,
+            null,
+            null);
     }
 
     /// <summary>记录检测到的缺失字体。</summary>
@@ -287,9 +330,17 @@ internal static class DiagnosticLogger
         bool isTrueType, [CallerMemberName] string caller = "")
     {
         if (!IsEnabled) return;
-        Interlocked.Increment(ref _missingDetected);
-        EnqueueEntry(DiagLevel.Info, "缺失", caller,
-            $"'{styleName}' 主字体缺失={isMainMissing} 大字体缺失={isBigMissing} IsTrueType={isTrueType}");
+        Ok(
+            "MissingFont",
+            caller,
+            "检测到缺失字体",
+            new Dictionary<string, object?>
+            {
+                ["styleName"] = styleName,
+                ["isMainMissing"] = isMainMissing,
+                ["isBigMissing"] = isBigMissing,
+                ["isTrueType"] = isTrueType
+            });
     }
 
     // ══════════════════════════════════════════
@@ -302,10 +353,23 @@ internal static class DiagnosticLogger
         string? reason = null, [CallerMemberName] string caller = "")
     {
         if (!IsEnabled) return;
-        var level = valid ? DiagLevel.Info : DiagLevel.Warn;
-        var msg = $"{role}='{fontName}' 有效={valid}";
-        if (reason != null) msg += $" 原因={reason}";
-        EnqueueEntry(level, "预校验", caller, msg);
+        var fields = new Dictionary<string, object?>
+        {
+            ["fontName"] = fontName,
+            ["role"] = role,
+            ["valid"] = valid
+        };
+        if (reason != null) fields["reason"] = reason;
+
+        EnqueueEntry(
+            valid ? DiagLevel.Info : DiagLevel.Warn,
+            valid ? StatusOk : StatusFail,
+            "PreValidation",
+            caller,
+            valid ? "替换字体预校验通过" : "替换字体预校验未通过",
+            fields,
+            null,
+            null);
     }
 
     /// <summary>记录字体名归一化结果。</summary>
@@ -314,18 +378,34 @@ internal static class DiagnosticLogger
         [CallerMemberName] string caller = "")
     {
         if (!IsEnabled) return;
-        EnqueueEntry(DiagLevel.Info, "归一化", caller, $"'{input}' → '{output}'");
+        Ok(
+            "Normalize",
+            caller,
+            "字体名归一化完成",
+            new Dictionary<string, object?>
+            {
+                ["input"] = input,
+                ["output"] = output
+            });
     }
 
-    /// <summary>记录单个属性的替换操作（旧值→新值）。</summary>
+    /// <summary>记录单个属性的替换操作（旧值到新值）。</summary>
     [Conditional("DEBUG")]
     public static void LogReplacement(string styleName, string property, string oldValue,
         string newValue, [CallerMemberName] string caller = "")
     {
         if (!IsEnabled) return;
-        Interlocked.Increment(ref _replacementOps);
-        EnqueueEntry(DiagLevel.Info, "替换", caller,
-            $"'{styleName}' {property}: '{oldValue}' → '{newValue}'");
+        Ok(
+            "Replacement",
+            caller,
+            "样式属性替换完成",
+            new Dictionary<string, object?>
+            {
+                ["styleName"] = styleName,
+                ["property"] = property,
+                ["oldValue"] = oldValue,
+                ["newValue"] = newValue
+            });
     }
 
     /// <summary>记录跳过的样式及原因。</summary>
@@ -334,8 +414,11 @@ internal static class DiagnosticLogger
         [CallerMemberName] string caller = "")
     {
         if (!IsEnabled) return;
-        Interlocked.Increment(ref _skippedCount);
-        EnqueueEntry(DiagLevel.Warn, "跳过", caller, $"'{styleName}' 原因={reason}");
+        Skip(
+            "StyleReplacement",
+            caller,
+            reason,
+            new Dictionary<string, object?> { ["styleName"] = styleName });
     }
 
     /// <summary>记录替换后的读回验证。</summary>
@@ -344,74 +427,39 @@ internal static class DiagnosticLogger
         string actual, [CallerMemberName] string caller = "")
     {
         if (!IsEnabled) return;
-        bool match = string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase);
-        var level = match ? DiagLevel.Info : DiagLevel.Warn;
-        var symbol = match ? "✓" : "✗";
-        EnqueueEntry(level, "验证", caller,
-            $"'{styleName}' {property} 期望='{expected}' 实际='{actual}' {symbol}");
+        bool match = string.Equals(expected, actual, StringComparison.Ordinal);
+        EnqueueEntry(
+            match ? DiagLevel.Info : DiagLevel.Warn,
+            match ? StatusOk : StatusFail,
+            "Validation",
+            caller,
+            match ? "读回验证通过" : "读回验证未通过",
+            new Dictionary<string, object?>
+            {
+                ["styleName"] = styleName,
+                ["property"] = property,
+                ["expected"] = expected,
+                ["actual"] = actual
+            },
+            null,
+            null);
     }
 
     // ══════════════════════════════════════════
-    //  通用日志
+    //  内部方法 - 格式化与入队
     // ══════════════════════════════════════════
 
-    /// <summary>记录通用分类日志（INFO 级别）。</summary>
-    [Conditional("DEBUG")]
-    public static void Log(string category, string message,
-        [CallerMemberName] string caller = "")
+    private static void EnqueueEntry(
+        DiagLevel level,
+        string status,
+        string module,
+        string operation,
+        string message,
+        IReadOnlyDictionary<string, object?>? fields,
+        long? durationMs,
+        Exception? ex)
     {
-        if (!IsEnabled) return;
-        EnqueueEntry(DiagLevel.Info, category, caller, message);
-    }
-
-    /// <summary>记录错误及异常详情（ERROR 级别，含完整堆栈）。</summary>
-    [Conditional("DEBUG")]
-    public static void LogError(string context, Exception ex,
-        [CallerMemberName] string caller = "")
-    {
-        if (!IsEnabled) return;
-        Interlocked.Increment(ref _errorCount);
-        EnqueueEntry(DiagLevel.Error, context, caller,
-            $"{ex.GetType().Name}: {ex.Message}");
-        if (ex.StackTrace != null)
-            Enqueue($"         {ex.StackTrace.Replace("\n", "\n         ")}");
-    }
-
-    /// <summary>输出最终统计汇总。</summary>
-    [Conditional("DEBUG")]
-    public static void WriteSummary([CallerMemberName] string caller = "")
-    {
-        if (!IsEnabled) return;
-        _sessionTimer?.Stop();
-        Enqueue("");
-        Enqueue("==================== 汇总 ====================");
-        Enqueue($"  扫描样式数: {_stylesScanned}");
-        Enqueue($"  检测缺失:   {_missingDetected}");
-        Enqueue($"  替换操作:   {_replacementOps}");
-        Enqueue($"  跳过:       {_skippedCount}");
-        Enqueue($"  错误:       {_errorCount}");
-        Enqueue($"  总耗时:     {_sessionTimer?.ElapsedMilliseconds ?? 0}ms");
-        Enqueue("===============================================");
-        Enqueue("");
-    }
-
-    // ══════════════════════════════════════════
-    //  内部方法 — 格式化与入队
-    // ══════════════════════════════════════════
-
-    private static void EnqueueEntry(DiagLevel level, string source, string caller, string message)
-    {
-        string levelTag = level switch
-        {
-            DiagLevel.Info  => "INFO ",
-            DiagLevel.Warn  => "WARN ",
-            DiagLevel.Error => "ERROR",
-            _               => "?    "
-        };
-        int tid = Environment.CurrentManagedThreadId;
-        string location = string.IsNullOrEmpty(source) ? caller : $"{source}.{caller}";
-        string ctx = BuildContextSuffix();
-        Enqueue($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [{levelTag}] [T:{tid:D2}] [{location}] {message}{ctx}");
+        Enqueue(BuildJsonLine(level, status, module, operation, message, fields, durationMs, ex));
     }
 
     private static void Enqueue(string line)
@@ -420,20 +468,219 @@ internal static class DiagnosticLogger
         _signal?.Set();
     }
 
-    private static string BuildContextSuffix()
+    private static string BuildJsonLine(
+        DiagLevel level,
+        string status,
+        string module,
+        string operation,
+        string message,
+        IReadOnlyDictionary<string, object?>? fields,
+        long? durationMs,
+        Exception? ex)
     {
+        long seq = Interlocked.Increment(ref _sequence);
+        var sb = new StringBuilder(512);
+        sb.Append('{');
+        AppendProperty(sb, "seq", seq);
+        sb.Append(',');
+        AppendProperty(sb, "timestamp", DateTimeOffset.Now.ToString("yyyy-MM-ddTHH:mm:ss.fffzzz", CultureInfo.InvariantCulture));
+        sb.Append(',');
+        AppendProperty(sb, "level", FormatLevel(level));
+        sb.Append(',');
+        AppendProperty(sb, "status", status);
+        sb.Append(',');
+        AppendProperty(sb, "module", NormalizeModule(module));
+        sb.Append(',');
+        AppendProperty(sb, "operation", NormalizeOperation(operation));
+        sb.Append(',');
+        AppendProperty(sb, "message", message);
+        sb.Append(',');
+        AppendProperty(sb, "threadId", Environment.CurrentManagedThreadId);
+        sb.Append(',');
+        sb.Append("\"context\":");
+        AppendContextObject(sb, fields);
+        sb.Append(',');
+        sb.Append("\"durationMs\":");
+        AppendJsonValue(sb, durationMs);
+        sb.Append(',');
+        sb.Append("\"error\":");
+        AppendException(sb, ex);
+        sb.Append('}');
+        return sb.ToString();
+    }
+
+    private static string FormatLevel(DiagLevel level)
+        => level switch
+        {
+            DiagLevel.Info => "INFO",
+            DiagLevel.Warn => "WARN",
+            DiagLevel.Error => "ERROR",
+            _ => "INFO"
+        };
+
+    private static string NormalizeModule(string module)
+        => string.IsNullOrWhiteSpace(module) ? "DiagnosticLogger" : module.Trim();
+
+    private static string NormalizeOperation(string operation)
+        => string.IsNullOrWhiteSpace(operation) ? "Log" : operation.Trim();
+
+    private static void AppendContextObject(StringBuilder sb, IReadOnlyDictionary<string, object?>? fields)
+    {
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         lock (_contextLock)
         {
-            if (_context.Count == 0) return "";
-            var sb = new StringBuilder(" |");
-            foreach (var (key, value) in _context)
-                sb.Append($" {key}={value}");
-            return sb.ToString();
+            foreach (var pair in _context)
+                values[pair.Key] = pair.Value;
+        }
+
+        if (fields != null)
+        {
+            foreach (var pair in fields)
+            {
+                if (!string.IsNullOrWhiteSpace(pair.Key))
+                    values[pair.Key] = pair.Value;
+            }
+        }
+
+        sb.Append('{');
+        bool first = true;
+        foreach (var pair in values)
+        {
+            if (!first) sb.Append(',');
+            first = false;
+            AppendJsonString(sb, pair.Key);
+            sb.Append(':');
+            AppendJsonValue(sb, pair.Value);
+        }
+        sb.Append('}');
+    }
+
+    private static void AppendProperty(StringBuilder sb, string name, object? value)
+    {
+        AppendJsonString(sb, name);
+        sb.Append(':');
+        AppendJsonValue(sb, value);
+    }
+
+    private static void AppendException(StringBuilder sb, Exception? ex)
+    {
+        if (ex == null)
+        {
+            sb.Append("null");
+            return;
+        }
+
+        sb.Append('{');
+        AppendProperty(sb, "type", ex.GetType().FullName ?? ex.GetType().Name);
+        sb.Append(',');
+        AppendProperty(sb, "message", ex.Message);
+        sb.Append(',');
+        AppendProperty(sb, "stackTrace", ex.StackTrace);
+        if (ex.InnerException != null)
+        {
+            sb.Append(',');
+            AppendProperty(sb, "innerType", ex.InnerException.GetType().FullName ?? ex.InnerException.GetType().Name);
+            sb.Append(',');
+            AppendProperty(sb, "innerMessage", ex.InnerException.Message);
+        }
+        sb.Append('}');
+    }
+
+    private static void AppendJsonValue(StringBuilder sb, object? value)
+    {
+        switch (value)
+        {
+            case null:
+                sb.Append("null");
+                break;
+            case string text:
+                AppendJsonString(sb, text);
+                break;
+            case bool boolean:
+                sb.Append(boolean ? "true" : "false");
+                break;
+            case byte or sbyte or short or ushort or int or uint or long or ulong:
+                sb.Append(Convert.ToString(value, CultureInfo.InvariantCulture));
+                break;
+            case float single:
+                if (float.IsNaN(single) || float.IsInfinity(single)) sb.Append("null");
+                else sb.Append(single.ToString("R", CultureInfo.InvariantCulture));
+                break;
+            case double number:
+                if (double.IsNaN(number) || double.IsInfinity(number)) sb.Append("null");
+                else sb.Append(number.ToString("R", CultureInfo.InvariantCulture));
+                break;
+            case decimal dec:
+                sb.Append(dec.ToString(CultureInfo.InvariantCulture));
+                break;
+            case DateTime dateTime:
+                AppendJsonString(sb, dateTime.ToString("o", CultureInfo.InvariantCulture));
+                break;
+            case DateTimeOffset dateTimeOffset:
+                AppendJsonString(sb, dateTimeOffset.ToString("o", CultureInfo.InvariantCulture));
+                break;
+            case TimeSpan timeSpan:
+                sb.Append(timeSpan.TotalMilliseconds.ToString("R", CultureInfo.InvariantCulture));
+                break;
+            case Enum enumValue:
+                AppendJsonString(sb, enumValue.ToString());
+                break;
+            default:
+                AppendJsonString(sb, Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty);
+                break;
         }
     }
 
+    private static void AppendJsonString(StringBuilder sb, string? value)
+    {
+        sb.Append('"');
+        string? text = value;
+        if (!string.IsNullOrEmpty(text))
+        {
+            foreach (char c in text!)
+            {
+                switch (c)
+                {
+                    case '"':
+                        sb.Append("\\\"");
+                        break;
+                    case '\\':
+                        sb.Append("\\\\");
+                        break;
+                    case '\b':
+                        sb.Append("\\b");
+                        break;
+                    case '\f':
+                        sb.Append("\\f");
+                        break;
+                    case '\n':
+                        sb.Append("\\n");
+                        break;
+                    case '\r':
+                        sb.Append("\\r");
+                        break;
+                    case '\t':
+                        sb.Append("\\t");
+                        break;
+                    default:
+                        if (c < ' ')
+                        {
+                            sb.Append("\\u");
+                            sb.Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+                        }
+                        else
+                        {
+                            sb.Append(c);
+                        }
+                        break;
+                }
+            }
+        }
+        sb.Append('"');
+    }
+
     // ══════════════════════════════════════════
-    //  内部方法 — 消费者线程
+    //  内部方法 - 消费者线程
     // ══════════════════════════════════════════
 
     private static void WriterLoop()
@@ -480,7 +727,7 @@ internal static class DiagnosticLogger
     }
 
     // ══════════════════════════════════════════
-    //  内部方法 — 文件管理
+    //  内部方法 - 文件管理
     // ══════════════════════════════════════════
 
     private static void OpenNewLogFile()
@@ -494,8 +741,8 @@ internal static class DiagnosticLogger
     private static string BuildFileName()
     {
         return _fileSequence == 0
-            ? $"{FilePrefix}{_fileTimestamp}.log"
-            : $"{FilePrefix}{_fileTimestamp}_{_fileSequence:D3}.log";
+            ? $"{FilePrefix}{_fileTimestamp}{FileExtension}"
+            : $"{FilePrefix}{_fileTimestamp}_{_fileSequence:D3}{FileExtension}";
     }
 
     private static void RollFile()
@@ -503,31 +750,53 @@ internal static class DiagnosticLogger
         try { _writer?.Flush(); _writer?.Dispose(); } catch { }
         _fileSequence++;
         OpenNewLogFile();
-        _writer?.WriteLine($"── 续前文件 (分包 #{_fileSequence}) ──");
-        _writer?.WriteLine("");
+        WriteLineToFile(BuildJsonLine(
+            DiagLevel.Info,
+            StatusOk,
+            "DiagnosticLogger",
+            "RollFile",
+            "诊断日志分包已创建",
+            new Dictionary<string, object?> { ["fileSequence"] = _fileSequence },
+            null,
+            null));
     }
 
     private static void WriteHeaderDirect()
     {
         if (_writer == null) return;
-        _writer.WriteLine("================== AFR 诊断日志 ==================");
-        _writer.WriteLine($"时间:     {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
-        _writer.WriteLine($"日志路径: {Path.Combine(_outputDir!, BuildFileName())}");
-        _writer.WriteLine($"插件版本: {PluginVersionService.GetPluginVersion()}");
-        _writer.WriteLine($"运行时:   {Environment.Version}");
-        _writer.WriteLine($"操作系统: {Environment.OSVersion}");
-        _writer.WriteLine("==================================================");
-        _writer.WriteLine("");
-        _writer.Flush();
-        _currentFileSize += 500; // 头部大小估算
+        string filePath = Path.Combine(_outputDir!, BuildFileName());
+        WriteLineToFile(BuildJsonLine(
+            DiagLevel.Info,
+            StatusOk,
+            "DiagnosticLogger",
+            "Enable",
+            "诊断日志已启用",
+            new Dictionary<string, object?>
+            {
+                ["format"] = "jsonl",
+                ["logPath"] = filePath,
+                ["pluginVersion"] = PluginVersionService.GetPluginVersion(),
+                ["runtime"] = Environment.Version.ToString(),
+                ["os"] = Environment.OSVersion.ToString(),
+                ["retentionDays"] = RetentionDays,
+                ["maxFileSizeBytes"] = MaxFileSize
+            },
+            null,
+            null));
+        try { _writer.Flush(); } catch { }
     }
 
     private static void CleanupOldLogs(string dir)
     {
+        CleanupOldLogsByPattern(dir, FilePattern);
+    }
+
+    private static void CleanupOldLogsByPattern(string dir, string pattern)
+    {
         try
         {
             var cutoff = DateTime.Now.AddDays(-RetentionDays);
-            foreach (var file in Directory.GetFiles(dir, FilePattern))
+            foreach (var file in Directory.GetFiles(dir, pattern))
             {
                 try
                 {
@@ -540,15 +809,6 @@ internal static class DiagnosticLogger
         catch { }
     }
 
-    private static void ResetCounters()
-    {
-        _stylesScanned = 0;
-        _missingDetected = 0;
-        _replacementOps = 0;
-        _skippedCount = 0;
-        _errorCount = 0;
-    }
-
     private static void ClearAllContextInternal()
     {
         lock (_contextLock) { _context.Clear(); }
@@ -557,13 +817,15 @@ internal static class DiagnosticLogger
 
 #else
 
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
 namespace AFR.Services;
 
 /// <summary>
-/// Release 构建的空壳 — 所有方法通过 [Conditional("DEBUG")] 在编译时自动移除调用。
+/// Release 构建的空壳 - 所有普通日志方法通过 [Conditional("DEBUG")] 在编译时自动移除调用。
 /// </summary>
 internal static class DiagnosticLogger
 {
@@ -575,12 +837,12 @@ internal static class DiagnosticLogger
     [Conditional("DEBUG")] public static void SetContext(string key, string value) { }
     [Conditional("DEBUG")] public static void ClearContext(string key) { }
     [Conditional("DEBUG")] public static void ClearAllContext() { }
-    [Conditional("DEBUG")] public static void Info(string source, string message, [CallerMemberName] string caller = "") { }
-    [Conditional("DEBUG")] public static void Warn(string source, string message, [CallerMemberName] string caller = "") { }
-    [Conditional("DEBUG")] public static void Error(string source, string message, Exception? ex = null, [CallerMemberName] string caller = "") { }
+    [Conditional("DEBUG")] public static void Start(string module, string operation, string message, IReadOnlyDictionary<string, object?>? fields = null, [CallerMemberName] string caller = "") { }
+    [Conditional("DEBUG")] public static void Ok(string module, string operation, string message, IReadOnlyDictionary<string, object?>? fields = null, long? durationMs = null, [CallerMemberName] string caller = "") { }
+    [Conditional("DEBUG")] public static void Fail(string module, string operation, string message, Exception? ex = null, IReadOnlyDictionary<string, object?>? fields = null, long? durationMs = null, [CallerMemberName] string caller = "") { }
+    [Conditional("DEBUG")] public static void Skip(string module, string operation, string reason, IReadOnlyDictionary<string, object?>? fields = null, [CallerMemberName] string caller = "") { }
+    public static void RunStep(string module, string operation, string startMessage, string okMessage, Action action, IReadOnlyDictionary<string, object?>? fields = null, [CallerMemberName] string caller = "") => action();
     [Conditional("DEBUG")] public static void BeginDocument(string docPath, string mainFont, string bigFont, string trueTypeFont, [CallerMemberName] string caller = "") { }
-    [Conditional("DEBUG")] public static void BeginPhase(string phaseName, [CallerMemberName] string caller = "") { }
-    [Conditional("DEBUG")] public static void EndPhase(string? summary = null, [CallerMemberName] string caller = "") { }
     [Conditional("DEBUG")] public static void LogStyleScan(string styleName, string fileName, string bigFont, string typeFace, bool isTrueType, bool isShapeFile, [CallerMemberName] string caller = "") { }
     [Conditional("DEBUG")] public static void LogFontAvailability(string fontName, string checkType, bool available, string? detail = null, [CallerMemberName] string caller = "") { }
     [Conditional("DEBUG")] public static void LogMissing(string styleName, bool isMainMissing, bool isBigMissing, bool isTrueType, [CallerMemberName] string caller = "") { }
@@ -589,9 +851,6 @@ internal static class DiagnosticLogger
     [Conditional("DEBUG")] public static void LogReplacement(string styleName, string property, string oldValue, string newValue, [CallerMemberName] string caller = "") { }
     [Conditional("DEBUG")] public static void LogSkipped(string styleName, string reason, [CallerMemberName] string caller = "") { }
     [Conditional("DEBUG")] public static void LogValidation(string styleName, string property, string expected, string actual, [CallerMemberName] string caller = "") { }
-    [Conditional("DEBUG")] public static void Log(string category, string message, [CallerMemberName] string caller = "") { }
-    [Conditional("DEBUG")] public static void LogError(string context, Exception ex, [CallerMemberName] string caller = "") { }
-    [Conditional("DEBUG")] public static void WriteSummary([CallerMemberName] string caller = "") { }
 }
 
 #endif

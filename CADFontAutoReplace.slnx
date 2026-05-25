@@ -4,51 +4,105 @@
     <Platform Name="x64" />
   </Configurations>
 
-  <Folder Name="/Solution Items/">
+  <Folder Name="/Repository/">
+    <File Path=".editorconfig" />
+    <File Path=".gitattributes" />
+    <File Path=".gitignore" />
+    <File Path="CADFontAutoReplace.slnx" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="global.json" />
+    <File Path="LICENSE.txt" />
     <File Path="Version.props" />
   </Folder>
 
-  <Project Path="src/AFR.Core/AFR.Core.shproj" Id="3eed6822-3b82-4bbd-9842-3f32258af0f0" />
-  <Project Path="src/AFR.Polyfills/AFR.Polyfills.shproj" Id="e1d65b0a-4f5c-42fb-b439-da31eaf465b1" />
-  <Project Path="src/AFR.HostIntegration/AFR.HostIntegration.shproj" Id="c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f" />
-  <Project Path="src/AFR.UI/AFR.UI.shproj" Id="b542e201-51b9-4103-9a5c-8e87772186d1" />
-  <Project Path="src/AFR.Deployer/AFR.Deployer.csproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234567890">
-    <Platform Solution="*|x64" Project="x64" />
-  </Project>
+  <Folder Name="/Docs/">
+    <File Path="README.md" />
+    <File Path="PROJECT_HANDOVER.md" />
+    <File Path="docs/autodesk-fonts.md" />
+    <File Path="docs/developer-guide-advanced.md" />
+    <File Path="docs/developer-guide-beginner.md" />
+    <File Path="docs/font-hook-evidence-and-boundaries.md" />
+    <File Path="docs/git-branch-guidelines.md" />
+  </Folder>
 
-  <Folder Name="/AutoCAD/">
-    <Project Path="src/AutoCAD/AFR.AutoCAD/AFR.AutoCAD.shproj" Id="3ce2a9ba-19c1-4439-9ec8-e68fdb3f533d" />
-    <Project Path="src/AutoCAD/AFR-ACAD2018/AFR-ACAD2018.csproj" Id="7ab78a85-217e-46d8-bc9c-cebe7062e697">
-      <Platform Solution="*|x64" Project="x64" />
-    </Project>
-    <Project Path="src/AutoCAD/AFR-ACAD2019/AFR-ACAD2019.csproj" Id="505904ee-5fda-4e6e-a8c7-f1a743a98017">
-      <Platform Solution="*|x64" Project="x64" />
-    </Project>
-    <Project Path="src/AutoCAD/AFR-ACAD2020/AFR-ACAD2020.csproj" Id="71997328-f134-427b-99d2-bac2ef3f7107">
-      <Platform Solution="*|x64" Project="x64" />
-    </Project>
-    <Project Path="src/AutoCAD/AFR-ACAD2021/AFR-ACAD2021.csproj" Id="57e003a6-b28c-45e5-839e-90984eb70577">
-      <Platform Solution="*|x64" Project="x64" />
-    </Project>
-    <Project Path="src/AutoCAD/AFR-ACAD2022/AFR-ACAD2022.csproj" Id="96831ced-0cff-4431-900d-9aac9f6a0ba1">
-      <Platform Solution="*|x64" Project="x64" />
-    </Project>
-    <Project Path="src/AutoCAD/AFR-ACAD2023/AFR-ACAD2023.csproj" Id="f1425e62-3c56-4244-973f-79ba18b6a980">
-      <Platform Solution="*|x64" Project="x64" />
-    </Project>
-    <Project Path="src/AutoCAD/AFR-ACAD2024/AFR-ACAD2024.csproj" Id="b2c747d9-1feb-4903-9dfa-81eb8a8a141e">
-      <Platform Solution="*|x64" Project="x64" />
-    </Project>
-    <Project Path="src/AutoCAD/AFR-ACAD2025/AFR-ACAD2025.csproj" Id="225a4c7d-deaa-4d89-be89-93afb3920571">
-      <Platform Solution="*|x64" Project="x64" />
-    </Project>
-    <Project Path="src/AutoCAD/AFR-ACAD2026/AFR-ACAD2026.csproj" Id="d48e6fcc-a40c-4231-ad10-5383e93241b2">
-      <Platform Solution="*|x64" Project="x64" />
-    </Project>
-    <Project Path="src/AutoCAD/AFR-ACAD2027/AFR-ACAD2027.csproj" Id="0067f487-dbb2-4a4c-8c2f-afea74061fe6">
-      <Platform Solution="*|x64" Project="x64" />
+  <Folder Name="/GitHub/">
+    <File Path=".github/copilot-instructions.md" />
+    <File Path=".github/deepseek-model.txt" />
+  </Folder>
+
+  <Folder Name="/GitHub/Workflows/">
+    <File Path=".github/workflows/branch-policy-check.yml" />
+    <File Path=".github/workflows/merge-permission.yml" />
+    <File Path=".github/workflows/orchestrate-pr-close.yml" />
+    <File Path=".github/workflows/orchestrate-pr-events.yml" />
+    <File Path=".github/workflows/orchestrate-push-events.yml" />
+    <File Path=".github/workflows/pr-auto-approve.yml" />
+    <File Path=".github/workflows/pr-auto-main.yml" />
+    <File Path=".github/workflows/pr-auto-test.yml" />
+    <File Path=".github/workflows/pr-close-notify.yml" />
+    <File Path=".github/workflows/release-build.yml" />
+    <File Path=".github/workflows/sync-test-branch.yml" />
+  </Folder>
+
+  <Folder Name="/Tools/">
+    <File Path="tools/Publish-ReleaseAssets.ps1" />
+  </Folder>
+
+  <Folder Name="/Core/">
+    <Project Path="src/AFR.Core/AFR.Core.shproj" Id="3eed6822-3b82-4bbd-9842-3f32258af0f0" />
+    <Project Path="src/AFR.HostIntegration/AFR.HostIntegration.shproj" Id="c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f" />
+    <Project Path="src/AFR.Polyfills/AFR.Polyfills.shproj" Id="e1d65b0a-4f5c-42fb-b439-da31eaf465b1" />
+    <Project Path="src/AFR.UI/AFR.UI.shproj" Id="b542e201-51b9-4103-9a5c-8e87772186d1" />
+  </Folder>
+
+  <Folder Name="/Deployer/">
+    <Project Path="src/AFR.Deployer/AFR.Deployer.csproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234567890">
+      <Platform Project="x64" />
     </Project>
   </Folder>
 
+  <Folder Name="/AutoCAD/Shared/">
+    <Project Path="src/AutoCAD/AFR.AutoCAD/AFR.AutoCAD.shproj" Id="3ce2a9ba-19c1-4439-9ec8-e68fdb3f533d" />
+  </Folder>
+  <Folder Name="/AutoCAD/" />
+
+  <Folder Name="/AutoCAD/Build/">
+    <File Path="src/AutoCAD/Directory.Build.props" />
+    <File Path="src/AutoCAD/Directory.Build.targets" />
+  </Folder>
+
+  <Folder Name="/AutoCAD/Versions/">
+    <Project Path="src/AutoCAD/AFR-ACAD2018/AFR-ACAD2018.csproj" Id="7ab78a85-217e-46d8-bc9c-cebe7062e697">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2019/AFR-ACAD2019.csproj" Id="505904ee-5fda-4e6e-a8c7-f1a743a98017">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2020/AFR-ACAD2020.csproj" Id="71997328-f134-427b-99d2-bac2ef3f7107">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2021/AFR-ACAD2021.csproj" Id="57e003a6-b28c-45e5-839e-90984eb70577">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2022/AFR-ACAD2022.csproj" Id="96831ced-0cff-4431-900d-9aac9f6a0ba1">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2023/AFR-ACAD2023.csproj" Id="f1425e62-3c56-4244-973f-79ba18b6a980">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2024/AFR-ACAD2024.csproj" Id="b2c747d9-1feb-4903-9dfa-81eb8a8a141e">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2025/AFR-ACAD2025.csproj" Id="225a4c7d-deaa-4d89-be89-93afb3920571">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2026/AFR-ACAD2026.csproj" Id="d48e6fcc-a40c-4231-ad10-5383e93241b2">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/AutoCAD/AFR-ACAD2027/AFR-ACAD2027.csproj" Id="0067f487-dbb2-4a4c-8c2f-afea74061fe6">
+      <Platform Project="x64" />
+    </Project>
+  </Folder>
 </Solution>
 

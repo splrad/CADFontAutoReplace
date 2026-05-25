@@ -41,5 +41,6 @@ public static class AwsHideableDialogPatcher
 
     private static string GetVersion()    => PlatformManager.Platform.VersionName;
     private static string GetRegistry()   => PlatformManager.Platform.RegistryBasePath;
-    private static void   Log(string tag, string message) => DiagnosticLogger.Log(tag, message);
+    private static void   Log(string tag, string message)
+        => DiagnosticLogger.Ok("AwsHideableDialogPatcher", tag, message);
 }

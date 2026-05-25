@@ -11,20 +11,17 @@ namespace AFR.Commands;
 
 /// <summary>
 /// AFR 插件的 AutoCAD 命令定义。
-/// 包含发行版命令：AFR（配置替换字体）、AFRLOG（查看日志/手动替换）。
-/// DEBUG 专属命令位于 <c>AFR.DebugCommands</c> 模块。
 /// </summary>
 public class AfrCommands
 {
     /// <summary>
-    /// AFR 命令：打开字体配置界面，让用户选择 SHX/TrueType 替换字体。
-    /// 保存配置后标记 IsInitialized = 1，并立即对当前文档执行一次字体替换。
+    /// AFR：保存替换字体配置，并在 Hook 已安装时处理当前图纸。
     /// </summary>
     [CommandMethod(AFR.Constants.CommandNames.Main)]
     public void AfrCommand()
     {
         var log = LogService.Instance;
-        DiagnosticLogger.Info("命令", "AFR 命令启动");
+        DiagnosticLogger.Start("AfrCommands", "AfrCommand", "AFR 命令启动");
         try
         {
             var window = new FontSelectionWindow();
@@ -32,20 +29,28 @@ public class AfrCommands
 
             if (window.DialogResult != true)
             {
-                DiagnosticLogger.Info("命令", "用户取消配置");
+                DiagnosticLogger.Skip("AfrCommands", "AfrCommand", "用户取消配置");
                 return;
             }
 
-            // 保存用户选择的替换字体到注册表
+            // 配置服务会把用户选择写入注册表。
             var config = ConfigService.Instance;
             config.MainFont = window.SelectedMainFont;
             config.BigFont = window.SelectedBigFont;
             config.TrueTypeFont = window.SelectedTrueTypeFont;
             config.IsInitialized = true;
-            DiagnosticLogger.Info("命令",
-                $"配置已保存: MainFont='{config.MainFont}' BigFont='{config.BigFont}' TrueType='{config.TrueTypeFont}'");
+            DiagnosticLogger.Ok(
+                "AfrCommands",
+                "SaveConfig",
+                "字体替换配置已保存",
+                new Dictionary<string, object?>
+                {
+                    ["mainFont"] = config.MainFont,
+                    ["bigFont"] = config.BigFont,
+                    ["trueTypeFont"] = config.TrueTypeFont
+                });
 
-            // 更新 Hook 的替换字体配置，使新配置在后续字体加载时生效
+            // 刷新共享字体索引，让后续 Hook 命中使用新配置。
             PlatformManager.FontHook.UpdateConfig();
 
             // 首次安装时 Hook 因无配置而跳过安装，此时 DWG 解析阶段的字体拦截不可用。
@@ -54,7 +59,10 @@ public class AfrCommands
             if (!PlatformManager.FontHook.IsInstalled)
             {
                 log.Warning("首次配置完成，请重启 AutoCAD 使字体替换完整生效。");
-                DiagnosticLogger.Info("命令", "Hook 未安装，跳过执行，提示用户重启");
+                DiagnosticLogger.Skip(
+                    "AfrCommands",
+                    "ExecuteAfterConfig",
+                    "Hook 未安装，跳过当前文档执行并提示用户重启");
 
                 System.Windows.MessageBox.Show(
                     "字体配置已保存。\n\n请重启 AutoCAD 使字体替换功能完整生效。",
@@ -64,7 +72,7 @@ public class AfrCommands
                 return;
             }
 
-            // Hook 已安装（非首次安装，用户修改配置）→ 对当前文档执行字体替换
+            // Hook 已安装时，当前图纸可立即按新配置处理样式表。
             var doc = AcadApp.DocumentManager.MdiActiveDocument;
             if (doc != null)
             {
@@ -79,16 +87,16 @@ public class AfrCommands
                 }
                 else
                 {
-                    // 无历史结果（从未执行过自动替换）→ 走正常检测替换流程
+                    // 未自动处理过的图纸走完整执行链路。
                     contextMgr.Remove(doc);
-                    ExecutionController.Instance.Execute(doc, "AFR Command");
+                    ExecutionController.Execute(doc, "AFR Command");
                 }
             }
         }
         catch (System.Exception ex)
         {
             log.Error("配置保存失败", ex);
-            DiagnosticLogger.LogError("AFR 命令失败", ex);
+            DiagnosticLogger.Fail("AfrCommands", "AfrCommand", "AFR 命令失败", ex);
         }
         finally
         {
@@ -97,24 +105,23 @@ public class AfrCommands
     }
 
     /// <summary>
-    /// AFRLOG 命令：打开字体替换日志界面。
+    /// AFRLOG：查看当前图纸的检测结果、运行时映射和手动替换入口。
     /// <para>
-    /// 显示当前文档的缺失字体检测结果和 MText 内联修复记录。
-    /// 用户可在界面中手动逐一指定替换字体（仅影响当前图纸，不写入注册表全局配置）。
-    /// 每次打开时重新检测数据库，以反映 ST 命令等外部修改后的最新状态。
+    /// 手动替换只改当前图纸样式表，不改全局配置。
     /// </para>
     /// </summary>
     [CommandMethod(AFR.Constants.CommandNames.Log)]
     public void AfrLogCommand()
     {
         var log = LogService.Instance;
-        DiagnosticLogger.Info("命令", "AFRLOG 命令启动");
+        DiagnosticLogger.Start("AfrCommands", "AfrLogCommand", "AFRLOG 命令启动");
         try
         {
             var doc = AcadApp.DocumentManager.MdiActiveDocument;
             if (doc == null)
             {
                 log.Info("请先打开图纸。");
+                DiagnosticLogger.Skip("AfrCommands", "AfrLogCommand", "当前没有打开的图纸");
                 return;
             }
 
@@ -123,94 +130,127 @@ public class AfrCommands
             List<FontCheckResult>? results;
             HashSet<string>? stillMissingStyleNames = null;
             Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? currentFonts = null;
+            List<RuntimeFontMappingResultRecord>? runtimeFontMappings = null;
+            var config = ConfigService.Instance;
 
             using (doc.LockDocument())
             {
-                // 每次 AFRLOG 命令使用全新检测上下文，避免缓存导致结果不准确
+                // 每次打开都重新检测，避免复用旧缓存。
                 var context = new FontDetectionContext(doc.Database);
 
-                // 重新检测当前文档中的缺失字体（反映替换或 ST 命令修改后的最新状态）
+                // 运行时映射只来自 HookHandler 真实记录，不在 UI 层推导候选项。
                 var currentMissing = FontDetector.DetectMissingFonts(context);
+                runtimeFontMappings = DocumentContextManager.Instance.GetRuntimeFontMappingResults(doc);
 
-                // 合并策略：以存储的原始检测结果（自动替换时保存的）为基础，
-                // 用当前检测结果标记哪些样式仍然缺失，这样已替换的字体也能在日志中显示
+                // 用原始检测结果保留“已替换过”的样式，再用当前检测结果标记仍缺失项。
                 var stored = DocumentContextManager.Instance.GetDetectionResults(doc);
-                DiagnosticLogger.Info("AFRLOG",
-                    $"检测完成: 存储={stored?.Count ?? 0}条 当前缺失={currentMissing.Count}条");
+                DiagnosticLogger.Ok(
+                    "AfrCommands",
+                    "AfrLogDetect",
+                    "AFRLOG 缺失字体检测完成",
+                    new Dictionary<string, object?>
+                    {
+                        ["storedCount"] = stored?.Count ?? 0,
+                        ["currentMissingCount"] = currentMissing.Count
+                    });
 
                 if (stored != null && stored.Count > 0)
                 {
-                    // 有存储结果时以其为基础，确保已替换的字体也能在日志中显示
                     results = stored;
-                    // 构建仍缺失的样式名集合，用于在 UI 中高亮标记
                     stillMissingStyleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     for (int i = 0; i < currentMissing.Count; i++)
                         stillMissingStyleNames.Add(currentMissing[i].StyleName);
                 }
                 else
                 {
-                    // 无存储结果：首次打开 AFRLOG 且未执行过自动替换，直接使用当前检测结果
+                    // 未自动处理过的图纸只显示当前检测结果。
                     results = currentMissing;
                     if (currentMissing.Count > 0)
                     {
-                        // 全部视为未替换
                         stillMissingStyleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         for (int i = 0; i < currentMissing.Count; i++)
                             stillMissingStyleNames.Add(currentMissing[i].StyleName);
                     }
                 }
 
-                // 读取图纸中各样式的当前实际字体信息（替换后或 ST 命令修改后的状态）
+                // 读当前样式表赋值，用于和原始缺失结果并排展示。
                 if (results.Count > 0)
                 {
                     currentFonts = FontDetector.ReadCurrentFontAssignments(doc.Database);
                 }
             }
 
-            // 构建 ViewModel 并创建日志窗口
-            var config = ConfigService.Instance;
-            var inlineFixResults = DocumentContextManager.Instance.GetInlineFontFixResults(doc);
+            runtimeFontMappings ??= DocumentContextManager.Instance.GetRuntimeFontMappingResults(doc);
             var vm = new FontReplacementLogViewModel(
                 results, config.MainFont, config.BigFont, config.TrueTypeFont,
-                currentFonts, inlineFixResults, stillMissingStyleNames);
+                currentFonts, runtimeFontMappings, stillMissingStyleNames);
 
-            DiagnosticLogger.Info("AFRLOG",
-                $"ViewModel 构建完成: Items={vm.Items.Count} 未替换={vm.FailedCount} 已替换={vm.ReplacedCount}");
+            DiagnosticLogger.Ok(
+                "AfrCommands",
+                "BuildAfrLogViewModel",
+                "AFRLOG ViewModel 构建完成",
+                new Dictionary<string, object?>
+                {
+                    ["items"] = vm.Items.Count,
+                    ["failedCount"] = vm.FailedCount,
+                    ["replacedCount"] = vm.ReplacedCount,
+                    ["fontMappingCount"] = vm.FontMappingCount
+                });
 
-            // 注册手动替换回调：当用户在日志界面中点击"替换"时执行
             var window = new FontReplacementLogWindow(vm);
             window.ApplyReplacementsHandler = replacements =>
             {
-                DiagnosticLogger.Info("AFRLOG", $"ApplyReplacementsHandler 收到 {replacements.Count} 条替换请求");
+                DiagnosticLogger.Start(
+                    "AfrCommands",
+                    "ApplyReplacementsHandler",
+                    "AFRLOG 手动替换请求处理开始",
+                    new Dictionary<string, object?> { ["replacementCount"] = replacements.Count });
                 for (int i = 0; i < replacements.Count; i++)
                 {
                     var r = replacements[i];
-                    DiagnosticLogger.Info("AFRLOG",
-                        $"  [{i}] 样式='{r.StyleName}' Main='{r.MainFontReplacement}' Big='{r.BigFontReplacement}' IsTT={r.IsTrueType}");
+                    DiagnosticLogger.Ok(
+                        "AfrCommands",
+                        "ApplyReplacementRequest",
+                        "AFRLOG 手动替换请求明细",
+                        new Dictionary<string, object?>
+                        {
+                            ["index"] = i,
+                            ["styleName"] = r.StyleName,
+                            ["mainFont"] = r.MainFontReplacement,
+                            ["bigFont"] = r.BigFontReplacement,
+                            ["isTrueType"] = r.IsTrueType
+                        });
                 }
 
                 using (doc.LockDocument())
                 {
-                    // 手动替换使用独立上下文，避免与自动替换的缓存冲突
+                    // 手动替换与自动执行隔离缓存。
                     var replaceContext = new FontDetectionContext(doc.Database);
                     int count = FontReplacer.ReplaceByStyleMapping(replacements, replaceContext);
-                    DiagnosticLogger.Info("AFRLOG", $"ReplaceByStyleMapping 返回: {count}");
-                    if (count > 0) doc.Editor.Regen();
+                    DiagnosticLogger.Ok(
+                        "AfrCommands",
+                        "ApplyReplacementsHandler",
+                        "AFRLOG 手动替换请求处理完成",
+                        new Dictionary<string, object?> { ["replacedCount"] = count });
+                    if (count > 0)
+                        doc.Editor.Regen();
                     return count;
                 }
             };
 
-            // 注册刷新回调：应用替换后重新检测并构建新 ViewModel
+            // 手动替换后刷新窗口数据，不重新推导运行时映射。
             window.RefreshHandler = () =>
             {
                 List<FontCheckResult> freshResults;
                 HashSet<string>? freshMissing = null;
                 Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? freshFonts = null;
+                List<RuntimeFontMappingResultRecord>? freshRuntimeMappings = null;
 
                 using (doc.LockDocument())
                 {
                     var freshContext = new FontDetectionContext(doc.Database);
                     var currentMissing = FontDetector.DetectMissingFonts(freshContext);
+                    freshRuntimeMappings = DocumentContextManager.Instance.GetRuntimeFontMappingResults(doc);
 
                     var stored = DocumentContextManager.Instance.GetDetectionResults(doc);
                     if (stored != null && stored.Count > 0)
@@ -235,15 +275,18 @@ public class AfrCommands
                         freshFonts = FontDetector.ReadCurrentFontAssignments(doc.Database);
                 }
 
-                var freshInline = DocumentContextManager.Instance.GetInlineFontFixResults(doc);
                 return new FontReplacementLogViewModel(
                     freshResults, config.MainFont, config.BigFont, config.TrueTypeFont,
-                    freshFonts, freshInline, freshMissing);
+                    freshFonts, freshRuntimeMappings, freshMissing);
             };
 
             PlatformManager.Host.ShowModalWindow(window);
 
-            DiagnosticLogger.Info("AFRLOG", $"窗口关闭: AppliedCount={window.AppliedCount}");
+            DiagnosticLogger.Ok(
+                "AfrCommands",
+                "AfrLogWindowClosed",
+                "AFRLOG 窗口已关闭",
+                new Dictionary<string, object?> { ["appliedCount"] = window.AppliedCount });
 
             if (window.LastAppliedReplacements != null && window.LastAppliedReplacements.Count > 0)
             {
@@ -253,7 +296,7 @@ public class AfrCommands
         catch (System.Exception ex)
         {
             log.Error("日志查看失败", ex);
-            DiagnosticLogger.LogError("AFRLOG 命令失败", ex);
+            DiagnosticLogger.Fail("AfrCommands", "AfrLogCommand", "AFRLOG 命令失败", ex);
         }
         finally
         {
@@ -262,12 +305,9 @@ public class AfrCommands
     }
 
     /// <summary>
-    /// 用新配置的替换字体重新覆盖已替换过的样式。
+    /// 用新配置覆盖已替换过的样式。
     /// <para>
-    /// 复用存储的原始检测结果构建 <see cref="StyleFontReplacement"/> 列表，
-    /// 通过 <see cref="FontReplacer.ReplaceByStyleMapping"/> 直接按样式名覆盖字体，
-    /// 绕过缺失检测（因为旧替换字体已可用，重新检测会误判为"不缺失"）。
-    /// 不包含 MText 内联字体扫描。
+    /// 复用原始缺失结果，避免旧替换字体已可用后被误判为“不缺失”。
     /// </para>
     /// </summary>
     private static void ReapplyWithNewConfig(
@@ -276,17 +316,23 @@ public class AfrCommands
         ConfigService config,
         LogService log)
     {
-        DiagnosticLogger.Info("命令", $"用新配置重新替换 {storedResults.Count} 个样式");
+        DiagnosticLogger.Start(
+            "AfrCommands",
+            "ReapplyWithNewConfig",
+            "用新配置重新替换样式开始",
+            new Dictionary<string, object?>
+            {
+                ["storedResults"] = storedResults.Count,
+                ["documentName"] = DocumentContextManager.ReadDocumentName(doc)
+            });
 
         using (doc.LockDocument())
         {
             var context = new FontDetectionContext(doc.Database);
 
-            // 读取数据库中各样式当前实际字体，用于与新配置比较，跳过未变更的字体
+            // 只覆盖与新配置不同的槽位。
             var currentFonts = FontDetector.ReadCurrentFontAssignments(doc.Database);
 
-            // 将原始检测结果转换为 StyleFontReplacement 列表
-            // 仅当新配置的字体与当前实际字体不同时才纳入替换
             var replacements = new List<StyleFontReplacement>();
             for (int i = 0; i < storedResults.Count; i++)
             {
@@ -297,11 +343,19 @@ public class AfrCommands
                 {
                     if (r.IsMainFontMissing && !string.IsNullOrEmpty(config.TrueTypeFont)
                         && !string.Equals(config.TrueTypeFont, current.TypeFace, StringComparison.OrdinalIgnoreCase))
-                        replacements.Add(new StyleFontReplacement(r.StyleName, true, config.TrueTypeFont, string.Empty));
+                    {
+                        bool preserveAtPrefix = FontRedirectResolver.HasAtPrefix(r.TypeFace)
+                                                || FontRedirectResolver.HasAtPrefix(r.FileName);
+                        replacements.Add(new StyleFontReplacement(
+                            r.StyleName,
+                            true,
+                            config.TrueTypeFont,
+                            string.Empty,
+                            preserveAtPrefix));
+                    }
                 }
                 else
                 {
-                    // 逐槽位判断：仅当新配置字体与当前实际字体不同时才填入替换值
                     string mainFont = (r.IsMainFontMissing && !string.IsNullOrEmpty(config.MainFont)
                         && !string.Equals(config.MainFont, current.FileName, StringComparison.OrdinalIgnoreCase))
                         ? config.MainFont : string.Empty;
@@ -309,7 +363,6 @@ public class AfrCommands
                         && !string.Equals(config.BigFont, current.BigFontFileName, StringComparison.OrdinalIgnoreCase))
                         ? config.BigFont : string.Empty;
 
-                    // 主字体和大字体都未变更时跳过该样式
                     if (!string.IsNullOrEmpty(mainFont) || !string.IsNullOrEmpty(bigFont))
                         replacements.Add(new StyleFontReplacement(r.StyleName, false, mainFont, bigFont));
                 }
@@ -318,13 +371,21 @@ public class AfrCommands
             if (replacements.Count == 0)
             {
                 log.Info("未检测到需要重新替换的样式。");
+                DiagnosticLogger.Skip(
+                    "AfrCommands",
+                    "ReapplyWithNewConfig",
+                    "未检测到需要重新替换的样式",
+                    new Dictionary<string, object?> { ["storedResults"] = storedResults.Count });
                 return;
             }
 
-            DiagnosticLogger.Info("命令", $"构建 {replacements.Count} 条替换指令");
+            DiagnosticLogger.Ok(
+                "AfrCommands",
+                "BuildReapplyRequests",
+                "重新替换指令已构建",
+                new Dictionary<string, object?> { ["replacementCount"] = replacements.Count });
             int replaceCount = FontReplacer.ReplaceByStyleMapping(replacements, context);
 
-            // 二次验证
             var postContext = new FontDetectionContext(doc.Database);
             var stillMissing = FontDetector.DetectMissingFonts(postContext);
             var contextMgr = DocumentContextManager.Instance;
@@ -337,15 +398,23 @@ public class AfrCommands
                 if (stillMissing[i].IsBigFontMissing && !stillMissing[i].IsTrueType) stillMissingSlotCount++;
             }
 
-            // 清理残留 SHX 引用
             FontReplacer.CleanupStaleShxReferences(context);
 
-            // Regen 刷新显示
+            // 手动重写样式表后只需要一次显示刷新。
             if (replaceCount > 0) doc.Editor.Regen();
 
-            // 输出统计（不含 MText 内联扫描）
             log.AddReplacementStatistics(replacements, stillMissingSlotCount);
             contextMgr.MarkExecuted(doc);
+            DiagnosticLogger.Ok(
+                "AfrCommands",
+                "ReapplyWithNewConfig",
+                "用新配置重新替换样式完成",
+                new Dictionary<string, object?>
+                {
+                    ["replacementCount"] = replacements.Count,
+                    ["replacedCount"] = replaceCount,
+                    ["stillMissingSlotCount"] = stillMissingSlotCount
+                });
         }
     }
 }

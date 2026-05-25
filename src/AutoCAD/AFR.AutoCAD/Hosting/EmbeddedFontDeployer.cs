@@ -35,14 +35,32 @@ internal static class EmbeddedFontDeployer
         var fontsDir = GetCadFontsDirectory();
         if (fontsDir is null)
         {
-            DiagnosticLogger.Log("字体部署", "无法定位 CAD Fonts 目录");
+            DiagnosticLogger.Skip("EmbeddedFontDeployer", "Deploy", "无法定位 CAD Fonts 目录");
             return false;
         }
 
         var assembly = typeof(EmbeddedFontDeployer).Assembly;
         var ok = EmbeddedFontExtractor.ExtractAll(assembly, fontsDir, out var error);
         if (!ok && error is not null)
-            DiagnosticLogger.Log("字体部署", error);
+        {
+            DiagnosticLogger.Fail(
+                "EmbeddedFontDeployer",
+                "Deploy",
+                "内嵌字体释放失败",
+                fields: new Dictionary<string, object?>
+                {
+                    ["fontsDir"] = fontsDir,
+                    ["error"] = error
+                });
+        }
+        else
+        {
+            DiagnosticLogger.Ok(
+                "EmbeddedFontDeployer",
+                "Deploy",
+                "内嵌字体已就绪",
+                new Dictionary<string, object?> { ["fontsDir"] = fontsDir });
+        }
         return ok;
     }
 
@@ -56,14 +74,22 @@ internal static class EmbeddedFontDeployer
             var fontsDir = Path.Combine(Path.GetDirectoryName(processPath)!, "Fonts");
             if (!Directory.Exists(fontsDir))
             {
-                DiagnosticLogger.Log("字体部署", $"Fonts 目录不存在: {fontsDir}");
+                DiagnosticLogger.Skip(
+                    "EmbeddedFontDeployer",
+                    "GetCadFontsDirectory",
+                    "Fonts 目录不存在",
+                    new Dictionary<string, object?> { ["fontsDir"] = fontsDir });
                 return null;
             }
             return fontsDir;
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.Log("字体部署", $"获取 Fonts 目录失败: {ex.Message}");
+            DiagnosticLogger.Fail(
+                "EmbeddedFontDeployer",
+                "GetCadFontsDirectory",
+                "获取 Fonts 目录失败",
+                ex);
             return null;
         }
     }

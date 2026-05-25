@@ -7,7 +7,7 @@
 #   4. 修改下方 env 中的 TEST_BRANCH 和 MAIN_BRANCH 为实际分支名
 #   5. 当 main 分支发生 push（含强制推送）或核心开发者跳过 test 分支直接向 main 合并 PR 后，test 分支将自动同步至 main 最新提交
 #   6. PR 关闭状态通知（已合并/未合并）由独立工作流处理，当前文件仅负责分支同步
-name: 🔄 重置测试分支到主分支
+name: 🔄 测试分支重置
 
 on:
   workflow_call:

@@ -96,7 +96,16 @@ internal static class ExternalRegistryDefaultsApplier
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.Log("ExternalDefaults", $"写入 {targetPath}\\{a.Name} 失败：{ex.Message}");
+            DiagnosticLogger.Fail(
+                "ExternalRegistryDefaultsApplier",
+                "ApplyValue",
+                "外部注册表默认值写入失败",
+                ex,
+                new Dictionary<string, object?>
+                {
+                    ["targetPath"] = targetPath,
+                    ["valueName"] = a.Name
+                });
         }
     }
 
@@ -152,7 +161,12 @@ internal static class ExternalRegistryDefaultsApplier
         }
         catch (Exception ex)
         {
-            DiagnosticLogger.Log("ExternalDefaults", $"清理标记失败：{ex.Message}");
+            DiagnosticLogger.Fail(
+                "ExternalRegistryDefaultsApplier",
+                "CleanupProfile",
+                "外部注册表默认值清理标记失败",
+                ex,
+                new Dictionary<string, object?> { ["profile"] = profile });
         }
     }
 

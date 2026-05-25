@@ -19,6 +19,7 @@
             </ResourceDictionary.MergedDictionaries>
             <BooleanToVisibilityConverter x:Key="BoolToVis"/>
             <SolidColorBrush x:Key="TrueTypeBrush" Color="#7C4DFF"/>
+            <SolidColorBrush x:Key="RuntimeMappingBrush" Color="#00897B"/>
         </ResourceDictionary>
     </Window.Resources>
 
@@ -51,11 +52,12 @@
             <Border Grid.Row="2" CornerRadius="5" Padding="10,5"
                     Background="{DynamicResource SecondaryRegionBrush}"
                     Visibility="{Binding HasAnyContent, Converter={StaticResource BoolToVis}}">
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Right" Text="{Binding SummaryText}"
-                               FontSize="11" VerticalAlignment="Center"
-                               Foreground="{DynamicResource SecondaryTextBrush}"/>
-					<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Grid>
+					<Grid.ColumnDefinitions>
+						<ColumnDefinition Width="Auto"/>
+						<ColumnDefinition Width="*"/>
+					</Grid.ColumnDefinitions>
+					<StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
 						<!-- 未替换计数（醒目红色，置于最前） -->
 						<Border CornerRadius="3" Padding="6,2" Margin="0,0,6,0"
 								Background="{DynamicResource DangerBrush}"
@@ -80,14 +82,20 @@
                                 Visibility="{Binding HasTrueType, Converter={StaticResource BoolToVis}}">
                             <TextBlock Text="{Binding TrueTypeLabel}" FontSize="10" Foreground="White"/>
                         </Border>
-                        <!-- 内联修复计数 -->
+                        <!-- MText内联字体映射计数 -->
                         <Border CornerRadius="3" Padding="6,2" Margin="6,0,0,0"
-                                Background="{DynamicResource SuccessBrush}"
-                                Visibility="{Binding HasInlineFix, Converter={StaticResource BoolToVis}}">
-                            <TextBlock Text="{Binding InlineFixLabel}" FontSize="10" Foreground="White"/>
+                                Background="{StaticResource RuntimeMappingBrush}"
+                                Visibility="{Binding HasFontMappings, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="{Binding FontMappingLabel}" FontSize="10" Foreground="White"/>
                         </Border>
                     </StackPanel>
-                </DockPanel>
+                    <TextBlock Grid.Column="1" Text="{Binding SummaryText}"
+                               Margin="10,0,0,0"
+                               FontSize="11" VerticalAlignment="Center"
+                               HorizontalAlignment="Right"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               TextTrimming="CharacterEllipsis"/>
+                </Grid>
             </Border>
 
 			<!-- 空状态提示 -->
@@ -116,7 +124,7 @@
 											   FontSize="11" FontWeight="SemiBold"
 											   Foreground="{DynamicResource PrimaryTextBrush}"/>
 								</Border>
-								<Border Padding="8,5,24,5"
+								<Border Padding="11,5,8,5"
 										BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
 									<Grid>
 										<Grid.ColumnDefinitions>
@@ -133,7 +141,7 @@
 												   HorizontalAlignment="Center" VerticalAlignment="Center"/>
 										<TextBlock Grid.Column="2" Text="缺失字体" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
-												   VerticalAlignment="Center"/>
+												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
 										<TextBlock Grid.Column="3" Text="替换字体" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
 												   HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -141,43 +149,41 @@
 								</Border>
 							</StackPanel>
 
-							<!-- MText 标题组 -->
-							<StackPanel x:Name="StickyMTextHeader" Visibility="Collapsed">
+							<!-- MText内联字体映射标题组 -->
+							<StackPanel x:Name="StickyFontMappingHeader" Visibility="Collapsed">
 								<Border Padding="8,7,8,7"
 										BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
-									<DockPanel>
-										<TextBlock DockPanel.Dock="Right"
-												   Text="自动完成，无需手动操作"
-												   FontSize="10" VerticalAlignment="Center"
-												   Foreground="{DynamicResource ThirdlyTextBrush}"/>
-										<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-											<TextBlock Text="MText 内联字体映射"
-													   FontSize="11" FontWeight="SemiBold"
-													   Foreground="{DynamicResource PrimaryTextBrush}"/>
-											<Border CornerRadius="3" Padding="5,1" Margin="8,0,0,0"
-													Background="{DynamicResource SuccessBrush}">
-												<TextBlock Text="{Binding InlineFixCount}" FontSize="9" Foreground="White"/>
-											</Border>
-										</StackPanel>
-									</DockPanel>
+									<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+										<TextBlock Text="MText内联字体映射"
+												   FontSize="11" FontWeight="SemiBold"
+												   Foreground="{DynamicResource PrimaryTextBrush}"/>
+										<Border CornerRadius="3" Padding="5,1" Margin="8,0,0,0"
+												Background="{StaticResource RuntimeMappingBrush}">
+											<TextBlock Text="{Binding FontMappingCount}" FontSize="9" Foreground="White"/>
+										</Border>
+									</StackPanel>
 								</Border>
-								<Border Padding="8,5,24,5"
+								<Border Padding="11,5,8,5"
 										BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
 									<Grid>
 										<Grid.ColumnDefinitions>
 											<ColumnDefinition Width="3*"/>
-											<ColumnDefinition Width="120"/>
+											<ColumnDefinition Width="150"/>
 											<ColumnDefinition Width="3*"/>
+											<ColumnDefinition Width="84"/>
 										</Grid.ColumnDefinitions>
 										<TextBlock Grid.Column="0" Text="缺失字体" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
-												   VerticalAlignment="Center"/>
+												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
 										<TextBlock Grid.Column="1" Text="类型" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
 												   HorizontalAlignment="Center" VerticalAlignment="Center"/>
 										<TextBlock Grid.Column="2" Text="映射字体" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
-												   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
+										<TextBlock Grid.Column="3" Text="Hook" FontSize="10"
+												   Foreground="{DynamicResource SecondaryTextBrush}"
+												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
 									</Grid>
 								</Border>
 							</StackPanel>
@@ -252,7 +258,7 @@
 														</TextBlock.Style>
 													</TextBlock>
 													<Border Grid.Column="1" CornerRadius="3"
-															Padding="4,1" Margin="0,0,4,0"
+															Padding="4,1"
 															HorizontalAlignment="Center" VerticalAlignment="Center">
 														<Border.Style>
 															<Style TargetType="Border">
@@ -301,102 +307,121 @@
 								</ItemsControl>
 							</StackPanel>
 
-							<!-- ─── MText 区块 ─── -->
-							<StackPanel x:Name="MTextSection"
-										Visibility="{Binding HasInlineFix, Converter={StaticResource BoolToVis}}">
-								<!-- MText 标题（在滚动区内，用于位置检测） -->
-								<Border x:Name="MTextHeaderMarker"
+							<!-- ─── MText内联字体映射区块 ─── -->
+							<StackPanel x:Name="FontMappingSection"
+										Visibility="{Binding HasFontMappings, Converter={StaticResource BoolToVis}}">
+								<Border x:Name="FontMappingHeaderMarker"
 										Background="{DynamicResource SecondaryRegionBrush}">
 									<StackPanel>
 										<Border Padding="8,7,8,7"
 												BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
-											<DockPanel>
-												<TextBlock DockPanel.Dock="Right"
-														   Text="自动完成，无需手动操作"
-														   FontSize="10" VerticalAlignment="Center"
-														   Foreground="{DynamicResource ThirdlyTextBrush}"/>
-												<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-													<TextBlock Text="MText 内联字体映射"
-															   FontSize="11" FontWeight="SemiBold"
-															   Foreground="{DynamicResource PrimaryTextBrush}"/>
-													<Border CornerRadius="3" Padding="5,1" Margin="8,0,0,0"
-															Background="{DynamicResource SuccessBrush}">
-														<TextBlock Text="{Binding InlineFixCount}" FontSize="9" Foreground="White"/>
-													</Border>
-												</StackPanel>
-											</DockPanel>
+											<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+												<TextBlock Text="MText内联字体映射"
+														   FontSize="11" FontWeight="SemiBold"
+														   Foreground="{DynamicResource PrimaryTextBrush}"/>
+												<Border CornerRadius="3" Padding="5,1" Margin="8,0,0,0"
+														Background="{StaticResource RuntimeMappingBrush}">
+													<TextBlock Text="{Binding FontMappingCount}" FontSize="9" Foreground="White"/>
+												</Border>
+											</StackPanel>
 										</Border>
-										<Border Padding="8,5,24,5"
+										<Border Padding="11,5,8,5"
 												BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
 											<Grid>
 												<Grid.ColumnDefinitions>
 													<ColumnDefinition Width="3*"/>
-													<ColumnDefinition Width="120"/>
+													<ColumnDefinition Width="150"/>
 													<ColumnDefinition Width="3*"/>
+													<ColumnDefinition Width="84"/>
 												</Grid.ColumnDefinitions>
 												<TextBlock Grid.Column="0" Text="缺失字体" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
-														   VerticalAlignment="Center"/>
+														   HorizontalAlignment="Left" VerticalAlignment="Center"/>
 												<TextBlock Grid.Column="1" Text="类型" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
 														   HorizontalAlignment="Center" VerticalAlignment="Center"/>
 												<TextBlock Grid.Column="2" Text="映射字体" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
-														   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+														   HorizontalAlignment="Left" VerticalAlignment="Center"/>
+												<TextBlock Grid.Column="3" Text="Hook" FontSize="10"
+														   Foreground="{DynamicResource SecondaryTextBrush}"
+														   HorizontalAlignment="Left" VerticalAlignment="Center"/>
 											</Grid>
 										</Border>
 									</StackPanel>
 								</Border>
 
-								<!-- MText 数据行 -->
-								<ItemsControl ItemsSource="{Binding InlineFixItems}">
+								<ItemsControl ItemsSource="{Binding FontMappingItems}">
 									<ItemsControl.ItemTemplate>
 										<DataTemplate>
-											<Border Padding="8,1"
-													BorderThickness="3,0,0,0"
-													BorderBrush="{DynamicResource SuccessBrush}"
-													Background="#06009688">
+											<Border Padding="8,1" BorderThickness="3,0,0,0">
+												<Border.Style>
+													<Style TargetType="Border">
+														<Setter Property="BorderBrush" Value="{StaticResource RuntimeMappingBrush}"/>
+														<Setter Property="Background" Value="#0500897B"/>
+														<Style.Triggers>
+															<DataTrigger Binding="{Binding IsFailed}" Value="True">
+																<Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}"/>
+																<Setter Property="Background" Value="#08FF4444"/>
+															</DataTrigger>
+														</Style.Triggers>
+													</Style>
+												</Border.Style>
 												<Grid MinHeight="28">
 													<Grid.ColumnDefinitions>
 														<ColumnDefinition Width="3*"/>
-														<ColumnDefinition Width="120"/>
+														<ColumnDefinition Width="150"/>
 														<ColumnDefinition Width="3*"/>
+														<ColumnDefinition Width="84"/>
 													</Grid.ColumnDefinitions>
-													<Border Grid.ColumnSpan="3" VerticalAlignment="Bottom" Height="1"
+													<Border Grid.ColumnSpan="4" VerticalAlignment="Bottom" Height="1"
 															Background="{DynamicResource BorderBrush}" Margin="-11,0,-8,-2" />
 													<TextBlock Grid.Column="0" Text="{Binding MissingFont}"
 															   FontSize="11" VerticalAlignment="Center"
-															   Foreground="{DynamicResource PrimaryTextBrush}"
+															   Foreground="{DynamicResource SecondaryTextBrush}"
 															   TextTrimming="CharacterEllipsis"
 															   ToolTip="{Binding MissingFont}"/>
 													<Border Grid.Column="1" CornerRadius="3"
-															Padding="4,1" Margin="0,0,4,0"
+															Padding="4,1"
 															HorizontalAlignment="Center" VerticalAlignment="Center">
 														<Border.Style>
 															<Style TargetType="Border">
 																<Setter Property="Background" Value="{DynamicResource PrimaryBrush}"/>
 																<Style.Triggers>
-																	<DataTrigger Binding="{Binding FontCategory}" Value="TrueType→SHX">
+																	<DataTrigger Binding="{Binding FontType}" Value="TrueType字体">
 																		<Setter Property="Background" Value="{StaticResource TrueTypeBrush}"/>
 																	</DataTrigger>
-																	<DataTrigger Binding="{Binding FontCategory}" Value="TrueType">
-																		<Setter Property="Background" Value="{StaticResource TrueTypeBrush}"/>
-																	</DataTrigger>
-																	<DataTrigger Binding="{Binding FontCategory}" Value="SHX大字体">
+																	<DataTrigger Binding="{Binding FontType}" Value="SHX大字体">
 																		<Setter Property="Background" Value="{DynamicResource WarningBrush}"/>
 																	</DataTrigger>
 																</Style.Triggers>
 															</Style>
 														</Border.Style>
-														<TextBlock Text="{Binding FontCategory}" FontSize="9"
-																   Foreground="White"/>
+														<TextBlock Text="{Binding FontType}" FontSize="9" Foreground="White"/>
 													</Border>
-													<TextBlock Grid.Column="2" Text="{Binding ReplacementFont}"
+													<TextBlock Grid.Column="2" Text="{Binding DisplayReplacementFont}"
 															   FontSize="11" VerticalAlignment="Center"
-															   HorizontalAlignment="Center"
-															   Foreground="{DynamicResource SuccessBrush}"
+															   HorizontalAlignment="Left"
 															   TextTrimming="CharacterEllipsis"
-															   ToolTip="{Binding ReplacementFont}"/>
+															   ToolTip="{Binding ReplacementToolTip}">
+														<TextBlock.Style>
+															<Style TargetType="TextBlock">
+																<Setter Property="Foreground" Value="{StaticResource RuntimeMappingBrush}"/>
+																<Style.Triggers>
+																	<DataTrigger Binding="{Binding IsFailed}" Value="True">
+																		<Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/>
+																		<Setter Property="FontWeight" Value="SemiBold"/>
+																	</DataTrigger>
+																</Style.Triggers>
+															</Style>
+														</TextBlock.Style>
+													</TextBlock>
+													<TextBlock Grid.Column="3" Text="{Binding ExecutingHook}"
+															   FontSize="10" VerticalAlignment="Center"
+															   HorizontalAlignment="Left"
+															   Foreground="{DynamicResource SecondaryTextBrush}"
+															   TextTrimming="CharacterEllipsis"
+															   ToolTip="{Binding Status}"/>
 												</Grid>
 											</Border>
 										</DataTemplate>
@@ -417,12 +442,11 @@
 							Margin="0,0,10,0"
 							Style="{StaticResource ButtonPrimary}"
 							hc:BorderElement.CornerRadius="6"
-							IsEnabled="{Binding HasUserChanges}"
-							Click="OnApply"/>
+							Command="{Binding ApplyCommand}"/>
                     <Button Content="关闭"
                             MinWidth="80" Height="32" FontSize="12"
                             hc:BorderElement.CornerRadius="6"
-                            Click="OnClose"/>
+                            Command="{Binding CloseCommand}"/>
                 </StackPanel>
 				<StackPanel Orientation="Horizontal" VerticalAlignment="Center"
 							IsEnabled="{Binding HasItems}"
@@ -454,7 +478,7 @@
                     <Button Content="填充" Height="28" FontSize="11"
                             Margin="5,0,0,0" Padding="6,0"
                             hc:BorderElement.CornerRadius="4"
-                            Click="OnBatchApply"/>
+                            Command="{Binding ApplyBatchCommand}"/>
                 </StackPanel>
             </DockPanel>
         </Grid>

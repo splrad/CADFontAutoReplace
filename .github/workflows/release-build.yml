@@ -1,4 +1,4 @@
-name: 📦 自动构建发布版本
+name: 📦 Release发布编排
 
 on:
   # 只有主分支中会影响发布内容的文件变化时才自动发版。
@@ -8,6 +8,7 @@ on:
     paths:
       - Version.props
       - chore/Fonts.zip
+      - tools/Publish-ReleaseAssets.ps1
       - src/**
       - .github/workflows/release-build.yml
   # 保留手动触发入口，便于维护者在 GitHub Actions 页面重新执行发布流程。
@@ -25,7 +26,7 @@ permissions:
 
 jobs:
   release:
-    name: 📦 构建并创建 GitHub Release
+    name: 📦 生成资产并创建 Release
     runs-on: windows-latest
     timeout-minutes: 45
     outputs:
@@ -124,63 +125,16 @@ jobs:
           "pr_title=$([string]$mergedPullRequest.title)" >> $env:GITHUB_OUTPUT
           "已确认当前提交来自已合并并关闭的 PR #$($mergedPullRequest.number)。" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
 
-      - name: 🧰 安装 .NET SDK
+      - name: 🧰 设置 .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: 🔎 确认 .NET SDK
         shell: pwsh
         run: |
-          # 读取 global.json，并通过 Microsoft 官方发布元数据确认 SDK 版本存在。
-          $globalJsonPath = Join-Path $env:GITHUB_WORKSPACE 'global.json'
-          $globalJson = Get-Content -LiteralPath $globalJsonPath -Raw | ConvertFrom-Json
-          $sdkVersion = [string]$globalJson.sdk.version
-          if ([string]::IsNullOrWhiteSpace($sdkVersion)) {
-              throw 'global.json 中缺少 sdk.version。'
-          }
-
-          if ($sdkVersion -notmatch '^(?<channel>\d+\.\d+)\.') {
-              throw "无法从 sdk.version 推断 .NET 发布通道：$sdkVersion"
-          }
-
-          $channelVersion = $Matches.channel
-          $releaseIndex = Invoke-RestMethod 'https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/releases-index.json'
-          $channel = $releaseIndex.'releases-index' | Where-Object { $_.'channel-version' -eq $channelVersion } | Select-Object -First 1
-          if ($null -eq $channel) {
-              throw "Microsoft .NET 发布元数据中未找到 $channelVersion 通道。"
-          }
-
-          $releaseMetadata = Invoke-RestMethod $channel.'releases.json'
-          $sdkExists = $releaseMetadata.releases.sdks.version -contains $sdkVersion
-          if (-not $sdkExists) {
-              throw "Microsoft .NET 发布元数据中未找到 SDK $sdkVersion。"
-          }
-
-          $installDir = Join-Path $env:RUNNER_TEMP 'dotnet-sdk'
-          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-          $installScript = Join-Path $env:RUNNER_TEMP 'dotnet-install.ps1'
-          # 使用官方 dotnet-install.ps1 安装指定 SDK，避免固定 setup-dotnet Action 版本。
-          Invoke-WebRequest 'https://dot.net/v1/dotnet-install.ps1' -OutFile $installScript
-
-          & $installScript -Version $sdkVersion -InstallDir $installDir -NoPath
-
-          # dotnet-install 在某些场景会残留非零 LASTEXITCODE，改为以“实际安装结果”判定是否成功。
-          $dotnetExe = Join-Path $installDir 'dotnet.exe'
-          if (-not (Test-Path -LiteralPath $dotnetExe)) {
-              throw ".NET SDK $sdkVersion 安装失败：未找到 $dotnetExe。"
-          }
-
-          $installedSdks = & $dotnetExe --list-sdks
-          if ($LASTEXITCODE -ne 0) {
-              throw ".NET SDK $sdkVersion 安装失败：dotnet --list-sdks 执行失败。"
-          }
-
-          $hasExactSdk = (($installedSdks -split "`r?`n") | Where-Object {
-              $_ -match ('^' + [regex]::Escape($sdkVersion) + '\s')
-          }).Count -gt 0
-          if (-not $hasExactSdk) {
-              throw ".NET SDK $sdkVersion 安装失败：安装目录中未检测到该版本。"
-          }
-
-          $installDir | Add-Content -LiteralPath $env:GITHUB_PATH
-          "DOTNET_ROOT=$installDir" | Add-Content -LiteralPath $env:GITHUB_ENV
-          "已通过 Microsoft .NET 发布元数据安装 SDK $sdkVersion。" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          dotnet --version
+          dotnet --list-sdks
 
       - name: 🔎 读取并对比版本
         id: version
@@ -246,37 +200,39 @@ jobs:
       - name: 🏗️ 构建部署器
         if: steps.version.outputs.should_release == 'true'
         shell: pwsh
-        run: ./src/AFR.Deployer/Publish-Deployer.ps1
+        run: ./tools/Publish-ReleaseAssets.ps1
 
       - name: 📦 打包发布资产
         if: steps.version.outputs.should_release == 'true'
         id: package
         shell: pwsh
         run: |
-          # GitHub Release 会自动提供源码 zip/tar；这里仅额外上传部署器 EXE 与字体压缩包。
+          # GitHub Release 会自动提供源码 zip/tar；这里仅额外上传部署器 EXE、插件 DLL 包与字体压缩包。
           $tagName = '${{ steps.version.outputs.tag_name }}'
-          $safeTag = $tagName -replace '[^0-9A-Za-z._-]', '-'
-          $publishDir = Join-Path $env:GITHUB_WORKSPACE 'publish/AFR.Deployer'
-          $fontsSourcePath = Join-Path $env:GITHUB_WORKSPACE 'chore/Fonts.zip'
           $assetDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts/ReleaseAssets'
           New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
 
-          $exeSourcePath = Join-Path $publishDir 'AFR-Deployer.exe'
-          $exeAssetPath = Join-Path $assetDir 'AFR-Deployer.exe'
-          $fontsAssetPath = Join-Path $assetDir 'Fonts.zip'
-          if (Test-Path -LiteralPath $exeAssetPath) { Remove-Item -LiteralPath $exeAssetPath -Force }
-          if (Test-Path -LiteralPath $fontsAssetPath) { Remove-Item -LiteralPath $fontsAssetPath -Force }
-          if (-not (Test-Path -LiteralPath $exeSourcePath)) {
-              throw '未找到 publish/AFR.Deployer/AFR-Deployer.exe，无法发布部署工具程序。'
-          }
-          if (-not (Test-Path -LiteralPath $fontsSourcePath)) {
-              throw '未找到 chore/Fonts.zip，无法发布字体压缩包。'
+          function Assert-ReleaseAssetSource([string]$Path, [string]$Description) {
+              if (-not (Test-Path -LiteralPath $Path)) {
+                  throw "未找到 $Description：$Path"
+              }
+
+              $item = Get-Item -LiteralPath $Path
+              if ($item.Length -le 0) {
+                  throw "$Description 文件为空：$Path"
+              }
           }
 
-          Copy-Item -LiteralPath $exeSourcePath -Destination $exeAssetPath -Force
-          Copy-Item -LiteralPath $fontsSourcePath -Destination $fontsAssetPath -Force
+          $exeAssetPath = Join-Path $assetDir "AFR-Deployer_$tagName.exe"
+          $dllZipAssetPath = Join-Path $assetDir "AFR-DLL_$tagName.zip"
+          $fontsAssetPath = Join-Path $assetDir 'Fonts.zip'
+
+          Assert-ReleaseAssetSource -Path $exeAssetPath -Description '版本化部署工具程序'
+          Assert-ReleaseAssetSource -Path $dllZipAssetPath -Description '版本化插件 DLL 压缩包'
+          Assert-ReleaseAssetSource -Path $fontsAssetPath -Description '发布用字体压缩包'
 
           "exe_path=$exeAssetPath" >> $env:GITHUB_OUTPUT
+          "dll_zip_path=$dllZipAssetPath" >> $env:GITHUB_OUTPUT
           "fonts_path=$fontsAssetPath" >> $env:GITHUB_OUTPUT
 
       - name: 🧠 生成发布说明
@@ -662,10 +618,11 @@ jobs:
           $lines.Add('')
           $lines.Add('| 文件 | 说明 |')
           $lines.Add('| --- | --- |')
-          $lines.Add('| **AFR-Deployer.exe** | 主安装程序，双击运行并选择 AutoCAD 版本 |')
+          $lines.Add("| **AFR-Deployer_$tagName.exe** | 主安装程序，双击运行并选择 AutoCAD 版本 |")
+          $lines.Add("| AFR-DLL_$tagName.zip | 手动 NETLOAD 用插件 DLL 包 |")
           $lines.Add('| Fonts.zip | 字体资源包（用于手动补充或备份） |')
           $lines.Add('')
-          $lines.Add('👉 **一般用户只需下载：AFR-Deployer.exe**')
+          $lines.Add("👉 **一般用户只需下载：AFR-Deployer_$tagName.exe**")
           $lines.Add('')
           $lines.Add('------')
           $lines.Add('')
@@ -852,6 +809,7 @@ jobs:
           # gh release create 会在 tag 不存在时基于 --target 自动创建 tag。
           gh release create '${{ steps.version.outputs.tag_name }}' `
               '${{ steps.package.outputs.exe_path }}' `
+              '${{ steps.package.outputs.dll_zip_path }}' `
               '${{ steps.package.outputs.fonts_path }}' `
               --repo $env:GH_REPO `
               --target '${{ github.sha }}' `
@@ -862,7 +820,7 @@ jobs:
           "已创建 Release：${{ steps.version.outputs.tag_name }}" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
 
   notify-release-result:
-    name: 📣 发布结果通知
+    name: 📣 回写 Release 结果
     runs-on: windows-latest
     needs: release
     if: always()

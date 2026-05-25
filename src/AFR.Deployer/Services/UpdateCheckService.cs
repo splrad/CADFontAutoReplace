@@ -8,7 +8,7 @@ namespace AFR.Deployer.Services;
 /// <summary>
 /// 部署器侧更新检查服务。
 /// <para>
-/// 通过 GitHub / Gitee 发行版接口获取项目最新发行版，并与本地部署器显示版本（X.Y）比较。
+/// 通过 GitHub / Gitee 发行版接口获取项目最新发行版，并与本地部署器显示版本（X.Y.Z）比较。
 /// 网络异常、限流或版本格式异常均静默视为无可用更新，避免影响部署器启动与安装 / 卸载流程。
 /// </para>
 /// </summary>
@@ -126,7 +126,7 @@ internal enum UpdateCheckSource
 /// <param name="HasUpdate">是否存在比本地版本更新的正式发行版。</param>
 /// <param name="IsReachable">发布源是否已成功联通并返回可解析的正式版本信息。</param>
 /// <param name="Source">返回结果的发布源。</param>
-/// <param name="LatestVersion">最新发行版显示版本（X.Y）。</param>
+/// <param name="LatestVersion">最新发行版显示版本（X.Y.Z）。</param>
 /// <param name="ReleaseUrl">用于打开浏览器的发行版页面地址。</param>
 /// <param name="ReleaseName">GitHub Release 标题。</param>
 internal sealed record UpdateCheckResult(

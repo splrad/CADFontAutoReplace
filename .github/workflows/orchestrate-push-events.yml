@@ -1,4 +1,4 @@
-name: 🚀 推送自动化
+name: 🚀 推送事件编排
 
 on:
   push:

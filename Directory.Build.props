@@ -10,13 +10,13 @@
 	<!-- 用户可见 -->
 	<Version>$(PluginDisplayVersion)</Version>                <!-- NuGet / 包版本号 -->
 	<AssemblyVersion>1.0.0.0</AssemblyVersion>   <!-- CLR 程序集版本（必须 4 段） -->
-	<FileVersion>$(PluginDisplayVersion).0.0</FileVersion>           <!-- Windows 文件属性「文件版本」 -->
+	<FileVersion>$(PluginDisplayVersion)</FileVersion>             <!-- Windows 文件属性「文件版本」 -->
 
 	<!-- 仅开发者可见：包含 build 后缀，运行时从程序集属性中拆分使用 -->
 	<InformationalVersion>$(PluginDisplayVersion)+$(PluginBuildId)</InformationalVersion>
 	<!--
 	  禁止 SDK 在 InformationalVersion 后自动追加 "+{Git 提交 SHA}"，
-	  否则会变成 "9.0+20260503.1+c6a2544..."，使日志/注册表里的 build 后缀变成 commit SHA 而非我们维护的 PluginBuildId。
+	  否则会变成 "9.0.0+20260503.1+c6a2544..."，使日志/注册表里的 build 后缀变成 commit SHA 而非我们维护的 PluginBuildId。
 	-->
 	<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 
@@ -24,12 +24,5 @@
     <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
     <UseArtifactsIntermediateOutput>false</UseArtifactsIntermediateOutput>
   </PropertyGroup>
-
-  <!-- Release 构建成功后，将生成的 DLL 复制到统一的 Releases 目录 -->
-  <Target Name="CopyDllToReleases" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <Message Importance="High" Text="[Releases Copy] 正在将 $(TargetFileName) 复制到 Releases 目录..." />
-    <MakeDir Directories="$(MSBuildThisFileDirectory)artifacts\Releases" />
-    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(MSBuildThisFileDirectory)artifacts\Releases" />
-  </Target>
 
 </Project>

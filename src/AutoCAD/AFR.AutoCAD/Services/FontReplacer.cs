@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows.Media;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.GraphicsInterface;
+using AFR.FontMapping;
 using AFR.Models;
 
 
@@ -10,18 +11,15 @@ namespace AFR.Services;
 /// <summary>
 /// 使用配置的备用字体替换文字样式表中的缺失字体。
 /// <para>
-/// 仅修改已确认缺失的样式，正常字体不受影响。
-/// 替换前会预校验替换字体的可用性，不可用的替换字体会被跳过并警告用户。
-/// 支持两种替换模式：全局替换（<see cref="ReplaceMissingFonts"/>）和按样式逐一替换（<see cref="ReplaceByStyleMapping"/>）。
+/// 只改已确认缺失的样式；替换字体不可用时跳过并提示。
 /// </para>
 /// </summary>
 internal static class FontReplacer
 {
     /// <summary>
-    /// 使用全局配置的备用字体替换所有缺失字体。
+    /// 按全局配置替换缺失字体。
     /// <para>
-    /// 替换策略：TrueType 缺失 → 用 trueTypeFont 替换；
-    /// SHX 主字体缺失 → 用 mainFont 替换；SHX 大字体缺失 → 用 bigFont 替换。
+    /// TrueType、SHX 主字体、SHX 大字体分别使用对应配置值。
     /// </para>
     /// </summary>
     /// <param name="missingFonts">缺失字体检查结果列表。</param>
@@ -42,14 +40,14 @@ internal static class FontReplacer
         var log = LogService.Instance;
         int replaceCount = 0;
 
-        // 预校验替换字体是否可用，避免将样式写成不可用字体
+        // 写回前先校验替换字体，避免把样式写成不可用值。
         bool mainFontValid = !string.IsNullOrEmpty(mainFont)
             && FontDetector.IsShxFontAvailable(mainFont, context);
         bool bigFontValid = !string.IsNullOrEmpty(bigFont)
             && FontDetector.IsShxFontAvailable(bigFont, context)
             && !FontDetector.IsShxTypeMismatch(bigFont, context, expectBigFont: true);
         bool trueTypeFontValid = !string.IsNullOrEmpty(trueTypeFont)
-            && FontDetector.IsTrueTypeFontAvailable(trueTypeFont, context);
+            && FontDetector.IsTrueTypeFontAvailable(FontRedirectResolver.StripLeadingAtPrefix(trueTypeFont), context);
 
         if (!string.IsNullOrEmpty(mainFont) && !mainFontValid)
             log.Warning($"SHX 替换字体 '{mainFont}' 不可用，已跳过，请执行 AFR 重新配置");
@@ -62,11 +60,7 @@ internal static class FontReplacer
         DiagnosticLogger.LogPreValidation(bigFont ?? "", "大字体", bigFontValid);
         DiagnosticLogger.LogPreValidation(trueTypeFont ?? "", "TrueType", trueTypeFontValid);
 
-        // FontDescriptor 和 GDI 查询要求字族名（如 "SimSun"），而非文件名（如 "simsun.ttc"）
-        if (trueTypeFontValid)
-            trueTypeFont = NormalizeTrueTypeName(trueTypeFont!, context);
-
-        // 预构建字典—O(1)查找替代线性搜索
+        // 按样式名快速定位原始缺失记录。
         var missingMap = new Dictionary<string, FontCheckResult>(missingFonts.Count, StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < missingFonts.Count; i++)
         {
@@ -83,7 +77,7 @@ internal static class FontReplacer
                 var style = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
                 if (!missingMap.TryGetValue(style.Name, out var missing)) continue;
 
-                // ShapeFile 样式用于复杂线型（ltypeshp.shx 等），替换会破坏线型结构
+                // ShapeFile 属于复杂线型，不做字体替换。
                 if (style.IsShapeFile)
                 {
                     DiagnosticLogger.LogSkipped(style.Name, "IsShapeFile=true");
@@ -93,51 +87,58 @@ internal static class FontReplacer
                 bool changed = false;
                 style.UpgradeOpen();
 
-                // 若主字体缺失且已配置替换字体，则执行替换
                 if (missing.IsMainFontMissing)
                 {
                     if (missing.IsTrueType)
                     {
-                        // TrueType 只用 TrueType 字体替换（需通过可用性校验）
-                        if (trueTypeFontValid)
+                        // @TrueType 只能写入预解析出的可用 @face。
+                        bool preserveAtPrefix = ShouldPreserveTrueTypeAtPrefix(missing);
+                        bool canReplaceTrueType = preserveAtPrefix
+                            ? TrueTypeFontAvailabilityIndex.TryGetResolvedAtTrueTypeFont(out _, out _)
+                            : trueTypeFontValid;
+                        if (canReplaceTrueType)
                         {
-                            var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(trueTypeFont!, context);
+                            if (!TryBuildTrueTypeWriteFace(
+                                trueTypeFont!,
+                                preserveAtPrefix,
+                                context,
+                                out string typeFaceToWrite,
+                                out string metricsFontName))
+                            {
+                                DiagnosticLogger.LogSkipped(style.Name, "@TrueType未找到可用兜底字体");
+                                continue;
+                            }
 
-                            // 先清除 SHX 引用，再设置 TrueType
-                            // 顺序关键: AutoCAD 要求 FileName 为有效 SHX 时才能设置 BigFontFileName，
-                            // 因此清空时必须先清 BigFontFileName 再清 FileName，否则 eInvalidInput。
+                            var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(metricsFontName, context);
+
+                            // 清空顺序关键：先 BigFont 再 FileName，避免 AutoCAD 抛 eInvalidInput。
                             style.BigFontFileName = string.Empty;
                             style.FileName = string.Empty;
-                            style.Font = new FontDescriptor(trueTypeFont, false, false, charset, pitch);
+                            style.Font = new FontDescriptor(typeFaceToWrite, false, false, charset, pitch);
 
                             DiagnosticLogger.LogReplacement(style.Name, "Font.TypeFace",
-                                missing.TypeFace, trueTypeFont ?? "");
+                                missing.TypeFace, typeFaceToWrite);
 
                             changed = true;
                         }
                         else
                         {
-                            DiagnosticLogger.LogSkipped(style.Name, "TrueType替换字体不可用");
+                            DiagnosticLogger.LogSkipped(
+                                style.Name,
+                                preserveAtPrefix ? "@TrueType替换字体不可用" : "TrueType替换字体不可用");
                         }
                     }
                     else
                     {
-                        // SHX 只用 SHX 字体替换（需通过可用性校验）
+                        // SHX 样式只写入已通过校验的 SHX 文件名。
                         if (mainFontValid)
                         {
-                            // 无条件清空 FontDescriptor，确保不残留任何 TrueType 信息。
-                            // 不依赖 TypeFace 读回值判断 — AutoCAD 内部状态可能不一致。
-                            // 必须先清 Font 再设 FileName，否则设置 Font 可能重置 FileName。
+                            // 先清 FontDescriptor 再设 FileName，避免残留 TrueType 状态。
                             style.Font = new FontDescriptor("", false, false, 0, 0);
                             style.FileName = mainFont;
 
-                            // 始终重建 BigFont 状态，避免旧值残留或与新主字体不匹配
-                            style.BigFontFileName = bigFontValid ? bigFont : string.Empty;
-
                             DiagnosticLogger.LogReplacement(style.Name, "FileName",
                                 missing.FileName, mainFont ?? "");
-                            DiagnosticLogger.LogReplacement(style.Name, "BigFontFileName",
-                                missing.BigFontFileName, bigFontValid ? bigFont ?? "" : "");
 
                             changed = true;
                         }
@@ -147,22 +148,40 @@ internal static class FontReplacer
                         }
                     }
                 }
-                // 单独处理仅 BigFont 缺失的情况（主字体正常，常见于中文 SHX 字体）
-                // TrueType 样式不支持大字体，跳过；FileName 必须有效才能设置 BigFontFileName
-                else if (!missing.IsTrueType && missing.IsBigFontMissing
-                         && !string.IsNullOrEmpty(style.FileName))
+                // BigFont 只能写入非 TrueType 且 FileName 有效的样式。
+                if (!missing.IsTrueType && missing.IsBigFontMissing)
                 {
-                    style.BigFontFileName = bigFontValid ? bigFont : string.Empty;
-                    DiagnosticLogger.LogReplacement(style.Name, "BigFontFileName",
-                        missing.BigFontFileName, bigFontValid ? bigFont ?? "" : "");
-                    changed = true;
+                    if (!bigFontValid)
+                    {
+                        DiagnosticLogger.LogSkipped(style.Name, "大字体替换字体不可用");
+                    }
+                    else if (missing.IsMainFontMissing && !mainFontValid)
+                    {
+                        DiagnosticLogger.LogSkipped(style.Name, "SHX主字体未替换，跳过大字体替换");
+                    }
+                    else if (string.IsNullOrEmpty(style.FileName))
+                    {
+                        DiagnosticLogger.LogSkipped(style.Name, "FileName为空，跳过大字体替换");
+                    }
+                    else
+                    {
+                        style.BigFontFileName = bigFont;
+                        DiagnosticLogger.LogReplacement(style.Name, "BigFontFileName",
+                            missing.BigFontFileName, bigFont ?? "");
+                        changed = true;
+                    }
                 }
 
                 if (changed) replaceCount++;
             }
             catch (Exception ex)
             {
-                DiagnosticLogger.LogError($"替换样式 {id} 的字体失败（已跳过）", ex);
+                DiagnosticLogger.Fail(
+                    "FontReplacer",
+                    "ReplaceMissingFonts",
+                    "替换样式字体失败，已跳过",
+                    ex,
+                    new Dictionary<string, object?> { ["objectId"] = id.ToString() });
             }
         }
 
@@ -171,10 +190,9 @@ internal static class FontReplacer
     }
 
     /// <summary>
-    /// 按样式名称与指定的替换字体进行逐一替换（AFRLOG 手动替换模式）。
+    /// AFRLOG 手动替换：按样式名写入指定字体。
     /// <para>
-    /// 用于用户在日志界面中手动为每个样式指定不同的替换字体。
-    /// 仅影响当前图纸中的样式表，不修改注册表全局配置。
+    /// 只影响当前图纸样式表，不修改注册表全局配置。
     /// </para>
     /// </summary>
     /// <param name="replacements">每个样式的替换规格列表。</param>
@@ -203,7 +221,7 @@ internal static class FontReplacer
                 var style = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
                 if (!map.TryGetValue(style.Name, out var replacement)) continue;
 
-                // ShapeFile 样式用于复杂线型（ltypeshp.shx 等），替换会破坏线型结构
+                // ShapeFile 属于复杂线型，不做字体替换。
                 if (style.IsShapeFile)
                 {
                     DiagnosticLogger.LogSkipped(style.Name, "IsShapeFile=true (手动)");
@@ -217,16 +235,34 @@ internal static class FontReplacer
                 {
                     if (replacement.IsTrueType)
                     {
-                        if (!FontDetector.IsTrueTypeFontAvailable(replacement.MainFontReplacement, context))
+                        bool preserveAtPrefix = replacement.PreserveTrueTypeAtPrefix
+                                                || FontRedirectResolver.HasAtPrefix(replacement.MainFontReplacement);
+                        string replacementLookup = FontRedirectResolver.StripLeadingAtPrefix(replacement.MainFontReplacement);
+                        bool replacementAvailable = preserveAtPrefix
+                            ? TrueTypeFontAvailabilityIndex.TryGetResolvedAtTrueTypeFont(out _, out _)
+                            : FontDetector.IsTrueTypeFontAvailable(replacementLookup, context);
+                        if (!replacementAvailable)
                         {
                             log.Warning($"样式 '{replacement.StyleName}': 字体 '{replacement.MainFontReplacement}' 不可用，已跳过");
                         }
                         else
                         {
-                            // FontDescriptor 要求字族名，去除可能的文件扩展名
-                            var fontFamily = NormalizeTrueTypeName(replacement.MainFontReplacement, context);
-                            var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(fontFamily, context);
-                            // 清空顺序: 先 BigFont 再 FileName，避免 eInvalidInput
+                            string requestedTrueTypeFont = replacement.MainFontReplacement;
+                            // FontDescriptor 要求字族名，不能写 .ttf/.ttc 文件名。
+                            if (!TryBuildTrueTypeWriteFace(
+                                requestedTrueTypeFont,
+                                replacement.PreserveTrueTypeAtPrefix,
+                                context,
+                                out string fontFamily,
+                                out string metricsFontName))
+                            {
+                                log.Warning($"样式 '{replacement.StyleName}': @TrueType 未找到可用兜底字体，已跳过");
+                                DiagnosticLogger.LogSkipped(replacement.StyleName, "@TrueType手动替换无可用兜底字体");
+                                continue;
+                            }
+
+                            var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(metricsFontName, context);
+                            // 清空顺序：先 BigFont 再 FileName，避免 eInvalidInput。
                             style.BigFontFileName = string.Empty;
                             style.FileName = string.Empty;
                             style.Font = new FontDescriptor(fontFamily, false, false, charset, pitch);
@@ -241,11 +277,11 @@ internal static class FontReplacer
                         }
                         else
                         {
-                            // 无条件清空 FontDescriptor，确保不残留任何 TrueType 信息
+                            // 清掉 TrueType 状态后再写 SHX。
                             style.Font = new FontDescriptor("", false, false, 0, 0);
                             style.FileName = replacement.MainFontReplacement;
 
-                            // 始终重建 BigFont 状态，避免旧值残留或与新主字体不匹配
+                            // 主字体变更时同步重建 BigFont，避免旧值残留。
                             if (!string.IsNullOrEmpty(replacement.BigFontReplacement)
                                 && FontDetector.IsShxFontAvailable(replacement.BigFontReplacement, context)
                                 && !FontDetector.IsShxTypeMismatch(replacement.BigFontReplacement, context, expectBigFont: true))
@@ -263,7 +299,7 @@ internal static class FontReplacer
                         }
                     }
                 }
-                // 仅大字体需要替换（主字体未变更）— 与 ReplaceMissingFonts 的 BigFont-only 分支对齐
+                // 仅 BigFont 变更时，与自动替换的 BigFont-only 分支保持一致。
                 else if (!replacement.IsTrueType
                          && !string.IsNullOrEmpty(replacement.BigFontReplacement)
                          && !string.IsNullOrEmpty(style.FileName))
@@ -284,7 +320,12 @@ internal static class FontReplacer
             }
             catch (Exception ex)
             {
-                DiagnosticLogger.LogError($"手动替换样式 {id} 的字体失败（已跳过）", ex);
+                DiagnosticLogger.Fail(
+                    "FontReplacer",
+                    "ReplaceByStyleMapping",
+                    "手动替换样式字体失败，已跳过",
+                    ex,
+                    new Dictionary<string, object?> { ["objectId"] = id.ToString() });
             }
         }
 
@@ -295,10 +336,7 @@ internal static class FontReplacer
     /// <summary>
     /// 清理样式表中 TrueType 可用但 SHX 引用缺失的残留引用。
     /// <para>
-    /// 当一个样式同时有 TypeFace（已安装的 TrueType）和 FileName（缺失的 SHX）时，
-    /// AutoCAD 使用 TrueType 渲染，SHX 引用实际无用。但 Hook 会在加载阶段将缺失 SHX
-    /// 重定向到替换字体，导致内部缓存与 DWG 实际数据不一致 → ST 弹出"已修改"提示。
-    /// 清除 FileName 可消除这种不一致，同时不影响渲染（TrueType 仍可用）。
+    /// 这类残留会让 Hook 重定向无用 SHX，导致 ST 认为样式被改动；清掉 FileName 不影响 TrueType 渲染。
     /// </para>
     /// </summary>
     /// <returns>被清理的样式数量。</returns>
@@ -307,10 +345,13 @@ internal static class FontReplacer
         var log = LogService.Instance;
         int cleaned = 0;
 
-        // 系统字体索引未就绪时跳过清理，避免误判
+        // 系统字体索引未就绪时跳过，避免误清理。
         if (!FontDetector.IsSystemFontIndexReady)
         {
-            DiagnosticLogger.Log("清理", "系统字体索引尚未就绪，跳过残留 SHX 清理");
+            DiagnosticLogger.Skip(
+                "FontReplacer",
+                "CleanupStaleShxReferences",
+                "系统字体索引尚未就绪，跳过残留 SHX 清理");
             return 0;
         }
 
@@ -323,20 +364,27 @@ internal static class FontReplacer
             {
                 var style = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
 
-                // 隔离 style.Font 访问 — 损坏的描述符不应阻断后续样式处理
+                // style.Font 可能损坏；隔离读取，避免阻断后续样式。
                 FontDescriptor? safeFont = null;
                 try { safeFont = style.Font; }
                 catch (Exception fontEx)
                 {
-                    DiagnosticLogger.Log("清理", $"样式 '{style.Name}' 的 TrueType 描述符损坏，已跳过: {fontEx.Message}");
+                    DiagnosticLogger.Skip(
+                        "FontReplacer",
+                        "CleanupStaleShxReferences",
+                        "TrueType 描述符损坏，已跳过清理",
+                        new Dictionary<string, object?>
+                        {
+                            ["styleName"] = style.Name,
+                            ["error"] = fontEx.Message
+                        });
                     continue;
                 }
                 var font = safeFont.Value;
 
-                // 仅处理有 TrueType 字族名的样式
+                // 只处理 TrueType 可渲染、但残留缺失 SHX 的样式。
                 if (string.IsNullOrEmpty(font.TypeFace)) continue;
 
-                // TrueType 必须已安装（通过系统字体索引或 FindFile 双重验证）
                 if (!FontDetector.IsSystemFont(font.TypeFace)
                     && !FontDetector.IsTrueTypeFontAvailable(font.TypeFace, context))
                     continue;
@@ -344,25 +392,37 @@ internal static class FontReplacer
                 var fileName = style.FileName ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(fileName)) continue;
 
-                // FileName 是 TrueType 文件 → 不需要清理
                 if (FontDetector.IsTrueTypeFontFile(fileName))
                     continue;
 
-                // 复用 FontDetector 的缓存查找，避免直接调用 FindFile 引发异常风暴
                 if (FontDetector.IsShxFontAvailable(fileName, context))
                     continue; // SHX 存在，无需清理
 
-                // TrueType 可用 + SHX 缺失 → 清除残留 SHX 引用
                 style.UpgradeOpen();
-                DiagnosticLogger.Log("清理", $"样式='{style.Name}' TrueType='{font.TypeFace}' 清除残留 FileName='{fileName}' BigFont='{style.BigFontFileName}'");
-                // 清空顺序: 先 BigFont 再 FileName，避免 eInvalidInput
+                DiagnosticLogger.Ok(
+                    "FontReplacer",
+                    "CleanupStaleShxReferences",
+                    "样式残留 SHX 引用已清理",
+                    new Dictionary<string, object?>
+                    {
+                        ["styleName"] = style.Name,
+                        ["typeFace"] = font.TypeFace,
+                        ["fileName"] = fileName,
+                        ["bigFontFileName"] = style.BigFontFileName
+                    });
+                // 清空顺序：先 BigFont 再 FileName，避免 eInvalidInput。
                 style.BigFontFileName = string.Empty;
                 style.FileName = string.Empty;
                 cleaned++;
             }
             catch (Exception ex)
             {
-                DiagnosticLogger.Log("清理", $"处理样式 {id} 时出错（已跳过）: {ex.Message}");
+                DiagnosticLogger.Fail(
+                    "FontReplacer",
+                    "CleanupStaleShxReferences",
+                    "处理样式时出错，已跳过",
+                    ex,
+                    new Dictionary<string, object?> { ["objectId"] = id.ToString() });
             }
         }
 
@@ -372,10 +432,7 @@ internal static class FontReplacer
 
     /// <summary>
     /// 将 TrueType 字体名归一化为字族名。
-    /// FontDescriptor 和 GDI 查询要求纯字族名（如 "SimSun"），
-    /// 不能包含文件扩展名（如 "simsun.ttc"），否则 AutoCAD 找不到字体。
-    /// 优先通过 GlyphTypeface 解析字体文件内部的真实字族名，
-    /// 避免文件名与字族名不一致的问题（如 FZYTK.TTF → "方正姚体"）。
+    /// FontDescriptor 和 GDI 查询不能使用 .ttf/.ttc 文件名；文件名配置会解析为内部字族名。
     /// </summary>
     private static string NormalizeTrueTypeName(string name, FontDetectionContext context)
     {
@@ -385,7 +442,7 @@ internal static class FontReplacer
         {
             try
             {
-                // 通过 AutoCAD 搜索路径定位字体文件，解析内部真实字族名
+                // 通过 CAD 搜索路径定位字体文件，再解析内部字族名。
                 string path = HostApplicationServices.Current.FindFile(
                     name, context.Db, FindFileHint.TrueTypeFontFile);
                 if (!string.IsNullOrEmpty(path))
@@ -401,7 +458,7 @@ internal static class FontReplacer
             }
             catch
             {
-                // FindFile 或 GlyphTypeface 解析失败 — 降级为扩展名截断
+                // 解析失败时退回到去扩展名。
             }
 
             var fallback = Path.GetFileNameWithoutExtension(name);
@@ -412,4 +469,63 @@ internal static class FontReplacer
         return name;
     }
 
+    private static bool ShouldPreserveTrueTypeAtPrefix(FontCheckResult missing)
+        => missing.IsTrueType
+           && (FontRedirectResolver.HasAtPrefix(missing.TypeFace)
+               || FontRedirectResolver.HasAtPrefix(missing.FileName));
+
+    private static bool TryBuildTrueTypeWriteFace(
+        string requestedTrueTypeFont,
+        bool preserveAtPrefix,
+        FontDetectionContext context,
+        out string typeFace,
+        out string metricsFontName)
+    {
+        typeFace = string.Empty;
+        string requestedBase = FontRedirectResolver.StripLeadingAtPrefix(requestedTrueTypeFont);
+        metricsFontName = NormalizeTrueTypeName(requestedBase, context).TrimStart('@');
+        bool writeAtPrefix = preserveAtPrefix || FontRedirectResolver.HasAtPrefix(requestedTrueTypeFont);
+        string atResolutionSource = "Configured";
+
+        if (writeAtPrefix)
+        {
+            if (!TrueTypeFontAvailabilityIndex.TryGetResolvedAtTrueTypeFont(
+                    out string resolvedAtBaseFont,
+                    out atResolutionSource))
+            {
+                DiagnosticLogger.Fail(
+                    "FontReplacer",
+                    "NormalizeTrueTypeReplacement",
+                    "@TrueType 未找到可用的 @face 兜底字体",
+                    fields: new Dictionary<string, object?>
+                    {
+                        ["requestedTrueTypeFont"] = requestedTrueTypeFont,
+                        ["preserveAtPrefix"] = true
+                    });
+                return false;
+            }
+
+            metricsFontName = NormalizeTrueTypeName(resolvedAtBaseFont, context).TrimStart('@');
+            typeFace = "@" + metricsFontName;
+        }
+        else
+        {
+            typeFace = metricsFontName;
+        }
+
+        DiagnosticLogger.Ok(
+            "FontReplacer",
+            "NormalizeTrueTypeReplacement",
+            "TrueType 替换字体已解析为 TypeFace",
+            new Dictionary<string, object?>
+            {
+                ["requestedTrueTypeFont"] = requestedTrueTypeFont,
+                ["typeFace"] = typeFace,
+                ["metricsFontName"] = metricsFontName,
+                ["preserveAtPrefix"] = writeAtPrefix,
+                ["atResolutionSource"] = atResolutionSource,
+                ["configuredAtCapable"] = TrueTypeFontAvailabilityIndex.IsConfiguredTrueTypeAtCapable
+            });
+        return true;
     }
+}

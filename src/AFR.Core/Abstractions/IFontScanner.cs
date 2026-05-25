@@ -12,6 +12,12 @@ public interface IFontScanner
     /// <summary>扫描 CAD 搜索路径下的可用 SHX 字体文件名（不含路径，含扩展名）。</summary>
     IReadOnlyCollection<string> ScanAvailableShxFonts();
 
+    /// <summary>扫描 CAD 搜索路径下可用的常规 SHX 主字体文件名（不含路径，含扩展名）。</summary>
+    IReadOnlyCollection<string> ScanAvailableMainShxFonts();
+
+    /// <summary>扫描 CAD 搜索路径下可用的 SHX 大字体文件名（不含路径，含扩展名）。</summary>
+    IReadOnlyCollection<string> ScanAvailableBigShxFonts();
+
     /// <summary>扫描操作系统已安装的 TrueType 字体族名（Family Name）。</summary>
     IReadOnlyCollection<string> ScanSystemTrueTypeFonts();
 }

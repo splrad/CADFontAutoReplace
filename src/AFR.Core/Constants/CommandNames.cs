@@ -21,24 +21,12 @@ internal static class CommandNames
     public const string Main = "AFR";
     /// <summary>查看插件日志。</summary>
     public const string Log = "AFRLOG";
+    // ── 隐藏维护命令（不通过 CommandMethod 注册，不进入 CAD 补全/建议列表）────
+    /// <summary>卸载插件并清理注册表。仅完整输入时由 UnknownCommand 路由触发。</summary>
+    public const string Unload = "AFRUNLOAD";
 
     // ── DEBUG 诊断命令（仅在 DEBUG 构建中由实现层注册）─────────────────
-    /// <summary>卸载插件并清理注册表。</summary>
-    public const string Unload = "AFRUNLOAD";
     /// <summary>查看 MText / MLeader 格式与样式诊断。</summary>
     public const string ViewMText = "AFRVIEW";
-    /// <summary>插入测试用 MText。</summary>
-    public const string InsertMText = "AFRINSERT";
-    /// <summary>Big5/GBK 编码诊断。</summary>
-    public const string Big5Diagnose = "AFRBIG5DIAG";
-    /// <summary>Big5 自动修复后的残留诊断。</summary>
-    public const string Big5Residual = "AFRBIG5LEFT";
-    /// <summary>转储当前 CAD 配置文件与注册表状态。</summary>
-    public const string DumpProfile = "AFRDUMPPROFILE";
-    /// <summary>列出候选 .aws 配置文件路径。</summary>
-    public const string ShowAwsPath = "AFRSHOWAWSPATH";
-    /// <summary>生成 PowerShell 反射探针脚本。</summary>
-    public const string GenProbeScripts = "AFRGENPROBESCRIPTS";
-    /// <summary>反射转储 CAD 对话框相关 API。</summary>
-    public const string DumpDialogApi = "AFRDUMPDIALOGAPI";
 }
+
