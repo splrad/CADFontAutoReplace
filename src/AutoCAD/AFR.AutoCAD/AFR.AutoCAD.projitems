@@ -14,12 +14,9 @@
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\AutoCadFontHook.cs" Link="FontMapping\AutoCadFontHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontRedirectResolver.cs" Link="FontMapping\FontRedirectResolver.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontRuntimeMappingStore.cs" Link="FontMapping\FontRuntimeMappingStore.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontRuntimeRequestRegistry.cs" Link="FontMapping\FontRuntimeRequestRegistry.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\HookShxFontIndex.cs" Link="FontMapping\HookShxFontIndex.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\HookTrueTypeFontIndex.cs" Link="FontMapping\HookTrueTypeFontIndex.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\LdFileHook.cs" Link="FontMapping\LdFileHook.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MapFontDiagnosticHook.cs" Link="FontMapping\MapFontDiagnosticHook.cs" Condition="'$(Configuration)'=='Debug'" />
-    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\MTextFontParser.cs" Link="FontMapping\MTextFontParser.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeFontHookProfile.cs" Link="FontMapping\NativeFontHookProfile.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\NativeInlineHook.cs" Link="FontMapping\NativeInlineHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\ShpLoadHook.cs" Link="FontMapping\ShpLoadHook.cs" />
@@ -39,11 +36,6 @@
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AssemblyRegistryDefaults.cs" Link="Hosting\AssemblyRegistryDefaults.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\ExternalRegistryDefaultsApplier.cs" Link="Hosting\ExternalRegistryDefaultsApplier.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Diagnostics\AwsHideableDialogPatcher.cs" Link="Diagnostics\AwsHideableDialogPatcher.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\DumpDialogApiCommand.cs" Link="DebugCommands\DumpDialogApiCommand.cs" Condition="'$(Configuration)'=='Debug'" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\GenProbeScriptsCommand.cs" Link="DebugCommands\GenProbeScriptsCommand.cs" Condition="'$(Configuration)'=='Debug'" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextEditorCommand.cs" Link="DebugCommands\MTextEditorCommand.cs" Condition="'$(Configuration)'=='Debug'" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextInsertCommand.cs" Link="DebugCommands\MTextInsertCommand.cs" Condition="'$(Configuration)'=='Debug'" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\ProfileDumpCommand.cs" Link="DebugCommands\ProfileDumpCommand.cs" Condition="'$(Configuration)'=='Debug'" />
-    <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\ShowAwsPathCommand.cs" Link="DebugCommands\ShowAwsPathCommand.cs" Condition="'$(Configuration)'=='Debug'" />
   </ItemGroup>
 </Project>

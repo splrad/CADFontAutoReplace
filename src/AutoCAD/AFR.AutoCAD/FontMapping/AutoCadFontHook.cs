@@ -123,7 +123,7 @@ internal sealed class AutoCadFontHook : IFontHook
         }
     }
 
-    /// <summary>卸载 Hook，恢复被拦截的 AcGiTextStyle 函数。</summary>
+    /// <summary>卸载字体加载 Hook。</summary>
     public void Uninstall()
     {
         DiagnosticLogger.Start("AutoCadFontHook", "Uninstall", "开始卸载插件级持久字体 Hook");

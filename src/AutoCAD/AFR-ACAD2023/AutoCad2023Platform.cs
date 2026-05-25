@@ -18,54 +18,11 @@ internal sealed class AutoCad2023Platform : ICadPlatform, INativeFontHookExports
     public string AcDbDllName => "acdb24.dll";
     public bool SupportsNativeFontHooks => true;
 
-    public string AcGiTextStyleLoadStyleRecExport => "?loadStyleRec@AcGiTextStyle@@UEBAHPEAVAcDbDatabase@@@Z";
-    public string AcGiTextStyleStyleNameExport => "?styleName@AcGiTextStyle@@UEBAPEB_WXZ";
-    public string AcGiTextStyleFileNameExport => "?fileName@AcGiTextStyle@@UEBAPEB_WXZ";
-    public string AcGiTextStyleBigFontFileNameExport => "?bigFontFileName@AcGiTextStyle@@UEBAPEB_WXZ";
-    public string AcGiTextStyleIsVerticalExport => "?isVertical@AcGiTextStyle@@UEBA_NXZ";
-    public string AcGiTextStyleSetVerticalExport => "?setVertical@AcGiTextStyle@@UEAAX_N@Z";
-    public string AcGiTextStyleSetFontExport => "?setFont@AcGiTextStyle@@UEAA?AW4ErrorStatus@Acad@@PEB_W_N1W4Charset@@W4FontPitch@FontUtils@PAL@AutoCAD@Autodesk@@W4FontFamily@6789@@Z";
-    public string AcGiTextStyleSetFileNameExport => "?setFileName@AcGiTextStyle@@UEAAXPEB_W@Z";
-    public string AcGiTextStyleSetBigFontFileNameExport => "?setBigFontFileName@AcGiTextStyle@@UEAAXPEB_W@Z";
-    public string AcGiTextStyleFileNameCtorExport => "??0AcGiTextStyle@@QEAA@PEB_W0NNNN_N111110@Z";
-    public string LdFileExport => "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z";
-    public uint? LdFileRva => 0x118B84;
-
     public NativeFontHookProfile NativeFontHookProfile
         => new(
             NativeHookTarget.Export(
-                "AcGiTextStyle::loadStyleRec",
-                AcGiTextStyleLoadStyleRecExport,
-                0xAA363C,
-                [0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xDA, 0xFF, 0x15, 0x6D, 0x2D, 0x07, 0x00, 0x48],
-                maxPrologueSize: 64),
-            NativeHookTarget.Export(
-                "AcGiTextStyle::setFont",
-                AcGiTextStyleSetFontExport,
-                0xAA3F10,
-                [0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x40, 0x41],
-                maxPrologueSize: 64),
-            NativeHookTarget.Export(
-                "AcGiTextStyle::setFileName",
-                AcGiTextStyleSetFileNameExport,
-                0xAA3EF0,
-                [0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xDA, 0xFF, 0x15, 0x41, 0x2B, 0x07, 0x00, 0x48],
-                maxPrologueSize: 64),
-            NativeHookTarget.Export(
-                "AcGiTextStyle::setBigFontFileName",
-                AcGiTextStyleSetBigFontFileNameExport,
-                0xAA3D14,
-                [0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xDA, 0xFF, 0x15, 0x1D, 0x2D, 0x07, 0x00, 0x48],
-                maxPrologueSize: 64),
-            NativeHookTarget.Export(
-                "AcGiTextStyle::AcGiTextStyle(font,bigFont)",
-                AcGiTextStyleFileNameCtorExport,
-                0xAA11B0,
-                [0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x10, 0x48, 0x89, 0x68, 0x18, 0x48, 0x89, 0x70, 0x20, 0x48],
-                maxPrologueSize: 96),
-            NativeHookTarget.Export(
                 "ldfile",
-                LdFileExport,
+                "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z",
                 0x118B84,
                 [0x40, 0x55, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x48, 0x8D, 0xAC],
                 maxPrologueSize: 64));

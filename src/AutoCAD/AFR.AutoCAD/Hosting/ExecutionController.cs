@@ -164,7 +164,6 @@ internal sealed class ExecutionController
                         runtimeMappingTimer.ElapsedMilliseconds);
 
                     allRuntimeMappingResults = FontRuntimeMappingStore.GetRuntimeMappingResults();
-                    contextMgr.StoreInlineFontFixResults(doc, []);
                     contextMgr.StoreRuntimeFontMappingResults(doc, allRuntimeMappingResults);
                     DiagnosticLogger.Ok(
                         "ExecutionController",
@@ -281,8 +280,7 @@ internal sealed class ExecutionController
                 log.AddStatistics(
                     missingFonts,
                     stillMissing,
-                    styleRuntimeMappingCount: allRuntimeMappingResults.Count,
-                    mtextMappingCount: 0);
+                    runtimeMappingCount: allRuntimeMappingResults.Count);
                 DiagnosticLogger.Ok(
                     "ExecutionController",
                     "ExecutionStatistics",
@@ -292,8 +290,7 @@ internal sealed class ExecutionController
                         ["missingFonts"] = missingFonts.Count,
                         ["stillMissing"] = stillMissing.Count,
                         ["replacedStyleCount"] = replacedStyleCount,
-                        ["runtimeMappingCount"] = allRuntimeMappingResults.Count,
-                        ["mTextMappingCount"] = 0
+                        ["runtimeMappingCount"] = allRuntimeMappingResults.Count
                     });
                 log.Flush();
             }

@@ -62,13 +62,11 @@ internal sealed class LogService : ILogService
     /// </summary>
     /// <param name="missingFonts">字体检查结果列表，包含每个字体样式的缺失情况。</param>
     /// <param name="stillMissingFonts">替换后仍然缺失的字体列表，为 null 或空表示全部替换成功。</param>
-    /// <param name="styleRuntimeMappingCount">样式表运行时映射命中数量。</param>
-    /// <param name="mtextMappingCount">MText 多行文字中通过内联字体映射修复的数量。</param>
+    /// <param name="runtimeMappingCount">文件级 Hook 实际命中的运行时映射数量。</param>
     public void AddStatistics(
         IReadOnlyList<FontCheckResult> missingFonts,
         IReadOnlyList<FontCheckResult>? stillMissingFonts = null,
-        int styleRuntimeMappingCount = 0,
-        int mtextMappingCount = 0)
+        int runtimeMappingCount = 0)
     {
         // --- 第一步：遍历检查结果，按字体类型分别统计原始缺失和替换后仍缺失 ---
         var missing = CountMissingSlots(missingFonts);
@@ -78,7 +76,7 @@ internal sealed class LogService : ILogService
         int shxCount = Math.Max(0, missing.ShxMain - stillMissing.ShxMain);
         int bigFontCount = Math.Max(0, missing.ShxBig - stillMissing.ShxBig);
         int total = trueTypeCount + shxCount + bigFontCount;
-        int runtimeMappingCount = Math.Max(0, styleRuntimeMappingCount) + Math.Max(0, mtextMappingCount);
+        runtimeMappingCount = Math.Max(0, runtimeMappingCount);
 
         // --- 第二步：生成唯一的字体修复汇总消息 ---
         string msg = $"[字体修复]已替换缺失字体 {total} 个(SHX主字体: {shxCount} , SHX大字体: {bigFontCount} , TrueType: {trueTypeCount})";

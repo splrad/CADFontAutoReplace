@@ -17,29 +17,6 @@ internal static class FontRuntimeMappingStore
     }
 
     internal static void RecordRuntimeMapping(
-        FontRuntimeRequest request,
-        string executingHook,
-        string result)
-    {
-        if (string.IsNullOrWhiteSpace(request.OriginalDisplayFont)
-            || string.IsNullOrWhiteSpace(request.ReplacementFont))
-        {
-            return;
-        }
-
-        string hook = string.IsNullOrWhiteSpace(executingHook) ? request.ExecutingHook : executingHook;
-        RecordRuntimeMapping(
-            NormalizeSource(request.Source),
-            request.Owner,
-            request.OriginalDisplayFont,
-            request.BaseFont,
-            GetFontTypeText(request.Kind),
-            request.ReplacementFont,
-            hook,
-            result);
-    }
-
-    internal static void RecordRuntimeMapping(
         string source,
         string owner,
         string originalFont,
@@ -82,8 +59,7 @@ internal static class FontRuntimeMappingStore
 
     private static string NormalizeSource(string source)
     {
-        if (source.StartsWith("MText", StringComparison.OrdinalIgnoreCase)
-            || source.StartsWith("AcGiTextStyle", StringComparison.OrdinalIgnoreCase))
+        if (source.StartsWith("MText", StringComparison.OrdinalIgnoreCase))
             return "MText";
         return string.IsNullOrWhiteSpace(source) ? "未知" : source;
     }

@@ -250,7 +250,7 @@ dotnet build CADFontAutoReplace.slnx
 
 > 将 `20XX` 替换为当前目标版本（例如 `2027`）。插件统一版本号集中在根目录的 `Version.props`（发版时仅修改这个文件）。
 
-4. 验证关键命令（`AFR` / `AFRLOG` ，Debug 下可验证 `AFRVIEW` / `AFRINSERT` 等测试命令）。
+4. 验证关键命令（`AFR` / `AFRLOG`，Debug 下可验证 `AFRVIEW`）。
 5. 推送分支后，流程会自动创建/更新 `你的分支 -> test` 的 PR。
 6. `test` 合并后，流程会自动创建/更新 `test -> main` 的 PR。
 7. 提交说明与 PR 描述会自动生成；不准确时请在 PR 评论补充。

@@ -191,11 +191,10 @@ public class AfrCommands
             }
 
             // 构建 ViewModel 并创建日志窗口
-            var inlineFixResults = DocumentContextManager.Instance.GetInlineFontFixResults(doc);
             runtimeFontMappings ??= DocumentContextManager.Instance.GetRuntimeFontMappingResults(doc);
             var vm = new FontReplacementLogViewModel(
                 results, config.MainFont, config.BigFont, config.TrueTypeFont,
-                currentFonts, inlineFixResults, runtimeFontMappings, stillMissingStyleNames);
+                currentFonts, runtimeFontMappings, stillMissingStyleNames);
 
             DiagnosticLogger.Ok(
                 "AfrCommands",
@@ -288,10 +287,9 @@ public class AfrCommands
                         freshFonts = FontDetector.ReadCurrentFontAssignments(doc.Database);
                 }
 
-                var freshInline = DocumentContextManager.Instance.GetInlineFontFixResults(doc);
                 return new FontReplacementLogViewModel(
                     freshResults, config.MainFont, config.BigFont, config.TrueTypeFont,
-                    freshFonts, freshInline, freshRuntimeMappings, freshMissing);
+                    freshFonts, freshRuntimeMappings, freshMissing);
             };
 
             PlatformManager.Host.ShowModalWindow(window);

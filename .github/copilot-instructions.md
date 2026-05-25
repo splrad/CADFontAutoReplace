@@ -5,7 +5,7 @@
 ## 当前项目事实
 
 - 项目名：`CADFontAutoReplace`，简称 AFR。
-- 当前范围：AutoCAD 缺失字体自动替换、样式表字体替换、样式表 `@TrueType` 运行时映射、`LdFileHook` 字体加载桥接、MText 内联字体运行时映射，以及 `AFR.Deployer` 一键安装/卸载。
+- 当前范围：AutoCAD 缺失字体自动替换、样式表字体替换、样式表 `@TrueType` 文件级运行时映射、`LdFileHook` / `ShpLoadHook` 字体加载桥接，以及 `AFR.Deployer` 一键安装/卸载。
 - 当前源码树不包含 `AFR.GlyphCore`、WenShu、DBText 修复、AI 决策、native decode evidence、训练数据、候选包、模型、报告或补绘链路。旧记忆或旧文档中的这些名称均视为历史上下文，除非源码重新引入。
 - 支持 AutoCAD 2018 到 2027。版本壳目标框架为：2018=`net462`，2019/2020=`net472`，2021-2024=`net48`，2025/2026=`net8.0-windows`，2027=`net10.0-windows`。
 - 主要分发方式：`AFR.Deployer` 部署工具一键安装/卸载。
@@ -66,7 +66,7 @@ docs                      使用与开发文档
 - 每行 JSON 事件包含 `seq`、`timestamp`、`level`、`status`、`module`、`operation`、`message`、`threadId`、`context`、`durationMs` 和 `error`。
 - `status` 固定使用 `START`、`OK`、`FAIL`、`SKIP`；排查问题时先按 `seq` 还原插件时序，再过滤 `FAIL` / `SKIP` 定位失败或跳过分支。
 - 新增诊断只能使用 `Start`、`Ok`、`Fail`、`Skip`、`RunStep` 或现有结构化领域方法；旧文本日志兼容入口已移除。
-- 字体映射是否真正生效仍以文件级 Hook 的真实命中记录和最终 `redirects` 计数为准，不能只看预登记事件。
+- 字体映射是否真正生效仍以文件级 Hook 的真实命中记录和最终 `redirects` 计数为准，不能只看早期登记或候选扫描事件。
 
 ## 当前命令
 
@@ -79,7 +79,7 @@ Release 命令：
 Debug 命令：
 
 - 当前真实注册的 Debug 命令只有 `AFRVIEW`，用于查看 MText / MLeader 格式与样式诊断。
-- `AFRINSERT`、`AFRDUMPPROFILE`、`AFRSHOWAWSPATH`、`AFRGENPROBESCRIPTS`、`AFRDUMPDIALOGAPI` 等旧调试入口在当前源码中未作为可用命令注册；不要在文档中描述为可执行命令，除非同时恢复 `CommandNames`、`CommandMethod` 和 `CommandClass`。
+- 旧调试入口已从源码删除；不要在文档中描述为可执行命令，除非同时恢复 `CommandNames`、`CommandMethod` 和 `CommandClass`。
 - 其他 Debug 辅助命令必须用 `#if DEBUG` 或项目条件控制，并在命令注册处同步控制。
 
 新增命令规则：
@@ -99,7 +99,7 @@ Debug 命令：
 2. 文档处理开始时清理上一文档的运行时映射结果、`LdFileHook` 文档级记录和诊断计数基线。
 3. 使用 `FontDetector.DetectMissingFonts()` 只读检测样式表原始缺失字体，并把原始检测结果存入 `DocumentContextManager` 供 `AFRLOG` 使用。
 4. 在任何样式表写回前先执行 `Editor.Regen()`，让 `LdFileHook` / `ShpLoadHook` 看到原始字体加载请求。
-5. 运行时映射结果只接受 `FontRuntimeMappingStore.GetRuntimeMappingResults()` 中由 `HookHandler` 实际 redirect 写入的记录；预登记、扫描候选和 `mapFont` 入站样本都不能计为成功映射。
+5. 运行时映射结果只接受 `FontRuntimeMappingStore.GetRuntimeMappingResults()` 中由 `HookHandler` 实际 redirect 写入的记录；早期登记、候选扫描和上游入站样本都不能计为成功映射。
 6. 最后使用 `FontReplacer.ReplaceMissingFonts()` 对仍需写回的普通缺失字体和 `@SHX` 缺失字体执行样式表永久替换；替换前必须校验替换字体可用性。
 7. 替换后重新检测并存储仍缺失结果，供 `AFRLOG` 标记当前状态。
 8. 如果发生样式表永久替换，通过 `MarkAffectedTextGraphicsModified()` 标记受影响文字、属性和块引用，再做最终视觉刷新。
@@ -121,7 +121,7 @@ Debug 命令：
 MText 内联运行时映射规则：
 
 - MText 内联字体不改写 `MText.Contents`。
-- 当前默认链路不安装来源级 MText Hook，也不运行 MText 候选预登记作为修复关键路径。
+- 当前默认链路不安装来源级 MText Hook，也不运行 MText 候选扫描作为修复关键路径。
 - MText 内联 SHX / TrueType 只有在 CAD 原生加载过程中真实进入 `LdFileHook` 或 `ShpLoadHook` 并发生 redirect 时，才写入运行时映射结果。
 - MText 内联 `@SHX` 由 `LdFileHook` 先尝试去 `@` 后基础 SHX，基础不存在再映射配置 SHX；`@TrueType` 由 `ShpLoadHook` 按基础 TrueType 是否存在决定保留原请求或映射到 `@` + 配置 TrueType。
 - AFRLOG 展示记录必须来自 `LdFileHook` / `ShpLoadHook` 实际命中的文件级映射结果，不在界面层重新推导候选映射。
@@ -137,12 +137,11 @@ MText 内联运行时映射规则：
 
 当前 Hook 边界：
 
-- `AutoCadFontHook.Install()` 默认只持久安装 `LdFileHook` 和 `ShpLoadHook`；Debug `MapFontDiagnosticHook` 只能作为可选诊断，不进入默认安装或修复链路。
+- `AutoCadFontHook.Install()` 默认只持久安装 `LdFileHook` 和 `ShpLoadHook`，不再安装上游诊断 Hook 或来源级 Hook。
 - `ExecutionController.Execute()` 不安装或卸载来源 Hook；开始时清理运行时映射结果和文件级文档状态，样式表写回前触发一次运行时刷新，最后才做样式表永久替换。
 - `LdFileHook` 是 SHX 文件级映射执行点；处理 `param2=0/4` 的 SHX 主字体/大字体，跳过 `param2=2` shape 文件，`@SHX` 先尝试基础 SHX 回退，再使用配置 SHX。
 - `ShpLoadHook` 是严格的 TrueType / `@TrueType` 文件级映射执行点；只处理已确认 TrueType 的请求，未知无扩展名、`.shx`、已知 SHX、`fileName/arg5 + param2=0/4` 一律放行给 SHX 链路，不得兜底成 TrueType。
-- `MapFontDiagnosticHook` 只用于 Debug 观察 `mapFont` 入站样本和噪声，不能把入站样本或预登记当作映射成功。
-- `StyleTextStyleHook` 和 `MTextInlineFontHook` 已从默认架构删除；不要恢复安装、编译或执行路径，除非先重新定义证据、边界和 CAD 实测验收。
+- 已删除的来源级与上游诊断 Hook 不应恢复安装、编译或执行路径，除非先重新定义证据、边界和 CAD 实测验收。
 - 普通样式表检测、永久替换和二次验证必须优先使用当前 `Database` 上的 CAD 托管 API。
 - `HookShxFontIndex` 只服务 SHX Hook 路径，负责 CAD 字体目录 `.shx` 兜底和主/大字体分类；`HookTrueTypeFontIndex` 只服务 TrueType Hook 路径，负责 DirectWrite 系统字体族索引和 CAD TrueType 文件兜底。
 
@@ -150,7 +149,7 @@ MText 内联运行时映射规则：
 
 ## AFRLOG 与文档上下文
 
-- `DocumentContextManager` 存储每个文档的原始缺失字体检测结果、替换后仍缺失结果、MText 内联映射结果和样式表运行时映射结果。
+- `DocumentContextManager` 存储每个文档的原始缺失字体检测结果、替换后仍缺失结果和文件级运行时映射结果。
 - `AFRLOG` 每次打开都会重新检测当前文档，反映 `STYLE`/`ST` 命令或手动修改后的最新状态。
 - 有原始检测结果时，`AFRLOG` 以原始结果为主列表，用当前检测结果标记仍缺失样式，避免已替换样式在日志中消失。
 - `AFRLOG` 手动替换只调用 `FontReplacer.ReplaceByStyleMapping()` 写入当前图纸样式表，不修改注册表全局配置。

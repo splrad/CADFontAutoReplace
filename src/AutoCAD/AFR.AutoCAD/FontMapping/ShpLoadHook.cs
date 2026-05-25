@@ -650,9 +650,6 @@ internal static class ShpLoadHook
         if (argumentName.Equals("arg6", StringComparison.Ordinal))
             return true;
 
-        if (FontRuntimeRequestRegistry.TryGetTrueTypeRequest(original, out _, out _))
-            return true;
-
         if (IsTrueTypeLoadAvailable(original))
             return true;
 

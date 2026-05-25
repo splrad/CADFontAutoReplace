@@ -35,14 +35,6 @@
     </Compile>
     <Compile Include="$(MSBuildThisFileDirectory)MTextEditor\MTextEditorViewModel.cs" Link="MTextEditor\MTextEditorViewModel.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)MTextEditor\MTextSyntaxHighlighter.cs" Link="MTextEditor\MTextSyntaxHighlighter.cs" />
-    <!-- MTextInsert（仅 Debug 构建参与编译，Release 下整个分部类被 #if DEBUG 移除） -->
-    <Page Include="$(MSBuildThisFileDirectory)MTextInsert\MTextInsertWindow.xaml" Link="MTextInsert\MTextInsertWindow.xaml" Condition="'$(Configuration)'=='Debug'">
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-    <Compile Include="$(MSBuildThisFileDirectory)MTextInsert\MTextInsertWindow.xaml.cs" Link="MTextInsert\MTextInsertWindow.xaml.cs" Condition="'$(Configuration)'=='Debug'">
-      <DependentUpon>MTextInsertWindow.xaml</DependentUpon>
-    </Compile>
-    <Compile Include="$(MSBuildThisFileDirectory)MTextInsert\MTextInsertViewModel.cs" Link="MTextInsert\MTextInsertViewModel.cs" Condition="'$(Configuration)'=='Debug'" />
     <!-- Shared -->
     <Compile Include="$(MSBuildThisFileDirectory)WindowPositionHelper.cs" Link="WindowPositionHelper.cs" />
   </ItemGroup>

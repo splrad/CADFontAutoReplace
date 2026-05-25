@@ -371,7 +371,6 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         string globalBigFont,
         string globalTrueTypeFont,
         Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? currentFonts = null,
-        IReadOnlyList<InlineFontFixRecord>? inlineFixResults = null,
         IReadOnlyList<RuntimeFontMappingResultRecord>? runtimeMappingResults = null,
         HashSet<string>? stillMissingStyleNames = null)
     {
@@ -514,25 +513,6 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
                     r.ReplacementFont,
                     r.ExecutingHook,
                     r.Result));
-            }
-        }
-
-        if (inlineFixResults != null)
-        {
-            foreach (var r in inlineFixResults
-                         .OrderBy(r => GetFontTypeOrder(r.FontCategory))
-                         .ThenBy(r => r.MissingFont, StringComparer.Ordinal)
-                         .ThenBy(r => r.ReplacementFont, StringComparer.Ordinal))
-            {
-                FontMappingItems.Add(new FontMappingDisplayRow(
-                    "MText",
-                    "多行文字",
-                    r.MissingFont,
-                    string.Empty,
-                    NormalizeFontType(r.FontCategory),
-                    r.ReplacementFont,
-                    string.Empty,
-                    string.Empty));
             }
         }
 
