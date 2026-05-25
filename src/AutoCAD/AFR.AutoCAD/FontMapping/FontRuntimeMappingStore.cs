@@ -50,6 +50,39 @@ internal static class FontRuntimeMappingStore
         RuntimeMappings[GetRuntimeKey(record)] = record;
     }
 
+    internal static void RecordFailedRuntimeMapping(
+        string source,
+        string owner,
+        string originalFont,
+        string baseFont,
+        string fontType,
+        string executingHook,
+        string reason)
+    {
+        if (string.IsNullOrWhiteSpace(originalFont))
+            return;
+
+        string normalizedSource = NormalizeSource(source);
+        string normalizedOwner = string.IsNullOrWhiteSpace(owner) ? string.Empty : owner.Trim();
+        string hook = string.IsNullOrWhiteSpace(executingHook) ? string.Empty : executingHook.Trim();
+        string normalizedReason = string.IsNullOrWhiteSpace(reason) ? "无法解析替换字体" : reason.Trim();
+
+        var record = new RuntimeFontMappingResultRecord(
+            normalizedSource,
+            normalizedOwner,
+            FontRedirectResolver.NormalizeInputName(originalFont),
+            FontRedirectResolver.NormalizeInputName(baseFont),
+            string.IsNullOrWhiteSpace(fontType) ? "未知" : fontType.Trim(),
+            string.Empty,
+            hook,
+            "映射失败：" + normalizedReason);
+
+        RuntimeMappings.AddOrUpdate(
+            GetRuntimeKey(record),
+            record,
+            (_, existing) => IsFailure(existing.Result) ? record : existing);
+    }
+
     internal static List<RuntimeFontMappingResultRecord> GetRuntimeMappingResults()
         => RuntimeMappings.Values
             .OrderBy(x => x.Source, StringComparer.Ordinal)
@@ -63,6 +96,9 @@ internal static class FontRuntimeMappingStore
             return "MText";
         return string.IsNullOrWhiteSpace(source) ? "未知" : source;
     }
+
+    private static bool IsFailure(string result)
+        => result.StartsWith("映射失败", StringComparison.OrdinalIgnoreCase);
 
     private static string GetFontTypeText(FontRedirectKind kind)
         => kind switch

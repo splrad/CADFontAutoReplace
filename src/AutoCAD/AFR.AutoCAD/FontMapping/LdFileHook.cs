@@ -219,6 +219,8 @@ internal static class LdFileHook
             if (!IsShxLoadRequest(original, param2))
                 return trampoline(fileName, param2, db, desc);
 
+            string normalized = NormalizeShxName(original.TrimStart('@'));
+            bool hasAtPrefix = original.Length > 1 && original[0] == '@';
             if (!TryResolveMissingShxFont(
                     original,
                     param2,
@@ -226,11 +228,17 @@ internal static class LdFileHook
                     out FontRedirectKind kind,
                     out string reason))
             {
+                FontRuntimeMappingStore.RecordFailedRuntimeMapping(
+                    "文件级",
+                    string.Empty,
+                    original,
+                    hasAtPrefix ? normalized : string.Empty,
+                    GetFontTypeText(kind),
+                    "LdFileHook",
+                    reason);
                 return trampoline(fileName, param2, db, desc);
             }
 
-            string normalized = NormalizeShxName(original.TrimStart('@'));
-            bool hasAtPrefix = original.Length > 1 && original[0] == '@';
             if (!hasAtPrefix && string.Equals(normalized, replacement, StringComparison.OrdinalIgnoreCase))
                 return trampoline(fileName, param2, db, desc);
 
@@ -491,6 +499,7 @@ internal static class LdFileHook
             return true;
         }
 
+        reason = "未找到可用 SHX 兜底字体";
         return false;
     }
 

@@ -606,9 +606,15 @@ internal static class ShpLoadHook
         if (IsTrueTypeLoadAvailable(original))
             return false;
         if (!TryGetConfiguredTrueTypeReplacement(original, out string replacement, out string redirectReason))
+        {
+            RecordTrueTypeMappingFailure(original, redirectReason);
             return false;
+        }
         if (string.Equals(original, replacement, StringComparison.OrdinalIgnoreCase))
+        {
+            RecordTrueTypeMappingFailure(original, "替换字体与缺失字体相同");
             return false;
+        }
 
         redirect = new ShpLoadRedirectApplication(
             argumentName,
@@ -718,6 +724,18 @@ internal static class ShpLoadHook
             });
     }
 
+    private static void RecordTrueTypeMappingFailure(string original, string reason)
+    {
+        FontRuntimeMappingStore.RecordFailedRuntimeMapping(
+            "文件级",
+            string.Empty,
+            original,
+            GetBaseFont(original),
+            "TrueType字体",
+            "ShpLoadHook",
+            reason);
+    }
+
     private static bool TryGetConfiguredTrueTypeReplacement(
         string original,
         out string replacement,
@@ -734,6 +752,7 @@ internal static class ShpLoadHook
                     out string resolvedAtBaseFont,
                     out string source))
             {
+                reason = "@TrueType 未找到可用的 @face 兜底字体";
                 DiagnosticLogger.Skip(
                     Tag,
                     "ResolveAtTrueTypeReplacement",
@@ -754,11 +773,17 @@ internal static class ShpLoadHook
         }
 
         if (!FontRedirectResolver.TryResolveConfiguredReplacement(FontRedirectKind.TrueType, out string configuredReplacement))
+        {
+            reason = "未找到可用 TrueType 兜底字体";
             return false;
+        }
 
         string configured = FontRedirectResolver.NormalizeInputName(configuredReplacement).TrimStart('@');
         if (string.IsNullOrWhiteSpace(configured))
+        {
+            reason = "TrueType 兜底字体为空";
             return false;
+        }
 
         replacement = configured;
         reason = "配置 TrueType 兜底";

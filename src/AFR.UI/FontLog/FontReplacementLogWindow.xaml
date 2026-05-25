@@ -81,7 +81,7 @@
                                 Visibility="{Binding HasTrueType, Converter={StaticResource BoolToVis}}">
                             <TextBlock Text="{Binding TrueTypeLabel}" FontSize="10" Foreground="White"/>
                         </Border>
-                        <!-- 运行时字体映射计数 -->
+                        <!-- MText内联字体映射计数 -->
                         <Border CornerRadius="3" Padding="6,2" Margin="6,0,0,0"
                                 Background="{StaticResource RuntimeMappingBrush}"
                                 Visibility="{Binding HasFontMappings, Converter={StaticResource BoolToVis}}">
@@ -142,12 +142,12 @@
 								</Border>
 							</StackPanel>
 
-							<!-- 运行时字体映射标题组 -->
+							<!-- MText内联字体映射标题组 -->
 							<StackPanel x:Name="StickyFontMappingHeader" Visibility="Collapsed">
 								<Border Padding="8,7,8,7"
 										BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
 									<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-										<TextBlock Text="运行时字体映射"
+										<TextBlock Text="MText内联字体映射"
 												   FontSize="11" FontWeight="SemiBold"
 												   Foreground="{DynamicResource PrimaryTextBrush}"/>
 										<Border CornerRadius="3" Padding="5,1" Margin="8,0,0,0"
@@ -160,37 +160,21 @@
 										BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
 									<Grid>
 										<Grid.ColumnDefinitions>
-											<ColumnDefinition Width="70"/>
-											<ColumnDefinition Width="1.4*"/>
-											<ColumnDefinition Width="1.6*"/>
-											<ColumnDefinition Width="1.2*"/>
+											<ColumnDefinition Width="2*"/>
 											<ColumnDefinition Width="95"/>
-											<ColumnDefinition Width="1.6*"/>
-											<ColumnDefinition Width="88"/>
-											<ColumnDefinition Width="105"/>
+											<ColumnDefinition Width="2*"/>
+											<ColumnDefinition Width="110"/>
 										</Grid.ColumnDefinitions>
-										<TextBlock Grid.Column="0" Text="来源" FontSize="10"
-												   Foreground="{DynamicResource SecondaryTextBrush}"
-												   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-										<TextBlock Grid.Column="1" Text="所属对象" FontSize="10"
-												   Foreground="{DynamicResource SecondaryTextBrush}"
-												   VerticalAlignment="Center"/>
-										<TextBlock Grid.Column="2" Text="缺失字体" FontSize="10"
+										<TextBlock Grid.Column="0" Text="缺失字体" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
 												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
-										<TextBlock Grid.Column="3" Text="基础字体" FontSize="10"
-												   Foreground="{DynamicResource SecondaryTextBrush}"
-												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
-										<TextBlock Grid.Column="4" Text="类型" FontSize="10"
+										<TextBlock Grid.Column="1" Text="类型" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
 												   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-										<TextBlock Grid.Column="5" Text="映射字体" FontSize="10"
+										<TextBlock Grid.Column="2" Text="映射字体" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
 												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
-										<TextBlock Grid.Column="6" Text="执行Hook" FontSize="10"
-												   Foreground="{DynamicResource SecondaryTextBrush}"
-												   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-										<TextBlock Grid.Column="7" Text="结果" FontSize="10"
+										<TextBlock Grid.Column="3" Text="执行Hook" FontSize="10"
 												   Foreground="{DynamicResource SecondaryTextBrush}"
 												   HorizontalAlignment="Left" VerticalAlignment="Center"/>
 									</Grid>
@@ -316,7 +300,7 @@
 								</ItemsControl>
 							</StackPanel>
 
-							<!-- ─── 运行时字体映射区块 ─── -->
+							<!-- ─── MText内联字体映射区块 ─── -->
 							<StackPanel x:Name="FontMappingSection"
 										Visibility="{Binding HasFontMappings, Converter={StaticResource BoolToVis}}">
 								<Border x:Name="FontMappingHeaderMarker"
@@ -325,7 +309,7 @@
 										<Border Padding="8,7,8,7"
 												BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
 											<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-												<TextBlock Text="运行时字体映射"
+												<TextBlock Text="MText内联字体映射"
 														   FontSize="11" FontWeight="SemiBold"
 														   Foreground="{DynamicResource PrimaryTextBrush}"/>
 												<Border CornerRadius="3" Padding="5,1" Margin="8,0,0,0"
@@ -338,37 +322,21 @@
 												BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
 											<Grid>
 												<Grid.ColumnDefinitions>
-													<ColumnDefinition Width="70"/>
-													<ColumnDefinition Width="1.4*"/>
-													<ColumnDefinition Width="1.6*"/>
-													<ColumnDefinition Width="1.2*"/>
+													<ColumnDefinition Width="2*"/>
 													<ColumnDefinition Width="95"/>
-													<ColumnDefinition Width="1.6*"/>
-													<ColumnDefinition Width="88"/>
-													<ColumnDefinition Width="105"/>
+													<ColumnDefinition Width="2*"/>
+													<ColumnDefinition Width="110"/>
 												</Grid.ColumnDefinitions>
-												<TextBlock Grid.Column="0" Text="来源" FontSize="10"
-														   Foreground="{DynamicResource SecondaryTextBrush}"
-														   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-												<TextBlock Grid.Column="1" Text="所属对象" FontSize="10"
-														   Foreground="{DynamicResource SecondaryTextBrush}"
-														   VerticalAlignment="Center"/>
-												<TextBlock Grid.Column="2" Text="缺失字体" FontSize="10"
+												<TextBlock Grid.Column="0" Text="缺失字体" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
 														   HorizontalAlignment="Left" VerticalAlignment="Center"/>
-												<TextBlock Grid.Column="3" Text="基础字体" FontSize="10"
-														   Foreground="{DynamicResource SecondaryTextBrush}"
-														   HorizontalAlignment="Left" VerticalAlignment="Center"/>
-												<TextBlock Grid.Column="4" Text="类型" FontSize="10"
+												<TextBlock Grid.Column="1" Text="类型" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
 														   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-												<TextBlock Grid.Column="5" Text="映射字体" FontSize="10"
+												<TextBlock Grid.Column="2" Text="映射字体" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
 														   HorizontalAlignment="Left" VerticalAlignment="Center"/>
-												<TextBlock Grid.Column="6" Text="执行Hook" FontSize="10"
-														   Foreground="{DynamicResource SecondaryTextBrush}"
-														   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-												<TextBlock Grid.Column="7" Text="结果" FontSize="10"
+												<TextBlock Grid.Column="3" Text="执行Hook" FontSize="10"
 														   Foreground="{DynamicResource SecondaryTextBrush}"
 														   HorizontalAlignment="Left" VerticalAlignment="Center"/>
 											</Grid>
@@ -379,51 +347,34 @@
 								<ItemsControl ItemsSource="{Binding FontMappingItems}">
 									<ItemsControl.ItemTemplate>
 										<DataTemplate>
-											<Border Padding="8,1"
-													BorderThickness="3,0,0,0"
-													BorderBrush="{StaticResource RuntimeMappingBrush}"
-													Background="#0500897B">
+											<Border Padding="8,1" BorderThickness="3,0,0,0">
+												<Border.Style>
+													<Style TargetType="Border">
+														<Setter Property="BorderBrush" Value="{StaticResource RuntimeMappingBrush}"/>
+														<Setter Property="Background" Value="#0500897B"/>
+														<Style.Triggers>
+															<DataTrigger Binding="{Binding IsFailed}" Value="True">
+																<Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}"/>
+																<Setter Property="Background" Value="#08FF4444"/>
+															</DataTrigger>
+														</Style.Triggers>
+													</Style>
+												</Border.Style>
 												<Grid MinHeight="28">
 													<Grid.ColumnDefinitions>
-														<ColumnDefinition Width="70"/>
-														<ColumnDefinition Width="1.4*"/>
-														<ColumnDefinition Width="1.6*"/>
-														<ColumnDefinition Width="1.2*"/>
+														<ColumnDefinition Width="2*"/>
 														<ColumnDefinition Width="95"/>
-														<ColumnDefinition Width="1.6*"/>
-														<ColumnDefinition Width="88"/>
-														<ColumnDefinition Width="105"/>
+														<ColumnDefinition Width="2*"/>
+														<ColumnDefinition Width="110"/>
 													</Grid.ColumnDefinitions>
-													<Border Grid.ColumnSpan="8" VerticalAlignment="Bottom" Height="1"
+													<Border Grid.ColumnSpan="4" VerticalAlignment="Bottom" Height="1"
 															Background="{DynamicResource BorderBrush}" Margin="-11,0,-8,-2" />
-													<Border Grid.Column="0" CornerRadius="3"
-															Padding="4,1" Margin="0,0,6,0"
-															HorizontalAlignment="Center" VerticalAlignment="Center">
-														<Border.Style>
-															<Style TargetType="Border">
-																<Setter Property="Background" Value="{StaticResource RuntimeMappingBrush}"/>
-																<Style.Triggers>
-																	<DataTrigger Binding="{Binding Source}" Value="MText">
-																		<Setter Property="Background" Value="{DynamicResource SuccessBrush}"/>
-																	</DataTrigger>
-																</Style.Triggers>
-															</Style>
-														</Border.Style>
-														<TextBlock Text="{Binding Source}" FontSize="9" Foreground="White"/>
-													</Border>
-													<TextBlock Grid.Column="1" Text="{Binding StyleName}"
-															   FontSize="11" VerticalAlignment="Center"
-															   Foreground="{DynamicResource PrimaryTextBrush}"
-															   TextTrimming="CharacterEllipsis"/>
-													<TextBlock Grid.Column="2" Text="{Binding MissingFont}"
+													<TextBlock Grid.Column="0" Text="{Binding MissingFont}"
 															   FontSize="11" VerticalAlignment="Center"
 															   Foreground="{DynamicResource SecondaryTextBrush}"
-															   TextTrimming="CharacterEllipsis"/>
-													<TextBlock Grid.Column="3" Text="{Binding BaseFont}"
-															   FontSize="11" VerticalAlignment="Center"
-															   Foreground="{DynamicResource SecondaryTextBrush}"
-															   TextTrimming="CharacterEllipsis"/>
-													<Border Grid.Column="4" CornerRadius="3"
+															   TextTrimming="CharacterEllipsis"
+															   ToolTip="{Binding MissingFont}"/>
+													<Border Grid.Column="1" CornerRadius="3"
 															Padding="4,1"
 															HorizontalAlignment="Center" VerticalAlignment="Center">
 														<Border.Style>
@@ -441,21 +392,29 @@
 														</Border.Style>
 														<TextBlock Text="{Binding FontType}" FontSize="9" Foreground="White"/>
 													</Border>
-													<TextBlock Grid.Column="5" Text="{Binding ReplacementFont}"
+													<TextBlock Grid.Column="2" Text="{Binding DisplayReplacementFont}"
 															   FontSize="11" VerticalAlignment="Center"
 															   HorizontalAlignment="Left"
-															   Foreground="{StaticResource RuntimeMappingBrush}"
-															   TextTrimming="CharacterEllipsis"/>
-													<TextBlock Grid.Column="6" Text="{Binding ExecutingHook}"
-															   FontSize="10" VerticalAlignment="Center"
-															   HorizontalAlignment="Center"
-															   Foreground="{DynamicResource SecondaryTextBrush}"
-															   TextTrimming="CharacterEllipsis"/>
-													<TextBlock Grid.Column="7" Text="{Binding Status}"
+															   TextTrimming="CharacterEllipsis"
+															   ToolTip="{Binding ReplacementToolTip}">
+														<TextBlock.Style>
+															<Style TargetType="TextBlock">
+																<Setter Property="Foreground" Value="{StaticResource RuntimeMappingBrush}"/>
+																<Style.Triggers>
+																	<DataTrigger Binding="{Binding IsFailed}" Value="True">
+																		<Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/>
+																		<Setter Property="FontWeight" Value="SemiBold"/>
+																	</DataTrigger>
+																</Style.Triggers>
+															</Style>
+														</TextBlock.Style>
+													</TextBlock>
+													<TextBlock Grid.Column="3" Text="{Binding ExecutingHook}"
 															   FontSize="10" VerticalAlignment="Center"
 															   HorizontalAlignment="Left"
-															   Foreground="{DynamicResource PrimaryTextBrush}"
-															   TextTrimming="CharacterEllipsis"/>
+															   Foreground="{DynamicResource SecondaryTextBrush}"
+															   TextTrimming="CharacterEllipsis"
+															   ToolTip="{Binding Status}"/>
 												</Grid>
 											</Border>
 										</DataTemplate>

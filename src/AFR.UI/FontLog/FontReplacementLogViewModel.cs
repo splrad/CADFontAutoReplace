@@ -117,6 +117,20 @@ public sealed class FontMappingDisplayRow
     public string ExecutingHook { get; }
 
     public string Status { get; }
+
+    public bool IsFailed =>
+        string.IsNullOrWhiteSpace(ReplacementFont)
+        || Status.StartsWith("映射失败", StringComparison.OrdinalIgnoreCase);
+
+    public string DisplayReplacementFont =>
+        IsFailed
+            ? "⚠ " + (string.IsNullOrWhiteSpace(ReplacementFont) ? "未映射" : ReplacementFont)
+            : ReplacementFont;
+
+    public string ReplacementToolTip =>
+        IsFailed && !string.IsNullOrWhiteSpace(Status)
+            ? Status
+            : ReplacementFont;
 }
 
 /// <summary>
@@ -146,7 +160,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
     public string ShxLabel => $"SHX主字体  {ShxCount}";
     public string TrueTypeLabel => $"TrueType  {TrueTypeCount}";
     public string BigFontLabel => $"SHX大字体  {BigFontCount}";
-    public string FontMappingLabel => $"运行时字体映射  {FontMappingCount}";
+    public string FontMappingLabel => $"MText内联字体映射  {FontMappingCount}";
     public string FailedLabel => $"未替换  {FailedCount}";
     public bool HasShx => ShxCount > 0;
     public bool HasTrueType => TrueTypeCount > 0;
@@ -539,9 +553,9 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         if (FontMappingCount > 0)
         {
             if (Items.Count == 0)
-                SummaryText = $"运行时字体映射 {FontMappingCount} 项";
+                SummaryText = $"MText内联字体映射 {FontMappingCount} 项";
             else
-                SummaryText += $" · 运行时字体映射 {FontMappingCount} 项";
+                SummaryText += $" · MText内联字体映射 {FontMappingCount} 项";
         }
     }
 
