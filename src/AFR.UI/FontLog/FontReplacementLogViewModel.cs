@@ -160,7 +160,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
     public string ShxLabel => $"SHX主字体  {ShxCount}";
     public string TrueTypeLabel => $"TrueType  {TrueTypeCount}";
     public string BigFontLabel => $"SHX大字体  {BigFontCount}";
-    public string FontMappingLabel => $"MText内联字体映射  {FontMappingCount}";
+    public string FontMappingLabel => $"MText映射  {FontMappingCount}";
     public string FailedLabel => $"未替换  {FailedCount}";
     public bool HasShx => ShxCount > 0;
     public bool HasTrueType => TrueTypeCount > 0;
@@ -515,13 +515,13 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
 
             int total = ttCount + shxCount + bigCount;
             if (failedCount > 0)
-                SummaryText = $"{total} 个缺失 · 已替换 {replacedCount} · 未替换 {failedCount}";
+                SummaryText = $"缺失{total} · 已替{replacedCount} · 未替{failedCount}";
             else
-                SummaryText = $"{total} 个缺失 · 全部已替换";
+                SummaryText = $"缺失{total} · 全替";
         }
         else
         {
-            SummaryText = "未检测到缺失字体";
+            SummaryText = "无缺失";
         }
 
         // 监听每行的 SelectedReplacement 变化，驱动 HasUserChanges 更新
@@ -553,9 +553,9 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         if (FontMappingCount > 0)
         {
             if (Items.Count == 0)
-                SummaryText = $"MText内联字体映射 {FontMappingCount} 项";
+                SummaryText = $"MText映射{FontMappingCount}";
             else
-                SummaryText += $" · MText内联字体映射 {FontMappingCount} 项";
+                SummaryText += $" · MText映射{FontMappingCount}";
         }
     }
 
