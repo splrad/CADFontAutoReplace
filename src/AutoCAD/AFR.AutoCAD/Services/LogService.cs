@@ -80,7 +80,7 @@ internal sealed class LogService : ILogService
 
         // --- 第二步：生成唯一的字体修复汇总消息 ---
         string msg = $"[字体修复]已替换缺失字体 {total} 个(SHX主字体: {shxCount} , SHX大字体: {bigFontCount} , TrueType: {trueTypeCount})";
-        msg += $" | 运行时字体映射：{runtimeMappingCount}";
+        msg += $" | MText内联字体映射：{runtimeMappingCount}";
 
         // --- 第三步：将汇总消息写入缓冲区 ---
         lock (_lock)
