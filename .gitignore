@@ -397,3 +397,4 @@ FodyWeavers.xsd
 *.Benchmarks.csproj
 /src/AFR.Benchmarks/FontHotPathBenchmarks.cs
 *.jsonl
+/release-notes.md

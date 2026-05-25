@@ -300,6 +300,7 @@ jobs:
                   -F number=$PullRequestNumber 2>$null
 
               if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($issueResponseRaw)) {
+                  $global:LASTEXITCODE = 0
                   return @()
               }
 
@@ -322,6 +323,7 @@ jobs:
 
               $pullRequestFilesRaw = gh api "repos/$env:GITHUB_REPOSITORY/pulls/$PullRequestNumber/files?per_page=100" 2>$null
               if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($pullRequestFilesRaw)) {
+                  $global:LASTEXITCODE = 0
                   return @()
               }
 
@@ -419,6 +421,7 @@ jobs:
 
                   $pullsRaw = gh api "repos/$env:GITHUB_REPOSITORY/commits/$commitSha/pulls" 2>$null
                   if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($pullsRaw)) {
+                      $global:LASTEXITCODE = 0
                       continue
                   }
 
@@ -675,6 +678,9 @@ jobs:
                       }
                   }
               } else {
+                  if ($LASTEXITCODE -ne 0) {
+                      $global:LASTEXITCODE = 0
+                  }
                   $fallbackReason = 'compare_api_failed'
               }
           }
