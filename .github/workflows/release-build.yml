@@ -469,12 +469,40 @@ jobs:
               $normalizedPath = $FilePath.Replace('\', '/')
               $fixedReleaseAttachmentSourcePaths = @(Get-FixedReleaseAttachmentSourcePaths)
               if ($normalizedPath -like '.github/*') { return $true }
+              if ($normalizedPath -like '.vscode/*') { return $true }
               if ($normalizedPath -like 'docs/*') { return $true }
+              if ($normalizedPath -like 'chore/*') { return $true }
               if ($fixedReleaseAttachmentSourcePaths -contains $normalizedPath) { return $true }
-              if ($normalizedPath -in @('.gitignore', '.gitattributes', '.editorconfig')) { return $true }
+              if ($normalizedPath -in @(
+                  '.gitignore',
+                  '.gitattributes',
+                  '.editorconfig',
+                  'CADFontAutoReplace.slnx',
+                  'Directory.Build.props',
+                  'Directory.Packages.props',
+                  'global.json'
+              )) { return $true }
               if ($normalizedPath -match '(^|/)(README|CHANGELOG|CONTRIBUTING)(\.[^/]+)?$') { return $true }
               if ($normalizedPath -match '\.(md|txt)$') { return $true }
               return $false
+          }
+
+          function Get-ReleaseFallbackPriority {
+              param(
+                  [string]$FilePath
+              )
+
+              if ($FilePath -like 'src/AutoCAD/*') { return 0 }
+              if ($FilePath -like 'src/AFR.Deployer/*' -or $FilePath -like 'tools/*') { return 1 }
+              if ($FilePath -like 'src/AFR.UI/*') { return 2 }
+              if (
+                  $FilePath -like 'src/AFR.Core/*' -or
+                  $FilePath -like 'src/AFR.HostIntegration/*' -or
+                  $FilePath -like 'src/AFR.Polyfills/*'
+              ) { return 3 }
+              if ($FilePath -eq 'Version.props') { return 4 }
+              if ($FilePath -like 'src/*') { return 5 }
+              return 6
           }
 
           function Normalize-AiBody {
@@ -505,17 +533,36 @@ jobs:
               )
 
               $filePath = [string]$FileEntry.filename
-              $status = [string]$FileEntry.status
+              $issueSuffix = Get-IssueSuffixForFilePath -IssueNumbersByFilePath $IssueNumbersByFilePath -FilePath $filePath
               if ($filePath -eq 'Version.props') {
                   return '- 更新版本基线与构建标识，便于安装与升级时识别当前发布版本。'
               }
 
+              if ($filePath -like 'src/AutoCAD/*') {
+                  return "- 完善 AutoCAD 多版本兼容与字体替换链路，提升缺失字体处理稳定性与结果一致性$issueSuffix。"
+              }
+
+              if ($filePath -like 'src/AFR.Deployer/*' -or $filePath -like 'tools/*') {
+                  return '- 优化部署器构建、版本识别与发布交付流程，降低安装与升级成本。'
+              }
+
+              if ($filePath -like 'src/AFR.UI/*') {
+                  return "- 改进字体配置与替换日志界面交互，便于确认处理结果和排查问题$issueSuffix。"
+              }
+
+              if (
+                  $filePath -like 'src/AFR.Core/*' -or
+                  $filePath -like 'src/AFR.HostIntegration/*' -or
+                  $filePath -like 'src/AFR.Polyfills/*'
+              ) {
+                  return "- 整理共享基础能力与诊断支撑，提升整体稳定性与维护性$issueSuffix。"
+              }
+
               if ($filePath -like 'src/*') {
-                  $issueSuffix = Get-IssueSuffixForFilePath -IssueNumbersByFilePath $IssueNumbersByFilePath -FilePath $filePath
                   return "- 优化本次版本涉及的部署、扫描与兼容性逻辑，提升使用稳定性与结果准确性$issueSuffix。"
               }
 
-              return '- 补充本次版本所需的相关交付内容，完善发布准备。'
+              return '- 完善本次版本的发布交付与版本基线准备，确保安装与升级识别一致。'
           }
 
           function Build-FallbackSummary {
@@ -561,8 +608,34 @@ jobs:
                   $summaryLines.Add('')
                   $summaryLines.Add('## ⚡ 优化')
                   $summaryLines.Add('')
-                  foreach ($fileEntry in @($RelevantFiles | Select-Object -First 5)) {
-                      $summaryLines.Add((Convert-ReleaseFileToFallbackLine -FileEntry $fileEntry -IssueNumbersByFilePath $IssueNumbersByFilePath))
+                  $fallbackLines = [System.Collections.Generic.List[string]]::new()
+                  $prioritizedRelevantFiles = @(
+                      $RelevantFiles |
+                      Sort-Object `
+                          @{ Expression = { Get-ReleaseFallbackPriority -FilePath ([string]$_.filename) } }, `
+                          @{ Expression = {
+                              $score = 0
+                              if ($null -ne $_.additions) { $score += [int]$_.additions }
+                              if ($null -ne $_.deletions) { $score += [int]$_.deletions }
+                              $score
+                          }; Descending = $true }, `
+                          @{ Expression = { [string]$_.filename } }
+                  )
+
+                  foreach ($fileEntry in @($prioritizedRelevantFiles)) {
+                      $fallbackLine = Convert-ReleaseFileToFallbackLine -FileEntry $fileEntry -IssueNumbersByFilePath $IssueNumbersByFilePath
+                      if ([string]::IsNullOrWhiteSpace($fallbackLine) -or ($fallbackLines -contains $fallbackLine)) {
+                          continue
+                      }
+
+                      $fallbackLines.Add($fallbackLine)
+                      if ($fallbackLines.Count -ge 5) {
+                          break
+                      }
+                  }
+
+                  foreach ($fallbackLine in @($fallbackLines)) {
+                      $summaryLines.Add($fallbackLine)
                   }
               }
 
@@ -794,6 +867,11 @@ jobs:
           }
 
           if ([string]::IsNullOrWhiteSpace($releaseSummary)) {
+              if ([string]::IsNullOrWhiteSpace($fallbackReason)) {
+                  $fallbackReason = 'empty_release_summary'
+              }
+
+              Write-Host "发布说明使用回退摘要，原因：$fallbackReason"
               $releaseSummary = Build-FallbackSummary -RelevantFiles @($relevantFiles) -Reason $fallbackReason -LatestTagValue $latestTag -IssueNumbersByFilePath $issueNumbersByFilePath
           }
 
