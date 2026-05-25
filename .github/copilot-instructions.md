@@ -67,6 +67,7 @@ docs                      使用与开发文档
 - `status` 固定使用 `START`、`OK`、`FAIL`、`SKIP`；排查问题时先按 `seq` 还原插件时序，再过滤 `FAIL` / `SKIP` 定位失败或跳过分支。
 - 新增诊断只能使用 `Start`、`Ok`、`Fail`、`Skip`、`RunStep` 或现有结构化领域方法；旧文本日志兼容入口已移除。
 - 字体映射是否真正生效仍以文件级 Hook 的真实命中记录和最终 `redirects` 计数为准，不能只看早期登记或候选扫描事件。
+- `counterWindow=ExecutionController` 表示计数只覆盖当前执行窗口；窗口外的 Hook 重定向需结合 `dbScope` 和 `seq` 归属，不能直接并入本次文档统计。
 
 ## 当前命令
 

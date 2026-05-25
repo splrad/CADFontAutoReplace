@@ -286,6 +286,7 @@ internal static class ShpLoadHook
             "本次文档 shpload 计数已采集",
             new Dictionary<string, object?>
             {
+                ["counterWindow"] = "ExecutionController",
                 ["hits"] = hits,
                 ["redirects"] = redirects,
                 ["sampleOverflow"] = overflow,
@@ -480,7 +481,8 @@ internal static class ShpLoadHook
                                 ["original"] = redirect.OriginalFont,
                                 ["replacement"] = redirect.ReplacementFont,
                                 ["param2"] = param2,
-                                ["reason"] = redirect.Reason
+                                ["reason"] = redirect.Reason,
+                                ["dbScope"] = FormatPointer(db)
                             });
                     }
 

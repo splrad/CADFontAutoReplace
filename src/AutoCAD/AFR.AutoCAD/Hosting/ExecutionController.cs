@@ -43,12 +43,14 @@ internal static class ExecutionController
         string documentKey = DocumentContextManager.GetDocumentKey(doc) ?? "<null>";
         string documentName = DocumentContextManager.ReadDocumentName(doc);
         string databaseFilename = DocumentContextManager.ReadDatabaseFilename(doc);
+        string diagnosticDocumentName = GetDiagnosticDocumentName(documentKey, documentName, databaseFilename);
 
         try
         {
             var contextMgr = DocumentContextManager.Instance;
             var executionFields = new Dictionary<string, object?>
             {
+                ["doc"] = diagnosticDocumentName,
                 ["trigger"] = triggerSource,
                 ["documentKey"] = documentKey,
                 ["documentName"] = documentName,
@@ -232,6 +234,7 @@ internal static class ExecutionController
                         "内联字体运行时映射结果已采集",
                         new Dictionary<string, object?>
                         {
+                            ["counterWindow"] = "ExecutionController",
                             ["runtimeMappingHits"] = allRuntimeMappingResults.Count,
                             ["ldFileRedirects"] = LdFileHook.GetCountersSnapshot().RedirectCount - ldFileRedirectCountBefore,
                             ["shpLoadRedirects"] = ShpLoadHook.GetCountersSnapshot().RedirectCount - shpLoadCountersBefore.RedirectCount
@@ -249,6 +252,7 @@ internal static class ExecutionController
                     "本次文档 ldfile 计数已采集",
                     new Dictionary<string, object?>
                     {
+                        ["counterWindow"] = "ExecutionController",
                         ["hits"] = ldFileHitCountAfter - ldFileHitCountBefore,
                         ["redirects"] = ldFileRedirectCountAfter - ldFileRedirectCountBefore,
                         ["sessionHits"] = ldFileHitCountAfter,
@@ -281,6 +285,7 @@ internal static class ExecutionController
                 "文档执行状态已标记",
                 new Dictionary<string, object?>
                 {
+                    ["doc"] = diagnosticDocumentName,
                     ["documentKey"] = documentKey,
                     ["documentName"] = documentName
                 });
@@ -291,6 +296,7 @@ internal static class ExecutionController
                 "文档字体替换执行完成",
                 new Dictionary<string, object?>
                 {
+                    ["doc"] = diagnosticDocumentName,
                     ["trigger"] = triggerSource,
                     ["documentKey"] = documentKey,
                     ["documentName"] = documentName,
@@ -308,6 +314,7 @@ internal static class ExecutionController
                 ex,
                 new Dictionary<string, object?>
                 {
+                    ["doc"] = diagnosticDocumentName,
                     ["trigger"] = triggerSource,
                     ["documentKey"] = documentKey,
                     ["documentName"] = documentName,
@@ -320,6 +327,26 @@ internal static class ExecutionController
         {
             log.Flush();
         }
+    }
+
+    private static string GetDiagnosticDocumentName(
+        string documentKey,
+        string documentName,
+        string databaseFilename)
+    {
+        foreach (string candidate in new[] { documentKey, documentName, databaseFilename })
+        {
+            if (string.IsNullOrWhiteSpace(candidate)
+                || string.Equals(candidate, "<null>", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string fileName = System.IO.Path.GetFileName(candidate);
+            return string.IsNullOrWhiteSpace(fileName) ? candidate : fileName;
+        }
+
+        return "<unknown>";
     }
 
     private sealed class RuntimeMappingStateScope : IDisposable
