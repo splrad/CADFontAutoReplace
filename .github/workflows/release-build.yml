@@ -143,7 +143,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          # Version.props 是发布版本的唯一来源：Tag 使用 vX.Y，标题保留构建号。
+          # Version.props 是发布版本的唯一来源：Tag 使用 vX.Y.Z，标题保留构建号。
           $versionFile = Join-Path $env:GITHUB_WORKSPACE 'Version.props'
           [xml]$versionXml = Get-Content -LiteralPath $versionFile -Raw
 
@@ -152,8 +152,8 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($displayVersion) -or [string]::IsNullOrWhiteSpace($buildId)) {
               throw 'Version.props 中缺少 PluginDisplayVersion 或 PluginBuildId。'
           }
-          if ($displayVersion -notmatch '^\d+\.\d+$') {
-              throw "PluginDisplayVersion 必须保持 X.Y 格式，当前值：$displayVersion"
+          if ($displayVersion -notmatch '^\d+\.\d+\.\d+$') {
+              throw "PluginDisplayVersion 必须保持 X.Y.Z 格式，当前值：$displayVersion"
           }
 
           $tagName = "v$displayVersion"
@@ -245,9 +245,7 @@ jobs:
         run: |
           # 发布说明优先使用 AI 基于“相对上一 Release 的相关代码差异”生成，并过滤工作流/文档等无关项。
           $notesPath = Join-Path $env:GITHUB_WORKSPACE 'release-notes.md'
-          $versionFile = Join-Path $env:GITHUB_WORKSPACE 'Version.props'
-          [xml]$versionXml = Get-Content -LiteralPath $versionFile -Raw
-          $tagName = "v$([string]$versionXml.Project.PropertyGroup.PluginDisplayVersion)"
+          $tagName = '${{ steps.version.outputs.tag_name }}'
           $latestTag = gh release list --repo $env:GITHUB_REPOSITORY --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""'
           $maxDiffChars = 16000
           $fallbackReason = ''
@@ -869,7 +867,7 @@ jobs:
               }
 
               $versionResponse = Invoke-WebRequest `
-                  -Uri "[https://api.github.com/repos/$env:GH_REPO/contents/Version.props?ref=$env:GITHUB_SHA](https://api.github.com/repos/$env:GH_REPO/contents/Version.props?ref=$env:GITHUB_SHA)" `
+                  -Uri "https://api.github.com/repos/$env:GH_REPO/contents/Version.props?ref=$env:GITHUB_SHA" `
                   -Headers $headers `
                   -SkipHttpErrorCheck
 
@@ -974,7 +972,7 @@ jobs:
               }
 
               $releaseLookup = Invoke-WebRequest `
-                  -Uri "[https://api.github.com/repos/$env:GH_REPO/releases/tags/$tagName](https://api.github.com/repos/$env:GH_REPO/releases/tags/$tagName)" `
+                  -Uri "https://api.github.com/repos/$env:GH_REPO/releases/tags/$tagName" `
                   -Headers $headers `
                   -SkipHttpErrorCheck
 
