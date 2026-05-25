@@ -579,7 +579,7 @@ jobs:
               }
 
               $response = Invoke-WebRequest `
-                  -Uri '[https://api.deepseek.com/chat/completions](https://api.deepseek.com/chat/completions)' `
+                  -Uri 'https://api.deepseek.com/chat/completions' `
                   -Method Post `
                   -Headers @{ Authorization = "Bearer $env:DEEPSEEK_API_KEY" } `
                   -ContentType 'application/json' `
@@ -649,20 +649,25 @@ jobs:
                       $relevantFiles.Add($fileEntry)
                       $additions = 0
                       $deletions = 0
+                      $patch = ''
                       if ($null -ne $fileEntry.additions) { $additions = [int]$fileEntry.additions }
                       if ($null -ne $fileEntry.deletions) { $deletions = [int]$fileEntry.deletions }
+                      $patchProperty = $fileEntry.PSObject.Properties['patch']
+                      if ($null -ne $patchProperty) {
+                          $patch = [string]$patchProperty.Value
+                      }
                       $issueDisplay = ''
                       if ($filePath -like 'src/*') {
                           $issueDisplay = Get-IssueDisplayForFilePath -IssueNumbersByFilePath $issueNumbersByFilePath -FilePath $filePath
                       }
                       $issueContext = if ([string]::IsNullOrWhiteSpace($issueDisplay)) { '' } else { "`t关联 Issues：$issueDisplay" }
-                      if ([string]::IsNullOrWhiteSpace([string]$fileEntry.patch)) {
+                      if ([string]::IsNullOrWhiteSpace($patch)) {
                           $changedFilesLines.Add("$(([string]$fileEntry.status).ToUpper())`t$filePath`t资源或二进制变更$issueContext")
                       } else {
                           $changedFilesLines.Add("$(([string]$fileEntry.status).ToUpper())`t$filePath`t+$additions/-$deletions$issueContext")
                           $diffCandidates.Add([pscustomobject]@{
                               FileName = $filePath
-                              Patch = [string]$fileEntry.patch
+                              Patch = $patch
                               Score = $additions + $deletions
                               Additions = $additions
                               Deletions = $deletions
