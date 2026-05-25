@@ -394,3 +394,4 @@ FodyWeavers.xsd
 *.UnitTests.csproj
 *.Benchmarks.csproj
 /src/AFR.Benchmarks/FontHotPathBenchmarks.cs
+*.jsonl
