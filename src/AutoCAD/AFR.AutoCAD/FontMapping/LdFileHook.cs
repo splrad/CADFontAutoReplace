@@ -345,21 +345,23 @@ internal static class LdFileHook
         }
 
         rva = (uint)delta;
-        if (target.Rva.HasValue && target.Rva.Value != rva)
+        string? expectedRva = target.Rva.HasValue ? $"0x{target.Rva.Value:X}" : null;
+        string actualRva = $"0x{rva:X}";
+        bool rvaMatched = !target.Rva.HasValue || target.Rva.Value == rva;
+        if (!rvaMatched)
         {
-            DiagnosticLogger.Skip(
+            DiagnosticLogger.Ok(
                 Tag,
                 "ResolveExport",
-                "Hook 导出 RVA 不匹配",
+                "Hook 导出 RVA 与版本指纹不匹配，继续按导出地址安装",
                 new Dictionary<string, object?>
                 {
                     ["target"] = target.Name,
-                    ["expectedRva"] = $"0x{target.Rva.Value:X}",
-                    ["actualRva"] = $"0x{rva:X}"
+                    ["expectedRva"] = expectedRva,
+                    ["actualRva"] = actualRva,
+                    ["rva"] = actualRva,
+                    ["rvaMatched"] = false
                 });
-            address = IntPtr.Zero;
-            rva = 0;
-            return false;
         }
 
         DiagnosticLogger.Ok(
@@ -369,7 +371,10 @@ internal static class LdFileHook
             new Dictionary<string, object?>
             {
                 ["target"] = target.Name,
-                ["rva"] = $"0x{rva:X}"
+                ["expectedRva"] = expectedRva,
+                ["actualRva"] = actualRva,
+                ["rva"] = actualRva,
+                ["rvaMatched"] = rvaMatched
             });
         return true;
     }

@@ -202,7 +202,7 @@ artifacts/ReleaseAssets/Fonts.zip
 
 - 常规变更：`dotnet build CADFontAutoReplace.slnx -c Debug` 与 `dotnet build CADFontAutoReplace.slnx -c Release` 能通过，或明确说明本机缺失 SDK/AutoCAD 依赖。
 - 发布相关变更应验证 `tools/Publish-ReleaseAssets.ps1`。
-- Hook 变更应验证 `LdFileHook`、`ShpLoadHook` 的真实 `HookHandler` 命中、redirect 计数和样式表写回顺序；`ShpLoadHook` 版本扩展还要复核导出名、RVA、入口 prefix 和 2027 `_N0022` ABI 分支。
+- Hook 变更应验证 `LdFileHook`、`ShpLoadHook` 的真实 `HookHandler` 命中、redirect 计数和样式表写回顺序；`ShpLoadHook` 版本扩展还要复核导出名、实际 RVA 诊断日志、入口 prefix 和 2027 `_N0022` ABI 分支。RVA 不匹配只作为 build 指纹漂移提示，不能替代 prefix / prologue 安装硬闸。
 - 命令变更应验证 `CommandNames.cs`、`CommandMethod`、`CommandClass` 和 Debug/Release 暴露范围。
 - 部署器变更应验证 UAC、注册表扫描、安装/卸载、内嵌插件资源和 `.cad.json` 解析。
 - 文档变更至少运行 `git diff --check`，确保没有空白错误。

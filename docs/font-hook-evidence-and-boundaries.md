@@ -19,7 +19,7 @@
 
 - CAD 实测显示 `LdFileHook.HookHandler` 能看到 SHX 文件级加载请求，并产生非零 redirect。
 - 当前有效边界是文件级 SHX 请求处理。
-- 当前实现继续使用 `NativeInlineHook` 和 `NativeFontHookProfile` 做版本 profile、RVA 和前缀校验。
+- 当前实现继续使用 `NativeInlineHook` 和 `NativeFontHookProfile` 做版本 profile；导出名实时解析安装地址，RVA 仅记录版本指纹，入口 prefix 和 prologue 扫描才是安装硬闸。
 
 职责：
 
@@ -41,7 +41,7 @@
 - `LdFileHook` 不能覆盖 TrueType / `@TrueType` face 请求。
 - `shpload` 是当前 TrueType 文件级加载执行点。
 - 现有证据表明 TrueType 信息可能出现在 `fileName`、`arg5`、`arg6` 中，尤其需要采样 `arg6`。
-- 当前 `NativeFontHookProfile` 为 AutoCAD 2018-2027 提供 `shpload` 导出名、RVA 和入口 prefix；2018-2026 使用 `_N00HH` 的 `int/int` ABI，2027 使用 `_N0022` 的 `bool/bool` 专用 ABI。
+- 当前 `NativeFontHookProfile` 为 AutoCAD 2018-2027 提供 `shpload` 导出名、RVA 版本指纹和入口 prefix；2018-2026 使用 `_N00HH` 的 `int/int` ABI，2027 使用 `_N0022` 的 `bool/bool` 专用 ABI。
 
 职责：
 
@@ -57,7 +57,7 @@
 - 不把未知无扩展名当作缺失 TrueType。
 - `@TrueType` 运行时只按去掉 `@` 后的基础 TrueType 是否存在决定保留原请求或映射；映射目标使用配置刷新 / Hook 初始化时预解析的 `@TrueType` 专用字体，Hook 回调内不做 GDI 枚举。
 - 不依赖任何运行时请求登记表作为默认修复前置条件。
-- 任一版本的导出名、RVA 或入口 prefix 不匹配时必须 fail-closed 跳过安装；2027 不得用 2018-2026 的 legacy delegate 强装。
+- 导出名缺失、入口 prefix 不匹配或 prologue 扫描失败时必须 fail-closed 跳过安装；RVA 不匹配只记录为 build 指纹漂移并继续按导出地址安装。2027 不得用 2018-2026 的 legacy delegate 强装。
 
 ## 已删除边界
 
