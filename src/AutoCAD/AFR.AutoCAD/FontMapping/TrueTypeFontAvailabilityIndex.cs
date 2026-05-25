@@ -6,15 +6,15 @@ using AFR.Services;
 namespace AFR.FontMapping;
 
 /// <summary>
-/// Hook 侧进程级 TrueType 字体可用性索引。
+/// 进程级 TrueType 字体可用性共享索引。
 /// <para>
-/// 系统字体通过 DirectWrite 枚举；CAD 字体搜索路径中的 .ttf/.ttc/.otf 作为 Hook 侧文件兜底。
+/// 系统字体通过 DirectWrite 枚举；CAD 字体搜索路径中的 .ttf/.ttc/.otf 作为文件兜底。
 /// @TrueType 查询只按去掉 @ 后的基础字体判断，不再查询 GDI vertical face。
 /// </para>
 /// </summary>
-internal static class HookTrueTypeFontIndex
+internal static class TrueTypeFontAvailabilityIndex
 {
-    private const string Tag = "HookTrueTypeFontIndex";
+    private const string Tag = "TrueTypeFontAvailabilityIndex";
 
     private static readonly object CacheLock = new();
     private static readonly HashSet<string> AvailableFonts = new(StringComparer.OrdinalIgnoreCase);
@@ -40,7 +40,7 @@ internal static class HookTrueTypeFontIndex
         DiagnosticLogger.Ok(
             Tag,
             "Initialize",
-            scanned ? "Hook 侧 TrueType 字体索引已初始化" : "Hook 侧 TrueType 字体索引已复用",
+            scanned ? "TrueType 字体共享索引已初始化" : "TrueType 字体共享索引已复用",
             new Dictionary<string, object?> { ["scanned"] = scanned });
     }
 
@@ -92,8 +92,8 @@ internal static class HookTrueTypeFontIndex
             Tag,
             "ScanAvailableTrueTypeFonts",
             directWriteAvailable
-                ? "Hook 侧 TrueType 字体索引已构建"
-                : "Hook 侧 TrueType 字体索引已构建，DirectWrite 系统字体枚举不可用",
+                ? "TrueType 字体共享索引已构建"
+                : "TrueType 字体共享索引已构建，DirectWrite 系统字体枚举不可用",
             new Dictionary<string, object?>
             {
                 ["directWriteAvailable"] = directWriteAvailable,

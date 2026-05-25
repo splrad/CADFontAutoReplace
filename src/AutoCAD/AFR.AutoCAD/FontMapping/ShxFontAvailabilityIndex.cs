@@ -5,14 +5,15 @@ using AFR.Services;
 namespace AFR.FontMapping;
 
 /// <summary>
-/// Hook 侧进程级 SHX 字体可用性兜底索引。
+/// 进程级 SHX 字体可用性共享索引。
 /// <para>
-/// 普通样式表检测和写回以当前 Database 上的 HostApplicationServices.FindFile 为权威；
-/// 此索引只服务 ldfile 等 native 回调附近无法安全取得托管 Database 的 SHX 路径。
+/// 统一服务样式表检测、Hook 运行时映射和 UI 字体列表。
+/// 只有能识别主/大字体类型的 SHX 才会进入主字体/大字体快照和类型匹配候选。
 /// </para>
 /// </summary>
-internal static class HookShxFontIndex
+internal static class ShxFontAvailabilityIndex
 {
+    private const string Tag = "ShxFontAvailabilityIndex";
     private const int ConflictSampleLimit = 8;
 
     private static readonly object CacheLock = new();
@@ -45,9 +46,9 @@ internal static class HookShxFontIndex
     {
         bool scanned = EnsureInitialized();
         DiagnosticLogger.Ok(
-            "HookShxFontIndex",
+            Tag,
             "Initialize",
-            scanned ? "Hook 侧 SHX 字体索引已初始化" : "Hook 侧 SHX 字体索引已复用",
+            scanned ? "SHX 字体共享索引已初始化" : "SHX 字体共享索引已复用",
             new Dictionary<string, object?> { ["scanned"] = scanned });
     }
 
@@ -94,6 +95,43 @@ internal static class HookShxFontIndex
         return true;
     }
 
+    internal static IReadOnlyCollection<string> GetAllFontNamesSnapshot()
+    {
+        EnsureInitialized();
+        lock (CacheLock)
+        {
+            return ShxFonts.Keys
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+    }
+
+    internal static IReadOnlyCollection<string> GetMainFontNamesSnapshot()
+        => GetFontNamesByKind(isBigFont: false);
+
+    internal static IReadOnlyCollection<string> GetBigFontNamesSnapshot()
+        => GetFontNamesByKind(isBigFont: true);
+
+    internal static bool TryFindFontByKind(bool expectBigFont, out string fontName)
+    {
+        EnsureInitialized();
+        lock (CacheLock)
+        {
+            foreach (var entry in ShxFonts.Values
+                         .Where(item => item.IsBigFont == expectBigFont)
+                         .OrderBy(item => item.SourceRank)
+                         .ThenBy(item => item.SourceOrder)
+                         .ThenBy(item => item.FileName, StringComparer.OrdinalIgnoreCase))
+            {
+                fontName = entry.FileName;
+                return true;
+            }
+        }
+
+        fontName = string.Empty;
+        return false;
+    }
+
     private static bool EnsureInitialized()
     {
         if (_initialized)
@@ -125,9 +163,9 @@ internal static class HookShxFontIndex
         }
 
         DiagnosticLogger.Ok(
-            "HookShxFontIndex",
+            Tag,
             "ScanAvailableShxFonts",
-            "Hook 侧 SHX 字体索引已构建",
+            "SHX 字体共享索引已构建",
             new Dictionary<string, object?>
             {
                 ["shxCount"] = ShxFonts.Count,
@@ -174,7 +212,6 @@ internal static class HookShxFontIndex
         if (!ShxFonts.TryGetValue(fileName, out ShxFontEntry? existing))
         {
             ShxFonts[fileName] = candidate;
-            UpdateFontManager(candidate);
             return;
         }
 
@@ -183,7 +220,19 @@ internal static class HookShxFontIndex
             return;
 
         ShxFonts[fileName] = candidate;
-        UpdateFontManager(candidate);
+    }
+
+    private static IReadOnlyCollection<string> GetFontNamesByKind(bool isBigFont)
+    {
+        EnsureInitialized();
+        lock (CacheLock)
+        {
+            return ShxFonts.Values
+                .Where(entry => entry.IsBigFont == isBigFont)
+                .Select(entry => entry.FileName)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
     }
 
     private static void TrackConflict(ShxFontEntry existing, ShxFontEntry candidate)
@@ -221,18 +270,6 @@ internal static class HookShxFontIndex
             return candidate.SourceRank < existing.SourceRank;
 
         return candidate.SourceOrder < existing.SourceOrder;
-    }
-
-    private static void UpdateFontManager(ShxFontEntry entry)
-    {
-        if (entry.IsBigFont.HasValue)
-        {
-            FontManager.FontCache[entry.FileName] = entry.IsBigFont.Value;
-        }
-        else
-        {
-            FontManager.FontCache.TryRemove(entry.FileName, out _);
-        }
     }
 
     private static bool TryGetShxEntry(
@@ -360,7 +397,7 @@ internal static class HookShxFontIndex
         foreach (var sample in ConflictSamples)
         {
             DiagnosticLogger.Skip(
-                "HookShxFontIndex",
+                Tag,
                 "ShxNameConflict",
                 "检测到同名 SHX 文件大小不一致，已按来源优先级选择首选项",
                 new Dictionary<string, object?>

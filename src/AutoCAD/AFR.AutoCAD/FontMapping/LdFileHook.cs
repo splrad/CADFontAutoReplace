@@ -371,11 +371,11 @@ internal static class LdFileHook
         if (string.IsNullOrWhiteSpace(fontName))
             return true;
 
-        if (FontAvailabilityIndex.IsShxAvailable(fontName))
+        if (ShxFontAvailabilityIndex.IsExactAvailable(fontName))
             return true;
 
         if (!Path.HasExtension(fontName)
-            && FontAvailabilityIndex.IsShxAvailable(fontName + ".shx"))
+            && ShxFontAvailabilityIndex.IsExactAvailable(fontName + ".shx"))
         {
             return true;
         }
@@ -395,13 +395,13 @@ internal static class LdFileHook
         if (string.IsNullOrWhiteSpace(baseName) || Path.HasExtension(baseName))
             return false;
 
-        if (FontAvailabilityIndex.IsTrueTypeAvailable(baseName))
+        if (TrueTypeFontAvailabilityIndex.IsAvailable(baseName))
         {
             LogTrueTypeBypass(fontName, param2, "系统 TrueType 字族");
             return true;
         }
 
-        if (FontAvailabilityIndex.IsTrueTypeIndexReady)
+        if (TrueTypeFontAvailabilityIndex.IsSystemIndexReady)
             return false;
 
         if (HasKnownShxCandidate(baseName))
@@ -417,7 +417,7 @@ internal static class LdFileHook
             return false;
 
         string shxName = NormalizeShxName(fontName);
-        return FontAvailabilityIndex.IsShxAvailable(shxName);
+        return ShxFontAvailabilityIndex.IsExactAvailable(shxName);
     }
 
     private static void LogTrueTypeBypass(string fontName, int param2, string reason)
@@ -438,7 +438,7 @@ internal static class LdFileHook
                 ["original"] = fontName,
                 ["param2"] = param2,
                 ["reason"] = reason,
-                ["systemTrueTypeIndexReady"] = FontAvailabilityIndex.IsTrueTypeIndexReady
+                ["systemTrueTypeIndexReady"] = TrueTypeFontAvailabilityIndex.IsSystemIndexReady
             });
     }
 
@@ -500,10 +500,10 @@ internal static class LdFileHook
         out string replacement)
     {
         replacement = string.Empty;
-        if (!FontAvailabilityIndex.IsShxAvailable(shxName))
+        if (!ShxFontAvailabilityIndex.IsExactAvailable(shxName))
             return false;
 
-        if (!FontAvailabilityIndex.TryGetShxKind(shxName, out bool isBigFont))
+        if (!ShxFontAvailabilityIndex.TryGetKind(shxName, out bool isBigFont))
             return false;
 
         if (kind == FontRedirectKind.ShxBigFont && !isBigFont)
@@ -517,19 +517,7 @@ internal static class LdFileHook
 
     private static bool TryFindCachedShx(bool expectBigFont, out string replacement)
     {
-        foreach (var pair in FontManager.FontCache)
-        {
-            if (pair.Value != expectBigFont)
-                continue;
-            if (!FontAvailabilityIndex.IsShxAvailable(pair.Key))
-                continue;
-
-            replacement = pair.Key;
-            return true;
-        }
-
-        replacement = string.Empty;
-        return false;
+        return ShxFontAvailabilityIndex.TryFindFontByKind(expectBigFont, out replacement);
     }
 
     private static string NormalizeLoadName(string fontName)

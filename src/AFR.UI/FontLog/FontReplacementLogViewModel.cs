@@ -396,10 +396,8 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         ApplyBatchCommand = new UiRelayCommand(ApplyBatch);
         CloseCommand = new UiRelayCommand(() => CloseRequested?.Invoke(this, EventArgs.Empty));
 
-        // 触发扫描（确保 FontCache 已填充）
-        FontSelectionViewModel.EnsureFontCachePopulated();
-        var mainFonts = new ObservableCollection<string>(FontManager.GetMainFontSnapshot());
-        var bigFonts = new ObservableCollection<string>(FontManager.GetBigFontSnapshot());
+        var mainFonts = new ObservableCollection<string>(FontSelectionViewModel.ScanAvailableMainShxFonts());
+        var bigFonts = new ObservableCollection<string>(FontSelectionViewModel.ScanAvailableBigShxFonts());
         var ttFonts = new ObservableCollection<string>(FontSelectionViewModel.ScanSystemTrueTypeFonts());
         AvailableMainFonts = mainFonts;
         AvailableBigFonts = bigFonts;

@@ -95,15 +95,14 @@ Debug 命令：
 
 主链路在 `ExecutionController.Execute`：
 
-1. `AutoCadFontHook.Install()` 在插件启动时默认只持久安装 `LdFileHook` 和 `ShpLoadHook`，并初始化 `HookShxFontIndex` 与 `HookTrueTypeFontIndex`。
+1. `AutoCadFontHook.Install()` 在插件启动时默认只持久安装 `LdFileHook` 和 `ShpLoadHook`，并初始化 `ShxFontAvailabilityIndex` 与 `TrueTypeFontAvailabilityIndex`。
 2. 文档处理开始时清理上一文档的运行时映射结果、`LdFileHook` 文档级记录和诊断计数基线。
 3. 使用 `FontDetector.DetectMissingFonts()` 只读检测样式表原始缺失字体，并把原始检测结果存入 `DocumentContextManager` 供 `AFRLOG` 使用。
-4. 在任何样式表写回前先执行 `Editor.Regen()`，让 `LdFileHook` / `ShpLoadHook` 看到原始字体加载请求。
-5. 运行时映射结果只接受 `FontRuntimeMappingStore.GetRuntimeMappingResults()` 中由 `HookHandler` 实际 redirect 写入的记录；早期登记、候选扫描和上游入站样本都不能计为成功映射。
-6. 最后使用 `FontReplacer.ReplaceMissingFonts()` 对仍需写回的普通缺失字体和 `@SHX` 缺失字体执行样式表永久替换；替换前必须校验替换字体可用性。
-7. 替换后重新检测并存储仍缺失结果，供 `AFRLOG` 标记当前状态。
-8. 如果发生样式表永久替换，通过 `MarkAffectedTextGraphicsModified()` 标记受影响文字、属性和块引用，再做最终视觉刷新。
-9. 写入 `LdFileHook` / `ShpLoadHook` 计数、统计汇总和 `DocumentContextManager.MarkExecuted(doc)`，避免同一文档重复执行。
+4. 使用 `FontReplacer.ReplaceMissingFonts()` 对样式表缺失字体执行永久替换；替换前必须校验替换字体可用性。
+5. 替换后重新检测并存储仍缺失结果，供 `AFRLOG` 标记当前状态。
+6. 如果发生样式表永久替换，通过 `MarkAffectedTextGraphicsModified()` 标记受影响文字、属性和块引用，再执行 `Editor.Regen()` 触发内联文字的文件级运行时映射。
+7. 运行时映射结果只接受 `FontRuntimeMappingStore.GetRuntimeMappingResults()` 中由 `HookHandler` 实际 redirect 写入的记录；早期登记、候选扫描和上游入站样本都不能计为成功映射。
+8. 写入 `LdFileHook` / `ShpLoadHook` 计数、统计汇总和 `DocumentContextManager.MarkExecuted(doc)`，避免同一文档重复执行。
 
 该流程不包含任何单行文字修复、AI 推理、训练或补绘阶段。
 
@@ -112,10 +111,11 @@ Debug 命令：
 样式表处理规则：
 
 - `ShapeFile` 样式用于复杂线型，检测和替换都必须跳过。
-- 样式表非 `@` 缺失字体必须走永久替换。
-- 样式表 `@SHX` 主字体和 `@SHX` 大字体缺失也必须走永久替换。
-- 样式表 `@TrueType` 不永久写回，必须先通过样式表写回前的文件级运行时映射尝试显示修复。
-- TrueType 可用性以 `HookTrueTypeFontIndex` 的 DirectWrite 系统字体索引和 CAD TrueType 文件兜底为准；`@TrueType` 不判断 `@face`，只按去掉 `@` 后的基础 TrueType 是否存在决定是否映射。
+- 样式表缺失字体必须走永久替换。
+- 样式表 SHX 主字体缺失写回配置 `MainFont`，SHX 大字体缺失写回配置 `BigFont`。
+- 样式表普通 TrueType 缺失写回配置 `TrueTypeFont`。
+- 样式表 `@TrueType` 不判断 `@face`，只按去掉 `@` 后的基础 TrueType 是否存在决定：基础字体存在则跳过，基础字体不存在则写回 `@` + 配置 `TrueTypeFont`。
+- TrueType 可用性以 `TrueTypeFontAvailabilityIndex` 的 DirectWrite 系统字体索引和 CAD TrueType 文件兜底为准。
 - 替换 TrueType 时必须先清空 `BigFontFileName`、`FileName`，再写入 `FontDescriptor`；替换 SHX 时必须清空残留 `FontDescriptor`。
 
 MText 内联运行时映射规则：
@@ -138,14 +138,14 @@ MText 内联运行时映射规则：
 当前 Hook 边界：
 
 - `AutoCadFontHook.Install()` 默认只持久安装 `LdFileHook` 和 `ShpLoadHook`，不再安装上游诊断 Hook 或来源级 Hook。
-- `ExecutionController.Execute()` 不安装或卸载来源 Hook；开始时清理运行时映射结果和文件级文档状态，样式表写回前触发一次运行时刷新，最后才做样式表永久替换。
+- `ExecutionController.Execute()` 不安装或卸载来源 Hook；开始时清理运行时映射结果和文件级文档状态，样式表永久写回和二次检测完成后，再通过刷新触发内联运行时映射。
 - `LdFileHook` 是 SHX 文件级映射执行点；处理 `param2=0/4` 的 SHX 主字体/大字体，跳过 `param2=2` shape 文件，`@SHX` 先尝试基础 SHX 回退，再使用配置 SHX。
 - `ShpLoadHook` 是严格的 TrueType / `@TrueType` 文件级映射执行点；只处理已确认 TrueType 的请求，未知无扩展名、`.shx`、已知 SHX、`fileName/arg5 + param2=0/4` 一律放行给 SHX 链路，不得兜底成 TrueType。
 - 已删除的来源级与上游诊断 Hook 不应恢复安装、编译或执行路径，除非先重新定义证据、边界和 CAD 实测验收。
-- 普通样式表检测、永久替换和二次验证必须优先使用当前 `Database` 上的 CAD 托管 API。
-- `HookShxFontIndex` 只服务 SHX Hook 路径，负责 CAD 字体目录 `.shx` 兜底和主/大字体分类；`HookTrueTypeFontIndex` 只服务 TrueType Hook 路径，负责 DirectWrite 系统字体族索引和 CAD TrueType 文件兜底。
+- 样式表检测、Hook 运行时映射和 UI 字体列表必须统一使用共享字体索引。
+- `ShxFontAvailabilityIndex` 负责 SHX 可用性、主/大字体分类、主/大/全量快照和类型匹配兜底；`TrueTypeFontAvailabilityIndex` 负责 TrueType / `@TrueType` 可用性、DirectWrite 系统字体族索引和 CAD TrueType 文件兜底。
 
-典型回归：把样式表永久写回放到运行时映射之前，会提前改变原始字体请求，导致真实文件级 Hook 证据消失。今后重构 LdFile/ShpLoad 边界时，必须保持“映射在前，样式表永久替换在最后”，并只用真实 `HookHandler` redirect 与非零计数证明成功。
+典型回归：用 UI、样式表和 Hook 各自独立的字体列表会导致主/大字体判断不一致。今后重构 LdFile/ShpLoad 边界时，必须保持共享索引和真实 `HookHandler` redirect / 非零计数作为成功证据。
 
 ## AFRLOG 与文档上下文
 

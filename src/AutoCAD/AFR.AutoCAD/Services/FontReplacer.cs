@@ -375,7 +375,7 @@ internal static class FontReplacer
                 // 仅处理有 TrueType 字族名的样式
                 if (string.IsNullOrEmpty(font.TypeFace)) continue;
 
-                // TrueType 必须已安装（通过系统字体索引或 FindFile 双重验证）
+                // TrueType 必须已安装，存在性判断统一走共享 TrueType 索引。
                 if (!FontDetector.IsSystemFont(font.TypeFace)
                     && !FontDetector.IsTrueTypeFontAvailable(font.TypeFace, context))
                     continue;
@@ -387,7 +387,7 @@ internal static class FontReplacer
                 if (FontDetector.IsTrueTypeFontFile(fileName))
                     continue;
 
-                // 复用 FontDetector 的缓存查找，避免直接调用 FindFile 引发异常风暴
+                // SHX 可用性判断统一走共享 SHX 索引。
                 if (FontDetector.IsShxFontAvailable(fileName, context))
                     continue; // SHX 存在，无需清理
 

@@ -58,10 +58,10 @@ internal static class FontRedirectResolver
         }
 
         string shxName = EnsureShx(configured);
-        if (!FontAvailabilityIndex.IsShxAvailableWithAtFallback(shxName))
+        if (!ShxFontAvailabilityIndex.IsAvailableWithAtFallback(shxName))
             return false;
 
-        if (FontAvailabilityIndex.TryGetShxKind(shxName, out bool isBigFont))
+        if (ShxFontAvailabilityIndex.TryGetKind(shxName, out bool isBigFont))
         {
             if (kind == FontRedirectKind.ShxBigFont && !isBigFont)
                 return false;
@@ -83,7 +83,7 @@ internal static class FontRedirectResolver
         if (string.IsNullOrWhiteSpace(normalized))
             return false;
 
-        return FontAvailabilityIndex.IsTrueTypeAvailable(normalized);
+        return TrueTypeFontAvailabilityIndex.IsAvailable(normalized);
     }
 
     internal static bool IsTrueTypeFontFileName(string fontName)

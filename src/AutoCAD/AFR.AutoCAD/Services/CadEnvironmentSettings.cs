@@ -9,7 +9,7 @@ namespace AFR.Services;
 /// AutoCAD 运行环境配置，提供统一的字体搜索路径。
 /// <para>
 /// 作为 CAD 字体目录的统一来源，供 <see cref="AutoCadFontScanner"/> 和字体 Hook 侧兜底缓存共用。
-/// 普通字体检测仍以当前图纸数据库上的 HostApplicationServices.FindFile 为权威。
+/// 字体索引会读取这些路径作为 CAD 字体目录来源。
 /// </para>
 /// </summary>
 internal static class CadEnvironmentSettings

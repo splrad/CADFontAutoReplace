@@ -112,7 +112,7 @@ public void YourCommand() { }
 
 `LdFileHook`、`ShpLoadHook` 涉及非托管逻辑，改动要小、每次改完都实测。数据库读写、样式表检测、SHX 文件查找应优先使用 AutoCAD 托管 API；TrueType 可用性由 DirectWrite 系统字体索引和 CAD TrueType 文件兜底判断，`@TrueType` 只看去掉 `@` 后的基础 TrueType 是否存在。`ShpLoadHook` 只处理已确认 TrueType，不能把未知无扩展名或 SHX 加载槽位兜底成 TrueType。
 
-样式表 `@SHX` 主字体和大字体缺失走永久替换；样式表 `@TrueType` 保留运行时映射，不要永久写回样式表。当前顺序固定为运行时文件级映射在前，样式表永久替换在最后；映射成功只能看 `LdFileHook`（SHX）或 `ShpLoadHook`（TrueType）的真实 `HookHandler` redirect 和非零计数。
+样式表缺失字体全部走样式表永久写回：SHX 主字体写配置 `MainFont`，SHX 大字体写配置 `BigFont`，普通 TrueType 写配置 `TrueTypeFont`；样式表 `@TrueType` 先按去掉 `@` 后的基础字体判断，基础存在则跳过，基础不存在则写回 `@` + 配置 `TrueTypeFont`。当前顺序固定为样式表永久写回和二次检测在前，随后标记受影响图形并通过 `Regen` 触发内联运行时映射；映射成功只能看 `LdFileHook`（SHX）或 `ShpLoadHook`（TrueType）的真实 `HookHandler` redirect 和非零计数。
 
 ### 错误 4：改了代码但 CAD 行为没变化
 

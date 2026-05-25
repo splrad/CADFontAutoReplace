@@ -10,29 +10,24 @@ namespace AFR.Services;
 /// <summary>
 /// 检测图纸 TextStyleTable 中的缺失字体。
 /// <para>
-/// 遍历所有文字样式，通过共享字体索引（SHX / TrueType）和 SHX 文件头分类
+/// 遍历所有文字样式，通过共享字体索引（SHX / TrueType）
 /// 判断每个样式引用的主字体和大字体是否在当前环境中可用。
-/// TrueType 度量缓存通过 <see cref="FontDetectionContext"/> 实例管理，
-/// SHX 类型分类缓存由全局 <see cref="FontManager.FontCache"/> 统一管理。
+/// TrueType 度量缓存通过 <see cref="FontDetectionContext"/> 实例管理，只用于样式表写回。
 /// </para>
 /// </summary>
 internal static class FontDetector
 {
-    // 历史 FindFile 缓存 key 前缀（保留给诊断/兜底方法，热路径走 FontAvailabilityIndex）
-    private static readonly string FindFilePrefixShx = ((int)FindFileHint.CompiledShapeFile).ToString() + ":";
-    private static readonly string FindFilePrefixTtf = ((int)FindFileHint.TrueTypeFontFile).ToString() + ":";
-
     /// <summary>预热系统 TrueType 字体索引。</summary>
-    public static void PrewarmSystemFonts() => FontAvailabilityIndex.InitializeTrueType();
+    public static void PrewarmSystemFonts() => TrueTypeFontAvailabilityIndex.Initialize();
 
     /// <summary>
     /// 检查指定名称是否为已安装的系统 TrueType 字族名。
     /// @ 前缀会按基础字体名查询，不做 GDI vertical face 判断。
     /// </summary>
-    public static bool IsSystemFont(string name) => FontAvailabilityIndex.IsTrueTypeAvailable(name);
+    public static bool IsSystemFont(string name) => TrueTypeFontAvailabilityIndex.IsAvailable(name);
 
     /// <summary>系统字体索引是否已构建完成且包含有效数据。</summary>
-    public static bool IsSystemFontIndexReady => FontAvailabilityIndex.IsTrueTypeIndexReady;
+    public static bool IsSystemFontIndexReady => TrueTypeFontAvailabilityIndex.IsSystemIndexReady;
 
     /// <summary>
     /// 检测指定数据库中所有文字样式的缺失字体。
@@ -114,7 +109,7 @@ internal static class FontDetector
                         || FontRedirectResolver.HasAtPrefix(fileName))
                     {
                         string atFontName = FontRedirectResolver.HasAtPrefix(typeFace) ? typeFace : fileName;
-                        if (FontAvailabilityIndex.IsTrueTypeBaseAvailable(atFontName))
+                        if (TrueTypeFontAvailabilityIndex.IsAvailable(FontRedirectResolver.StripLeadingAtPrefix(atFontName)))
                         {
                             DiagnosticLogger.Skip(
                                 "FontDetector",
@@ -219,12 +214,12 @@ internal static class FontDetector
 
     /// <summary>
     /// 检查 SHX 字体文件是否在 AutoCAD 搜索路径中可用。
-    /// 通过 <see cref="HostApplicationServices.FindFile"/> 查找，结果缓存在 context 中。
+    /// 通过共享 SHX 字体索引查找。
     /// </summary>
     internal static bool IsShxFontAvailable(string fileName, FontDetectionContext context)
     {
         if (string.IsNullOrWhiteSpace(fileName)) return true;
-        return FontAvailabilityIndex.IsShxAvailable(fileName);
+        return ShxFontAvailabilityIndex.IsExactAvailable(fileName);
     }
 
     /// <summary>检查 TrueType 字体是否可用（仅字族名版本，无 FileName 辅助）。</summary>
@@ -233,75 +228,15 @@ internal static class FontDetector
 
     /// <summary>
     /// 检查 TrueType 字体是否可用。
-    /// 依次通过：DirectWrite TrueType 索引 → FindFile（FileName）→ FindFile（.ttf/.ttc/.otf）。
+    /// 通过共享 TrueType 字体索引查询；@ 前缀在索引中按基础字体处理。
     /// </summary>
     private static bool IsTrueTypeFontAvailable(string typeface, string fileName, FontDetectionContext context)
     {
         if (string.IsNullOrWhiteSpace(typeface)) return true;
 
-        return FontAvailabilityIndex.IsTrueTypeAvailable(typeface)
+        return TrueTypeFontAvailabilityIndex.IsAvailable(typeface)
                || (!string.IsNullOrWhiteSpace(fileName)
-                   && FontAvailabilityIndex.IsTrueTypeAvailable(fileName));
-    }
-
-    /// <summary>通过 HostApplicationServices.FindFile 查找字体文件，结果缓存在 context 中。</summary>
-    private static bool TryFindFile(string fileName, FontDetectionContext context, FindFileHint hint)
-    {
-        var cacheKey = string.Concat(
-            hint == FindFileHint.CompiledShapeFile ? FindFilePrefixShx : FindFilePrefixTtf,
-            fileName);
-        if (context.FindFileCache.TryGetValue(cacheKey, out var cached)) return cached;
-        bool found;
-        try { var r = HostApplicationServices.Current.FindFile(fileName, context.Db, hint); found = !string.IsNullOrEmpty(r); }
-        catch { found = false; }
-
-        context.FindFileCache.TryAdd(cacheKey, found);
-        return found;
-    }
-
-    /// <summary>通过 FindFile 查找字体文件并返回完整路径，找不到返回 null。复用 FindFileCache 避免重复调用。</summary>
-    private static string? TryFindFilePath(string fileName, FontDetectionContext context, FindFileHint hint)
-    {
-        string normalized = NormalizeFontName(fileName);
-
-        string? path = FindFilePathCached(normalized, context, hint);
-        if (path != null) return path;
-
-        if (!Path.HasExtension(normalized))
-        {
-            path = FindFilePathCached(normalized + ".shx", context, hint);
-            if (path != null) return path;
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// 单文件名的 FindFile 带缓存路径返回：
-    /// 缓存已记录为不存在时直接短路；否则调用 FindFile 并回填 bool 缓存。
-    /// </summary>
-    private static string? FindFilePathCached(string normalized, FontDetectionContext context, FindFileHint hint)
-    {
-        var cacheKey = string.Concat(
-            hint == FindFileHint.CompiledShapeFile ? FindFilePrefixShx : FindFilePrefixTtf,
-            normalized);
-
-        if (context.FindFileCache.TryGetValue(cacheKey, out var cached) && !cached)
-            return null;
-
-        try
-        {
-            string result = HostApplicationServices.Current.FindFile(normalized, context.Db, hint);
-            if (!string.IsNullOrEmpty(result))
-            {
-                context.FindFileCache.TryAdd(cacheKey, true);
-                return result;
-            }
-        }
-        catch { }
-
-        context.FindFileCache.TryAdd(cacheKey, false);
-        return null;
+                   && TrueTypeFontAvailabilityIndex.IsAvailable(fileName));
     }
 
     /// <summary>
@@ -310,41 +245,15 @@ internal static class FontDetector
     /// </summary>
     internal static bool IsShxTypeMismatch(string fileName, FontDetectionContext context, bool expectBigFont)
     {
-        if (!FontAvailabilityIndex.IsShxAvailable(fileName))
+        if (!ShxFontAvailabilityIndex.IsExactAvailable(fileName))
             return false;
 
         // 分类失败 → 保守处理为不匹配，触发替换修复而非放行
-        if (!FontAvailabilityIndex.TryGetShxKind(fileName, out bool isBigFont))
+        if (!ShxFontAvailabilityIndex.TryGetKind(fileName, out bool isBigFont))
             return true;
 
         return expectBigFont != isBigFont;
     }
-
-    /// <summary>
-    /// 判断 SHX 文件是否为大字体，优先查询全局 <see cref="FontManager.FontCache"/>，
-    /// 未命中时通过 <see cref="ShxFontAnalyzer.IsBigFont"/> 读取文件头并回填缓存。
-    /// 返回 null 表示文件读取失败（损坏、权限不足等），调用方应按保守策略处理。
-    /// </summary>
-    private static bool? ClassifyShxFile(string filePath)
-    {
-        string fileName = Path.GetFileName(filePath);
-
-        // 优先查询全局缓存（缓存中只有确定性结果，命中即可信）
-        if (FontManager.FontCache.TryGetValue(fileName, out bool cached))
-            return cached;
-
-        // 全局缓存未命中 → 读取文件头判断
-        bool? result = ShxFontAnalyzer.IsBigFont(filePath);
-
-        // 仅缓存确定性结果；读取失败（null）不写入缓存，下次访问时重试
-        if (result.HasValue)
-            FontManager.FontCache.TryAdd(fileName, result.Value);
-
-        return result;
-    }
-
-    /// <summary>去除路径前缀，仅保留文件名并去除首尾空白。</summary>
-    private static string NormalizeFontName(string name) => Path.GetFileName(name.Trim());
 
     /// <summary>
     /// 判断文件名是否为 TrueType 字体文件（.ttf/.ttc/.otf）。

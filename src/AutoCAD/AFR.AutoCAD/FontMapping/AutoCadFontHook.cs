@@ -15,12 +15,11 @@ internal sealed class AutoCadFontHook : IFontHook
         LdFileHook.IsInstalled
         || ShpLoadHook.IsInstalled;
 
-    /// <summary>安装插件级持久字体 Hook，并初始化 Hook 侧字体索引。</summary>
+    /// <summary>安装插件级持久字体 Hook，并初始化共享字体索引。</summary>
     public void Install()
     {
         DiagnosticLogger.Start("AutoCadFontHook", "Install", "开始安装插件级持久字体 Hook");
-        FontAvailabilityIndex.InitializeAll();
-        DiagnosticLogger.Ok("AutoCadFontHook", "InitializeHookFontIndexes", "Hook 侧字体索引初始化完成");
+        InitializeFontIndexes();
         InstallOne("LdFileHook", LdFileHook.Install, () => LdFileHook.IsInstalled);
         InstallOne("ShpLoadHook", ShpLoadHook.Install, () => ShpLoadHook.IsInstalled);
         DiagnosticLogger.Ok(
@@ -138,8 +137,15 @@ internal sealed class AutoCadFontHook : IFontHook
     /// <summary>更新 Hook 使用的替换字体配置（用户通过 AFR 命令修改后调用）。</summary>
     public void UpdateConfig()
     {
-        DiagnosticLogger.Start("AutoCadFontHook", "UpdateConfig", "开始更新 Hook 字体兜底索引");
-        FontAvailabilityIndex.InitializeAll();
-        DiagnosticLogger.Ok("AutoCadFontHook", "UpdateConfig", "Hook 字体兜底索引更新完成");
+        DiagnosticLogger.Start("AutoCadFontHook", "UpdateConfig", "开始更新共享字体索引");
+        InitializeFontIndexes();
+        DiagnosticLogger.Ok("AutoCadFontHook", "UpdateConfig", "共享字体索引更新完成");
+    }
+
+    private static void InitializeFontIndexes()
+    {
+        ShxFontAvailabilityIndex.Initialize();
+        TrueTypeFontAvailabilityIndex.Initialize();
+        DiagnosticLogger.Ok("AutoCadFontHook", "InitializeFontIndexes", "共享字体索引初始化完成");
     }
 }

@@ -671,8 +671,8 @@ internal static class ShpLoadHook
             return false;
 
         string shxName = FontRedirectResolver.EnsureShx(lookup);
-        return FontAvailabilityIndex.IsShxAvailable(shxName)
-               || FontAvailabilityIndex.IsShxAvailableWithAtFallback(shxName);
+        return ShxFontAvailabilityIndex.IsExactAvailable(shxName)
+               || ShxFontAvailabilityIndex.IsAvailableWithAtFallback(shxName);
     }
 
     private static bool HasNonTrueTypeExtension(string original)
@@ -739,7 +739,7 @@ internal static class ShpLoadHook
         if (string.IsNullOrWhiteSpace(normalized))
             return true;
 
-        return FontAvailabilityIndex.IsTrueTypeAvailable(normalized);
+        return TrueTypeFontAvailabilityIndex.IsAvailable(normalized);
     }
 
     private static string GetBaseFont(string fontName)
