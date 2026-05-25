@@ -867,7 +867,7 @@ jobs:
               }
 
               $versionResponse = Invoke-WebRequest `
-                  -Uri "[https://api.github.com/repos/$env:GH_REPO/contents/Version.props?ref=$env:GITHUB_SHA](https://api.github.com/repos/$env:GH_REPO/contents/Version.props?ref=$env:GITHUB_SHA)" `
+                  -Uri "https://api.github.com/repos/$env:GH_REPO/contents/Version.props?ref=$env:GITHUB_SHA" `
                   -Headers $headers `
                   -SkipHttpErrorCheck
 
@@ -972,7 +972,7 @@ jobs:
               }
 
               $releaseLookup = Invoke-WebRequest `
-                  -Uri "[https://api.github.com/repos/$env:GH_REPO/releases/tags/$tagName](https://api.github.com/repos/$env:GH_REPO/releases/tags/$tagName)" `
+                  -Uri "https://api.github.com/repos/$env:GH_REPO/releases/tags/$tagName" `
                   -Headers $headers `
                   -SkipHttpErrorCheck
 
