@@ -5,10 +5,14 @@
   </Configurations>
 
   <Folder Name="/Repository/">
+    <File Path=".editorconfig" />
+    <File Path=".gitattributes" />
     <File Path=".gitignore" />
+    <File Path="CADFontAutoReplace.slnx" />
     <File Path="Directory.Build.props" />
     <File Path="Directory.Packages.props" />
     <File Path="global.json" />
+    <File Path="LICENSE.txt" />
     <File Path="Version.props" />
   </Folder>
 
@@ -18,6 +22,7 @@
     <File Path="docs/autodesk-fonts.md" />
     <File Path="docs/developer-guide-advanced.md" />
     <File Path="docs/developer-guide-beginner.md" />
+    <File Path="docs/font-hook-evidence-and-boundaries.md" />
     <File Path="docs/git-branch-guidelines.md" />
   </Folder>
 
@@ -60,6 +65,17 @@
 
   <Folder Name="/AutoCAD/Shared/">
     <Project Path="src/AutoCAD/AFR.AutoCAD/AFR.AutoCAD.shproj" Id="3ce2a9ba-19c1-4439-9ec8-e68fdb3f533d" />
+  </Folder>
+
+  <Folder Name="/AutoCAD/Build/">
+    <File Path="src/AutoCAD/Directory.Build.props" />
+    <File Path="src/AutoCAD/Directory.Build.targets" />
+  </Folder>
+
+  <Folder Name="/AutoCAD/Launch Settings/">
+    <File Path="src/AutoCAD/AFR-ACAD2024/Properties/launchSettings.json" />
+    <File Path="src/AutoCAD/AFR-ACAD2025/Properties/launchSettings.json" />
+    <File Path="src/AutoCAD/AFR-ACAD2026/Properties/launchSettings.json" />
   </Folder>
 
   <Folder Name="/AutoCAD/Versions/">
