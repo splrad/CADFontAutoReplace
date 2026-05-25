@@ -41,8 +41,15 @@ internal static class ShpLoadHook
     private static long _sampleSequence;
     private static long _sampleOverflowCount;
     private static long _strictBypassLogCount;
+    // 缓存伪句柄，避免每次 hook 命中都走 P/Invoke GetCurrentProcess()
+    private static readonly IntPtr s_currentProcess = GetCurrentProcess();
 
     [ThreadStatic] private static bool _inHook;
+    // 可重用读取缓冲区：hook 回调天然不递归（_inHook 守卫），ThreadStatic 零分配
+    [ThreadStatic] private static byte[]? _readBuffer;
+    [ThreadStatic] private static char[]? _charBuffer;
+    // 可重用 key 构建缓冲区，避免 RecordSample 每次 hook 命中都分配 ~360 B
+    [ThreadStatic] private static System.Text.StringBuilder? _sampleKeyBuilder;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int ShpLoadLegacyDelegate(
@@ -544,22 +551,17 @@ internal static class ShpLoadHook
         int result)
     {
         long sequence = Interlocked.Increment(ref _sampleSequence);
-        string key = string.Join(
-            "\u001F",
-            fileName,
-            param2,
-            flag,
-            arg5,
-            arg6,
-            arg7,
-            arg8,
-            charset,
-            pitch,
-            family,
-            abi,
-            redirected,
-            redirectArgument,
-            redirectReplacement);
+        // 用 string.Concat 替代 string.Join，避免 14 次值类型装箱和 object[] 分配
+        const char Sep = '\u001F';
+        var sb = _sampleKeyBuilder ??= new System.Text.StringBuilder(512);
+        sb.Clear();
+        sb.Append(fileName).Append(Sep).Append(param2).Append(Sep).Append(flag)
+          .Append(Sep).Append(arg5).Append(Sep).Append(arg6).Append(Sep).Append(arg7)
+          .Append(Sep).Append(arg8).Append(Sep).Append(charset).Append(Sep).Append(pitch)
+          .Append(Sep).Append(family).Append(Sep).Append(abi)
+          .Append(Sep).Append(redirected ? '1' : '0')
+          .Append(Sep).Append(redirectArgument).Append(Sep).Append(redirectReplacement);
+        string key = sb.ToString();
 
         var incoming = new SampleRecord(
             fileName,
@@ -713,6 +715,20 @@ internal static class ShpLoadHook
         return true;
     }
 
+    /// <summary>
+    /// 文档开始时重置跨文档累积的日志抑制状态，使每篇文档都能独立产生完整的 bypass 日志记录。
+    /// <para>
+    /// 不重置 <c>_hitCount</c>、<c>_redirectCount</c>、<c>_sampleSequence</c> 等计数器，
+    /// 因为 <see cref="LogDocumentSummary"/> 依赖这些计数器的 delta 语义。
+    /// 不重置 <see cref="RedirectLogSeen"/>，跨文档的去重抑制是期望行为（相同替换组合无需反复记录）。
+    /// </para>
+    /// </summary>
+    internal static void ResetDocumentDiagnostics()
+    {
+        TrueTypeStrictBypassLogSeen.Clear();
+        Interlocked.Exchange(ref _strictBypassLogCount, 0);
+    }
+
     private static void ResetDiagnostics()
     {
         Samples.Clear();
@@ -823,25 +839,40 @@ internal static class ShpLoadHook
 
     private static bool IsShxLikeRequest(string original)
     {
-        string normalized = FontRedirectResolver.NormalizeInputName(original);
-        if (string.IsNullOrWhiteSpace(normalized))
+        // original 由调用方通过 NormalizeInputName 已规范化，直接使用
+        if (string.IsNullOrWhiteSpace(original))
             return false;
 
-        if (normalized.EndsWith(".shx", StringComparison.OrdinalIgnoreCase))
+        if (original.EndsWith(".shx", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        string lookup = normalized.TrimStart('@');
-        if (lookup.Length == 0 || Path.HasExtension(lookup))
+        // 跳过 @ 前缀；若已有任意扩展名则非 SHX 候选
+        int start = original.Length > 0 && original[0] == '@' ? 1 : 0;
+        int lookupLen = original.Length - start;
+        if (lookupLen == 0)
             return false;
 
-        string shxName = FontRedirectResolver.EnsureShx(lookup);
+#if NET8_0_OR_GREATER
+        // .NET 8+：AsSpan 直接操作原字符串偏移，string.Concat 只分配最终结果，
+        // 消除 @ 分支中 Substring/[1..] 产生的中间字符串（节省约 32 B/次）。
+        if (Path.HasExtension(original.AsSpan(start)))
+            return false;
+        string shxName = string.Concat(original.AsSpan(start), ".shx".AsSpan());
+#else
+        // .NET Framework：AsSpan 不可用，退回范围切片 + concat 原始路径
+        string lookup = start > 0 ? original[start..] : original;
+        if (Path.HasExtension(lookup))
+            return false;
+        string shxName = lookup + ".shx";
+#endif
         return ShxFontAvailabilityIndex.IsExactAvailable(shxName)
                || ShxFontAvailabilityIndex.IsAvailableWithAtFallback(shxName);
     }
 
     private static bool HasNonTrueTypeExtension(string original)
     {
-        string lookup = FontRedirectResolver.NormalizeInputName(original).TrimStart('@');
+        // StripLeadingAtPrefix 内含规范化（NormalizeInputNameRange 一次），替代 NormalizeInputName + 手动剥离
+        string lookup = FontRedirectResolver.StripLeadingAtPrefix(original);
         return Path.HasExtension(lookup)
                && !FontRedirectResolver.IsTrueTypeFontFileName(lookup);
     }
@@ -862,7 +893,7 @@ internal static class ShpLoadHook
         if (Interlocked.Read(ref _strictBypassLogCount) >= TrueTypeStrictBypassLogLimit)
             return;
 
-        string logKey = $"{argumentName}|{original}|{param2}|{reason}";
+        string logKey = string.Concat(argumentName, "|", original, "|", param2.ToString(), "|", reason);
         if (!TrueTypeStrictBypassLogSeen.TryAdd(logKey, 0))
             return;
 
@@ -904,8 +935,8 @@ internal static class ShpLoadHook
         bool preserveAtPrefix = FontRedirectResolver.HasAtPrefix(original);
         if (preserveAtPrefix)
         {
-            string configuredAtBase = FontRedirectResolver.NormalizeInputName(
-                ConfigService.Instance.TrueTypeFont?.Trim() ?? string.Empty).TrimStart('@');
+            string configuredAtBase = FontRedirectResolver.StripLeadingAtPrefix(
+                ConfigService.Instance.TrueTypeFont ?? string.Empty);
             if (!TrueTypeFontAvailabilityIndex.TryGetResolvedAtTrueTypeFont(
                     out string resolvedAtBaseFont,
                     out string source))
@@ -936,7 +967,7 @@ internal static class ShpLoadHook
             return false;
         }
 
-        string configured = FontRedirectResolver.NormalizeInputName(configuredReplacement).TrimStart('@');
+        string configured = FontRedirectResolver.StripLeadingAtPrefix(configuredReplacement);
         if (string.IsNullOrWhiteSpace(configured))
         {
             reason = "TrueType 兜底字体为空";
@@ -958,9 +989,10 @@ internal static class ShpLoadHook
     }
 
     private static string GetBaseFont(string fontName)
-        => FontRedirectResolver.HasAtPrefix(fontName)
-            ? FontRedirectResolver.NormalizeInputName(fontName).TrimStart('@')
-            : string.Empty;
+    {
+        string n = FontRedirectResolver.NormalizeInputName(fontName);
+        return n.Length > 1 && n[0] == '@' ? n[1..] : string.Empty;
+    }
 
     private static IntPtr GetNativeString(string value)
         => NativeStringCache.GetOrAdd(value, static text => Marshal.StringToHGlobalUni(text));
@@ -968,12 +1000,17 @@ internal static class ShpLoadHook
     private static bool TryReadUtf16String(IntPtr value, int maxChars, out string text)
     {
         text = string.Empty;
-        byte[] buffer = new byte[(maxChars + 1) * 2];
+        int byteLen = (maxChars + 1) * 2;
+        // 复用线程本地缓冲区，每次 hook 命中不产生堆分配
+        if (_readBuffer == null || _readBuffer.Length < byteLen)
+            _readBuffer = new byte[byteLen];
+        byte[] buffer = _readBuffer;
+
         if (!ReadProcessMemory(
-                GetCurrentProcess(),
+                s_currentProcess,
                 value,
                 buffer,
-                (UIntPtr)buffer.Length,
+                (UIntPtr)byteLen,
                 out UIntPtr bytesRead)
             || bytesRead == UIntPtr.Zero)
         {
@@ -981,9 +1018,12 @@ internal static class ShpLoadHook
         }
 
         ulong bytesReadValue = bytesRead.ToUInt64();
-        int byteCount = bytesReadValue > (ulong)buffer.Length ? buffer.Length : (int)bytesReadValue;
+        int byteCount = bytesReadValue > (ulong)byteLen ? byteLen : (int)bytesReadValue;
         int charCount = Math.Min(byteCount / 2, maxChars);
-        var chars = new char[charCount];
+
+        if (_charBuffer == null || _charBuffer.Length < charCount)
+            _charBuffer = new char[charCount];
+        char[] chars = _charBuffer;
         int length = 0;
 
         for (int index = 0; index < charCount; index++)
@@ -1003,7 +1043,10 @@ internal static class ShpLoadHook
     private static string FormatPointer(IntPtr value)
         => value == IntPtr.Zero ? "0x0" : $"0x{value.ToInt64():X}";
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+#if NET7_0_OR_GREATER
+#pragma warning disable SYSLIB1054
+#endif
+    [DllImport("kernel32.dll", EntryPoint = "GetModuleHandleW", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string lpModuleName);
 
     [DllImport("kernel32.dll")]
@@ -1017,4 +1060,7 @@ internal static class ShpLoadHook
         [Out] byte[] lpBuffer,
         UIntPtr nSize,
         out UIntPtr lpNumberOfBytesRead);
+#if NET7_0_OR_GREATER
+#pragma warning restore SYSLIB1054
+#endif
 }

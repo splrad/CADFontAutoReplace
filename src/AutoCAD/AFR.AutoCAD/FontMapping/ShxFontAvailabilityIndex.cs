@@ -16,11 +16,15 @@ internal static class ShxFontAvailabilityIndex
     private const string Tag = "ShxFontAvailabilityIndex";
     private const int ConflictSampleLimit = 8;
 
+#if NET9_0_OR_GREATER
+    private static readonly System.Threading.Lock CacheLock = new();
+#else
     private static readonly object CacheLock = new();
+#endif
     private static readonly Dictionary<string, ShxFontEntry> ShxFonts = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> ConflictNames = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> SizeConflictNames = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly List<ShxConflictSample> ConflictSamples = new();
+    private static readonly List<ShxConflictSample> ConflictSamples = [];
     private static volatile bool _initialized;
     private static int _pathCount;
     private static int _primaryPathCount;
@@ -100,9 +104,11 @@ internal static class ShxFontAvailabilityIndex
         EnsureInitialized();
         lock (CacheLock)
         {
-            return ShxFonts.Keys
-                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            return
+            [
+                .. ShxFonts.Keys
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            ];
         }
     }
 
@@ -227,11 +233,13 @@ internal static class ShxFontAvailabilityIndex
         EnsureInitialized();
         lock (CacheLock)
         {
-            return ShxFonts.Values
-                .Where(entry => entry.IsBigFont == isBigFont)
-                .Select(entry => entry.FileName)
-                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            return
+            [
+                .. ShxFonts.Values
+                    .Where(entry => entry.IsBigFont == isBigFont)
+                    .Select(entry => entry.FileName)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            ];
         }
     }
 
@@ -283,7 +291,8 @@ internal static class ShxFontAvailabilityIndex
         if (!allowAtFallback || fileName.Length <= 1 || fileName[0] != '@')
             return false;
 
-        return TryGetExactShxEntry(fileName.TrimStart('@'), out entry);
+        // fileName[0] == '@' 已确认，直接切片，无需 TrimStart 扫描
+        return TryGetExactShxEntry(fileName[1..], out entry);
     }
 
     private static bool TryGetExactShxEntry(string fileName, out ShxFontEntry? entry)

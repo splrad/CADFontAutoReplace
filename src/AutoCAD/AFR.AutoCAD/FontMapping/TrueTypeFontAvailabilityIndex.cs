@@ -26,8 +26,13 @@ internal static class TrueTypeFontAvailabilityIndex
     private const int LfFaceSize = 32;
     private const int LfFullFaceSize = 64;
 
+#if NET9_0_OR_GREATER
+    private static readonly System.Threading.Lock CacheLock = new();
+    private static readonly System.Threading.Lock AtResolutionLock = new();
+#else
     private static readonly object CacheLock = new();
     private static readonly object AtResolutionLock = new();
+#endif
     private static readonly HashSet<string> AvailableFonts = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, bool> VerticalFaceProbeCache =
         new(StringComparer.OrdinalIgnoreCase);
@@ -94,13 +99,13 @@ internal static class TrueTypeFontAvailabilityIndex
 
         lock (AtResolutionLock)
         {
-            foreach (var candidate in EnumerateAtResolutionCandidates(configuredBase))
+            foreach ((string candidateFontName, string candidateSource) in EnumerateAtResolutionCandidates(configuredBase))
             {
-                bool isConfigured = string.Equals(candidate.FontName, configuredBase, StringComparison.OrdinalIgnoreCase);
-                if (!IsAvailable(candidate.FontName))
+                bool isConfigured = string.Equals(candidateFontName, configuredBase, StringComparison.OrdinalIgnoreCase);
+                if (!IsAvailable(candidateFontName))
                     continue;
 
-                bool supportsAt = ProbeVerticalFaceAvailableCached(candidate.FontName);
+                bool supportsAt = ProbeVerticalFaceAvailableCached(candidateFontName);
                 if (isConfigured)
                     configuredSupportsAt = supportsAt;
 
@@ -109,9 +114,9 @@ internal static class TrueTypeFontAvailabilityIndex
 
                 resolution = new AtTrueTypeResolution(
                     configuredBase,
-                    candidate.FontName,
+                    candidateFontName,
                     configuredSupportsAt,
-                    candidate.Source);
+                    candidateSource);
                 break;
             }
 
@@ -162,9 +167,11 @@ internal static class TrueTypeFontAvailabilityIndex
     internal static IReadOnlyCollection<string> GetAvailableFontNamesSnapshot()
     {
         EnsureInitialized();
-        return AvailableFonts
-            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        return
+        [
+            .. AvailableFonts
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+        ];
     }
 
     private static IEnumerable<(string FontName, string Source)> EnumerateAtResolutionCandidates(string configuredBase)
@@ -245,7 +252,7 @@ internal static class TrueTypeFontAvailabilityIndex
                 lfFaceName = verticalFaceName
             };
 
-            FontEnumProc callback = (ref ENUMLOGFONTEXW lpelfe, IntPtr _, uint __, IntPtr ___) =>
+            int Callback(ref ENUMLOGFONTEXW lpelfe, IntPtr _, uint __, IntPtr ___)
             {
                 string enumerated = NormalizeFaceName(lpelfe.elfLogFont.lfFaceName);
                 if (!string.Equals(enumerated, verticalFaceName, StringComparison.OrdinalIgnoreCase))
@@ -253,8 +260,9 @@ internal static class TrueTypeFontAvailabilityIndex
 
                 matched = true;
                 return 0;
-            };
+            }
 
+            FontEnumProc callback = Callback;
             _ = EnumFontFamiliesExW(hdc, ref logFont, callback, IntPtr.Zero, 0);
         }
         catch (Exception ex)
@@ -318,7 +326,7 @@ internal static class TrueTypeFontAvailabilityIndex
             });
     }
 
-    private static bool TryScanDirectWriteSystemFonts(ISet<string> names, out int addedCount)
+    private static bool TryScanDirectWriteSystemFonts(HashSet<string> names, out int addedCount)
     {
         addedCount = 0;
         IDWriteFactory? factory = null;
@@ -471,7 +479,7 @@ internal static class TrueTypeFontAvailabilityIndex
 
         normalized = normalized.Trim();
         if (normalized.Length > 1 && normalized[0] == '@')
-            normalized = normalized.TrimStart('@');
+            normalized = normalized[1..]; // [0] == '@' 已确认，直接切片
 
         return normalized;
     }
@@ -594,6 +602,10 @@ internal static class TrueTypeFontAvailabilityIndex
         public string elfScript;
     }
 
+#if NET7_0_OR_GREATER
+    // LibraryImport 源生成器不支持 EnumFontFamiliesExW 当前使用的 ByValTStr 固定字符串封送。
+#pragma warning disable SYSLIB1054
+#endif
     [DllImport("gdi32.dll")]
     private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
 
@@ -608,6 +620,9 @@ internal static class TrueTypeFontAvailabilityIndex
         FontEnumProc lpProc,
         IntPtr lParam,
         uint dwFlags);
+#if NET7_0_OR_GREATER
+#pragma warning restore SYSLIB1054
+#endif
 
     [DllImport("dwrite.dll", ExactSpelling = true)]
     private static extern int DWriteCreateFactory(
@@ -615,6 +630,9 @@ internal static class TrueTypeFontAvailabilityIndex
         ref Guid iid,
         [MarshalAs(UnmanagedType.Interface)] out IDWriteFactory factory);
 
+#if NET8_0_OR_GREATER
+#pragma warning disable SYSLIB1096
+#endif
     [ComImport]
     [Guid("B859EE5A-D838-4B5B-A2E8-1ADC7D93DB48")]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -688,4 +706,7 @@ internal static class TrueTypeFontAvailabilityIndex
             [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder stringBuffer,
             uint size);
     }
+#if NET8_0_OR_GREATER
+#pragma warning restore SYSLIB1096
+#endif
 }

@@ -9,8 +9,7 @@
            artifacts\bin\AFR-ACAD20XX\release\
       2. 校验每个插件的 Release DLL 与 CAD 元数据 JSON
       3. dotnet publish AFR.Deployer -> 自包含 .NET 10 单文件 EXE
-         （已内置 .NET 10 运行时；用户仅需额外安装 Windows App Runtime 1.8 (x64)，
-           缺失时由 AFR.Deployer 启动期检测并弹原生对话框给出下载链接）
+         （已内置 .NET Desktop Runtime 所需组件；无需 Windows App Runtime 等外置依赖）
       4. 生成版本化发布资产到 artifacts\ReleaseAssets\
          - AFR-Deployer_vX.Y.Z.exe：部署器 EXE 本体
          - AFR-DLL_vX.Y.Z.zip：仅 AFR-ACAD*.dll 插件主 DLL

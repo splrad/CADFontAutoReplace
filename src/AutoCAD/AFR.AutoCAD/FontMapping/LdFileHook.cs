@@ -32,6 +32,7 @@ internal static class LdFileHook
         new(StringComparer.OrdinalIgnoreCase);
     private static long _hitCount;
     private static long _redirectCount;
+    private static int _trueTypeBypassCount;
 
     [ThreadStatic] private static bool _inHook;
 
@@ -51,6 +52,7 @@ internal static class LdFileHook
         RedirectLog.Clear();
         RedirectLogSeen.Clear();
         TrueTypeBypassLogSeen.Clear();
+        Interlocked.Exchange(ref _trueTypeBypassCount, 0);
     }
 
     internal static void ClearRegisteredRedirectsForDocument(IntPtr _)
@@ -63,6 +65,7 @@ internal static class LdFileHook
     {
         RedirectLogSeen.Clear();
         TrueTypeBypassLogSeen.Clear();
+        Interlocked.Exchange(ref _trueTypeBypassCount, 0);
     }
 
     internal static IntPtr GetDatabaseScope(Database? db)
@@ -186,6 +189,7 @@ internal static class LdFileHook
         NativeStringCache.Clear();
         Interlocked.Exchange(ref _hitCount, 0);
         Interlocked.Exchange(ref _redirectCount, 0);
+        Interlocked.Exchange(ref _trueTypeBypassCount, 0);
         if (installedBefore)
             DiagnosticLogger.Ok(Tag, "Uninstall", "ldfile 字体加载 Hook 卸载完成");
     }
@@ -219,10 +223,18 @@ internal static class LdFileHook
             if (!IsShxLoadRequest(original, param2))
                 return trampoline(fileName, param2, db, desc);
 
-            string normalized = NormalizeShxName(original.TrimStart('@'));
             bool hasAtPrefix = original.Length > 1 && original[0] == '@';
+#if NET8_0_OR_GREATER
+            // 跳过 @ 直接在原串上取 span，一次 string.Concat(span,span) 得到最终串，
+            // 比 original[1..] 再传入 EnsureShx 少一次中间字符串分配。
+            string normalized = NormalizeShxNameDirect(original, hasAtPrefix);
+#else
+            string baseShx = hasAtPrefix ? original[1..] : original;
+            string normalized = NormalizeShxName(baseShx);
+#endif
             if (!TryResolveMissingShxFont(
                     original,
+                    normalized,
                     param2,
                     out string replacement,
                     out FontRedirectKind kind,
@@ -255,7 +267,7 @@ internal static class LdFileHook
                 "LdFileHook",
                 "已映射");
 
-            string logKey = $"{original}|{replacement}|{param2}|{reason}";
+            string logKey = string.Concat(original, "|", replacement, "|", param2.ToString(), "|", reason);
             if (RedirectLogSeen.TryAdd(logKey, 0))
             {
                 DiagnosticLogger.Ok(
@@ -404,9 +416,22 @@ internal static class LdFileHook
             return true;
         }
 
-        string baseName = fontName.TrimStart('@');
+#if NET8_0_OR_GREATER
+        // .NET 8+：先用 span 做无分配早退出检查，只在确实需要传递给下游 string API 时才分配。
+        ReadOnlySpan<char> baseSpan = fontName.AsSpan();
+        if (baseSpan.Length > 0 && baseSpan[0] == '@')
+            baseSpan = baseSpan[1..];
+        if (baseSpan.IsEmpty || baseSpan.IsWhiteSpace() || Path.HasExtension(baseSpan))
+            return false;
+        // 超过早退出点，下游 API 需要 string；此处只分配一次。
+        string baseName = new(baseSpan);
+#else
+        // .NET Framework：TrimStart('@') 等价替换为 index-skip，无 @ 时零分配。
+        int start = fontName.Length > 0 && fontName[0] == '@' ? 1 : 0;
+        string baseName = start > 0 ? fontName[start..] : fontName;
         if (string.IsNullOrWhiteSpace(baseName) || Path.HasExtension(baseName))
             return false;
+#endif
 
         if (TrueTypeFontAvailabilityIndex.IsAvailable(baseName))
         {
@@ -435,12 +460,14 @@ internal static class LdFileHook
 
     private static void LogTrueTypeBypass(string fontName, int param2, string reason)
     {
-        if (TrueTypeBypassLogSeen.Count >= TrueTypeBypassSampleLimit)
+        if (Volatile.Read(ref _trueTypeBypassCount) >= TrueTypeBypassSampleLimit)
             return;
 
-        string logKey = $"{fontName}|{param2}|{reason}";
+        string logKey = string.Concat(fontName, "|", param2.ToString(), "|", reason);
         if (!TrueTypeBypassLogSeen.TryAdd(logKey, 0))
             return;
+
+        Interlocked.Increment(ref _trueTypeBypassCount);
 
         DiagnosticLogger.Skip(
             Tag,
@@ -464,6 +491,7 @@ internal static class LdFileHook
 
     private static bool TryResolveMissingShxFont(
         string fontName,
+        string precomputedBase,
         int param2,
         out string replacement,
         out FontRedirectKind kind,
@@ -474,8 +502,8 @@ internal static class LdFileHook
         reason = string.Empty;
 
         bool hasAtPrefix = fontName.Length > 1 && fontName[0] == '@';
-        string lookup = hasAtPrefix ? fontName.TrimStart('@') : fontName;
-        string baseShx = NormalizeShxName(lookup);
+        // precomputedBase 已是 NormalizeShxName 的结果，直接使用。
+        string baseShx = precomputedBase;
 
         if (hasAtPrefix
             && TryUseAvailableShx(baseShx, kind, out replacement))
@@ -535,22 +563,27 @@ internal static class LdFileHook
     }
 
     private static string NormalizeLoadName(string fontName)
-    {
-        if (string.IsNullOrWhiteSpace(fontName))
-            return string.Empty;
-
-        string trimmed = fontName.Trim();
-        string fileName = Path.GetFileName(trimmed);
-        return string.IsNullOrWhiteSpace(fileName) ? trimmed : fileName;
-    }
+        => FontRedirectResolver.NormalizeInputName(fontName);
 
     private static string NormalizeShxName(string fontName)
+        => FontRedirectResolver.EnsureShx(fontName);
+
+#if NET8_0_OR_GREATER
+    /// <summary>
+    /// .NET 8+ 专用：跳过 @ 前缀直接在原串上取 span 拼 .shx，
+    /// 比先 original[1..] 再 EnsureShx(baseShx) 少一次中间字符串分配。
+    /// </summary>
+    private static string NormalizeShxNameDirect(string fontName, bool hasAtPrefix)
     {
-        string normalized = NormalizeLoadName(fontName).TrimStart('@');
-        return normalized.EndsWith(".shx", StringComparison.OrdinalIgnoreCase)
-            ? normalized
-            : normalized + ".shx";
+        int start = hasAtPrefix ? 1 : 0;
+        ReadOnlySpan<char> body = fontName.AsSpan(start).Trim();
+        if (body.IsEmpty)
+            return ".shx";
+        if (body.EndsWith(".shx", StringComparison.OrdinalIgnoreCase))
+            return new string(body);
+        return string.Concat(body, ".shx".AsSpan());
     }
+#endif
 
     private static string GetFontTypeText(FontRedirectKind kind)
         => kind == FontRedirectKind.ShxBigFont ? "SHX大字体" : "SHX主字体";

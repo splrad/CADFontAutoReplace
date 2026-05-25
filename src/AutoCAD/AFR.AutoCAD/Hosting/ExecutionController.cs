@@ -379,7 +379,10 @@ internal static class ExecutionController
         {
             FontRuntimeMappingStore.Clear();
             if (clearDocumentFileMappings)
+            {
                 LdFileHook.ClearRegisteredRedirectsForDocument(dbScope);
+                ShpLoadHook.ResetDocumentDiagnostics();
+            }
             if (clearTransientFileMappings)
                 LdFileHook.ClearTransientRegisteredRedirects();
         }
