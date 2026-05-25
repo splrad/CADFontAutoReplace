@@ -41,6 +41,7 @@
 - `LdFileHook` 不能覆盖 TrueType / `@TrueType` face 请求。
 - `shpload` 是当前 TrueType 文件级加载执行点。
 - 现有证据表明 TrueType 信息可能出现在 `fileName`、`arg5`、`arg6` 中，尤其需要采样 `arg6`。
+- 当前 `NativeFontHookProfile` 为 AutoCAD 2018-2027 提供 `shpload` 导出名、RVA 和入口 prefix；2018-2026 使用 `_N00HH` 的 `int/int` ABI，2027 使用 `_N0022` 的 `bool/bool` 专用 ABI。
 
 职责：
 
@@ -56,6 +57,7 @@
 - 不把未知无扩展名当作缺失 TrueType。
 - `@TrueType` 运行时只按去掉 `@` 后的基础 TrueType 是否存在决定保留原请求或映射；映射目标使用配置刷新 / Hook 初始化时预解析的 `@TrueType` 专用字体，Hook 回调内不做 GDI 枚举。
 - 不依赖任何运行时请求登记表作为默认修复前置条件。
+- 任一版本的导出名、RVA 或入口 prefix 不匹配时必须 fail-closed 跳过安装；2027 不得用 2018-2026 的 legacy delegate 强装。
 
 ## 已删除边界
 
@@ -67,4 +69,5 @@
 - 样式表永久替换日志必须出现在运行时映射采集之后。
 - SHX 图纸要求 `LdFileHook.HookHandler` 有真实 redirect，且 `ldfile redirects > 0`。
 - TrueType / `@TrueType` 图纸要求 `ShpLoadHook` 有真实入站样本；若映射成功，要求 `shpload redirects > 0`。
+- 2027 还要求启动和入站日志显示 `_N0022 bool/bool` ABI 分支，确认没有按 `_N00HH int/int` 错位调用。
 - AFRLOG 的运行时映射数量只来自 `FontRuntimeMappingStore` 中真实文件级 Hook 命中结果。

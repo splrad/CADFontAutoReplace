@@ -25,5 +25,11 @@ internal sealed class AutoCad2027Platform : ICadPlatform, INativeFontHookExports
                 "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z",
                 0xA375C,
                 [0x40, 0x55, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x48, 0x8D, 0xAC],
+                maxPrologueSize: 64),
+            NativeHookTarget.Export(
+                "shpload",
+                "?shpload@@YAHPEB_WHPEAVAcDbDatabase@@_N0022W4Charset@@W4FontPitch@FontUtils@PAL@AutoCAD@Autodesk@@W4FontFamily@4567@@Z",
+                0xA07A0,
+                [0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x20, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56],
                 maxPrologueSize: 64));
 }

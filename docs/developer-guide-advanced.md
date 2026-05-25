@@ -32,6 +32,7 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - `NativeHookTarget`、`NativeFontHookProfile`、`INativeFontHookExportsProvider`：字体 Hook profile 与平台导出/RVA 信息。
 - `LdFileHook`：SHX 文件级映射执行点，处理 `param2=0/4` 的主字体/大字体请求，跳过 `param2=2` shape 文件。
 - `ShpLoadHook`：严格的 TrueType / `@TrueType` 文件级映射执行点，只处理已确认 TrueType 的请求；`.shx`、已知 SHX、未知无扩展名和 `fileName/arg5 + param2=0/4` 不得兜底成 TrueType。
+- `ShpLoadHook` 版本 profile 覆盖 AutoCAD 2018-2027；2018-2026 使用 `_N00HH` 的 `int/int` ABI，2027 使用 `_N0022` 的 `bool/bool` ABI，不能混用。
 
 `LdFileHook` 和 `ShpLoadHook` 随插件默认持久安装，不再保留上游诊断 Hook、来源级 Hook 或候选扫描修复路径。`ExecutionController.Execute()` 只管理文档级运行时状态。文档执行顺序必须保持为：清理运行时结果 → 原始样式表检测 → 样式表永久写回 → 替换后二次检测 → 标记受影响图形 → `Regen` 触发内联运行时映射 → 采集真实 Hook redirect 结果。
 
@@ -67,6 +68,7 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - `RegistryBasePath`
 - `AcDbDllName`
 - `NativeFontHookProfile` 中的 `ldfile` / `shpload` 导出名、RVA 和 prefix
+- 2027 `shpload` 的 `_N0022 bool/bool` delegate 分支
 
 ## 6. 发布资产生成脚本
 

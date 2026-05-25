@@ -25,5 +25,11 @@ internal sealed class AutoCad2018Platform : ICadPlatform, INativeFontHookExports
                 "?ldfile@@YAHPEB_WHPEAVAcDbDatabase@@PEAVAcFontDescription@@@Z",
                 0x4093C4,
                 [0x48, 0x8B, 0xC4, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x48, 0x8D],
+                maxPrologueSize: 64),
+            NativeHookTarget.Export(
+                "shpload",
+                "?shpload@@YAHPEB_WHPEAVAcDbDatabase@@_N00HHW4Charset@@W4FontPitch@FontUtils@PAL@AutoCAD@Autodesk@@W4FontFamily@4567@@Z",
+                0x3F2BFC,
+                [0x48, 0x8B, 0xC4, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0x48, 0x8D],
                 maxPrologueSize: 64));
 }

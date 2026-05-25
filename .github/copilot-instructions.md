@@ -141,6 +141,7 @@ MText 内联运行时映射规则：
 - `ExecutionController.Execute()` 不安装或卸载来源 Hook；开始时清理运行时映射结果和文件级文档状态，样式表永久写回和二次检测完成后，再通过刷新触发内联运行时映射。
 - `LdFileHook` 是 SHX 文件级映射执行点；处理 `param2=0/4` 的 SHX 主字体/大字体，跳过 `param2=2` shape 文件，`@SHX` 先尝试基础 SHX 回退，再使用配置 SHX。
 - `ShpLoadHook` 是严格的 TrueType / `@TrueType` 文件级映射执行点；只处理已确认 TrueType 的请求，未知无扩展名、`.shx`、已知 SHX、`fileName/arg5 + param2=0/4` 一律放行给 SHX 链路，不得兜底成 TrueType。
+- `ShpLoadHook` 已覆盖 AutoCAD 2018-2027 的 `NativeFontHookProfile`：2018-2026 使用 `_N00HH` 的 `int/int` ABI，2027 使用 `_N0022` 的 `bool/bool` ABI；2027 不得回退复用 legacy delegate。
 - 已删除的来源级与上游诊断 Hook 不应恢复安装、编译或执行路径，除非先重新定义证据、边界和 CAD 实测验收。
 - 样式表检测、Hook 运行时映射和 UI 字体列表必须统一使用共享字体索引。
 - `ShxFontAvailabilityIndex` 负责 SHX 可用性、主/大字体分类、主/大/全量快照和类型匹配兜底；`TrueTypeFontAvailabilityIndex` 负责 TrueType 可用性、DirectWrite 系统字体族索引、CAD TrueType 文件兜底，以及配置刷新时的 `@TrueType` 专用字体预解析。
@@ -201,7 +202,7 @@ artifacts/ReleaseAssets/Fonts.zip
 
 - 常规变更：`dotnet build CADFontAutoReplace.slnx -c Debug` 与 `dotnet build CADFontAutoReplace.slnx -c Release` 能通过，或明确说明本机缺失 SDK/AutoCAD 依赖。
 - 发布相关变更应验证 `tools/Publish-ReleaseAssets.ps1`。
-- Hook 变更应验证 `LdFileHook`、`ShpLoadHook` 的真实 `HookHandler` 命中、redirect 计数和样式表写回顺序。
+- Hook 变更应验证 `LdFileHook`、`ShpLoadHook` 的真实 `HookHandler` 命中、redirect 计数和样式表写回顺序；`ShpLoadHook` 版本扩展还要复核导出名、RVA、入口 prefix 和 2027 `_N0022` ABI 分支。
 - 命令变更应验证 `CommandNames.cs`、`CommandMethod`、`CommandClass` 和 Debug/Release 暴露范围。
 - 部署器变更应验证 UAC、注册表扫描、安装/卸载、内嵌插件资源和 `.cad.json` 解析。
 - 文档变更至少运行 `git diff --check`，确保没有空白错误。

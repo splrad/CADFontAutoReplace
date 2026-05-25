@@ -21,9 +21,13 @@ internal static class ShpLoadHook
     private const int TrueTypeStrictBypassLogLimit = 24;
     private const int FontTypeRegular = 0;
     private const int FontTypeBigFont = 4;
+    private const string LegacyAbiName = "_N00HH int/int";
+    private const string Abi2027Name = "_N0022 bool/bool";
 
-    private static NativeInlineHook<ShpLoadDelegate>? _hook;
-    private static ShpLoadDelegate? _hookDelegate;
+    private static NativeInlineHook<ShpLoadLegacyDelegate>? _legacyHook;
+    private static ShpLoadLegacyDelegate? _legacyHookDelegate;
+    private static NativeInlineHook<ShpLoad2027Delegate>? _hook2027;
+    private static ShpLoad2027Delegate? _hook2027Delegate;
     private static readonly ConcurrentDictionary<string, SampleRecord> Samples =
         new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, IntPtr> NativeStringCache =
@@ -41,7 +45,7 @@ internal static class ShpLoadHook
     [ThreadStatic] private static bool _inHook;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int ShpLoadDelegate(
+    private delegate int ShpLoadLegacyDelegate(
         IntPtr fileName,
         int param2,
         IntPtr db,
@@ -53,6 +57,25 @@ internal static class ShpLoadHook
         int charset,
         int pitch,
         int family);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int ShpLoad2027Delegate(
+        IntPtr fileName,
+        int param2,
+        IntPtr db,
+        byte flag,
+        IntPtr arg5,
+        IntPtr arg6,
+        byte arg7,
+        byte arg8,
+        int charset,
+        int pitch,
+        int family);
+
+    private delegate int ShpLoadTrampolineCall(
+        IntPtr effectiveFileName,
+        IntPtr effectiveArg5,
+        IntPtr effectiveArg6);
 
     internal sealed record CounterSnapshot(
         long HitCount,
@@ -73,6 +96,7 @@ internal static class ShpLoadHook
         int Charset,
         int Pitch,
         int Family,
+        string Abi,
         bool Redirected,
         string RedirectArgument,
         string RedirectReplacement,
@@ -89,7 +113,7 @@ internal static class ShpLoadHook
         string ReplacementFont,
         string Reason);
 
-    internal static bool IsInstalled => _hook?.IsInstalled == true;
+    internal static bool IsInstalled => _legacyHook?.IsInstalled == true || _hook2027?.IsInstalled == true;
 
     internal static CounterSnapshot GetCountersSnapshot()
         => new(
@@ -143,15 +167,15 @@ internal static class ShpLoadHook
         }
 
         ResetDiagnostics();
-        _hookDelegate = HookHandler;
-        _hook = new NativeInlineHook<ShpLoadDelegate>(Tag, target.Name, target.Rva ?? rva);
-        _hook.InstallAtAddress(
-            address,
-            rva,
-            _hookDelegate,
-            target.MinPrologueSize,
-            target.MaxPrologueSize,
-            target.ExpectedPrefix);
+        string abi = GetCurrentAbiName();
+        if (Uses2027Abi())
+        {
+            Install2027Hook(address, rva, target);
+        }
+        else
+        {
+            InstallLegacyHook(address, rva, target);
+        }
 
         if (IsInstalled)
         {
@@ -162,7 +186,8 @@ internal static class ShpLoadHook
                 new Dictionary<string, object?>
                 {
                     ["target"] = target.Name,
-                    ["rva"] = $"0x{rva:X}"
+                    ["rva"] = $"0x{rva:X}",
+                    ["abi"] = abi
                 });
         }
         else
@@ -174,7 +199,8 @@ internal static class ShpLoadHook
                 fields: new Dictionary<string, object?>
                 {
                     ["target"] = target.Name,
-                    ["rva"] = $"0x{rva:X}"
+                    ["rva"] = $"0x{rva:X}",
+                    ["abi"] = abi
                 });
         }
     }
@@ -200,11 +226,40 @@ internal static class ShpLoadHook
             DiagnosticLogger.Skip(Tag, "Uninstall", "shpload Hook 未安装，跳过卸载");
         }
 
-        _hook?.Uninstall();
-        _hook = null;
-        _hookDelegate = null;
+        _legacyHook?.Uninstall();
+        _legacyHook = null;
+        _legacyHookDelegate = null;
+        _hook2027?.Uninstall();
+        _hook2027 = null;
+        _hook2027Delegate = null;
         ResetDiagnostics();
         DiagnosticLogger.Ok(Tag, "Uninstall", "shpload TrueType Hook 卸载流程完成");
+    }
+
+    private static void InstallLegacyHook(IntPtr address, uint rva, NativeHookTarget target)
+    {
+        _legacyHookDelegate = HookHandler;
+        _legacyHook = new NativeInlineHook<ShpLoadLegacyDelegate>(Tag, target.Name, target.Rva ?? rva);
+        _legacyHook.InstallAtAddress(
+            address,
+            rva,
+            _legacyHookDelegate,
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
+    }
+
+    private static void Install2027Hook(IntPtr address, uint rva, NativeHookTarget target)
+    {
+        _hook2027Delegate = HookHandler2027;
+        _hook2027 = new NativeInlineHook<ShpLoad2027Delegate>(Tag, target.Name, target.Rva ?? rva);
+        _hook2027.InstallAtAddress(
+            address,
+            rva,
+            _hook2027Delegate,
+            target.MinPrologueSize,
+            target.MaxPrologueSize,
+            target.ExpectedPrefix);
     }
 
     internal static void LogDocumentSummary(CounterSnapshot before)
@@ -244,12 +299,98 @@ internal static class ShpLoadHook
         int pitch,
         int family)
     {
-        var trampoline = _hook?.TrampolineDelegate;
+        var trampoline = _legacyHook?.TrampolineDelegate;
         if (trampoline == null)
             return -1;
 
+        return HandleHook(
+            fileName,
+            param2,
+            db,
+            flag,
+            arg5,
+            arg6,
+            arg7,
+            arg8,
+            charset,
+            pitch,
+            family,
+            LegacyAbiName,
+            (effectiveFileName, effectiveArg5, effectiveArg6) => trampoline(
+                effectiveFileName,
+                param2,
+                db,
+                flag,
+                effectiveArg5,
+                effectiveArg6,
+                arg7,
+                arg8,
+                charset,
+                pitch,
+                family));
+    }
+
+    private static int HookHandler2027(
+        IntPtr fileName,
+        int param2,
+        IntPtr db,
+        byte flag,
+        IntPtr arg5,
+        IntPtr arg6,
+        byte arg7,
+        byte arg8,
+        int charset,
+        int pitch,
+        int family)
+    {
+        var trampoline = _hook2027?.TrampolineDelegate;
+        if (trampoline == null)
+            return -1;
+
+        return HandleHook(
+            fileName,
+            param2,
+            db,
+            flag,
+            arg5,
+            arg6,
+            arg7,
+            arg8,
+            charset,
+            pitch,
+            family,
+            Abi2027Name,
+            (effectiveFileName, effectiveArg5, effectiveArg6) => trampoline(
+                effectiveFileName,
+                param2,
+                db,
+                flag,
+                effectiveArg5,
+                effectiveArg6,
+                arg7,
+                arg8,
+                charset,
+                pitch,
+                family));
+    }
+
+    private static int HandleHook(
+        IntPtr fileName,
+        int param2,
+        IntPtr db,
+        byte flag,
+        IntPtr arg5,
+        IntPtr arg6,
+        int arg7,
+        int arg8,
+        int charset,
+        int pitch,
+        int family,
+        string abi,
+        ShpLoadTrampolineCall trampoline)
+    {
         if (_inHook)
-            return trampoline(fileName, param2, db, flag, arg5, arg6, arg7, arg8, charset, pitch, family);
+            return trampoline(fileName, arg5, arg6);
 
         _inHook = true;
         string requestName = FormatPointer(fileName);
@@ -291,7 +432,8 @@ internal static class ShpLoadHook
                             ["arg8"] = arg8,
                             ["charset"] = charset,
                             ["pitch"] = pitch,
-                            ["family"] = family
+                            ["family"] = family,
+                            ["abi"] = abi
                         });
                 }
 
@@ -351,7 +493,7 @@ internal static class ShpLoadHook
                 DiagnosticLogger.Fail(Tag, "HookHandler.Preprocess", "shpload TrueType 处理前置异常", ex);
             }
 
-            int result = trampoline(effectiveFileName, param2, db, flag, effectiveArg5, effectiveArg6, arg7, arg8, charset, pitch, family);
+            int result = trampoline(effectiveFileName, effectiveArg5, effectiveArg6);
             try
             {
                 RecordSample(
@@ -365,6 +507,7 @@ internal static class ShpLoadHook
                     charset,
                     pitch,
                     family,
+                    abi,
                     redirect != null,
                     redirect?.ArgumentName ?? string.Empty,
                     redirect?.ReplacementFont ?? string.Empty,
@@ -394,6 +537,7 @@ internal static class ShpLoadHook
         int charset,
         int pitch,
         int family,
+        string abi,
         bool redirected,
         string redirectArgument,
         string redirectReplacement,
@@ -412,6 +556,7 @@ internal static class ShpLoadHook
             charset,
             pitch,
             family,
+            abi,
             redirected,
             redirectArgument,
             redirectReplacement);
@@ -427,6 +572,7 @@ internal static class ShpLoadHook
             charset,
             pitch,
             family,
+            abi,
             redirected,
             redirectArgument,
             redirectReplacement,
@@ -468,8 +614,15 @@ internal static class ShpLoadHook
         => $"file='{sample.FileName}' param2={sample.Param2} " +
            $"flag={sample.Flag} arg5='{sample.Arg5}' arg6='{sample.Arg6}' args={sample.Arg7}/{sample.Arg8} " +
            $"charset={sample.Charset} pitch={sample.Pitch} family={sample.Family} " +
+           $"abi={sample.Abi} " +
            $"redirect={sample.Redirected}:{sample.RedirectArgument}->{sample.RedirectReplacement} " +
            $"result={sample.LastResult} count={sample.Count}";
+
+    private static bool Uses2027Abi()
+        => string.Equals(PlatformManager.Platform.VersionName, "2027", StringComparison.Ordinal);
+
+    private static string GetCurrentAbiName()
+        => Uses2027Abi() ? Abi2027Name : LegacyAbiName;
 
     private static bool TryGetExportAddress(
         IntPtr module,

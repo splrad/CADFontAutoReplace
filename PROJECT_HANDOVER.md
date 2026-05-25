@@ -60,7 +60,7 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 - `LdFileHook`
 - `ShpLoadHook`
 
-`LdFileHook` 负责 SHX 文件级加载重定向；`ShpLoadHook` 负责 TrueType / `@TrueType` 文件级映射。当前默认链路只安装这两个文件级 Hook，不再保留上游诊断 Hook、来源级 Hook 或候选扫描修复路径。
+`LdFileHook` 负责 SHX 文件级加载重定向；`ShpLoadHook` 负责 TrueType / `@TrueType` 文件级映射。当前默认链路只安装这两个文件级 Hook，不再保留上游诊断 Hook、来源级 Hook 或候选扫描修复路径。`ShpLoadHook` profile 覆盖 AutoCAD 2018-2027，其中 2027 使用 `_N0022 bool/bool` 专用 ABI。
 
 ## 发布
 
@@ -97,5 +97,5 @@ artifacts/ReleaseAssets/Fonts.zip
 - `dotnet build CADFontAutoReplace.slnx -c Release`
 - `AFR` 能完成字体配置和当前图纸处理。
 - `AFRLOG` 能展示样式表检测、替换状态和真实文件级运行时映射。
-- `LdFileHook`、`ShpLoadHook` 在各自边界内工作，启动日志只显示这两个默认字体 Hook。
+- `LdFileHook`、`ShpLoadHook` 在各自边界内工作，启动日志只显示这两个默认字体 Hook；2027 的 `ShpLoadHook` 日志应显示 `_N0022 bool/bool` ABI。
 - 发布脚本能生成部署器、DLL 包和字体包。
