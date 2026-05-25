@@ -95,15 +95,24 @@ internal static class FontReplacer
                 {
                     if (missing.IsTrueType)
                     {
-                        // TrueType 只用 TrueType 字体替换（需通过可用性校验）
-                        if (trueTypeFontValid)
+                        // TrueType 只用 TrueType 字体替换；@TrueType 使用配置刷新时预解析的 @ 专用字体。
+                        bool preserveAtPrefix = ShouldPreserveTrueTypeAtPrefix(missing);
+                        bool canReplaceTrueType = preserveAtPrefix
+                            ? TrueTypeFontAvailabilityIndex.TryGetResolvedAtTrueTypeFont(out _, out _)
+                            : trueTypeFontValid;
+                        if (canReplaceTrueType)
                         {
-                            bool preserveAtPrefix = ShouldPreserveTrueTypeAtPrefix(missing);
-                            string typeFaceToWrite = BuildTrueTypeWriteFace(
+                            if (!TryBuildTrueTypeWriteFace(
                                 trueTypeFont!,
                                 preserveAtPrefix,
                                 context,
-                                out string metricsFontName);
+                                out string typeFaceToWrite,
+                                out string metricsFontName))
+                            {
+                                DiagnosticLogger.LogSkipped(style.Name, "@TrueType未找到可用兜底字体");
+                                continue;
+                            }
+
                             var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(metricsFontName, context);
 
                             // 先清除 SHX 引用，再设置 TrueType
@@ -120,7 +129,9 @@ internal static class FontReplacer
                         }
                         else
                         {
-                            DiagnosticLogger.LogSkipped(style.Name, "TrueType替换字体不可用");
+                            DiagnosticLogger.LogSkipped(
+                                style.Name,
+                                preserveAtPrefix ? "@TrueType替换字体不可用" : "TrueType替换字体不可用");
                         }
                     }
                     else
@@ -234,8 +245,13 @@ internal static class FontReplacer
                 {
                     if (replacement.IsTrueType)
                     {
+                        bool preserveAtPrefix = replacement.PreserveTrueTypeAtPrefix
+                                                || FontRedirectResolver.HasAtPrefix(replacement.MainFontReplacement);
                         string replacementLookup = FontRedirectResolver.StripLeadingAtPrefix(replacement.MainFontReplacement);
-                        if (!FontDetector.IsTrueTypeFontAvailable(replacementLookup, context))
+                        bool replacementAvailable = preserveAtPrefix
+                            ? TrueTypeFontAvailabilityIndex.TryGetResolvedAtTrueTypeFont(out _, out _)
+                            : FontDetector.IsTrueTypeFontAvailable(replacementLookup, context);
+                        if (!replacementAvailable)
                         {
                             log.Warning($"样式 '{replacement.StyleName}': 字体 '{replacement.MainFontReplacement}' 不可用，已跳过");
                         }
@@ -243,11 +259,18 @@ internal static class FontReplacer
                         {
                             string requestedTrueTypeFont = replacement.MainFontReplacement;
                             // FontDescriptor 要求字族名，去除可能的文件扩展名
-                            string fontFamily = BuildTrueTypeWriteFace(
+                            if (!TryBuildTrueTypeWriteFace(
                                 requestedTrueTypeFont,
                                 replacement.PreserveTrueTypeAtPrefix,
                                 context,
-                                out string metricsFontName);
+                                out string fontFamily,
+                                out string metricsFontName))
+                            {
+                                log.Warning($"样式 '{replacement.StyleName}': @TrueType 未找到可用兜底字体，已跳过");
+                                DiagnosticLogger.LogSkipped(replacement.StyleName, "@TrueType手动替换无可用兜底字体");
+                                continue;
+                            }
+
                             var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(metricsFontName, context);
                             // 清空顺序: 先 BigFont 再 FileName，避免 eInvalidInput
                             style.BigFontFileName = string.Empty;
@@ -471,16 +494,45 @@ internal static class FontReplacer
            && (FontRedirectResolver.HasAtPrefix(missing.TypeFace)
                || FontRedirectResolver.HasAtPrefix(missing.FileName));
 
-    private static string BuildTrueTypeWriteFace(
+    private static bool TryBuildTrueTypeWriteFace(
         string requestedTrueTypeFont,
         bool preserveAtPrefix,
         FontDetectionContext context,
+        out string typeFace,
         out string metricsFontName)
     {
+        typeFace = string.Empty;
         string requestedBase = FontRedirectResolver.StripLeadingAtPrefix(requestedTrueTypeFont);
         metricsFontName = NormalizeTrueTypeName(requestedBase, context).TrimStart('@');
         bool writeAtPrefix = preserveAtPrefix || FontRedirectResolver.HasAtPrefix(requestedTrueTypeFont);
-        string typeFace = writeAtPrefix ? "@" + metricsFontName : metricsFontName;
+        string atResolutionSource = "Configured";
+
+        if (writeAtPrefix)
+        {
+            if (!TrueTypeFontAvailabilityIndex.TryGetResolvedAtTrueTypeFont(
+                    out string resolvedAtBaseFont,
+                    out atResolutionSource))
+            {
+                DiagnosticLogger.Fail(
+                    "FontReplacer",
+                    "NormalizeTrueTypeReplacement",
+                    "@TrueType 未找到可用的 @face 兜底字体",
+                    fields: new Dictionary<string, object?>
+                    {
+                        ["requestedTrueTypeFont"] = requestedTrueTypeFont,
+                        ["preserveAtPrefix"] = true
+                    });
+                return false;
+            }
+
+            metricsFontName = NormalizeTrueTypeName(resolvedAtBaseFont, context).TrimStart('@');
+            typeFace = "@" + metricsFontName;
+        }
+        else
+        {
+            typeFace = metricsFontName;
+        }
+
         DiagnosticLogger.Ok(
             "FontReplacer",
             "NormalizeTrueTypeReplacement",
@@ -490,8 +542,10 @@ internal static class FontReplacer
                 ["requestedTrueTypeFont"] = requestedTrueTypeFont,
                 ["typeFace"] = typeFace,
                 ["metricsFontName"] = metricsFontName,
-                ["preserveAtPrefix"] = writeAtPrefix
+                ["preserveAtPrefix"] = writeAtPrefix,
+                ["atResolutionSource"] = atResolutionSource,
+                ["configuredAtCapable"] = TrueTypeFontAvailabilityIndex.IsConfiguredTrueTypeAtCapable
             });
-        return typeFace;
+        return true;
     }
 }

@@ -114,8 +114,8 @@ Debug 命令：
 - 样式表缺失字体必须走永久替换。
 - 样式表 SHX 主字体缺失写回配置 `MainFont`，SHX 大字体缺失写回配置 `BigFont`。
 - 样式表普通 TrueType 缺失写回配置 `TrueTypeFont`。
-- 样式表 `@TrueType` 不判断 `@face`，只按去掉 `@` 后的基础 TrueType 是否存在决定：基础字体存在则跳过，基础字体不存在则写回 `@` + 配置 `TrueTypeFont`。
-- TrueType 可用性以 `TrueTypeFontAvailabilityIndex` 的 DirectWrite 系统字体索引和 CAD TrueType 文件兜底为准。
+- 样式表 `@TrueType` 先按去掉 `@` 后的基础 TrueType 是否存在决定：基础字体存在则跳过，基础字体不存在则写回配置刷新时预解析的 `@TrueType` 专用字体。
+- TrueType 可用性以 `TrueTypeFontAvailabilityIndex` 的 DirectWrite 系统字体索引和 CAD TrueType 文件兜底为准；配置 `TrueTypeFont` 是否支持 `@face` 只在配置刷新 / Hook 初始化时用 GDI 有限候选探测一次。
 - 替换 TrueType 时必须先清空 `BigFontFileName`、`FileName`，再写入 `FontDescriptor`；替换 SHX 时必须清空残留 `FontDescriptor`。
 
 MText 内联运行时映射规则：
@@ -123,7 +123,7 @@ MText 内联运行时映射规则：
 - MText 内联字体不改写 `MText.Contents`。
 - 当前默认链路不安装来源级 MText Hook，也不运行 MText 候选扫描作为修复关键路径。
 - MText 内联 SHX / TrueType 只有在 CAD 原生加载过程中真实进入 `LdFileHook` 或 `ShpLoadHook` 并发生 redirect 时，才写入运行时映射结果。
-- MText 内联 `@SHX` 由 `LdFileHook` 先尝试去 `@` 后基础 SHX，基础不存在再映射配置 SHX；`@TrueType` 由 `ShpLoadHook` 按基础 TrueType 是否存在决定保留原请求或映射到 `@` + 配置 TrueType。
+- MText 内联 `@SHX` 由 `LdFileHook` 先尝试去 `@` 后基础 SHX，基础不存在再映射配置 SHX；`@TrueType` 由 `ShpLoadHook` 按基础 TrueType 是否存在决定保留原请求或映射到预解析的 `@TrueType` 专用字体。
 - AFRLOG 展示记录必须来自 `LdFileHook` / `ShpLoadHook` 实际命中的文件级映射结果，不在界面层重新推导候选映射。
 
 ## Hook 职责边界
@@ -143,7 +143,7 @@ MText 内联运行时映射规则：
 - `ShpLoadHook` 是严格的 TrueType / `@TrueType` 文件级映射执行点；只处理已确认 TrueType 的请求，未知无扩展名、`.shx`、已知 SHX、`fileName/arg5 + param2=0/4` 一律放行给 SHX 链路，不得兜底成 TrueType。
 - 已删除的来源级与上游诊断 Hook 不应恢复安装、编译或执行路径，除非先重新定义证据、边界和 CAD 实测验收。
 - 样式表检测、Hook 运行时映射和 UI 字体列表必须统一使用共享字体索引。
-- `ShxFontAvailabilityIndex` 负责 SHX 可用性、主/大字体分类、主/大/全量快照和类型匹配兜底；`TrueTypeFontAvailabilityIndex` 负责 TrueType / `@TrueType` 可用性、DirectWrite 系统字体族索引和 CAD TrueType 文件兜底。
+- `ShxFontAvailabilityIndex` 负责 SHX 可用性、主/大字体分类、主/大/全量快照和类型匹配兜底；`TrueTypeFontAvailabilityIndex` 负责 TrueType 可用性、DirectWrite 系统字体族索引、CAD TrueType 文件兜底，以及配置刷新时的 `@TrueType` 专用字体预解析。
 
 典型回归：用 UI、样式表和 Hook 各自独立的字体列表会导致主/大字体判断不一致。今后重构 LdFile/ShpLoad 边界时，必须保持共享索引和真实 `HookHandler` redirect / 非零计数作为成功证据。
 

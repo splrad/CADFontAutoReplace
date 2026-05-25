@@ -605,7 +605,7 @@ internal static class ShpLoadHook
 
         if (IsTrueTypeLoadAvailable(original))
             return false;
-        if (!TryGetConfiguredTrueTypeReplacement(original, out string replacement))
+        if (!TryGetConfiguredTrueTypeReplacement(original, out string replacement, out string redirectReason))
             return false;
         if (string.Equals(original, replacement, StringComparison.OrdinalIgnoreCase))
             return false;
@@ -614,7 +614,7 @@ internal static class ShpLoadHook
             argumentName,
             original,
             replacement,
-            "配置 TrueType 兜底");
+            redirectReason);
         return true;
     }
 
@@ -718,18 +718,50 @@ internal static class ShpLoadHook
             });
     }
 
-    private static bool TryGetConfiguredTrueTypeReplacement(string original, out string replacement)
+    private static bool TryGetConfiguredTrueTypeReplacement(
+        string original,
+        out string replacement,
+        out string reason)
     {
         replacement = string.Empty;
-        if (!FontRedirectResolver.TryResolveConfiguredReplacement(FontRedirectKind.TrueType, out string configured))
+        reason = string.Empty;
+        bool preserveAtPrefix = FontRedirectResolver.HasAtPrefix(original);
+        if (preserveAtPrefix)
+        {
+            string configuredAtBase = FontRedirectResolver.NormalizeInputName(
+                ConfigService.Instance.TrueTypeFont?.Trim() ?? string.Empty).TrimStart('@');
+            if (!TrueTypeFontAvailabilityIndex.TryGetResolvedAtTrueTypeFont(
+                    out string resolvedAtBaseFont,
+                    out string source))
+            {
+                DiagnosticLogger.Skip(
+                    Tag,
+                    "ResolveAtTrueTypeReplacement",
+                    "@TrueType 未找到可用的 @face 兜底字体，跳过 shpload 映射",
+                    new Dictionary<string, object?>
+                    {
+                        ["original"] = original,
+                        ["configuredTrueTypeFont"] = configuredAtBase
+                    });
+                return false;
+            }
+
+            replacement = "@" + resolvedAtBaseFont;
+            reason = source.Equals("Configured", StringComparison.Ordinal)
+                ? "配置 TrueType 兜底"
+                : "配置 TrueType 不支持 @，使用系统兜底";
+            return true;
+        }
+
+        if (!FontRedirectResolver.TryResolveConfiguredReplacement(FontRedirectKind.TrueType, out string configuredReplacement))
             return false;
 
-        configured = FontRedirectResolver.NormalizeInputName(configured).TrimStart('@');
+        string configured = FontRedirectResolver.NormalizeInputName(configuredReplacement).TrimStart('@');
         if (string.IsNullOrWhiteSpace(configured))
             return false;
 
-        bool preserveAtPrefix = FontRedirectResolver.HasAtPrefix(original);
-        replacement = preserveAtPrefix ? "@" + configured : configured;
+        replacement = configured;
+        reason = "配置 TrueType 兜底";
         return true;
     }
 

@@ -35,9 +35,9 @@ AFR.Core -> AFR.UI -> AFR.AutoCAD -> AFR-ACAD20XX
 
 `LdFileHook` 和 `ShpLoadHook` 随插件默认持久安装，不再保留上游诊断 Hook、来源级 Hook 或候选扫描修复路径。`ExecutionController.Execute()` 只管理文档级运行时状态。文档执行顺序必须保持为：清理运行时结果 → 原始样式表检测 → 样式表永久写回 → 替换后二次检测 → 标记受影响图形 → `Regen` 触发内联运行时映射 → 采集真实 Hook redirect 结果。
 
-样式表检测、Hook 运行时映射和 UI 字体列表统一使用共享字体索引。SHX 可用性和主/大字体分类由 `ShxFontAvailabilityIndex` 管理；TrueType / `@TrueType` 可用性由 `TrueTypeFontAvailabilityIndex` 管理，通过 DirectWrite 枚举系统字体族，并用 CAD 字体搜索路径中的 `.ttf/.ttc/.otf` 做文件兜底。
+样式表检测、Hook 运行时映射和 UI 字体列表统一使用共享字体索引。SHX 可用性和主/大字体分类由 `ShxFontAvailabilityIndex` 管理；TrueType 可用性由 `TrueTypeFontAvailabilityIndex` 管理，通过 DirectWrite 枚举系统字体族，并用 CAD 字体搜索路径中的 `.ttf/.ttc/.otf` 做文件兜底。配置 `TrueTypeFont` 是否支持 `@face` 只在配置刷新 / Hook 初始化时做有限候选 GDI 探测，并缓存为 `@TrueType` 专用字体结果。
 
-样式表中所有缺失字体都由样式表规则永久写回。样式表 `@TrueType` 只按去掉 `@` 后的基础 TrueType 是否存在判断：基础字体存在则跳过，基础字体不存在则写回 `@` + 配置 TrueType。内联 SHX 只由 `LdFileHook` 运行时映射；内联 TrueType / `@TrueType` 只由 `ShpLoadHook` 运行时映射。
+样式表中所有缺失字体都由样式表规则永久写回。样式表 `@TrueType` 只按去掉 `@` 后的基础 TrueType 是否存在判断：基础字体存在则跳过，基础字体不存在则写回预解析的 `@TrueType` 专用字体。内联 SHX 只由 `LdFileHook` 运行时映射；内联 TrueType / `@TrueType` 只由 `ShpLoadHook` 运行时映射。
 
 运行时映射成功标准只看真实文件级 Hook：`LdFileHook.HookHandler` / `ShpLoadHook.HookHandler` 的 redirect 日志、非零计数和 `FontRuntimeMappingStore` 结果。早期登记、候选扫描或上游入站样本都不能算成功。
 

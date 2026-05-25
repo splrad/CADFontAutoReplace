@@ -46,7 +46,7 @@
 
 - 在 `shpload` 阶段采样 `fileName`、`arg5`、`arg6`，但只有确认是 TrueType 的请求才允许替换。
 - 对缺失普通 TrueType 映射到配置 TrueType。
-- 对缺失 `@TrueType` 保留 `@` 前缀，映射到 `@` + 配置 TrueType。
+- 对缺失 `@TrueType` 保留 `@` 前缀，映射到配置刷新时预解析的 `@TrueType` 专用字体。
 - 只有实际替换 native 参数并调用 trampoline 时，才记录 redirect 和运行时映射。
 
 边界：
@@ -54,7 +54,7 @@
 - 不处理 `.shx`、已知 SHX、可归一化为已知 SHX 的无扩展名请求。
 - 不把 `fileName` / `arg5` 上 `param2=0/4` 的无扩展名请求兜底成 TrueType；这类请求默认属于 SHX 主字体/大字体加载槽位。
 - 不把未知无扩展名当作缺失 TrueType。
-- 不再判断 `@TrueType` vertical face 是否被系统枚举；运行时只按去掉 `@` 后的基础 TrueType 是否存在决定保留原请求或映射到 `@` + 配置 TrueType。
+- `@TrueType` 运行时只按去掉 `@` 后的基础 TrueType 是否存在决定保留原请求或映射；映射目标使用配置刷新 / Hook 初始化时预解析的 `@TrueType` 专用字体，Hook 回调内不做 GDI 枚举。
 - 不依赖任何运行时请求登记表作为默认修复前置条件。
 
 ## 已删除边界

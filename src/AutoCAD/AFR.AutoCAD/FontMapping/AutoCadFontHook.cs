@@ -146,6 +146,7 @@ internal sealed class AutoCadFontHook : IFontHook
     {
         ShxFontAvailabilityIndex.Initialize();
         TrueTypeFontAvailabilityIndex.Initialize();
+        TrueTypeFontAvailabilityIndex.RefreshAtTrueTypeResolution(ConfigService.Instance.TrueTypeFont);
         DiagnosticLogger.Ok("AutoCadFontHook", "InitializeFontIndexes", "共享字体索引初始化完成");
     }
 }
