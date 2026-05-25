@@ -1,4 +1,4 @@
-name: 📣 PR关闭链路编排
+name: 📣 PR关闭事件编排
 
 on:
   pull_request_target:

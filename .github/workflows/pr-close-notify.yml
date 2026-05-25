@@ -5,7 +5,7 @@
 #   3. 当 PR 关闭时自动发布状态评论，并通过评论中的 @对象触发 GitHub 官方通知邮件
 #   4. 未合并关闭 PR 时，最后一条非机器人评论必须来自关闭人；否则将自动恢复为打开状态
 #   5. 若日志出现 github.token 无写权限，先确认仓库 Actions 默认权限为 Read and write，再确认本工作流 jobs.permissions 含 pull-requests: write 与 issues: write
-name: 📣 PR关闭状态通知
+name: 📣 关闭结果通知
 
 on:
   workflow_call:

@@ -5,7 +5,7 @@
 #   3. 修改下方 env 中的 ALLOWED_SOURCE_BRANCH 为允许向主分支合并的来源分支名
 #   4. 如需限制触发分支，请在编排工作流中配置 pull_request_target.branches（建议在 orchestrate-pr-events.yml 中维护）
 #   5. 核心开发者（TRUSTED_DEVELOPERS 变量中的用户）发起的 PR 将自动放行来源限制
-name: 🔒 主干分支合并规则校验
+name: 🔒 主干来源规则
 
 on:
   workflow_call:

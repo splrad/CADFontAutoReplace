@@ -1,4 +1,4 @@
-name: 📦 自动构建发布版本
+name: 📦 Release发布编排
 
 on:
   # 只有主分支中会影响发布内容的文件变化时才自动发版。
@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   release:
-    name: 📦 构建并创建 GitHub Release
+    name: 📦 生成资产并创建 Release
     runs-on: windows-latest
     timeout-minutes: 45
     outputs:
@@ -820,7 +820,7 @@ jobs:
           "已创建 Release：${{ steps.version.outputs.tag_name }}" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
 
   notify-release-result:
-    name: 📣 发布结果通知
+    name: 📣 回写 Release 结果
     runs-on: windows-latest
     needs: release
     if: always()
