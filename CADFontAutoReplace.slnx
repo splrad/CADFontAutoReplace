@@ -72,12 +72,6 @@
     <File Path="src/AutoCAD/Directory.Build.targets" />
   </Folder>
 
-  <Folder Name="/AutoCAD/Launch Settings/">
-    <File Path="src/AutoCAD/AFR-ACAD2024/Properties/launchSettings.json" />
-    <File Path="src/AutoCAD/AFR-ACAD2025/Properties/launchSettings.json" />
-    <File Path="src/AutoCAD/AFR-ACAD2026/Properties/launchSettings.json" />
-  </Folder>
-
   <Folder Name="/AutoCAD/Versions/">
     <Project Path="src/AutoCAD/AFR-ACAD2018/AFR-ACAD2018.csproj" Id="7ab78a85-217e-46d8-bc9c-cebe7062e697">
       <Platform Solution="*|Any CPU" Project="x64" />
