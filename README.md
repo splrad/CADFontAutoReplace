@@ -1,5 +1,5 @@
 <div align="center">
-<h1><img src="chore/assets/afr-icon.png" alt="AFR 项目图标" width="46" style="vertical-align:middle;border-radius:10px;" /> AFR — CAD 缺失字体自动替换工具</h1>
+<h1 style="display:inline-flex;align-items:center;justify-content:center;gap:16px;"><img src="chore/assets/afr-icon.png" alt="AFR 项目图标" width="46" align="absmiddle" style="border-radius:10px;" /> <span>AFR — CAD 缺失字体自动替换工具</span></h1>
 
 **减少缺失字体导致的文字不显示、乱码和反复手动指定字体**
 
