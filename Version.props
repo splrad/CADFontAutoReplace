@@ -16,8 +16,8 @@
     ╚═══════════════════════════════════════════════════════════════════════════╝
   -->
   <PropertyGroup>
-    <PluginDisplayVersion>9.1.0</PluginDisplayVersion>
-    <PluginBuildId>20260504.1</PluginBuildId>
+    <PluginDisplayVersion>9.2.0</PluginDisplayVersion>
+    <PluginBuildId>20260525.1</PluginBuildId>
   </PropertyGroup>
 
 </Project>
