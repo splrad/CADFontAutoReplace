@@ -5,6 +5,7 @@ namespace AFR.FontMapping;
 
 /// <summary>
 /// 记录当前执行周期内文件级字体 Hook 实际命中的运行时映射。
+/// 只有 HookHandler 真实 redirect 或失败记录会进入这里，注册和候选不算成功映射。
 /// </summary>
 internal static class FontRuntimeMappingStore
 {

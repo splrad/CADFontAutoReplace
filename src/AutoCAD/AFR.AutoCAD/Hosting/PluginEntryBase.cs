@@ -12,27 +12,21 @@ using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 namespace AFR.Hosting;
 
 /// <summary>
-/// AutoCAD 插件入口基类，实现 <see cref="IExtensionApplication"/> 接口。
+/// AutoCAD 插件入口基类。
 /// <para>
-/// 负责插件的完整生命周期管理：初始化平台服务、注册文档事件、调度字体替换执行。
-/// 各 CAD 版本适配壳（如 AFR-ACAD2026）继承此类，通过抽象方法提供版本特定的平台实例。
+/// 各版本壳只提供平台差异；公共流程在这里完成初始化、Hook 安装和延迟执行调度。
 /// </para>
 /// </summary>
 public abstract class PluginEntryBase : IExtensionApplication
 {
-    // ── 延迟执行队列机制 ──
-    // 文档事件（如 DocumentCreated）触发时不直接执行替换，而是入队等待 Idle 事件统一处理。
-    // 这样做是因为文档事件触发时，文档可能尚未完全加载，此时操作数据库可能失败。
+    // 文档事件发生时图纸可能尚未加载完成，先入队，等 Idle 再处理数据库。
     private static readonly Queue<(Document? Doc, string Trigger)> _pendingExecutions = new();
-    // 标记是否已注册 Idle 事件处理器，避免重复注册
+    // 避免重复注册 Idle 处理器。
     private static bool _idleHandlerRegistered;
-    // 标记插件是否已卸载，卸载后不再处理任何事件
+    // 卸载后忽略所有延迟请求。
     private static volatile bool _unloaded;
     // 重入防护：ExecutionController.Execute 内部会调用 Regen()，Regen() 会泵送
-    // Windows 消息队列，可能在当前执行尚未结束时再次触发 OnDeferredIdle，
-    // 导致 doc2 的 ClearDocumentRuntimeState 污染 doc1 正在使用的全局单例状态，
-    // 并引发嵌套 LockDocument + 嵌套 Regen 造成 UI 线程死锁。
-    // 通过此标志阻断重入：重入期间到来的请求重新调度到下一次 Idle。
+    // Windows 消息队列，可能再次触发 Idle。重入请求留到下一轮，避免跨文档状态污染和嵌套锁。
     private static bool _executeInProgress;
 #if NET9_0_OR_GREATER
     private static readonly System.Threading.Lock _scheduleLock = new();
@@ -47,10 +41,8 @@ public abstract class PluginEntryBase : IExtensionApplication
     private const string FontAltVariableName = "FONTALT";
     private const string DisabledFontAltValue = ".";
 
-    // 嵌入程序集缓存：第三方托管依赖以嵌入资源形式打包在插件 DLL 中
+    // 第三方托管依赖以嵌入资源形式打包在插件 DLL 中。
     private static readonly Dictionary<string, Assembly> ResolvedEmbeddedAssemblies = new(StringComparer.OrdinalIgnoreCase);
-
-    // ── 子类必须实现：提供版本特定的平台服务 ──
 
     /// <summary>创建当前 CAD 版本的平台常量实例（品牌、版本、注册表路径等）。</summary>
     protected abstract ICadPlatform CreatePlatform();
@@ -67,14 +59,10 @@ public abstract class PluginEntryBase : IExtensionApplication
     /// <summary>创建字体扫描器实现。默认返回 AutoCAD 字体扫描器。</summary>
     protected virtual IFontScanner CreateFontScanner() => new AutoCadFontScanner();
 
-    // ── 嵌入程序集解析 ──
-
     /// <summary>
     /// 从插件主程序集的嵌入资源中加载第三方托管依赖。
     /// <para>
-    /// 当 .NET 运行时找不到某个程序集时会触发此回调。
-    /// 使用 typeof(PluginEntryBase).Assembly 定位插件 DLL，
-    /// 因为 PluginEntryBase 通过 Shared Project 编译进了最终的插件 DLL 中。
+    /// PluginEntryBase 通过 Shared Project 编进最终插件 DLL，所以资源从该程序集读取。
     /// </para>
     /// </summary>
     private static Assembly? OnResolveEmbeddedAssembly(object? sender, ResolveEventArgs args)
@@ -107,14 +95,10 @@ public abstract class PluginEntryBase : IExtensionApplication
         return string.Equals(name, "HandyControl", StringComparison.OrdinalIgnoreCase);
     }
 
-    // ── IExtensionApplication 实现 ──
-
     /// <summary>
-    /// AutoCAD 加载插件时调用。按阶段依次完成：
-    /// 平台注册 → Hook 安装 → 注册表初始化 → 文档事件注册 → 延迟启动执行。
+    /// AutoCAD 加载插件时调用。
     /// <para>
-    /// 首次加载（通过 NETLOAD 手动加载）时仅完成注册表初始化和字体部署，
-    /// 跳过 Hook 安装、事件注册和执行调度，提示用户重启 CAD。
+    /// 正常自动加载会安装 Hook、注册文档事件并调度当前图纸；首次 NETLOAD 只完成部署并提示重启。
     /// </para>
     /// </summary>
     public void Initialize()
@@ -123,13 +107,13 @@ public abstract class PluginEntryBase : IExtensionApplication
         var initTimer = Stopwatch.StartNew();
         using var dialogSystemVariables = CadDialogSystemVariableScope.Capture();
 
-        // 诊断日志仅在 Debug 构建时自动启用，用于开发调试
+        // Debug 构建自动开启 JSONL 诊断。
 #if DEBUG
         DiagnosticLogger.Enable();
 #endif
         DiagnosticLogger.Start("PluginEntry", "Initialize", "插件初始化开始");
 
-        // 注册嵌入程序集解析回调，使 HandyControl 等打包在 DLL 资源中的依赖可被加载
+        // 让 HandyControl 等嵌入依赖可被 .NET 加载。
         AppDomain.CurrentDomain.AssemblyResolve += OnResolveEmbeddedAssembly;
         DiagnosticLogger.Ok("PluginEntry", "RegisterEmbeddedAssemblyResolver", "嵌入程序集解析回调已注册");
 
@@ -138,7 +122,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         RegisterHiddenUnloadCommand();
         DiagnosticLogger.Ok("PluginEntry", "RegisterHiddenUnloadCommand", "隐藏卸载入口已注册");
 
-        // 第负一阶段: 注册平台服务 — 必须最先执行，后续所有功能依赖 PlatformManager
+        // 平台服务必须最先注册，后续 Hook、窗口和日志都依赖它。
         DiagnosticLogger.Start("PluginEntry", "InitializePlatform", "开始初始化平台服务");
         PlatformManager.Initialize(CreatePlatform(), CreateFontHook(), CreateHost(), CreateLogger(), CreateFontScanner());
         DiagnosticLogger.Ok(
@@ -152,8 +136,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         {
             EnsureFontAltDisabled(log);
 
-            // 第一阶段: 注册表初始化 — 检查/创建自动加载注册表项和默认配置
-            // 首次安装时还会部署内嵌字体到 CAD Fonts 目录并写入默认替换字体
+            // 初始化自动加载注册表项；首次安装还会部署内嵌字体和默认配置。
             DiagnosticLogger.Start("PluginEntry", "AppInitializer", "开始执行注册表和默认字体初始化");
             bool isFirstRun = AppInitializer.Initialize();
             DiagnosticLogger.Ok(
@@ -183,15 +166,12 @@ public abstract class PluginEntryBase : IExtensionApplication
                 return;
             }
 
-            // ── 以下仅在非首次加载（注册表自动启动）时执行 ──
-
-            // 第零阶段 A: 预热系统 TrueType 字族索引。
-            // Hook 侧 TrueType 索引通过 DirectWrite 枚举系统字体，不再使用 GDI face 查询。
+            // 非首次加载才进入运行链路：预热共享 TrueType 索引。
             DiagnosticLogger.Start("PluginEntry", "PrewarmSystemFonts", "开始预热系统 TrueType 字族索引");
             FontDetector.PrewarmSystemFonts();
             DiagnosticLogger.Ok("PluginEntry", "PrewarmSystemFonts", "系统 TrueType 字族索引预热已调度");
 
-            // 第零阶段 B: 安装字体 Hook — 在字体解析前就位，才能拦截缺失字体请求
+            // Hook 必须在图纸字体解析前安装，才可能捕获文件级加载请求。
             if (PlatformManager.Platform.SupportsNativeFontHooks)
             {
                 DiagnosticLogger.Start("PluginEntry", "InstallFontHooks", "开始安装插件级持久字体 Hook");
@@ -211,13 +191,13 @@ public abstract class PluginEntryBase : IExtensionApplication
                     new Dictionary<string, object?> { ["platform"] = PlatformManager.Platform.DisplayName });
             }
 
-            // 第二阶段: 注册文档事件 — 监听新建/关闭文档，自动触发字体替换
+            // 文档事件只负责调度，实际执行统一延迟到 Idle。
             var docMgr = AcadApp.DocumentManager;
             docMgr.DocumentCreated += OnDocumentCreated;
             docMgr.DocumentToBeDestroyed += OnDocumentToBeDestroyed;
             DiagnosticLogger.Ok("PluginEntry", "RegisterDocumentEvents", "文档事件已注册");
 
-            // 第三阶段: 延迟启动执行 — 对当前已打开的文档安排字体替换
+            // 当前活动图纸也走同一套 Idle 延迟执行。
             ScheduleExecution(null, "Startup");
             initTimer.Stop();
             DiagnosticLogger.Ok(
@@ -378,8 +358,6 @@ public abstract class PluginEntryBase : IExtensionApplication
                || string.Equals(trimmed, DisabledFontAltValue, StringComparison.Ordinal);
     }
 
-    // ── 事件处理与延迟调度 ──
-
     /// <summary>注销所有已注册的 AutoCAD 文档事件，防止卸载后继续触发。</summary>
     private static void UnregisterEvents()
     {
@@ -395,7 +373,7 @@ public abstract class PluginEntryBase : IExtensionApplication
     }
 
     /// <summary>
-    /// Registers the hidden unload route without adding AFRUNLOAD to AutoCAD's command stack.
+    /// 注册隐藏卸载入口，不把 AFRUNLOAD 加入 AutoCAD 命令栈。
     /// </summary>
     private static void RegisterHiddenUnloadCommand()
     {
@@ -416,7 +394,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         }
     }
 
-    /// <summary>Unregisters the hidden unload route from all tracked documents.</summary>
+    /// <summary>从所有已跟踪文档注销隐藏卸载入口。</summary>
     private static void UnregisterHiddenUnloadCommand()
     {
         lock (_hiddenUnloadLock)
@@ -440,7 +418,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         }
     }
 
-    /// <summary>Attaches the UnknownCommand route for one document.</summary>
+    /// <summary>给单个文档挂接 UnknownCommand 卸载入口。</summary>
     private static void AttachHiddenUnloadHandler(Document? doc)
     {
         if (doc == null || doc.IsDisposed) return;
@@ -450,7 +428,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         _hiddenUnloadDocuments.Add(doc);
     }
 
-    /// <summary>Detaches the UnknownCommand route for one document.</summary>
+    /// <summary>从单个文档移除 UnknownCommand 卸载入口。</summary>
     private static void DetachHiddenUnloadHandler(Document? doc)
     {
         if (doc == null) return;
@@ -493,8 +471,7 @@ public abstract class PluginEntryBase : IExtensionApplication
     }
 
     /// <summary>
-    /// 将一次字体替换执行请求加入延迟队列，并确保 Idle 事件已注册。
-    /// 实际执行会在 AutoCAD 空闲时由 <see cref="OnDeferredIdle"/> 处理。
+    /// 将一次字体处理请求加入 Idle 延迟队列。
     /// </summary>
     /// <param name="doc">目标文档（为 null 时在 Idle 处理时取活动文档）。</param>
     /// <param name="trigger">触发来源标识（如 "Startup"、"DocumentCreated"），用于日志。</param>
@@ -533,8 +510,7 @@ public abstract class PluginEntryBase : IExtensionApplication
     }
 
     /// <summary>
-    /// Idle 事件回调：在 AutoCAD 空闲时批量处理延迟队列中的所有执行请求。
-    /// 每次触发后注销自身，避免持续占用 Idle 事件。
+    /// AutoCAD 空闲时批量处理延迟队列；触发后立即注销自身。
     /// </summary>
     private static void OnDeferredIdle(object? sender, System.EventArgs e)
     {

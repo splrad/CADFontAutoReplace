@@ -8,7 +8,7 @@ using AFR.Services;
 namespace AFR.FontMapping;
 
 /// <summary>
-/// 处理 AutoCAD shpload 阶段的 TrueType / @TrueType 运行时文件级映射。
+/// 处理 shpload 阶段的 TrueType / @TrueType 文件级重定向。
 /// </summary>
 internal static class ShpLoadHook
 {
@@ -41,14 +41,14 @@ internal static class ShpLoadHook
     private static long _sampleSequence;
     private static long _sampleOverflowCount;
     private static long _strictBypassLogCount;
-    // 缓存伪句柄，避免每次 hook 命中都走 P/Invoke GetCurrentProcess()
+    // 缓存伪句柄，避免每次 Hook 命中都调用 GetCurrentProcess。
     private static readonly IntPtr s_currentProcess = GetCurrentProcess();
 
     [ThreadStatic] private static bool _inHook;
-    // 可重用读取缓冲区：hook 回调天然不递归（_inHook 守卫），ThreadStatic 零分配
+    // Hook 回调受 _inHook 防重入保护，线程本地缓冲区可安全复用。
     [ThreadStatic] private static byte[]? _readBuffer;
     [ThreadStatic] private static char[]? _charBuffer;
-    // 可重用 key 构建缓冲区，避免 RecordSample 每次 hook 命中都分配 ~360 B
+    // 复用采样 key 缓冲区，降低 Hook 热路径分配。
     [ThreadStatic] private static System.Text.StringBuilder? _sampleKeyBuilder;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -551,7 +551,7 @@ internal static class ShpLoadHook
         int result)
     {
         long sequence = Interlocked.Increment(ref _sampleSequence);
-        // 用 string.Concat 替代 string.Join，避免 14 次值类型装箱和 object[] 分配
+        // 手动拼 key，避免 string.Join 带来的装箱和 object[] 分配。
         const char Sep = '\u001F';
         var sb = _sampleKeyBuilder ??= new System.Text.StringBuilder(512);
         sb.Clear();
@@ -684,6 +684,7 @@ internal static class ShpLoadHook
         string? expectedRva = target.Rva.HasValue ? $"0x{target.Rva.Value:X}" : null;
         string actualRva = $"0x{rva:X}";
         bool rvaMatched = !target.Rva.HasValue || target.Rva.Value == rva;
+        // RVA 只作为版本指纹输出；安装安全由导出名、入口字节和序言扫描共同决定。
         if (!rvaMatched)
         {
             DiagnosticLogger.Ok(
@@ -716,11 +717,9 @@ internal static class ShpLoadHook
     }
 
     /// <summary>
-    /// 文档开始时重置跨文档累积的日志抑制状态，使每篇文档都能独立产生完整的 bypass 日志记录。
+    /// 文档开始时重置本轮 bypass 日志抑制状态。
     /// <para>
-    /// 不重置 <c>_hitCount</c>、<c>_redirectCount</c>、<c>_sampleSequence</c> 等计数器，
-    /// 因为 <see cref="LogDocumentSummary"/> 依赖这些计数器的 delta 语义。
-    /// 不重置 <see cref="RedirectLogSeen"/>，跨文档的去重抑制是期望行为（相同替换组合无需反复记录）。
+    /// 计数器不清零，<see cref="LogDocumentSummary"/> 需要用快照 delta 统计单文档命中。
     /// </para>
     /// </summary>
     internal static void ResetDocumentDiagnostics()
@@ -839,27 +838,26 @@ internal static class ShpLoadHook
 
     private static bool IsShxLikeRequest(string original)
     {
-        // original 由调用方通过 NormalizeInputName 已规范化，直接使用
+        // original 已由调用方规范化。
         if (string.IsNullOrWhiteSpace(original))
             return false;
 
         if (original.EndsWith(".shx", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        // 跳过 @ 前缀；若已有任意扩展名则非 SHX 候选
+        // 跳过 @ 后若已有扩展名，则不按 SHX 候选处理。
         int start = original.Length > 0 && original[0] == '@' ? 1 : 0;
         int lookupLen = original.Length - start;
         if (lookupLen == 0)
             return false;
 
 #if NET8_0_OR_GREATER
-        // .NET 8+：AsSpan 直接操作原字符串偏移，string.Concat 只分配最终结果，
-        // 消除 @ 分支中 Substring/[1..] 产生的中间字符串（节省约 32 B/次）。
+        // .NET 8+ 直接在原串 span 上拼 .shx，减少中间字符串。
         if (Path.HasExtension(original.AsSpan(start)))
             return false;
         string shxName = string.Concat(original.AsSpan(start), ".shx".AsSpan());
 #else
-        // .NET Framework：AsSpan 不可用，退回范围切片 + concat 原始路径
+        // .NET Framework 无 span 路径，退回字符串切片。
         string lookup = start > 0 ? original[start..] : original;
         if (Path.HasExtension(lookup))
             return false;
@@ -871,7 +869,7 @@ internal static class ShpLoadHook
 
     private static bool HasNonTrueTypeExtension(string original)
     {
-        // StripLeadingAtPrefix 内含规范化（NormalizeInputNameRange 一次），替代 NormalizeInputName + 手动剥离
+        // StripLeadingAtPrefix 已含规范化，避免重复处理。
         string lookup = FontRedirectResolver.StripLeadingAtPrefix(original);
         return Path.HasExtension(lookup)
                && !FontRedirectResolver.IsTrueTypeFontFileName(lookup);
@@ -1001,7 +999,7 @@ internal static class ShpLoadHook
     {
         text = string.Empty;
         int byteLen = (maxChars + 1) * 2;
-        // 复用线程本地缓冲区，每次 hook 命中不产生堆分配
+        // 复用线程本地缓冲区，减少 Hook 热路径分配。
         if (_readBuffer == null || _readBuffer.Length < byteLen)
             _readBuffer = new byte[byteLen];
         byte[] buffer = _readBuffer;

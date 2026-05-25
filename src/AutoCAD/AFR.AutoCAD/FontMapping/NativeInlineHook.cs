@@ -7,7 +7,7 @@ namespace AFR.FontMapping;
 /// <summary>
 /// x64 inline hook 辅助器。
 /// <para>
-/// 仅用于 DBCS / code page 调查链路，负责安装绝对跳转、创建 trampoline，并在卸载时安全还原原始字节。
+/// 负责入口校验、序言扫描、绝对跳转、trampoline 创建和卸载还原。
 /// </para>
 /// </summary>
 /// <typeparam name="TDelegate">目标函数对应的托管委托类型。</typeparam>
@@ -30,9 +30,7 @@ internal sealed class NativeInlineHook<TDelegate> where TDelegate : Delegate
     private byte[]? _savedBytes;
     private int _prologueSize;
 
-    /// <summary>
-    /// 初始化 hook 辅助器。
-    /// </summary>
+    /// <summary>初始化 Hook 辅助器。</summary>
     /// <param name="tag">诊断日志标签。</param>
     /// <param name="name">目标函数名称。</param>
     /// <param name="rva">目标函数 RVA。</param>
@@ -46,7 +44,7 @@ internal sealed class NativeInlineHook<TDelegate> where TDelegate : Delegate
     /// <summary>是否已成功安装。</summary>
     public bool IsInstalled { get; private set; }
 
-    /// <summary>trampoline 委托。</summary>
+    /// <summary>调用原函数的 trampoline 委托。</summary>
     public TDelegate? TrampolineDelegate { get; private set; }
 
     /// <summary>最近一次 hook 入口捕获到的返回地址。</summary>
@@ -62,14 +60,12 @@ internal sealed class NativeInlineHook<TDelegate> where TDelegate : Delegate
         }
     }
 
-    /// <summary>
-    /// 安装 inline hook。
-    /// </summary>
+    /// <summary>按模块基址和配置 RVA 安装 inline hook。</summary>
     /// <param name="module">模块基址。</param>
     /// <param name="hookDelegate">替换目标函数的托管委托。</param>
     /// <param name="minPrologueSize">最少覆盖字节数。</param>
     /// <param name="maxPrologueSize">最大扫描字节数。</param>
-    /// <param name="expectedPrefix">可选入口字节前缀，用于防止版本不匹配时误 patch。</param>
+    /// <param name="expectedPrefix">可选入口字节前缀，不匹配时拒绝 patch。</param>
     /// <returns>成功返回 true。</returns>
     public bool Install(
         IntPtr module,
@@ -85,15 +81,13 @@ internal sealed class NativeInlineHook<TDelegate> where TDelegate : Delegate
         return InstallAtAddress(targetAddress, _rva, hookDelegate, minPrologueSize, maxPrologueSize, expectedPrefix);
     }
 
-    /// <summary>
-    /// 在已解析的函数地址安装 inline hook。
-    /// </summary>
+    /// <summary>在已解析的函数地址安装 inline hook。</summary>
     /// <param name="targetAddress">目标函数入口地址。</param>
-    /// <param name="resolvedRva">目标函数在模块中的实际 RVA，仅用于诊断。</param>
+    /// <param name="resolvedRva">实际 RVA，仅用于诊断和版本指纹输出。</param>
     /// <param name="hookDelegate">替换目标函数的托管委托。</param>
     /// <param name="minPrologueSize">最少覆盖字节数。</param>
     /// <param name="maxPrologueSize">最大扫描字节数。</param>
-    /// <param name="expectedPrefix">可选入口字节前缀，用于防止版本不匹配时误 patch。</param>
+    /// <param name="expectedPrefix">可选入口字节前缀，不匹配时拒绝 patch。</param>
     /// <returns>成功返回 true。</returns>
     public bool InstallAtAddress(
         IntPtr targetAddress,

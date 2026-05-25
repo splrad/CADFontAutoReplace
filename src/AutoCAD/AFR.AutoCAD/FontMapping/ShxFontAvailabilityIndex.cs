@@ -7,8 +7,8 @@ namespace AFR.FontMapping;
 /// <summary>
 /// 进程级 SHX 字体可用性共享索引。
 /// <para>
-/// 统一服务样式表检测、Hook 运行时映射和 UI 字体列表。
-/// 只有能识别主/大字体类型的 SHX 才会进入主字体/大字体快照和类型匹配候选。
+/// 样式表检测、Hook 运行时映射和 UI 字体列表共用同一份扫描结果。
+/// 只有能识别类型的 SHX 才会进入主字体/大字体分类候选。
 /// </para>
 /// </summary>
 internal static class ShxFontAvailabilityIndex
@@ -201,7 +201,7 @@ internal static class ShxFontAvailabilityIndex
         }
         catch
         {
-            // 字体目录不可读时跳过，后续按缺失字体处理。
+            // 字体目录不可读时跳过，后续按缺失处理。
         }
     }
 
@@ -291,7 +291,7 @@ internal static class ShxFontAvailabilityIndex
         if (!allowAtFallback || fileName.Length <= 1 || fileName[0] != '@')
             return false;
 
-        // fileName[0] == '@' 已确认，直接切片，无需 TrimStart 扫描
+        // 已确认 @ 前缀，直接查基础 SHX。
         return TryGetExactShxEntry(fileName[1..], out entry);
     }
 

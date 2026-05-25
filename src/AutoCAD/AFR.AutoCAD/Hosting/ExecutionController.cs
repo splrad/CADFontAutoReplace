@@ -8,19 +8,18 @@ using AFR.Services;
 namespace AFR.Hosting;
 
 /// <summary>
-/// 统一执行控制器，协调字体检测与替换的完整流程。
+/// 文档级字体处理控制器。
 /// <para>
-/// 处理三种触发来源：Startup（插件启动）、Command（用户命令）、DocumentCreated（新建文档）。
-/// 内置重复执行防护（同一文档不会重复处理）和 IsInitialized 门控（未配置替换字体时跳过）。
+/// 负责缺失字体检测、样式表写回、Regen 触发运行时 Hook，以及结果采集。
 /// </para>
 /// </summary>
 internal static class ExecutionController
 {
     /// <summary>
-    /// 对指定文档执行字体检测与替换的完整流程。
+    /// 执行一次文档字体处理。
     /// <para>
-    /// 执行阶段：检测缺失字体 → 文件级运行时映射刷新 → 样式表最终写回 → 二次验证 → 统计输出。
-    /// 遵守 IsInitialized 门控（未配置则跳过）和重复执行防护（同文档只执行一次）。
+    /// 顺序：检测缺失字体 -> 样式表写回 -> 二次检测 -> Regen 触发文件级 Hook -> 采集真实 Hook 命中结果。
+    /// 未配置替换字体或同一文档已处理时会直接跳过。
     /// </para>
     /// </summary>
     /// <param name="doc">要处理的 AutoCAD 文档。</param>
@@ -47,7 +46,6 @@ internal static class ExecutionController
 
         try
         {
-            // 重复执行防护
             var contextMgr = DocumentContextManager.Instance;
             var executionFields = new Dictionary<string, object?>
             {
@@ -71,7 +69,6 @@ internal static class ExecutionController
                 return;
             }
 
-            // 门控: 未配置替换字体时跳过
             if (!config.IsInitialized)
             {
                 DiagnosticLogger.Skip(
@@ -83,13 +80,13 @@ internal static class ExecutionController
                 return;
             }
 
-            // 获取文档写入锁 — 修改样式表需要写锁
+            // 后续可能写样式表，必须持有文档写锁。
             DiagnosticLogger.Start("ExecutionController", "LockDocument", "开始获取文档写锁", executionFields);
             using (doc.LockDocument())
             {
                 DiagnosticLogger.Ok("ExecutionController", "LockDocument", "文档写锁已获取", executionFields);
                 bool needsVisualRegen = false;
-                // 创建独立的字体检测上下文 — 缓存生命周期与本次执行绑定，结束后由 GC 自动回收
+                // 检测缓存只属于本次文档执行，避免跨图纸污染。
                 var context = new FontDetectionContext(doc.Database);
                 IntPtr dbScope = LdFileHook.GetDatabaseScope(doc.Database);
 
@@ -110,13 +107,12 @@ internal static class ExecutionController
 
                 try
                 {
-                    // 第一阶段: 检测缺失字体（读取样式表原始状态，判断哪些字体在系统中不可用）。
-                    // 此阶段不做永久写回，后续先修复样式表，再让 Hook 处理内联文字。
+                    // 读取样式表原始状态；此处只检测，不写回。
                     var detectTimer = Stopwatch.StartNew();
                     DiagnosticLogger.Start("ExecutionController", "DetectMissingFonts", "检测缺失字体开始", executionFields);
                     missingFonts = FontDetector.DetectMissingFonts(context);
 
-                    // 存储检测结果供 AFRLOG 命令使用
+                    // AFRLOG 需要原始缺失结果来显示已替换过的样式。
                     contextMgr.StoreDetectionResults(doc, missingFonts);
                     detectTimer.Stop();
                     DiagnosticLogger.Ok(
@@ -131,8 +127,7 @@ internal static class ExecutionController
                         },
                         detectTimer.ElapsedMilliseconds);
 
-                    // 第二阶段: 样式表最终写回。样式表中的缺失字体全部由这里永久修复；
-                    // Hook 只在后续 Regen 中处理内联文字运行时字体加载。
+                    // 永久修复样式表缺失字体；运行时 Hook 只处理后续 Regen 中出现的文件加载。
                     var finalWriteTimer = Stopwatch.StartNew();
                     DiagnosticLogger.Start(
                         "ExecutionController",
@@ -174,7 +169,7 @@ internal static class ExecutionController
                         },
                         finalWriteTimer.ElapsedMilliseconds);
 
-                    // 第三阶段: 二次检测替换后的样式表状态，供 AFRLOG 标记仍缺失样式。
+                    // 写回后再检测一次，用于标记仍缺失的样式。
                     var postDetectTimer = Stopwatch.StartNew();
                     DiagnosticLogger.Start("ExecutionController", "PostDetectMissingFonts", "替换后二次检测开始");
                     var postContext = new FontDetectionContext(doc.Database);
@@ -188,8 +183,7 @@ internal static class ExecutionController
                         new Dictionary<string, object?> { ["stillMissing"] = stillMissing.Count },
                         postDetectTimer.ElapsedMilliseconds);
 
-                    // 第四阶段: 样式表处理完成后刷新。此时样式表缺失已先行回写，
-                    // LdFileHook/ShpLoadHook 只负责内联文字的运行时字体加载映射。
+                    // Regen 放在样式表写回之后：既刷新显示，也让文件级 Hook 捕获运行时字体加载。
                     int markedGraphics = 0;
                     if (needsVisualRegen)
                     {
@@ -651,8 +645,7 @@ internal static class ExecutionController
     }
 
     /// <summary>
-    /// 诊断: 在 Regen 前读回样式表，验证 FontReplacer 的修改是否已写入数据库。
-    /// 仅 DEBUG 构建有效 — Release 中调用点被 #if DEBUG 排除。
+    /// DEBUG 诊断：Regen 前读回样式表，确认写回结果已进入数据库。
     /// </summary>
 #if DEBUG
     private static void VerifyStyleTableAfterReplace(

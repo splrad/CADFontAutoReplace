@@ -9,9 +9,8 @@ namespace AFR.FontMapping;
 /// <summary>
 /// 进程级 TrueType 字体可用性共享索引。
 /// <para>
-/// 系统字体通过 DirectWrite 枚举；CAD 字体搜索路径中的 .ttf/.ttc/.otf 作为文件兜底。
-/// @TrueType 基础字体可用性仍按去掉 @ 后的基础字体判断；配置字体是否可用于 @TrueType
-/// 由配置刷新阶段的 GDI vertical face 探测缓存决定，Hook 和样式表热路径只读缓存。
+/// DirectWrite 枚举系统字体，CAD 搜索路径中的 TrueType 文件作为兜底。
+/// @TrueType 先按基础字体判断；可写入的 @face 在配置刷新时预解析，热路径只读缓存。
 /// </para>
 /// </summary>
 internal static class TrueTypeFontAvailabilityIndex
@@ -479,7 +478,7 @@ internal static class TrueTypeFontAvailabilityIndex
 
         normalized = normalized.Trim();
         if (normalized.Length > 1 && normalized[0] == '@')
-            normalized = normalized[1..]; // [0] == '@' 已确认，直接切片
+            normalized = normalized[1..];
 
         return normalized;
     }
@@ -551,7 +550,7 @@ internal static class TrueTypeFontAvailabilityIndex
         }
         catch
         {
-            // 释放失败不影响字体判定路径，交给运行时回收。
+            // 释放失败不影响字体判定，交给运行时回收。
         }
     }
 

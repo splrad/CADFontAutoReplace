@@ -9,7 +9,7 @@ using AFR.Services;
 namespace AFR.FontMapping;
 
 /// <summary>
-/// 处理 AutoCAD ldfile 阶段的 SHX 主字体/大字体运行时文件加载重定向。
+/// 处理 ldfile 阶段的 SHX 主字体/大字体文件级重定向。
 /// </summary>
 internal static class LdFileHook
 {
@@ -225,8 +225,7 @@ internal static class LdFileHook
 
             bool hasAtPrefix = original.Length > 1 && original[0] == '@';
 #if NET8_0_OR_GREATER
-            // 跳过 @ 直接在原串上取 span，一次 string.Concat(span,span) 得到最终串，
-            // 比 original[1..] 再传入 EnsureShx 少一次中间字符串分配。
+            // 跳过 @ 后直接拼 .shx，避免中间字符串分配。
             string normalized = NormalizeShxNameDirect(original, hasAtPrefix);
 #else
             string baseShx = hasAtPrefix ? original[1..] : original;
@@ -360,6 +359,7 @@ internal static class LdFileHook
         string? expectedRva = target.Rva.HasValue ? $"0x{target.Rva.Value:X}" : null;
         string actualRva = $"0x{rva:X}";
         bool rvaMatched = !target.Rva.HasValue || target.Rva.Value == rva;
+        // RVA 只作为版本指纹输出；安装安全由导出名、入口字节和序言扫描共同决定。
         if (!rvaMatched)
         {
             DiagnosticLogger.Ok(
@@ -417,16 +417,15 @@ internal static class LdFileHook
         }
 
 #if NET8_0_OR_GREATER
-        // .NET 8+：先用 span 做无分配早退出检查，只在确实需要传递给下游 string API 时才分配。
+        // .NET 8+ 先用 span 做早退检查，只有下游需要 string 时才分配。
         ReadOnlySpan<char> baseSpan = fontName.AsSpan();
         if (baseSpan.Length > 0 && baseSpan[0] == '@')
             baseSpan = baseSpan[1..];
         if (baseSpan.IsEmpty || baseSpan.IsWhiteSpace() || Path.HasExtension(baseSpan))
             return false;
-        // 超过早退出点，下游 API 需要 string；此处只分配一次。
         string baseName = new(baseSpan);
 #else
-        // .NET Framework：TrimStart('@') 等价替换为 index-skip，无 @ 时零分配。
+        // .NET Framework 用索引跳过 @，无 @ 时不分配。
         int start = fontName.Length > 0 && fontName[0] == '@' ? 1 : 0;
         string baseName = start > 0 ? fontName[start..] : fontName;
         if (string.IsNullOrWhiteSpace(baseName) || Path.HasExtension(baseName))
@@ -502,7 +501,7 @@ internal static class LdFileHook
         reason = string.Empty;
 
         bool hasAtPrefix = fontName.Length > 1 && fontName[0] == '@';
-        // precomputedBase 已是 NormalizeShxName 的结果，直接使用。
+        // precomputedBase 已归一化，避免重复处理。
         string baseShx = precomputedBase;
 
         if (hasAtPrefix
@@ -570,8 +569,7 @@ internal static class LdFileHook
 
 #if NET8_0_OR_GREATER
     /// <summary>
-    /// .NET 8+ 专用：跳过 @ 前缀直接在原串上取 span 拼 .shx，
-    /// 比先 original[1..] 再 EnsureShx(baseShx) 少一次中间字符串分配。
+    /// .NET 8+ 专用：跳过 @ 后直接拼 .shx，减少 Hook 热路径分配。
     /// </summary>
     private static string NormalizeShxNameDirect(string fontName, bool hasAtPrefix)
     {

@@ -13,9 +13,7 @@ internal enum FontRedirectKind
 internal static class FontRedirectResolver
 {
     /// <summary>
-    /// 提取规范文件名：修剪空白，去掉路径前缀（等价于 Path.GetFileName），
-    /// 避免空结果时回退为整段路径。
-    /// 返回的 (start, length) 是原始字符串中有效文件名的切片范围。
+    /// 提取规范文件名在原始字符串中的切片范围，尽量避免热路径分配。
     /// </summary>
     private static (int Start, int Length) NormalizeInputNameRange(string fontName)
     {
@@ -28,7 +26,7 @@ internal static class FontRedirectResolver
         if (lo > hi)
             return (0, 0);
 
-        // 找最后一个路径分隔符（等价于 Path.GetFileName 语义）
+        // 等价 Path.GetFileName，但保留原串切片。
         int sep = -1;
         for (int i = hi; i >= lo; i--)
         {
@@ -39,8 +37,7 @@ internal static class FontRedirectResolver
         if (sep < 0)
             return (lo, hi - lo + 1);
 
-        // 等价于 Path.GetFileName：分隔符在末尾时返回空串，Path 返回""，
-        // 原始实现用 IsNullOrWhiteSpace 回退到 trimmed；这里保持一致。
+        // 分隔符在末尾时回退到 trim 后的原范围。
         int start = sep + 1;
         int len   = hi - sep;
         return len > 0 ? (start, len) : (lo, hi - lo + 1);
@@ -50,7 +47,7 @@ internal static class FontRedirectResolver
     {
         var (start, length) = NormalizeInputNameRange(fontName);
         if (length == 0) return string.Empty;
-        // 仅当子串与原串不同时才分配
+        // 子串与原串一致时不分配。
         return length == fontName.Length ? fontName : fontName.Substring(start, length);
     }
 
@@ -81,7 +78,7 @@ internal static class FontRedirectResolver
             _                            => ConfigService.Instance.MainFont?.Trim()     ?? string.Empty
         };
 
-        // 一次 Substring 得到规范名，去掉可能的 @ 前缀
+        // 一次 Substring 得到规范配置名，并去掉可能的 @ 前缀。
         var (rs, rl) = NormalizeInputNameRange(raw);
         if (rl == 0) return false;
         if (raw[rs] == '@') { rs++; rl--; }
@@ -133,11 +130,11 @@ internal static class FontRedirectResolver
         var (start, length) = NormalizeInputNameRange(name);
         if (length == 0) return ".shx";
 
-        // 去 @ 前缀（索引操作，不分配）
+        // 索引跳过 @ 前缀，不额外分配。
         if (name[start] == '@') { start++; length--; }
         if (length == 0) return ".shx";
 
-        // 检查是否已有 .shx 后缀（不产生新字符串）
+        // 检查 .shx 后缀时不产生新字符串。
         if (length >= 4
             && string.Compare(name, start + length - 4, ".shx", 0, 4, StringComparison.OrdinalIgnoreCase) == 0)
         {

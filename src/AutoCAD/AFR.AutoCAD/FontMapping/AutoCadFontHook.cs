@@ -6,16 +6,16 @@ namespace AFR.FontMapping;
 
 /// <summary>
 /// AutoCAD 平台的 <see cref="IFontHook"/> 实现。
-/// 本身不包含 Hook 逻辑，仅作为接口适配器安装全局字体加载 Hook。
+/// 负责初始化共享字体索引，并安装插件级持久 Hook。
 /// </summary>
 internal sealed class AutoCadFontHook : IFontHook
 {
-    /// <summary>Hook 是否已安装并处于拦截状态。</summary>
+    /// <summary>至少一个文件级 Hook 已安装时返回 true。</summary>
     public bool IsInstalled =>
         LdFileHook.IsInstalled
         || ShpLoadHook.IsInstalled;
 
-    /// <summary>安装插件级持久字体 Hook，并初始化共享字体索引。</summary>
+    /// <summary>初始化共享索引并安装 LdFileHook / ShpLoadHook。</summary>
     public void Install()
     {
         DiagnosticLogger.Start("AutoCadFontHook", "Install", "开始安装插件级持久字体 Hook");
@@ -121,7 +121,7 @@ internal sealed class AutoCadFontHook : IFontHook
         }
     }
 
-    /// <summary>卸载字体加载 Hook。</summary>
+    /// <summary>卸载已安装的文件级 Hook。</summary>
     public void Uninstall()
     {
         DiagnosticLogger.Start("AutoCadFontHook", "Uninstall", "开始卸载插件级持久字体 Hook");
@@ -134,7 +134,7 @@ internal sealed class AutoCadFontHook : IFontHook
             new Dictionary<string, object?> { ["isInstalled"] = IsInstalled });
     }
 
-    /// <summary>更新 Hook 使用的替换字体配置（用户通过 AFR 命令修改后调用）。</summary>
+    /// <summary>用户修改配置后刷新共享字体索引。</summary>
     public void UpdateConfig()
     {
         DiagnosticLogger.Start("AutoCadFontHook", "UpdateConfig", "开始更新共享字体索引");

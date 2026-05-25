@@ -10,9 +10,7 @@ namespace AFR.Services;
 /// <summary>
 /// 检测图纸 TextStyleTable 中的缺失字体。
 /// <para>
-/// 遍历所有文字样式，通过共享字体索引（SHX / TrueType）
-/// 判断每个样式引用的主字体和大字体是否在当前环境中可用。
-/// TrueType 度量缓存通过 <see cref="FontDetectionContext"/> 实例管理，只用于样式表写回。
+/// SHX 和 TrueType 可用性统一走共享索引；上下文只保存本次执行需要的度量缓存。
 /// </para>
 /// </summary>
 internal static class FontDetector
@@ -22,7 +20,7 @@ internal static class FontDetector
 
     /// <summary>
     /// 检查指定名称是否为已安装的系统 TrueType 字族名。
-    /// @ 前缀会按基础字体名查询，不做 GDI vertical face 判断。
+    /// @ 前缀按基础字体名查询，不判断 vertical face。
     /// </summary>
     public static bool IsSystemFont(string name) => TrueTypeFontAvailabilityIndex.IsAvailable(name);
 
@@ -32,8 +30,7 @@ internal static class FontDetector
     /// <summary>
     /// 检测指定数据库中所有文字样式的缺失字体。
     /// <para>
-    /// 对每个样式判断：TrueType 字族名是否可用、SHX 主字体是否存在、
-    /// SHX 大字体是否存在且类型匹配。ShapeFile 样式（用于复杂线型）自动跳过。
+    /// ShapeFile 样式用于复杂线型，检测阶段直接跳过。
     /// </para>
     /// </summary>
     /// <param name="context">字体检测上下文，提供数据库引用和查询缓存。</param>
@@ -49,12 +46,11 @@ internal static class FontDetector
             {
                 var style = (TextStyleTableRecord)tr.GetObject(id, OpenMode.ForRead);
                 var styleName = style.Name;
-                // Path.GetFileName 剥离目录路径：DWG 中 style.FileName 可能存储
-                // 旧版 CAD 安装目录的完整路径，归一化为纯文件名供显示和检测
+                // 旧图纸可能存完整路径，检测前归一化为文件名。
                 var fileName = Path.GetFileName(style.FileName ?? string.Empty);
                 var bigFontName = Path.GetFileName(style.BigFontFileName ?? string.Empty);
 
-                // 隔离 style.Font 访问 — 损坏的 TrueType 描述符不应阻断 SHX 检测
+                // style.Font 可能损坏；隔离读取，避免阻断 SHX 检测。
                 FontDescriptor? safeFont = null;
                 try { safeFont = style.Font; }
                 catch (Exception fontEx)
@@ -73,7 +69,7 @@ internal static class FontDetector
                 bool hasTT = safeFont.HasValue && !string.IsNullOrWhiteSpace(safeFont.Value.TypeFace);
                 bool hasFile = !string.IsNullOrWhiteSpace(fileName);
 
-                // FileName 为 TrueType 文件时，该样式仍属于 TrueType（AutoCAD 常同时写入 TypeFace 和 .ttf FileName）
+                // AutoCAD 可能同时写 TypeFace 和 .ttf FileName，此时仍按 TrueType 样式处理。
                 bool fileIsTrueType = hasFile && IsTrueTypeFontFile(fileName);
                 bool isTrueType = hasTT && (!hasFile || fileIsTrueType);
 
@@ -81,8 +77,7 @@ internal static class FontDetector
                     safeFont.HasValue ? (safeFont.Value.TypeFace ?? "") : "<损坏>",
                     isTrueType, style.IsShapeFile);
 
-                // ShapeFile 样式用于复杂线型（ltypeshp.shx 等），替换会破坏线型结构，
-                // 且 FontReplacer 始终跳过此类样式，检测阶段直接排除避免产生永远无法消除的"未替换"条目
+                // 替换 ShapeFile 会破坏复杂线型，且后续写回也会跳过。
                 if (style.IsShapeFile)
                 {
                     DiagnosticLogger.Skip(
@@ -100,8 +95,7 @@ internal static class FontDetector
                 bool isMainMissing = false;
                 bool isBigMissing = false;
 
-                // TrueType 样式: 普通 face 验证字体可用才跳过；
-                // @TrueType 先按去掉 @ 的基础字体判断，基础字体缺失时进入样式表回写。
+                // @TrueType 先检查基础字体；基础字体缺失时才进入样式表写回。
                 if (isTrueType)
                 {
                     var typeFace = safeFont!.Value.TypeFace!;
@@ -166,8 +160,7 @@ internal static class FontDetector
     }
 
     /// <summary>
-    /// 收集数据库样式表中所有被引用的字体文件名（FileName + BigFontFileName）。
-    /// 用于辅助判断哪些字体在图纸中被使用。
+    /// 收集样式表引用的 FileName 和 BigFontFileName。
     /// </summary>
     public static HashSet<string> CollectStyleTableFontNames(Database db)
     {
@@ -189,8 +182,7 @@ internal static class FontDetector
     }
 
     /// <summary>
-    /// 读取数据库中所有文字样式当前实际的字体赋值（FileName、BigFontFileName、TypeFace）。
-    /// 返回值反映替换后或 ST 命令修改后的最新状态，供 AFRLOG 界面展示。
+    /// 读取样式表当前字体赋值，供 AFRLOG 展示替换后的状态。
     /// </summary>
     public static Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)> ReadCurrentFontAssignments(Database db)
     {
@@ -213,8 +205,7 @@ internal static class FontDetector
     }
 
     /// <summary>
-    /// 检查 SHX 字体文件是否在 AutoCAD 搜索路径中可用。
-    /// 通过共享 SHX 字体索引查找。
+    /// 检查 SHX 文件是否在共享索引中精确存在。
     /// </summary>
     internal static bool IsShxFontAvailable(string fileName, FontDetectionContext context)
     {
@@ -228,7 +219,7 @@ internal static class FontDetector
 
     /// <summary>
     /// 检查 TrueType 字体是否可用。
-    /// 通过共享 TrueType 字体索引查询；@ 前缀在索引中按基础字体处理。
+    /// @ 前缀在索引中按基础字体处理。
     /// </summary>
     private static bool IsTrueTypeFontAvailable(string typeface, string fileName, FontDetectionContext context)
     {
@@ -248,16 +239,14 @@ internal static class FontDetector
         if (!ShxFontAvailabilityIndex.IsExactAvailable(fileName))
             return false;
 
-        // 分类失败 → 保守处理为不匹配，触发替换修复而非放行
+        // 无法识别主/大字体类型时保守触发替换。
         if (!ShxFontAvailabilityIndex.TryGetKind(fileName, out bool isBigFont))
             return true;
 
         return expectBigFont != isBigFont;
     }
 
-    /// <summary>
-    /// 判断文件名是否为 TrueType 字体文件（.ttf/.ttc/.otf）。
-    /// </summary>
+    /// <summary>判断文件名是否为 TrueType 字体文件。</summary>
     internal static bool IsTrueTypeFontFile(string fileName)
         => !string.IsNullOrEmpty(fileName) &&
            (fileName.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase) ||
@@ -268,7 +257,7 @@ internal static class FontDetector
 
     /// <summary>
     /// 通过 GDI API 查询 TrueType 字体的 CharacterSet 和 PitchAndFamily 属性。
-    /// 这些值用于构造 <see cref="FontDescriptor"/>，确保 AutoCAD 能正确匹配字体特征。
+    /// 写回 FontDescriptor 时需要这些度量。
     /// </summary>
     public static (int CharacterSet, int PitchAndFamily) GetTrueTypeFontMetrics(string fontName, FontDetectionContext context)
     {

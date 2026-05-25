@@ -6,16 +6,15 @@ using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 namespace AFR.Services;
 
 /// <summary>
-/// AutoCAD 运行环境配置，提供统一的字体搜索路径。
+/// AutoCAD 字体搜索路径来源。
 /// <para>
-/// 作为 CAD 字体目录的统一来源，供 <see cref="AutoCadFontScanner"/> 和字体 Hook 侧兜底缓存共用。
-/// 字体索引会读取这些路径作为 CAD 字体目录来源。
+/// 供共享字体索引使用，避免扫描逻辑散落在检测、UI 和 Hook 中。
 /// </para>
 /// </summary>
 internal static class CadEnvironmentSettings
 {
     /// <summary>
-    /// 获取 CAD 字体搜索目录。
+    /// 获取 CAD 字体搜索目录，按 AutoCAD 搜索路径优先。
     /// <para>
     /// 扫描范围（按优先级排列）：
     /// <list type="number">
@@ -23,7 +22,7 @@ internal static class CadEnvironmentSettings
     ///   <item>HostApplicationServices 暴露的 Roamable/Local/AllUsers 根目录下有限的 Fonts/Support 子目录。</item>
     ///   <item>AutoCAD 进程目录下的 Fonts 文件夹。</item>
     /// </list>
-    /// 不再递归扫描 AppData 的 AutoCAD 配置树，避免在 CAD 启动和 Hook 初始化阶段放大 I/O。
+    /// 不递归扫描 AppData 配置树，避免启动和 Hook 初始化阶段放大 I/O。
     /// </para>
     /// </summary>
     public static List<string> GetAllFontSearchPaths()

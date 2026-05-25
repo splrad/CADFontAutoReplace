@@ -4,16 +4,14 @@ using AFR.Services;
 namespace AFR.Commands;
 
 /// <summary>
-/// Hidden AFRUNLOAD entry point.
+/// AFRUNLOAD 隐藏卸载入口。
 /// <para>
-/// This is intentionally not registered with <c>CommandMethod</c>. Registration would put
-/// the command in AutoCAD's command stack, making it eligible for command-line suggestions.
-/// <see cref="PluginEntryBase"/> invokes it only after an exact UnknownCommand match.
+/// 不注册 <c>CommandMethod</c>，避免进入命令栈和命令建议；只由 UnknownCommand 精确匹配触发。
 /// </para>
 /// </summary>
 internal static class AfrUnloadCommand
 {
-    /// <summary>Runs the unload sequence for the AFR plugin.</summary>
+    /// <summary>执行插件卸载和自动加载注册表清理。</summary>
     public static void Execute()
     {
         var log = LogService.Instance;
@@ -21,10 +19,8 @@ internal static class AfrUnloadCommand
 
         try
         {
-            // 第一步：注销事件监听、卸载 Hook、清空文档跟踪和执行队列
             PluginEntryBase.Unload();
 
-            // 第二步：删除注册表中的自动加载条目
             var config = ConfigService.Instance;
             config.DeleteAllApplicationKeys();
 
