@@ -14,14 +14,8 @@ namespace AFR.Hosting;
 /// 内置重复执行防护（同一文档不会重复处理）和 IsInitialized 门控（未配置替换字体时跳过）。
 /// </para>
 /// </summary>
-internal sealed class ExecutionController
+internal static class ExecutionController
 {
-    private static readonly Lazy<ExecutionController> _instance = new(() => new ExecutionController());
-    /// <summary>获取 ExecutionController 的全局唯一实例。</summary>
-    public static ExecutionController Instance => _instance.Value;
-
-    private ExecutionController() { }
-
     /// <summary>
     /// 对指定文档执行字体检测与替换的完整流程。
     /// <para>
@@ -31,7 +25,7 @@ internal sealed class ExecutionController
     /// </summary>
     /// <param name="doc">要处理的 AutoCAD 文档。</param>
     /// <param name="triggerSource">触发来源标识，用于诊断日志。</param>
-    public void Execute(Document doc, string triggerSource)
+    public static void Execute(Document doc, string triggerSource)
     {
         if (doc == null || doc.IsDisposed)
         {
@@ -106,7 +100,7 @@ internal sealed class ExecutionController
                     "文档执行上下文已建立",
                     executionFields);
                 var runtimeStateScope = RuntimeMappingStateScope.Begin(dbScope);
-                var ldFileCountersBefore = LdFileHook.GetCountersSnapshot();
+                (long ldFileHitCountBefore, long ldFileRedirectCountBefore) = LdFileHook.GetCountersSnapshot();
                 var shpLoadCountersBefore = ShpLoadHook.GetCountersSnapshot();
 
                 int replacedStyleCount = 0;
@@ -245,7 +239,7 @@ internal sealed class ExecutionController
                         new Dictionary<string, object?>
                         {
                             ["runtimeMappingHits"] = allRuntimeMappingResults.Count,
-                            ["ldFileRedirects"] = LdFileHook.GetCountersSnapshot().RedirectCount - ldFileCountersBefore.RedirectCount,
+                            ["ldFileRedirects"] = LdFileHook.GetCountersSnapshot().RedirectCount - ldFileRedirectCountBefore,
                             ["shpLoadRedirects"] = ShpLoadHook.GetCountersSnapshot().RedirectCount - shpLoadCountersBefore.RedirectCount
                         });
                 }
@@ -254,17 +248,17 @@ internal sealed class ExecutionController
                     runtimeStateScope.Dispose();
                 }
 
-                var ldFileCountersAfter = LdFileHook.GetCountersSnapshot();
+                (long ldFileHitCountAfter, long ldFileRedirectCountAfter) = LdFileHook.GetCountersSnapshot();
                 DiagnosticLogger.Ok(
                     "LdFileHook",
                     "DocumentCounters",
                     "本次文档 ldfile 计数已采集",
                     new Dictionary<string, object?>
                     {
-                        ["hits"] = ldFileCountersAfter.HitCount - ldFileCountersBefore.HitCount,
-                        ["redirects"] = ldFileCountersAfter.RedirectCount - ldFileCountersBefore.RedirectCount,
-                        ["sessionHits"] = ldFileCountersAfter.HitCount,
-                        ["sessionRedirects"] = ldFileCountersAfter.RedirectCount
+                        ["hits"] = ldFileHitCountAfter - ldFileHitCountBefore,
+                        ["redirects"] = ldFileRedirectCountAfter - ldFileRedirectCountBefore,
+                        ["sessionHits"] = ldFileHitCountAfter,
+                        ["sessionRedirects"] = ldFileRedirectCountAfter
                     });
                 ShpLoadHook.LogDocumentSummary(shpLoadCountersBefore);
 
@@ -396,7 +390,7 @@ internal sealed class ExecutionController
 
     private static int MarkAffectedTextGraphicsModified(
         Database db,
-        IReadOnlyList<FontCheckResult> missingFonts)
+        List<FontCheckResult> missingFonts)
     {
         if (missingFonts.Count == 0)
             return 0;

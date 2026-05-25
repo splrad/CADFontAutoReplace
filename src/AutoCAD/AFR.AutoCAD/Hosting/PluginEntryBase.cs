@@ -34,9 +34,14 @@ public abstract class PluginEntryBase : IExtensionApplication
     // 并引发嵌套 LockDocument + 嵌套 Regen 造成 UI 线程死锁。
     // 通过此标志阻断重入：重入期间到来的请求重新调度到下一次 Idle。
     private static bool _executeInProgress;
+#if NET9_0_OR_GREATER
+    private static readonly System.Threading.Lock _scheduleLock = new();
+    private static readonly System.Threading.Lock _hiddenUnloadLock = new();
+#else
     private static readonly object _scheduleLock = new();
     private static readonly object _hiddenUnloadLock = new();
-    private static readonly HashSet<Document> _hiddenUnloadDocuments = new();
+#endif
+    private static readonly HashSet<Document> _hiddenUnloadDocuments = [];
     private static bool _hiddenUnloadRegistered;
     private static bool _hiddenUnloadInProgress;
     private const string FontAltVariableName = "FONTALT";
@@ -326,7 +331,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         DiagnosticLogger.Disable();
     }
 
-    private static void EnsureFontAltDisabled(ILogService log)
+    private static void EnsureFontAltDisabled(LogService log)
     {
         DiagnosticLogger.Start("PluginEntry", "EnsureFontAltDisabled", "开始检查 FONTALT");
         try
@@ -597,7 +602,7 @@ public abstract class PluginEntryBase : IExtensionApplication
                             ["index"] = i,
                             ["doc"] = DocumentContextManager.ReadDocumentName(doc)
                         });
-                    ExecutionController.Instance.Execute(doc, trigger);
+                    ExecutionController.Execute(doc, trigger);
                     DiagnosticLogger.Ok(
                         "PluginEntry",
                         "DeferredExecutionItem",

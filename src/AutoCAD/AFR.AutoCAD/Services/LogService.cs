@@ -31,11 +31,15 @@ internal sealed class LogService : ILogService
     public static LogService Instance => _instance.Value;
 
     // 日志缓冲区：暂存所有日志条目（分类 + 消息 + 时间戳），Flush 时统一排序输出
-    private readonly List<(LogCategory Category, string Message, DateTime Timestamp)> _buffer = new();
+    private readonly List<(LogCategory Category, string Message, DateTime Timestamp)> _buffer = [];
     // 记录已显示过 AFR 版本信息头的文档名，确保每个文档在整个会话中只显示一次横幅
     private readonly HashSet<string> _headerShownDocuments = new(StringComparer.OrdinalIgnoreCase);
     // 同步锁：保护 _buffer 和 _headerShownDocuments 的并发访问（AutoCAD 可能从不同线程触发日志写入）
+#if NET9_0_OR_GREATER
+    private readonly System.Threading.Lock _lock = new();
+#else
     private readonly object _lock = new();
+#endif
 
     // 私有构造函数：禁止外部 new，确保只能通过 Instance 属性获取实例
     private LogService() { }
@@ -69,12 +73,12 @@ internal sealed class LogService : ILogService
         int runtimeMappingCount = 0)
     {
         // --- 第一步：遍历检查结果，按字体类型分别统计原始缺失和替换后仍缺失 ---
-        var missing = CountMissingSlots(missingFonts);
-        var stillMissing = CountMissingSlots(stillMissingFonts ?? Array.Empty<FontCheckResult>());
+        (int missingShxMain, int missingShxBig, int missingTrueType) = CountMissingSlots(missingFonts);
+        (int stillMissingShxMain, int stillMissingShxBig, int stillMissingTrueType) = CountMissingSlots(stillMissingFonts ?? []);
 
-        int trueTypeCount = Math.Max(0, missing.TrueType - stillMissing.TrueType);
-        int shxCount = Math.Max(0, missing.ShxMain - stillMissing.ShxMain);
-        int bigFontCount = Math.Max(0, missing.ShxBig - stillMissing.ShxBig);
+        int trueTypeCount = Math.Max(0, missingTrueType - stillMissingTrueType);
+        int shxCount = Math.Max(0, missingShxMain - stillMissingShxMain);
+        int bigFontCount = Math.Max(0, missingShxBig - stillMissingShxBig);
         int total = trueTypeCount + shxCount + bigFontCount;
         runtimeMappingCount = Math.Max(0, runtimeMappingCount);
 
@@ -89,7 +93,7 @@ internal sealed class LogService : ILogService
         }
 
         // 如果仍有未替换的字体，额外记录一条警告提醒用户手动处理
-        int stillMissingTotal = stillMissing.TrueType + stillMissing.ShxMain + stillMissing.ShxBig;
+        int stillMissingTotal = stillMissingTrueType + stillMissingShxMain + stillMissingShxBig;
         if (stillMissingTotal > 0)
             AddEntry(LogCategory.Warning, $"仍有 {stillMissingTotal} 个字体未成功替换，请执行 AFRLOG 手动指定替换字体");
     }
@@ -237,7 +241,7 @@ internal sealed class LogService : ILogService
                         _ => $"\n{message}"
                     };
                     // ??= 表示：如果该桶还没创建列表就先创建，然后再添加格式化后的消息
-                    (buckets[idx] ??= new List<string>()).Add(formatted);
+                    (buckets[idx] ??= []).Add(formatted);
                 }
                 _buffer.Clear();
 

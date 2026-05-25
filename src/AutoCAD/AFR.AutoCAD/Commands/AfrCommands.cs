@@ -92,7 +92,7 @@ public class AfrCommands
                 {
                     // 无历史结果（从未执行过自动替换）→ 走正常检测替换流程
                     contextMgr.Remove(doc);
-                    ExecutionController.Instance.Execute(doc, "AFR Command");
+                    ExecutionController.Execute(doc, "AFR Command");
                 }
             }
         }

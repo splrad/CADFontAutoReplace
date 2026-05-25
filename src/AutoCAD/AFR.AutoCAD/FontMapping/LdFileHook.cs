@@ -568,6 +568,12 @@ internal static class LdFileHook
     private static string FormatPointer(IntPtr value)
         => value == IntPtr.Zero ? "0x0" : $"0x{value.ToInt64():X}";
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    private static extern IntPtr GetModuleHandle(string lpModuleName);
+#if NET8_0_OR_GREATER
+#pragma warning disable SYSLIB1054
+#endif
+    [DllImport("kernel32.dll", EntryPoint = "GetModuleHandleW", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern IntPtr GetModuleHandle([MarshalAs(UnmanagedType.LPWStr)] string lpModuleName);
+#if NET8_0_OR_GREATER
+#pragma warning restore SYSLIB1054
+#endif
 }
