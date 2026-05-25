@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows.Media;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.GraphicsInterface;
+using AFR.FontMapping;
 using AFR.Models;
 
 
@@ -49,7 +50,7 @@ internal static class FontReplacer
             && FontDetector.IsShxFontAvailable(bigFont, context)
             && !FontDetector.IsShxTypeMismatch(bigFont, context, expectBigFont: true);
         bool trueTypeFontValid = !string.IsNullOrEmpty(trueTypeFont)
-            && FontDetector.IsTrueTypeFontAvailable(trueTypeFont, context);
+            && FontDetector.IsTrueTypeFontAvailable(FontRedirectResolver.StripLeadingAtPrefix(trueTypeFont), context);
 
         if (!string.IsNullOrEmpty(mainFont) && !mainFontValid)
             log.Warning($"SHX 替换字体 '{mainFont}' 不可用，已跳过，请执行 AFR 重新配置");
@@ -61,22 +62,6 @@ internal static class FontReplacer
         DiagnosticLogger.LogPreValidation(mainFont ?? "", "SHX主字体", mainFontValid);
         DiagnosticLogger.LogPreValidation(bigFont ?? "", "大字体", bigFontValid);
         DiagnosticLogger.LogPreValidation(trueTypeFont ?? "", "TrueType", trueTypeFontValid);
-
-        // FontDescriptor 和 GDI 查询要求字族名（如 "SimSun"），而非文件名（如 "simsun.ttc"）。
-        if (trueTypeFontValid)
-        {
-            string requestedTrueTypeFont = trueTypeFont!;
-            trueTypeFont = NormalizeTrueTypeName(requestedTrueTypeFont, context);
-            DiagnosticLogger.Ok(
-                "FontReplacer",
-                "NormalizeTrueTypeReplacement",
-                "TrueType 替换字体已解析为 TypeFace",
-                new Dictionary<string, object?>
-                {
-                    ["requestedTrueTypeFont"] = requestedTrueTypeFont,
-                    ["typeFace"] = trueTypeFont
-                });
-        }
 
         // 预构建字典—O(1)查找替代线性搜索
         var missingMap = new Dictionary<string, FontCheckResult>(missingFonts.Count, StringComparer.OrdinalIgnoreCase);
@@ -113,17 +98,23 @@ internal static class FontReplacer
                         // TrueType 只用 TrueType 字体替换（需通过可用性校验）
                         if (trueTypeFontValid)
                         {
-                            var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(trueTypeFont!, context);
+                            bool preserveAtPrefix = ShouldPreserveTrueTypeAtPrefix(missing);
+                            string typeFaceToWrite = BuildTrueTypeWriteFace(
+                                trueTypeFont!,
+                                preserveAtPrefix,
+                                context,
+                                out string metricsFontName);
+                            var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(metricsFontName, context);
 
                             // 先清除 SHX 引用，再设置 TrueType
                             // 顺序关键: AutoCAD 要求 FileName 为有效 SHX 时才能设置 BigFontFileName，
                             // 因此清空时必须先清 BigFontFileName 再清 FileName，否则 eInvalidInput。
                             style.BigFontFileName = string.Empty;
                             style.FileName = string.Empty;
-                            style.Font = new FontDescriptor(trueTypeFont, false, false, charset, pitch);
+                            style.Font = new FontDescriptor(typeFaceToWrite, false, false, charset, pitch);
 
                             DiagnosticLogger.LogReplacement(style.Name, "Font.TypeFace",
-                                missing.TypeFace, trueTypeFont ?? "");
+                                missing.TypeFace, typeFaceToWrite);
 
                             changed = true;
                         }
@@ -243,7 +234,8 @@ internal static class FontReplacer
                 {
                     if (replacement.IsTrueType)
                     {
-                        if (!FontDetector.IsTrueTypeFontAvailable(replacement.MainFontReplacement, context))
+                        string replacementLookup = FontRedirectResolver.StripLeadingAtPrefix(replacement.MainFontReplacement);
+                        if (!FontDetector.IsTrueTypeFontAvailable(replacementLookup, context))
                         {
                             log.Warning($"样式 '{replacement.StyleName}': 字体 '{replacement.MainFontReplacement}' 不可用，已跳过");
                         }
@@ -251,8 +243,12 @@ internal static class FontReplacer
                         {
                             string requestedTrueTypeFont = replacement.MainFontReplacement;
                             // FontDescriptor 要求字族名，去除可能的文件扩展名
-                            var fontFamily = NormalizeTrueTypeName(requestedTrueTypeFont, context);
-                            var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(fontFamily, context);
+                            string fontFamily = BuildTrueTypeWriteFace(
+                                requestedTrueTypeFont,
+                                replacement.PreserveTrueTypeAtPrefix,
+                                context,
+                                out string metricsFontName);
+                            var (charset, pitch) = FontDetector.GetTrueTypeFontMetrics(metricsFontName, context);
                             // 清空顺序: 先 BigFont 再 FileName，避免 eInvalidInput
                             style.BigFontFileName = string.Empty;
                             style.FileName = string.Empty;
@@ -468,5 +464,34 @@ internal static class FontReplacer
         }
 
         return name;
+    }
+
+    private static bool ShouldPreserveTrueTypeAtPrefix(FontCheckResult missing)
+        => missing.IsTrueType
+           && (FontRedirectResolver.HasAtPrefix(missing.TypeFace)
+               || FontRedirectResolver.HasAtPrefix(missing.FileName));
+
+    private static string BuildTrueTypeWriteFace(
+        string requestedTrueTypeFont,
+        bool preserveAtPrefix,
+        FontDetectionContext context,
+        out string metricsFontName)
+    {
+        string requestedBase = FontRedirectResolver.StripLeadingAtPrefix(requestedTrueTypeFont);
+        metricsFontName = NormalizeTrueTypeName(requestedBase, context).TrimStart('@');
+        bool writeAtPrefix = preserveAtPrefix || FontRedirectResolver.HasAtPrefix(requestedTrueTypeFont);
+        string typeFace = writeAtPrefix ? "@" + metricsFontName : metricsFontName;
+        DiagnosticLogger.Ok(
+            "FontReplacer",
+            "NormalizeTrueTypeReplacement",
+            "TrueType 替换字体已解析为 TypeFace",
+            new Dictionary<string, object?>
+            {
+                ["requestedTrueTypeFont"] = requestedTrueTypeFont,
+                ["typeFace"] = typeFace,
+                ["metricsFontName"] = metricsFontName,
+                ["preserveAtPrefix"] = writeAtPrefix
+            });
+        return typeFace;
     }
 }

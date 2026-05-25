@@ -117,7 +117,7 @@ internal sealed class ExecutionController
                 try
                 {
                     // 第一阶段: 检测缺失字体（读取样式表原始状态，判断哪些字体在系统中不可用）。
-                    // 此阶段不做永久写回，保证运行时映射先处理原始图纸状态。
+                    // 此阶段不做永久写回，后续先修复样式表，再让 Hook 处理内联文字。
                     var detectTimer = Stopwatch.StartNew();
                     DiagnosticLogger.Start("ExecutionController", "DetectMissingFonts", "检测缺失字体开始", executionFields);
                     missingFonts = FontDetector.DetectMissingFonts(context);
@@ -137,47 +137,8 @@ internal sealed class ExecutionController
                         },
                         detectTimer.ElapsedMilliseconds);
 
-                    // 第二阶段: 样式表写回前先触发图形刷新，让文件级 Hook 看到原始字体加载请求。
-                    var runtimeMappingTimer = Stopwatch.StartNew();
-                    DiagnosticLogger.Start(
-                        "ExecutionController",
-                        "RuntimeMappingRegen",
-                        "样式表写回前触发文件级运行时映射刷新开始",
-                        new Dictionary<string, object?>
-                        {
-                            ["missingFonts"] = missingFonts.Count,
-                            ["ldFileInstalled"] = LdFileHook.IsInstalled,
-                            ["shpLoadInstalled"] = ShpLoadHook.IsInstalled
-                        });
-                    doc.Editor.Regen();
-                    runtimeMappingTimer.Stop();
-                    DiagnosticLogger.Ok(
-                        "ExecutionController",
-                        "RuntimeMappingRegen",
-                        "样式表写回前触发文件级运行时映射刷新完成",
-                        new Dictionary<string, object?>
-                        {
-                            ["missingFonts"] = missingFonts.Count,
-                            ["ldFileInstalled"] = LdFileHook.IsInstalled,
-                            ["shpLoadInstalled"] = ShpLoadHook.IsInstalled
-                        },
-                        runtimeMappingTimer.ElapsedMilliseconds);
-
-                    allRuntimeMappingResults = FontRuntimeMappingStore.GetRuntimeMappingResults();
-                    contextMgr.StoreRuntimeFontMappingResults(doc, allRuntimeMappingResults);
-                    DiagnosticLogger.Ok(
-                        "ExecutionController",
-                        "CollectRuntimeMappingResults",
-                        "文件级运行时映射结果已采集",
-                        new Dictionary<string, object?>
-                        {
-                            ["runtimeMappingHits"] = allRuntimeMappingResults.Count,
-                            ["ldFileRedirects"] = LdFileHook.GetCountersSnapshot().RedirectCount - ldFileCountersBefore.RedirectCount,
-                            ["shpLoadRedirects"] = ShpLoadHook.GetCountersSnapshot().RedirectCount - shpLoadCountersBefore.RedirectCount
-                        });
-
-                    // 第三阶段: 样式表最终写回。FontDetector 仅排除 @TrueType，
-                    // SHX 缺失字体（包含 @SHX）在这里永久写回样式表。
+                    // 第二阶段: 样式表最终写回。样式表中的缺失字体全部由这里永久修复；
+                    // Hook 只在后续 Regen 中处理内联文字运行时字体加载。
                     var finalWriteTimer = Stopwatch.StartNew();
                     DiagnosticLogger.Start(
                         "ExecutionController",
@@ -203,7 +164,7 @@ internal sealed class ExecutionController
                         DiagnosticLogger.Skip(
                             "ExecutionController",
                             "ReplaceMissingFonts",
-                            "没有普通缺失字体需要样式表最终写回",
+                            "没有缺失字体需要样式表最终写回",
                             new Dictionary<string, object?> { ["missingFonts"] = 0 });
                     }
 
@@ -219,7 +180,7 @@ internal sealed class ExecutionController
                         },
                         finalWriteTimer.ElapsedMilliseconds);
 
-                    // 第四阶段: 二次检测替换后的样式表状态，供 AFRLOG 标记仍缺失样式。
+                    // 第三阶段: 二次检测替换后的样式表状态，供 AFRLOG 标记仍缺失样式。
                     var postDetectTimer = Stopwatch.StartNew();
                     DiagnosticLogger.Start("ExecutionController", "PostDetectMissingFonts", "替换后二次检测开始");
                     var postContext = new FontDetectionContext(doc.Database);
@@ -232,35 +193,65 @@ internal sealed class ExecutionController
                         "替换后二次检测完成",
                         new Dictionary<string, object?> { ["stillMissing"] = stillMissing.Count },
                         postDetectTimer.ElapsedMilliseconds);
+
+                    // 第四阶段: 样式表处理完成后刷新。此时样式表缺失已先行回写，
+                    // LdFileHook/ShpLoadHook 只负责内联文字的运行时字体加载映射。
+                    int markedGraphics = 0;
+                    if (needsVisualRegen)
+                    {
+                        markedGraphics = MarkAffectedTextGraphicsModified(doc.Database, missingFonts);
+                    }
+                    else
+                    {
+                        DiagnosticLogger.Skip(
+                            "ExecutionController",
+                            "MarkAffectedTextGraphicsModified",
+                            "没有样式表最终写回，不标记图形缓存");
+                    }
+
+                    var inlineRuntimeTimer = Stopwatch.StartNew();
+                    DiagnosticLogger.Start(
+                        "ExecutionController",
+                        "InlineRuntimeMappingRegen",
+                        "样式表回写后触发内联字体运行时映射刷新开始",
+                        new Dictionary<string, object?>
+                        {
+                            ["markedGraphics"] = markedGraphics,
+                            ["styleWriteback"] = needsVisualRegen,
+                            ["ldFileInstalled"] = LdFileHook.IsInstalled,
+                            ["shpLoadInstalled"] = ShpLoadHook.IsInstalled
+                        });
+                    doc.Editor.Regen();
+                    inlineRuntimeTimer.Stop();
+                    DiagnosticLogger.Ok(
+                        "ExecutionController",
+                        "InlineRuntimeMappingRegen",
+                        "样式表回写后内联字体运行时映射刷新完成",
+                        new Dictionary<string, object?>
+                        {
+                            ["markedGraphics"] = markedGraphics,
+                            ["styleWriteback"] = needsVisualRegen,
+                            ["ldFileInstalled"] = LdFileHook.IsInstalled,
+                            ["shpLoadInstalled"] = ShpLoadHook.IsInstalled
+                        },
+                        inlineRuntimeTimer.ElapsedMilliseconds);
+
+                    allRuntimeMappingResults = FontRuntimeMappingStore.GetRuntimeMappingResults();
+                    contextMgr.StoreRuntimeFontMappingResults(doc, allRuntimeMappingResults);
+                    DiagnosticLogger.Ok(
+                        "ExecutionController",
+                        "CollectRuntimeMappingResults",
+                        "内联字体运行时映射结果已采集",
+                        new Dictionary<string, object?>
+                        {
+                            ["runtimeMappingHits"] = allRuntimeMappingResults.Count,
+                            ["ldFileRedirects"] = LdFileHook.GetCountersSnapshot().RedirectCount - ldFileCountersBefore.RedirectCount,
+                            ["shpLoadRedirects"] = ShpLoadHook.GetCountersSnapshot().RedirectCount - shpLoadCountersBefore.RedirectCount
+                        });
                 }
                 finally
                 {
                     runtimeStateScope.Dispose();
-                }
-
-                // 最终视觉刷新: 只处理永久样式写回后的显示更新。
-                // 前面的两个触发型 Regen 负责 Hook 命中顺序，不在这里合并。
-                if (needsVisualRegen)
-                {
-                    int markedGraphics = MarkAffectedTextGraphicsModified(doc.Database, missingFonts);
-                    DiagnosticLogger.Start(
-                        "ExecutionController",
-                        "FinalVisualRegen",
-                        "样式表最终写回后执行文档级登记已清理的最终 Regen",
-                        new Dictionary<string, object?> { ["markedGraphics"] = markedGraphics });
-                    doc.Editor.Regen();
-                    DiagnosticLogger.Ok(
-                        "ExecutionController",
-                        "FinalVisualRegen",
-                        "最终视觉刷新完成",
-                        new Dictionary<string, object?> { ["markedGraphics"] = markedGraphics });
-                }
-                else
-                {
-                    DiagnosticLogger.Skip(
-                        "ExecutionController",
-                        "FinalVisualRegen",
-                        "没有样式表最终写回，不执行最终视觉刷新");
                 }
 
                 var ldFileCountersAfter = LdFileHook.GetCountersSnapshot();

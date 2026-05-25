@@ -360,7 +360,16 @@ public class AfrCommands
                 {
                     if (r.IsMainFontMissing && !string.IsNullOrEmpty(config.TrueTypeFont)
                         && !string.Equals(config.TrueTypeFont, current.TypeFace, StringComparison.OrdinalIgnoreCase))
-                        replacements.Add(new StyleFontReplacement(r.StyleName, true, config.TrueTypeFont, string.Empty));
+                    {
+                        bool preserveAtPrefix = FontRedirectResolver.HasAtPrefix(r.TypeFace)
+                                                || FontRedirectResolver.HasAtPrefix(r.FileName);
+                        replacements.Add(new StyleFontReplacement(
+                            r.StyleName,
+                            true,
+                            config.TrueTypeFont,
+                            string.Empty,
+                            preserveAtPrefix));
+                    }
                 }
                 else
                 {

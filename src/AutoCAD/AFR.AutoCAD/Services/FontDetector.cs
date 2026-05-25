@@ -10,29 +10,29 @@ namespace AFR.Services;
 /// <summary>
 /// 检测图纸 TextStyleTable 中的缺失字体。
 /// <para>
-/// 遍历所有文字样式，通过多重验证（系统字体索引、FindFile、SHX 文件头分类）
+/// 遍历所有文字样式，通过共享字体索引（SHX / TrueType）和 SHX 文件头分类
 /// 判断每个样式引用的主字体和大字体是否在当前环境中可用。
-/// FindFile 和 TrueType 度量缓存通过 <see cref="FontDetectionContext"/> 实例管理，
+/// TrueType 度量缓存通过 <see cref="FontDetectionContext"/> 实例管理，
 /// SHX 类型分类缓存由全局 <see cref="FontManager.FontCache"/> 统一管理。
 /// </para>
 /// </summary>
 internal static class FontDetector
 {
-    // FindFile 缓存 key 前缀（预计算，避免每次调用 int.ToString()）
+    // 历史 FindFile 缓存 key 前缀（保留给诊断/兜底方法，热路径走 FontAvailabilityIndex）
     private static readonly string FindFilePrefixShx = ((int)FindFileHint.CompiledShapeFile).ToString() + ":";
     private static readonly string FindFilePrefixTtf = ((int)FindFileHint.TrueTypeFontFile).ToString() + ":";
 
     /// <summary>预热系统 TrueType 字体索引。</summary>
-    public static void PrewarmSystemFonts() => HookTrueTypeFontIndex.Initialize();
+    public static void PrewarmSystemFonts() => FontAvailabilityIndex.InitializeTrueType();
 
     /// <summary>
     /// 检查指定名称是否为已安装的系统 TrueType 字族名。
     /// @ 前缀会按基础字体名查询，不做 GDI vertical face 判断。
     /// </summary>
-    public static bool IsSystemFont(string name) => HookTrueTypeFontIndex.IsAvailable(name);
+    public static bool IsSystemFont(string name) => FontAvailabilityIndex.IsTrueTypeAvailable(name);
 
     /// <summary>系统字体索引是否已构建完成且包含有效数据。</summary>
-    public static bool IsSystemFontIndexReady => HookTrueTypeFontIndex.IsSystemIndexReady;
+    public static bool IsSystemFontIndexReady => FontAvailabilityIndex.IsTrueTypeIndexReady;
 
     /// <summary>
     /// 检测指定数据库中所有文字样式的缺失字体。
@@ -102,39 +102,45 @@ internal static class FontDetector
                     continue;
                 }
 
-                // TrueType 样式: 验证字体可用才跳过。
-                // 普通 face 通过 DirectWrite TrueType 索引和 FindFile 验证；
-                // @TrueType 不参与永久写回，后续运行时流程只按基础 TrueType 判定。
+                bool isMainMissing = false;
+                bool isBigMissing = false;
+
+                // TrueType 样式: 普通 face 验证字体可用才跳过；
+                // @TrueType 先按去掉 @ 的基础字体判断，基础字体缺失时进入样式表回写。
                 if (isTrueType)
                 {
                     var typeFace = safeFont!.Value.TypeFace!;
                     if (FontRedirectResolver.HasAtPrefix(typeFace)
                         || FontRedirectResolver.HasAtPrefix(fileName))
                     {
-                        DiagnosticLogger.Skip(
-                            "FontDetector",
-                            "DetectMissingFonts",
-                            "@TrueType 交由样式表运行时 Hook 处理，跳过永久替换",
-                            new Dictionary<string, object?>
-                            {
-                                ["styleName"] = styleName,
-                                ["typeFace"] = typeFace,
-                                ["fileName"] = fileName
-                            });
-                        continue;
-                    }
+                        string atFontName = FontRedirectResolver.HasAtPrefix(typeFace) ? typeFace : fileName;
+                        if (FontAvailabilityIndex.IsTrueTypeBaseAvailable(atFontName))
+                        {
+                            DiagnosticLogger.Skip(
+                                "FontDetector",
+                                "DetectMissingFonts",
+                                "@TrueType 基础字体可用，跳过样式表替换",
+                                new Dictionary<string, object?>
+                                {
+                                    ["styleName"] = styleName,
+                                    ["typeFace"] = typeFace,
+                                    ["fileName"] = fileName,
+                                    ["baseFont"] = FontRedirectResolver.StripLeadingAtPrefix(atFontName)
+                                });
+                            continue;
+                        }
 
-                    if (IsTrueTypeFontAvailable(typeFace, fileName, context))
+                        isMainMissing = true;
+                    }
+                    else if (IsTrueTypeFontAvailable(typeFace, fileName, context))
                     {
                         DiagnosticLogger.LogFontAvailability(typeFace, "TrueType", true);
                         continue;
                     }
-                }
-                bool isMainMissing = false;
-                bool isBigMissing = false;
-                if (isTrueType)
-                {
-                    isMainMissing = true;
+                    else
+                    {
+                        isMainMissing = true;
+                    }
                 }
                 else if (!string.IsNullOrWhiteSpace(fileName))
                 {
@@ -218,10 +224,7 @@ internal static class FontDetector
     internal static bool IsShxFontAvailable(string fileName, FontDetectionContext context)
     {
         if (string.IsNullOrWhiteSpace(fileName)) return true;
-        var normalized = NormalizeFontName(fileName);
-        if (TryFindFile(normalized, context, FindFileHint.CompiledShapeFile)) return true;
-        if (!Path.HasExtension(normalized) && TryFindFile(normalized + ".shx", context, FindFileHint.CompiledShapeFile)) return true;
-        return false;
+        return FontAvailabilityIndex.IsShxAvailable(fileName);
     }
 
     /// <summary>检查 TrueType 字体是否可用（仅字族名版本，无 FileName 辅助）。</summary>
@@ -236,17 +239,9 @@ internal static class FontDetector
     {
         if (string.IsNullOrWhiteSpace(typeface)) return true;
 
-        if (IsTrueTypeFontFile(typeface))
-            return TryFindFile(NormalizeFontName(typeface), context, FindFileHint.TrueTypeFontFile);
-
-        if (HookTrueTypeFontIndex.IsAvailable(typeface)) return true;
-        if (!string.IsNullOrWhiteSpace(fileName)
-            && TryFindFile(NormalizeFontName(fileName), context, FindFileHint.TrueTypeFontFile)) return true;
-        if (TryFindFile(typeface + ".ttf", context, FindFileHint.TrueTypeFontFile)) return true;
-        if (TryFindFile(typeface + ".ttc", context, FindFileHint.TrueTypeFontFile)) return true;
-        if (TryFindFile(typeface + ".otf", context, FindFileHint.TrueTypeFontFile)) return true;
-
-        return false;
+        return FontAvailabilityIndex.IsTrueTypeAvailable(typeface)
+               || (!string.IsNullOrWhiteSpace(fileName)
+                   && FontAvailabilityIndex.IsTrueTypeAvailable(fileName));
     }
 
     /// <summary>通过 HostApplicationServices.FindFile 查找字体文件，结果缓存在 context 中。</summary>
@@ -315,14 +310,14 @@ internal static class FontDetector
     /// </summary>
     internal static bool IsShxTypeMismatch(string fileName, FontDetectionContext context, bool expectBigFont)
     {
-        string? filePath = TryFindFilePath(fileName, context, FindFileHint.CompiledShapeFile);
-        if (filePath == null) return false;
+        if (!FontAvailabilityIndex.IsShxAvailable(fileName))
+            return false;
 
-        bool? classified = ClassifyShxFile(filePath);
         // 分类失败 → 保守处理为不匹配，触发替换修复而非放行
-        if (!classified.HasValue) return true;
+        if (!FontAvailabilityIndex.TryGetShxKind(fileName, out bool isBigFont))
+            return true;
 
-        return expectBigFont != classified.Value;
+        return expectBigFont != isBigFont;
     }
 
     /// <summary>

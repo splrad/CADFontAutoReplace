@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using AFR.Models;
@@ -22,6 +23,7 @@ public sealed class FontReplacementRow : INotifyPropertyChanged
     public string MissingFontName { get; }
     public bool IsTrueType { get; }
     public bool IsBigFont { get; }
+    public bool PreserveTrueTypeAtPrefix { get; }
 
     /// <summary>该缺失字体是否已被成功替换。</summary>
     public bool IsReplaced { get; }
@@ -54,13 +56,15 @@ public sealed class FontReplacementRow : INotifyPropertyChanged
         bool isBigFont,
         bool isReplaced,
         ObservableCollection<string> availableFonts,
-        string autoReplacement)
+        string autoReplacement,
+        bool preserveTrueTypeAtPrefix = false)
     {
         StyleName = styleName;
         FontCategory = fontCategory;
         MissingFontName = missingFontName;
         IsTrueType = isTrueType;
         IsBigFont = isBigFont;
+        PreserveTrueTypeAtPrefix = preserveTrueTypeAtPrefix;
         IsReplaced = isReplaced;
         AvailableFonts = availableFonts;
         OriginalReplacement = autoReplacement;
@@ -355,11 +359,25 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
                 StringComparison.OrdinalIgnoreCase)) continue;
 
             if (!map.TryGetValue(row.StyleName, out var existing))
-                existing = new StyleFontReplacement(row.StyleName, false, string.Empty, string.Empty);
+            {
+                existing = new StyleFontReplacement(
+                    row.StyleName,
+                    row.IsTrueType,
+                    string.Empty,
+                    string.Empty,
+                    row.IsTrueType && row.PreserveTrueTypeAtPrefix);
+            }
 
+            bool preserveAtPrefix = existing.PreserveTrueTypeAtPrefix
+                                    || (row.IsTrueType && row.PreserveTrueTypeAtPrefix);
             map[row.StyleName] = row.IsBigFont
                 ? existing with { BigFontReplacement = font }
-                : existing with { MainFontReplacement = font, IsTrueType = row.IsTrueType };
+                : existing with
+                {
+                    MainFontReplacement = font,
+                    IsTrueType = row.IsTrueType,
+                    PreserveTrueTypeAtPrefix = preserveAtPrefix
+                };
         }
 
         return map.Values.ToList();
@@ -417,6 +435,9 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
                         ? (!string.IsNullOrEmpty(r.TypeFace) ? r.TypeFace : r.FileName)
                         : r.FileName;
                     var fonts = r.IsTrueType ? ttFonts : mainFonts;
+                    bool preserveAtPrefix = r.IsTrueType
+                                            && (HasAtPrefix(r.TypeFace)
+                                                || HasAtPrefix(r.FileName));
 
                     // 优先使用当前实际字体，全局配置作为兜底
                     string replacement;
@@ -433,7 +454,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
 
                     var row = new FontReplacementRow(
                         r.StyleName, category, missingName,
-                        r.IsTrueType, false, isReplaced, fonts, replacement);
+                        r.IsTrueType, false, isReplaced, fonts, replacement, preserveAtPrefix);
 
                     if (r.IsTrueType) ttCount++;
                     else shxCount++;
@@ -546,6 +567,25 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
             return "TrueType字体";
 
         return "SHX主字体";
+    }
+
+    private static bool HasAtPrefix(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        string trimmed = value.Trim();
+        string normalized;
+        try
+        {
+            normalized = Path.GetFileName(trimmed);
+        }
+        catch
+        {
+            normalized = trimmed;
+        }
+
+        return normalized.Length > 1 && normalized[0] == '@';
     }
 
     private void OnRowPropertyChanged(object? sender, PropertyChangedEventArgs e)

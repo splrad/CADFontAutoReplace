@@ -12,6 +12,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrCommands.cs" Link="Commands\AfrCommands.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Commands\AfrUnloadCommand.cs" Link="Commands\AfrUnloadCommand.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\AutoCadFontHook.cs" Link="FontMapping\AutoCadFontHook.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontAvailabilityIndex.cs" Link="FontMapping\FontAvailabilityIndex.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontRedirectResolver.cs" Link="FontMapping\FontRedirectResolver.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\FontRuntimeMappingStore.cs" Link="FontMapping\FontRuntimeMappingStore.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\HookShxFontIndex.cs" Link="FontMapping\HookShxFontIndex.cs" />

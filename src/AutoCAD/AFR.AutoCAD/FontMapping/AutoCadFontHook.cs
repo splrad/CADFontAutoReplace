@@ -19,8 +19,7 @@ internal sealed class AutoCadFontHook : IFontHook
     public void Install()
     {
         DiagnosticLogger.Start("AutoCadFontHook", "Install", "开始安装插件级持久字体 Hook");
-        HookShxFontIndex.Initialize();
-        HookTrueTypeFontIndex.Initialize();
+        FontAvailabilityIndex.InitializeAll();
         DiagnosticLogger.Ok("AutoCadFontHook", "InitializeHookFontIndexes", "Hook 侧字体索引初始化完成");
         InstallOne("LdFileHook", LdFileHook.Install, () => LdFileHook.IsInstalled);
         InstallOne("ShpLoadHook", ShpLoadHook.Install, () => ShpLoadHook.IsInstalled);
@@ -140,8 +139,7 @@ internal sealed class AutoCadFontHook : IFontHook
     public void UpdateConfig()
     {
         DiagnosticLogger.Start("AutoCadFontHook", "UpdateConfig", "开始更新 Hook 字体兜底索引");
-        HookShxFontIndex.Initialize();
-        HookTrueTypeFontIndex.Initialize();
+        FontAvailabilityIndex.InitializeAll();
         DiagnosticLogger.Ok("AutoCadFontHook", "UpdateConfig", "Hook 字体兜底索引更新完成");
     }
 }

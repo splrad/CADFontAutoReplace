@@ -8,7 +8,7 @@ namespace AFR.Services;
 /// AutoCAD 平台的 <see cref="IFontScanner"/> 实现。
 /// <para>
 /// 通过 <see cref="CadEnvironmentSettings.GetAllFontSearchPaths"/> 获取 CAD 字体目录，
-/// 扫描可用的 SHX 字体；系统已安装 TrueType 字族由 HookTrueTypeFontIndex 通过 DirectWrite 枚举。
+/// 扫描可用的 SHX 字体；系统已安装 TrueType 字族由共享字体索引通过 DirectWrite 枚举。
 /// SHX 扫描时同步填充 <see cref="FontManager.FontCache"/>（大字体/常规字体分类）。
 /// 使用会话级缓存 — 字体列表在 CAD 运行期间不变，只扫描一次。
 /// </para>
@@ -45,7 +45,7 @@ internal sealed class AutoCadFontScanner : IFontScanner
         if (_cachedTrueTypeFonts != null) return _cachedTrueTypeFonts;
 
         var fonts = new SortedSet<string>(
-            HookTrueTypeFontIndex.GetAvailableFontNamesSnapshot(),
+            FontAvailabilityIndex.GetAvailableTrueTypeFontNamesSnapshot(),
             StringComparer.OrdinalIgnoreCase);
         _cachedTrueTypeFonts = fonts;
         return fonts;
