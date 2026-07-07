@@ -7,7 +7,7 @@ using System.Xml.Linq;
 
 namespace AFR.HostIntegration;
 
-internal enum AwsDialogSuppressionState
+public enum AwsDialogSuppressionState
 {
     Correct = 0,
     Missing = 1,
