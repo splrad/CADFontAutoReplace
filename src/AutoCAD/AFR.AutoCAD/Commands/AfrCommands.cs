@@ -58,7 +58,7 @@ public class AfrCommands
             // 提示用户重启 CAD，使 Hook 在下次启动时读取已保存的配置并正确安装。
             if (!PlatformManager.FontHook.IsInstalled)
             {
-                log.Warning("首次配置完成，请重启 AutoCAD 使字体替换完整生效。");
+                log.WarningLast("首次配置完成，请重启 AutoCAD 使字体替换完整生效。");
                 DiagnosticLogger.Skip(
                     "AfrCommands",
                     "ExecuteAfterConfig",

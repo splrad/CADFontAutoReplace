@@ -129,6 +129,41 @@ internal static class AwsHideableDialogPatcherCore
     }
 
     /// <summary>
+    /// 插件运行期专用：跳过 acad.exe 进程检查，只覆盖缺失 SHX 弹窗对应节点。
+    /// </summary>
+    /// <remarks>
+    /// 用于手动 NETLOAD 首次安装 / 更新场景。调用后仍需提示用户重启 CAD，确保宿主重新读取 Profile。
+    /// </remarks>
+    /// <returns>实际写入或刷新的文件数量。</returns>
+    public static int ApplyInstallOrUpdateOverrideInRunningHost(
+        string brand,
+        string version,
+        string registryBasePath,
+        System.Action<string, string>? log = null)
+    {
+        var paths = EnumerateTargetAwsFiles(brand, version, registryBasePath).ToArray();
+        if (paths.Length == 0)
+        {
+            log?.Invoke("AwsPatcher", "ApplyInstallOrUpdateOverrideInRunningHost 跳过：未找到任何 FixedProfile.aws。");
+            return 0;
+        }
+
+        int count = 0;
+        foreach (var path in paths)
+        {
+            try
+            {
+                if (WriteInstallOrUpdateOverrideNode(path)) count++;
+            }
+            catch (System.Exception ex)
+            {
+                log?.Invoke("AwsPatcher", $"运行期覆盖 {path} 失败：{ex.Message}");
+            }
+        }
+        return count;
+    }
+
+    /// <summary>
     /// 删除指定 CAD 版本对应 <c>FixedProfile.aws</c> 中所有带 AFR 所有权标记的抑制节点。
     /// 用户手动设置（无标记）的同名节点不会被删除。
     /// </summary>
@@ -177,6 +212,22 @@ internal static class AwsHideableDialogPatcherCore
                       .FirstOrDefault(e => e.Name.LocalName == "HideableDialog"
                                         && (string?)e.Attribute("id") == DialogId);
         return node?.ToString(SaveOptions.DisableFormatting) ?? string.Empty;
+    }
+
+    /// <summary>判断指定 .aws 中的缺失 SHX 弹窗节点是否已经是 AFR 标准抑制节点。</summary>
+    public static bool IsDialogNodeUpToDate(string awsPath)
+    {
+        if (!File.Exists(awsPath)) return false;
+        var doc = XDocument.Load(awsPath);
+        var profile = doc.Root;
+        if (profile is null || profile.Name.LocalName != "Profile") return false;
+        var ns = profile.GetDefaultNamespace();
+
+        var nodes = profile.Descendants()
+                           .Where(e => e.Name.LocalName == "HideableDialog"
+                                    && (string?)e.Attribute("id") == DialogId)
+                           .ToList();
+        return nodes.Count == 1 && IsOwnedNodeUpToDate(nodes[0], ns);
     }
 
     /// <summary>判断 acad.exe 是否在运行。任何异常一律视为"在运行"，从安全侧拒绝写入。</summary>
@@ -309,6 +360,7 @@ internal static class AwsHideableDialogPatcherCore
     /// <summary>判断已存在的自有节点结构是否已经与当前目标完全一致（用于跳过冗余写入）。</summary>
     private static bool IsOwnedNodeUpToDate(XElement existing, XNamespace ns)
     {
+        if ((string?)existing.Attribute(OwnershipAttr) != OwnershipToken) return false;
         if ((string?)existing.Attribute("title")       != DialogTitle)  return false;
         if ((string?)existing.Attribute("category")    != DialogTitle)  return false;
         if ((string?)existing.Attribute("application") != "")           return false;

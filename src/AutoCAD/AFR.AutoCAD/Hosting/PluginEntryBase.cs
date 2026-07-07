@@ -138,13 +138,23 @@ public abstract class PluginEntryBase : IExtensionApplication
 
             // 初始化自动加载注册表项；首次安装还会部署内嵌字体和默认配置。
             DiagnosticLogger.Start("PluginEntry", "AppInitializer", "开始执行注册表和默认字体初始化");
-            bool isFirstRun = AppInitializer.Initialize();
+            var initResult = AppInitializer.Initialize();
             DiagnosticLogger.Ok(
                 "PluginEntry",
                 "AppInitializer",
                 "注册表和默认字体初始化完成",
-                new Dictionary<string, object?> { ["isFirstRun"] = isFirstRun });
-            if (isFirstRun)
+                new Dictionary<string, object?>
+                {
+                    ["state"] = initResult.State.ToString(),
+                    ["isFirstInstall"] = initResult.IsFirstInstall
+                });
+
+            if (initResult.ShouldApplyAwsOverride)
+            {
+                TryApplyInstallOrUpdateAwsOverride(initResult, log);
+            }
+
+            if (initResult.ShouldSkipRuntimeStartup)
             {
                 // 首次通过 NETLOAD 加载：CAD 已启动，Hook 无法拦截已加载的字体。
                 // 仅完成注册表写入和字体部署，提示用户重启 CAD 后自动生效。
@@ -153,7 +163,7 @@ public abstract class PluginEntryBase : IExtensionApplication
                     "PluginEntry",
                     "RuntimeStartup",
                     "首次加载跳过 Hook 安装、文档事件注册和替换调度",
-                    new Dictionary<string, object?> { ["isFirstRun"] = true });
+                    new Dictionary<string, object?> { ["state"] = initResult.State.ToString() });
                 log.Info("首次加载完成，默认替换字体已部署。请重启 CAD 使插件自动生效。");
                 log.Flush();
                 initTimer.Stop();
@@ -161,7 +171,7 @@ public abstract class PluginEntryBase : IExtensionApplication
                     "PluginEntry",
                     "Initialize",
                     "插件首次加载初始化完成",
-                    new Dictionary<string, object?> { ["isFirstRun"] = true },
+                    new Dictionary<string, object?> { ["state"] = initResult.State.ToString() },
                     initTimer.ElapsedMilliseconds);
                 return;
             }
@@ -204,7 +214,7 @@ public abstract class PluginEntryBase : IExtensionApplication
                 "PluginEntry",
                 "Initialize",
                 "插件初始化完成",
-                new Dictionary<string, object?> { ["isFirstRun"] = false },
+                new Dictionary<string, object?> { ["state"] = initResult.State.ToString() },
                 initTimer.ElapsedMilliseconds);
         }
         catch (System.Exception ex)
@@ -219,6 +229,44 @@ public abstract class PluginEntryBase : IExtensionApplication
             log.Error("插件初始化失败", ex);
             log.Flush();
         }
+    }
+
+    private static bool TryApplyInstallOrUpdateAwsOverride(PluginInitializationResult initResult, LogService log)
+    {
+        try
+        {
+            int changedCount = Diagnostics.AwsHideableDialogPatcher.ApplyInstallOrUpdateOverrideInRunningHost();
+            bool activeNodeReady = Diagnostics.AwsHideableDialogPatcher.IsActiveDialogNodeUpToDate();
+            DiagnosticLogger.Ok(
+                "PluginEntry",
+                "ApplyInstallOrUpdateAwsOverride",
+                "运行期缺失 SHX 弹窗抑制处理完成",
+                new Dictionary<string, object?>
+                {
+                    ["state"] = initResult.State.ToString(),
+                    ["changedCount"] = changedCount,
+                    ["activeNodeReady"] = activeNodeReady
+                });
+
+            if (changedCount > 0 || activeNodeReady)
+            {
+                log.InfoLast("缺失 SHX 弹窗抑制已设置。请重启 CAD 后生效。");
+                return true;
+            }
+
+            log.WarningLast("缺失 SHX 弹窗抑制未写入：未找到 FixedProfile.aws 或写入失败。请关闭 CAD 后使用 AFR 部署工具重新安装。");
+        }
+        catch (System.Exception ex)
+        {
+            DiagnosticLogger.Fail(
+                "PluginEntry",
+                "ApplyInstallOrUpdateAwsOverride",
+                "运行期缺失 SHX 弹窗抑制处理失败",
+                ex,
+                new Dictionary<string, object?> { ["state"] = initResult.State.ToString() });
+            log.WarningLast("缺失 SHX 弹窗抑制处理失败：" + ex.Message);
+        }
+        return false;
     }
 
     /// <summary>AutoCAD 卸载插件时调用（通常在 CAD 退出时）。</summary>
