@@ -49,11 +49,6 @@ internal sealed class LogService : ILogService
     {
         AddTailEntry(LogCategory.Info, message);
     }
-    /// <summary>记录一条必须在本轮 Flush 绝对最后输出的信息。</summary>
-    public void InfoFinal(string message)
-    {
-        AddFinalTailEntry(LogCategory.Info, message);
-    }
     /// <summary>记录一条警告级别日志到缓冲区。</summary>
     public void Warning(string message) => AddEntry(LogCategory.Warning, message);
     /// <summary>记录一条必须在本轮 Flush 最后输出的警告。</summary>
@@ -332,12 +327,16 @@ internal sealed class LogService : ILogService
                         LogCategory.Info => $"\n[信息] {message}",
                         _ => $"\n{message}"
                     };
-                    editor.WriteMessage(formatted);
+                    editor.WriteMessage(i == finalTail.Count - 1 ? formatted + "\n" : formatted);
                 }
             }
+            else
+            {
+                // 追加换行以触发 AutoCAD 命令行刷新；存在 final tail 时不再追加，
+                // 保证 final tail 提示是本轮 Flush 的最后一次输出。
+                editor.WriteMessage("\n");
+            }
 
-            // 追加换行以触发 AutoCAD 命令行刷新。
-            editor.WriteMessage("\n");
         }
         catch
         {

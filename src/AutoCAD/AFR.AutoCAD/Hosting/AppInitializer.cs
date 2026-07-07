@@ -16,22 +16,22 @@ internal enum PluginInitializationState
 
 internal sealed class PluginInitializationResult
 {
-    public PluginInitializationResult(PluginInitializationState state, bool hasPendingAwsOverride)
+    public PluginInitializationResult(PluginInitializationState state, bool awsSuppressionWarningShown)
     {
         State = state;
-        HasPendingAwsOverride = hasPendingAwsOverride;
+        AwsSuppressionWarningShown = awsSuppressionWarningShown;
     }
 
     public PluginInitializationState State { get; }
 
-    public bool HasPendingAwsOverride { get; }
+    public bool AwsSuppressionWarningShown { get; }
 
     public bool IsFirstInstall => State == PluginInitializationState.FirstInstall;
 
     public bool IsInstallOrUpdate => State is PluginInitializationState.FirstInstall
                                            or PluginInitializationState.Updated;
 
-    public bool ShouldEvaluateAwsSuppression => IsInstallOrUpdate || HasPendingAwsOverride;
+    public bool ShouldCheckAwsSuppression => IsInstallOrUpdate && !AwsSuppressionWarningShown;
 
     public bool ShouldSkipRuntimeStartup => State == PluginInitializationState.FirstInstall;
 }
@@ -56,9 +56,7 @@ internal static class AppInitializer
     private const string PluginVersionValueName = "PluginVersion";
     private const string PluginBuildIdValueName = "PluginBuildId";
     private const string ConfigSchemaVersionValueName = "ConfigSchemaVersion";
-    private const string PendingAwsOverrideValueName = "PendingAwsOverride";
-    private const string PendingAwsOverrideBuildIdValueName = "PendingAwsOverrideBuildId";
-    private const string PendingAwsOverrideReasonValueName = "PendingAwsOverrideReason";
+    private const string AwsSuppressionWarningShownValueName = "AwsSuppressionWarningShown";
 
     /// <summary>
     /// 执行注册表初始化：为所有匹配的 CAD 配置文件创建/更新自动加载条目。
@@ -68,7 +66,7 @@ internal static class AppInitializer
     {
         var log = LogService.Instance;
         var state = PluginInitializationState.NormalRun;
-        var hasPendingAwsOverride = false;
+        var awsSuppressionWarningShownForAllProfiles = true;
         try
         {
             var dllPath = GetCurrentDllPath();
@@ -82,7 +80,7 @@ internal static class AppInitializer
                     "GetAcadProfiles",
                     "未找到有效的 AutoCAD 配置文件",
                     new Dictionary<string, object?> { ["versionTag"] = versionTag });
-                return new PluginInitializationResult(state, hasPendingAwsOverride);
+                return new PluginInitializationResult(state, awsSuppressionWarningShownForAllProfiles);
             }
 
             foreach (var profile in profiles)
@@ -90,7 +88,7 @@ internal static class AppInitializer
                 var appPath = $@"{AutoCadBasePath}\{profile}\Applications\{AppName}";
                 var profileResult = InitializeProfile(appPath, dllPath);
                 state = MaxState(state, profileResult.State);
-                hasPendingAwsOverride |= profileResult.HasPendingAwsOverride;
+                awsSuppressionWarningShownForAllProfiles &= profileResult.AwsSuppressionWarningShown;
             }
 
             #if AFR_EXTERNAL_REGISTRY
@@ -103,7 +101,7 @@ internal static class AppInitializer
         {
             log.Error("初始化失败", ex);
         }
-        return new PluginInitializationResult(state, hasPendingAwsOverride);
+        return new PluginInitializationResult(state, awsSuppressionWarningShownForAllProfiles);
     }
 
     /// <summary>
@@ -123,7 +121,7 @@ internal static class AppInitializer
         string? installedBuildId = RegistryService.ReadString(Registry.CurrentUser, appPath, PluginBuildIdValueName);
         int? installedConfigSchemaVersion = RegistryService.ReadDword(Registry.CurrentUser, appPath, ConfigSchemaVersionValueName);
         int? installedInitialized = RegistryService.ReadDword(Registry.CurrentUser, appPath, "IsInitialized");
-        bool hasPendingAwsOverride = RegistryService.ReadDword(Registry.CurrentUser, appPath, PendingAwsOverrideValueName) == 1;
+        bool awsSuppressionWarningShown = RegistryService.ReadDword(Registry.CurrentUser, appPath, AwsSuppressionWarningShownValueName) == 1;
         bool versionChanged = !isNewKey
                            && (!string.Equals(installedPluginVersion, currentPluginVersion, StringComparison.Ordinal)
                             || !string.Equals(installedBuildId, currentBuildId, StringComparison.Ordinal));
@@ -198,34 +196,20 @@ internal static class AppInitializer
             {
                 ["appPath"] = appPath,
                 ["state"] = state.ToString(),
-                ["hasPendingAwsOverride"] = hasPendingAwsOverride
+                ["awsSuppressionWarningShown"] = awsSuppressionWarningShown
             });
-        return new ProfileInitializationResult(state, hasPendingAwsOverride);
+        return new ProfileInitializationResult(state, awsSuppressionWarningShown);
     }
 
     private static PluginInitializationState MaxState(PluginInitializationState left, PluginInitializationState right)
         => (PluginInitializationState)Math.Max((int)left, (int)right);
 
-    /// <summary>标记缺失 SHX 弹窗抑制需要在 CAD 关闭后由 agent 补写。</summary>
-    public static void MarkAwsOverridePending(PluginInitializationState reason)
-    {
-        var currentBuildId = PluginVersionService.GetBuildId();
-        foreach (var appPath in GetAppPaths())
-        {
-            RegistryService.WriteDword(Registry.CurrentUser, appPath, PendingAwsOverrideValueName, 1);
-            RegistryService.WriteString(Registry.CurrentUser, appPath, PendingAwsOverrideBuildIdValueName, currentBuildId);
-            RegistryService.WriteString(Registry.CurrentUser, appPath, PendingAwsOverrideReasonValueName, reason.ToString());
-        }
-    }
-
-    /// <summary>清除缺失 SHX 弹窗抑制的离线补写 pending 标记。</summary>
-    public static void ClearAwsOverridePending()
+    /// <summary>标记缺失 SHX 弹窗抑制提示已经输出过。</summary>
+    public static void MarkAwsSuppressionWarningShown()
     {
         foreach (var appPath in GetAppPaths())
         {
-            RegistryService.DeleteValue(Registry.CurrentUser, appPath, PendingAwsOverrideValueName);
-            RegistryService.DeleteValue(Registry.CurrentUser, appPath, PendingAwsOverrideBuildIdValueName);
-            RegistryService.DeleteValue(Registry.CurrentUser, appPath, PendingAwsOverrideReasonValueName);
+            RegistryService.WriteDword(Registry.CurrentUser, appPath, AwsSuppressionWarningShownValueName, 1);
         }
     }
 
@@ -237,14 +221,14 @@ internal static class AppInitializer
 
     private readonly struct ProfileInitializationResult
     {
-        public ProfileInitializationResult(PluginInitializationState state, bool hasPendingAwsOverride)
+        public ProfileInitializationResult(PluginInitializationState state, bool awsSuppressionWarningShown)
         {
             State = state;
-            HasPendingAwsOverride = hasPendingAwsOverride;
+            AwsSuppressionWarningShown = awsSuppressionWarningShown;
         }
 
         public PluginInitializationState State { get; }
-        public bool HasPendingAwsOverride { get; }
+        public bool AwsSuppressionWarningShown { get; }
     }
 
     /// <summary>

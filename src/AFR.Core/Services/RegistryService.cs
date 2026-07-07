@@ -82,19 +82,6 @@ public static class RegistryService
         }
     }
 
-    /// <summary>删除指定子键下的单个值。值不存在或删除失败时静默忽略。</summary>
-    public static void DeleteValue(RegistryKey baseKey, string subKeyPath, string valueName)
-    {
-        try
-        {
-            using var key = baseKey.OpenSubKey(subKeyPath, true);
-            key?.DeleteValue(valueName, throwOnMissingValue: false);
-        }
-        catch
-        {
-        }
-    }
-
     /// <summary>获取指定子键下的所有直接子键名称。找不到或读取失败时返回空数组。</summary>
     public static string[] GetSubKeyNames(RegistryKey baseKey, string subKeyPath)
     {

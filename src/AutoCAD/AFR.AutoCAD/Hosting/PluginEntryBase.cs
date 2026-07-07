@@ -148,12 +148,12 @@ public abstract class PluginEntryBase : IExtensionApplication
                 {
                     ["state"] = initResult.State.ToString(),
                     ["isFirstInstall"] = initResult.IsFirstInstall,
-                    ["hasPendingAwsOverride"] = initResult.HasPendingAwsOverride
+                    ["awsSuppressionWarningShown"] = initResult.AwsSuppressionWarningShown
                 });
 
-            if (initResult.ShouldEvaluateAwsSuppression)
+            if (initResult.ShouldCheckAwsSuppression)
             {
-                TryScheduleOfflineAwsOverride(initResult, log);
+                WarnIfAwsSuppressionNotConfigured(initResult, log);
             }
 
             if (initResult.ShouldSkipRuntimeStartup)
@@ -233,7 +233,7 @@ public abstract class PluginEntryBase : IExtensionApplication
         }
     }
 
-    private static bool TryScheduleOfflineAwsOverride(PluginInitializationResult initResult, LogService log)
+    private static void WarnIfAwsSuppressionNotConfigured(PluginInitializationResult initResult, LogService log)
     {
         try
         {
@@ -245,58 +245,42 @@ public abstract class PluginEntryBase : IExtensionApplication
                 new Dictionary<string, object?>
                 {
                     ["state"] = initResult.State.ToString(),
-                    ["hasPendingAwsOverride"] = initResult.HasPendingAwsOverride,
+                    ["awsSuppressionWarningShown"] = initResult.AwsSuppressionWarningShown,
                     ["suppressionState"] = suppressionState.ToString()
                 });
 
             if (suppressionState == AwsDialogSuppressionState.Correct)
             {
-                if (initResult.HasPendingAwsOverride)
-                    AppInitializer.ClearAwsOverridePending();
-                return true;
+                return;
             }
 
-            if (initResult.IsInstallOrUpdate)
-                AppInitializer.MarkAwsOverridePending(initResult.State);
-
-            if (AwsPatchAgentLauncher.TryStart(out var errorMessage))
-            {
-                DiagnosticLogger.Ok(
-                    "PluginEntry",
-                    "StartAwsPatchAgent",
-                    "缺失 SHX 弹窗抑制离线补写 agent 已启动",
-                    new Dictionary<string, object?>
-                    {
-                        ["state"] = initResult.State.ToString(),
-                        ["suppressionState"] = suppressionState.ToString()
-                    });
-                log.InfoFinal("缺失 SHX 弹窗抑制已安排在 CAD 关闭后写入，请重启 CAD 后生效。");
-                return true;
-            }
-
-            DiagnosticLogger.Fail(
-                "PluginEntry",
-                "StartAwsPatchAgent",
-                "缺失 SHX 弹窗抑制离线补写 agent 启动失败",
-                fields: new Dictionary<string, object?>
-                {
-                    ["state"] = initResult.State.ToString(),
-                    ["suppressionState"] = suppressionState.ToString(),
-                    ["error"] = errorMessage
-                });
-            log.WarningFinal("缺失 SHX 弹窗抑制需要在 CAD 关闭后写入，请关闭 CAD 后使用 AFR 部署工具修复安装。");
+            log.WarningFinal("当前CAD软件SHX缺失弹窗未关闭，如果需要关闭请关闭 CAD 后运行 AFR 部署工具修复安装。");
+            MarkAwsSuppressionWarningShownSafely();
         }
         catch (System.Exception ex)
         {
             DiagnosticLogger.Fail(
                 "PluginEntry",
-                "ScheduleOfflineAwsOverride",
-                "缺失 SHX 弹窗抑制离线补写安排失败",
+                "EvaluateAwsSuppression",
+                "缺失 SHX 弹窗抑制状态检测失败",
                 ex,
                 new Dictionary<string, object?> { ["state"] = initResult.State.ToString() });
-            log.WarningFinal("缺失 SHX 弹窗抑制处理失败：" + ex.Message);
+            log.WarningFinal("当前CAD软件SHX缺失弹窗未关闭，如果需要关闭请关闭 CAD 后运行 AFR 部署工具修复安装。");
+            MarkAwsSuppressionWarningShownSafely();
         }
-        return false;
+    }
+
+    private static void MarkAwsSuppressionWarningShownSafely()
+    {
+        try
+        {
+            AppInitializer.MarkAwsSuppressionWarningShown();
+            DiagnosticLogger.Ok("PluginEntry", "MarkAwsSuppressionWarningShown", "缺失 SHX 弹窗抑制提示已标记为显示过");
+        }
+        catch (System.Exception ex)
+        {
+            DiagnosticLogger.Fail("PluginEntry", "MarkAwsSuppressionWarningShown", "缺失 SHX 弹窗抑制提示标记写入失败", ex);
+        }
     }
 
     /// <summary>AutoCAD 卸载插件时调用（通常在 CAD 退出时）。</summary>
