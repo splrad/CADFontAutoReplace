@@ -370,6 +370,5 @@ Hook 变更：
 
 ## 17. 相关文档
 
-- [字体 Hook 证据与边界](font-hook-evidence-and-boundaries.md)
 - [Git 分支管理摘要](git-branch-guidelines.md)
 - [AutoCAD 原版 SHX 字体清单](autodesk-fonts.md)
