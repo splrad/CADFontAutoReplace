@@ -13,7 +13,7 @@ namespace AFR.Services;
 /// SHX 和 TrueType 可用性统一走共享索引；上下文只保存本次执行需要的度量缓存。
 /// </para>
 /// </summary>
-internal static class FontDetector
+internal static partial class FontDetector
 {
     /// <summary>预热系统 TrueType 字体索引。</summary>
     public static void PrewarmSystemFonts() => TrueTypeFontAvailabilityIndex.Initialize();
@@ -121,7 +121,7 @@ internal static class FontDetector
 
                         isMainMissing = true;
                     }
-                    else if (IsTrueTypeFontAvailable(typeFace, fileName, context))
+                    else if (IsTrueTypeFontAvailable(typeFace, fileName))
                     {
                         DiagnosticLogger.LogFontAvailability(typeFace, "TrueType", true);
                         continue;
@@ -133,11 +133,11 @@ internal static class FontDetector
                 }
                 else if (!string.IsNullOrWhiteSpace(fileName))
                 {
-                    isMainMissing = !IsShxFontAvailable(fileName, context) || IsShxTypeMismatch(fileName, context, expectBigFont: false);
+                    isMainMissing = !IsShxFontAvailable(fileName) || IsShxTypeMismatch(fileName, expectBigFont: false);
                 }
                 if (!isTrueType && !string.IsNullOrWhiteSpace(bigFontName))
                 {
-                    isBigMissing = !IsShxFontAvailable(bigFontName, context) || IsShxTypeMismatch(bigFontName, context, expectBigFont: true);
+                    isBigMissing = !IsShxFontAvailable(bigFontName) || IsShxTypeMismatch(bigFontName, expectBigFont: true);
                 }
                 if (isMainMissing || isBigMissing)
                 {
@@ -207,21 +207,21 @@ internal static class FontDetector
     /// <summary>
     /// 检查 SHX 文件是否在共享索引中精确存在。
     /// </summary>
-    internal static bool IsShxFontAvailable(string fileName, FontDetectionContext context)
+    internal static bool IsShxFontAvailable(string fileName)
     {
         if (string.IsNullOrWhiteSpace(fileName)) return true;
         return ShxFontAvailabilityIndex.IsExactAvailable(fileName);
     }
 
     /// <summary>检查 TrueType 字体是否可用（仅字族名版本，无 FileName 辅助）。</summary>
-    internal static bool IsTrueTypeFontAvailable(string typeface, FontDetectionContext context)
-        => IsTrueTypeFontAvailable(typeface, string.Empty, context);
+    internal static bool IsTrueTypeFontAvailable(string typeface)
+        => IsTrueTypeFontAvailable(typeface, string.Empty);
 
     /// <summary>
     /// 检查 TrueType 字体是否可用。
     /// @ 前缀在索引中按基础字体处理。
     /// </summary>
-    private static bool IsTrueTypeFontAvailable(string typeface, string fileName, FontDetectionContext context)
+    private static bool IsTrueTypeFontAvailable(string typeface, string fileName)
     {
         if (string.IsNullOrWhiteSpace(typeface)) return true;
 
@@ -234,7 +234,7 @@ internal static class FontDetector
     /// 检查 SHX 字体文件的实际类型（主字体/大字体）是否与期望类型匹配。
     /// 不匹配时返回 true，表示虽然文件存在但类型错误（如主字体槽位引用了大字体文件）。
     /// </summary>
-    internal static bool IsShxTypeMismatch(string fileName, FontDetectionContext context, bool expectBigFont)
+    internal static bool IsShxTypeMismatch(string fileName, bool expectBigFont)
     {
         if (!ShxFontAvailabilityIndex.IsExactAvailable(fileName))
             return false;
@@ -306,27 +306,60 @@ internal static class FontDetector
         {
             if (oldFont != IntPtr.Zero && hdc != IntPtr.Zero) SelectObject(hdc, oldFont);
             if (hFont != IntPtr.Zero) DeleteObject(hFont);
-            if (hdc != IntPtr.Zero) ReleaseDC(IntPtr.Zero, hdc);
+            if (hdc != IntPtr.Zero && ReleaseDC(IntPtr.Zero, hdc) == 0)
+            {
+                DiagnosticLogger.Fail(
+                    "FontDetector",
+                    "QueryFontMetricsFromGdi.ReleaseDC",
+                    "GDI 设备上下文释放失败",
+                    fields: new Dictionary<string, object?> { ["fontName"] = fontName });
+            }
         }
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    // WCHAR 字段以 ushort 表示（布局与 char16_t 一致），使结构体严格 blittable，
+    // LibraryImport 源生成器才能直接封送，无需程序集级 DisableRuntimeMarshalling。
+    [StructLayout(LayoutKind.Sequential)]
     private struct TEXTMETRICW
     {
         public int tmHeight, tmAscent, tmDescent, tmInternalLeading, tmExternalLeading;
         public int tmAveCharWidth, tmMaxCharWidth, tmWeight, tmOverhang;
         public int tmDigitizedAspectX, tmDigitizedAspectY;
-        public char tmFirstChar, tmLastChar, tmDefaultChar, tmBreakChar;
+        public ushort tmFirstChar, tmLastChar, tmDefaultChar, tmBreakChar;
         public byte tmItalic, tmUnderlined, tmStruckOut, tmPitchAndFamily, tmCharSet;
     }
 
+#if NET7_0_OR_GREATER
+    // .NET 7+ 使用源生成 P/Invoke：编译期生成封送代码，支持 AOT/裁剪且无运行时 IL stub 开销。
+    [LibraryImport("user32.dll")]
+    private static partial IntPtr GetDC(IntPtr hWnd);
+
+    [LibraryImport("user32.dll")]
+    private static partial int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [LibraryImport("gdi32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial IntPtr CreateFontW(int cHeight, int cWidth, int cEscapement, int cOrientation, int cWeight, uint bItalic, uint bUnderline, uint bStrikeOut, uint iCharSet, uint iOutPrecision, uint iClipPrecision, uint iQuality, uint iPitchAndFamily, string pszFaceName);
+
+    [LibraryImport("gdi32.dll")]
+    private static partial IntPtr SelectObject(IntPtr hdc, IntPtr h);
+
+    [LibraryImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetTextMetricsW(IntPtr hdc, out TEXTMETRICW lptm);
+
+    [LibraryImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool DeleteObject(IntPtr ho);
+#else
+    // .NET Framework 不支持 LibraryImport 源生成器，保留经典 DllImport。
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateFontW(int cHeight, int cWidth, int cEscapement, int cOrientation, int cWeight, uint bItalic, uint bUnderline, uint bStrikeOut, uint iCharSet, uint iOutPrecision, uint iClipPrecision, uint iQuality, uint iPitchAndFamily, string pszFaceName);
     [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr hdc, IntPtr h);
-    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] private static extern bool GetTextMetricsW(IntPtr hdc, out TEXTMETRICW lptm);
+    [DllImport("gdi32.dll")] private static extern bool GetTextMetricsW(IntPtr hdc, out TEXTMETRICW lptm);
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr ho);
+#endif
 
     #endregion
 }

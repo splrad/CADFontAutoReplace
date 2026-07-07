@@ -8,7 +8,7 @@
 2. 常用开发入口是版本壳 `src/AutoCAD/AFR-ACAD20XX/`，真正业务代码主要在 `src/AutoCAD/AFR.AutoCAD/`。
 3. `AFR.Core`、`AFR.UI`、`AFR.HostIntegration`、`AFR.Polyfills` 不能引用 AutoCAD SDK。
 4. Hook 安装成功不等于字体映射成功；成功必须看真实 `HookHandler` hit / redirect 和 `FontRuntimeMappingStore` 结果。
-5. 改了命令、Hook、发布或范围边界时，要同步 README、`PROJECT_HANDOVER.md`、`.github/copilot-instructions.md` 或本文中的对应事实。
+5. 改了命令、Hook、发布或范围边界时，要同步 README、本文和本机私有项目记忆中的对应事实。
 
 当前项目只维护 AutoCAD 缺失字体自动替换、文件级字体运行时映射和部署器发布。当前源码不包含 DBText、GlyphCore、WenShu、AI 推理、训练数据、候选包、模型、报告、补绘或 native decode evidence 链路；这些名称只作为历史上下文，不能当作当前入口恢复。
 
@@ -24,7 +24,7 @@
 dotnet build src/AutoCAD/AFR-ACAD2026/AFR-ACAD2026.csproj
 ```
 
-4. 找到输出 DLL：`artifacts/bin/AFR-ACAD2026/debug/AFR-ACAD2026.dll`。
+4. 找到目标版本壳生成的 Debug DLL。
 5. 启动对应 AutoCAD，用 VS 调试版本壳，或在 CAD 里手动 `NETLOAD` 这个 DLL。
 6. CAD 命令行执行 `AFR`，确认字体配置窗口能打开。
 7. 打开一张测试 DWG，执行 `AFRLOG`，确认能看到样式表检测和替换结果。
@@ -75,7 +75,7 @@ dotnet build CADFontAutoReplace.slnx
 
 1. 构建目标版本壳。
 2. 在 AutoCAD 命令行输入 `NETLOAD`。
-3. 选择 `artifacts/bin/AFR-ACAD20XX/debug/AFR-ACAD20XX.dll`。
+3. 选择目标版本壳生成的 Debug DLL。
 4. 首次 `NETLOAD` 会完成默认字体释放、配置初始化和自动加载注册，按命令行提示重启后再验证 Hook 行为。
 
 ### 部署器安装
@@ -117,8 +117,8 @@ Hook 诊断必须分清三层：安装成功、收到 native 请求、实际 red
 | 改 Hook | `LdFileHook`、`ShpLoadHook`、`NativeFontHookProfile` | 真实 `HookHandler` hit/redirect，2027 ABI 和 fail-closed 行为正确 |
 | 改 AFRLOG | `AfrCommands`、`DocumentContextManager`、UI ViewModel | 原始检测、仍缺失、运行时映射三类数据来源不混淆 |
 | 改部署器 | `src/AFR.Deployer`、`AFR.HostIntegration` | UAC、注册表、嵌入资源、安装/卸载、字体释放都验证 |
-| 改发布流程 | `Publish-ReleaseAssets.ps1`、Release workflow、`Version.props` | `artifacts/ReleaseAssets` 三件套生成且名称带版本 |
-| 改文档 | README、本文、交接文档、仓库记忆 | 搜索旧入口和历史链路，确认没有误导性残留 |
+| 改发布流程 | `Publish-ReleaseAssets.ps1`、Release workflow、`Version.props` | 发布资产三件套生成且名称带版本 |
+| 改文档 | README、本文、本机私有项目记忆 | 搜索旧入口和历史链路，确认没有误导性残留 |
 
 ## 7. 第一次做小改动
 
@@ -130,7 +130,7 @@ Hook 诊断必须分清三层：安装成功、收到 native 请求、实际 red
 
 - `README.md`
 - 如果事实变化影响维护者，也同步 `docs/developer-guide.md`
-- 如果是长期行为规则，也同步 `.github/copilot-instructions.md`
+- 如果是长期行为规则，也同步本机私有项目记忆
 
 验证：
 
@@ -309,7 +309,7 @@ docs                      使用与开发文档
 - `AFR.Deployer` 是 `net10.0-windows`、`win-x64`、自包含单文件 WPF 应用。
 - `app.manifest` 请求 `requireAdministrator`，安装/卸载时应预期 UAC。
 - 部署器通过 `AFR.HostIntegration` 共用内嵌 SHX 字体释放和 `FixedProfile.aws` 弹窗抑制能力。
-- 插件 DLL 与 `.cad.json` 从 `artifacts/bin/AFR-ACAD*/release/` 嵌入部署器资源。
+- 插件 DLL 与 `.cad.json` 从标准 Release 构建输出嵌入部署器资源。
 - 不需要 Windows App Runtime 作为外置依赖；不要重新引入该要求，除非代码确实改为依赖 WinAppSDK。
 
 发布资产由 `tools/Publish-ReleaseAssets.ps1` 统一生成：
@@ -319,14 +319,7 @@ docs                      使用与开发文档
 ./tools/Publish-ReleaseAssets.ps1 -SkipPluginBuild
 ```
 
-输出约定：
-
-```text
-publish/AFR.Deployer/AFR-Deployer.exe
-artifacts/ReleaseAssets/AFR-Deployer_vX.Y.Z.exe
-artifacts/ReleaseAssets/AFR-DLL_vX.Y.Z.zip
-artifacts/ReleaseAssets/Fonts.zip
-```
+输出约定：脚本会生成部署器 EXE、插件 DLL 压缩包和字体压缩包，发布资产文件名带版本号。
 
 发版版本号来自根目录 `Version.props`。发布脚本不接受模型、模型清单、训练包或原生推理运行时参数。
 
@@ -363,8 +356,7 @@ Hook 变更：
 
 - README 面向用户，避免写内部实现细节过多。
 - 本文必须能指导新手完成首次开发闭环，同时保留维护边界。
-- `PROJECT_HANDOVER.md` 是短版交接，不要塞成长篇教程。
-- `.github/copilot-instructions.md` 是仓库长期协作记忆，行为变化时必须同步。
+- 本机私有项目记忆只保留在本地，行为变化时必须同步；公开文档不要引用本地忽略路径。
 
 ## 16. 禁止事项
 
@@ -378,6 +370,5 @@ Hook 变更：
 
 ## 17. 相关文档
 
-- [字体 Hook 证据与边界](font-hook-evidence-and-boundaries.md)
 - [Git 分支管理摘要](git-branch-guidelines.md)
 - [AutoCAD 原版 SHX 字体清单](autodesk-fonts.md)

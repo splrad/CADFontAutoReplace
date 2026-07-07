@@ -178,8 +178,6 @@ AFR 缺失字体自动替换 v9.1.0
 
 AFR 不改写 `MText.Contents`。当前流程会先修复样式表缺失字体，再通过 `Regen` 让 AutoCAD 原生展开和绘制 MText；内联字体在运行时文件加载阶段映射，`AFRLOG` 中的内联映射记录只来自真实运行时命中结果。
 
-更具体的 Hook 边界和验收证据见 [字体 Hook 证据与边界](docs/font-hook-evidence-and-boundaries.md)。
-
 > 注意：若图纸正文字符已经被错误编码保存（文字数据已损坏），字体替换无法恢复原文。
 
 </details>
@@ -212,7 +210,6 @@ QQ：1186191934
 ## 🛠️ 开发者说明
 
 - [开发者指南](docs/developer-guide.md)
-- [字体 Hook 证据与边界](docs/font-hook-evidence-and-boundaries.md)
 - [规范：Git 分支模板](docs/git-branch-guidelines.md)
 
 ---

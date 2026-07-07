@@ -19,6 +19,14 @@ internal static class AwsHideableDialogPatcher
     public static int Apply(CadDescriptor descriptor)
         => AwsHideableDialogPatcherCore.Apply(descriptor.Brand, descriptor.Version, descriptor.RegistryBasePath);
 
+    /// <summary>安装 / 更新时只覆盖缺失 SHX 弹窗对应的 <c>HideableDialog</c> 节点。</summary>
+    /// <returns>实际写入或刷新的文件数量。</returns>
+    public static int ApplyInstallOrUpdateOverride(CadDescriptor descriptor)
+        => AwsHideableDialogPatcherCore.ApplyInstallOrUpdateOverride(
+            descriptor.Brand,
+            descriptor.Version,
+            descriptor.RegistryBasePath);
+
     /// <summary>删除指定 CAD 版本对应 <c>FixedProfile.aws</c> 中带 AFR 所有权标记的抑制节点。</summary>
     /// <returns>实际清理的文件数量。</returns>
     public static int Cleanup(CadDescriptor descriptor)

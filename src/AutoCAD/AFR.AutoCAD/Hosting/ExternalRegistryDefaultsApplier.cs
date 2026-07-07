@@ -123,7 +123,7 @@ internal static class ExternalRegistryDefaultsApplier
             using (var ownedRoot = Registry.CurrentUser.OpenSubKey($@"{appPath}\{OwnedSubKey}", false))
             {
                 if (ownedRoot is null) return;
-                ownedSubPaths = EnumerateOwnedSubPaths(ownedRoot, currentPrefix: "").ToList();
+                ownedSubPaths = [.. EnumerateOwnedSubPaths(ownedRoot, currentPrefix: "")];
             }
 
             using (var ownedRoot = Registry.CurrentUser.OpenSubKey($@"{appPath}\{OwnedSubKey}", false))

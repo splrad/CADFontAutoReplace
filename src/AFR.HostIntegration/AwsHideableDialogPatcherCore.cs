@@ -85,6 +85,85 @@ internal static class AwsHideableDialogPatcherCore
     }
 
     /// <summary>
+    /// 安装 / 更新时专用：只覆盖 <c>Acad.UnresolvedFontFiles</c> 对应的 HideableDialog 节点。
+    /// AutoCAD 运行中、文件不存在或写入异常一律视为本次跳过（不抛出）。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="Apply"/> 不同，本方法会接管用户已有的同 id 节点（例如 result=1001），
+    /// 但不会改动 <c>FixedProfile.aws</c> 中其它节点。调用方必须只在首次安装或更新时调用，
+    /// 以便用户后续手动修改不会被同版本重复安装覆盖。
+    /// </remarks>
+    /// <returns>实际写入或刷新的文件数量。</returns>
+    public static int ApplyInstallOrUpdateOverride(
+        string brand,
+        string version,
+        string registryBasePath,
+        System.Action<string, string>? log = null)
+    {
+        if (IsAutoCadRunning())
+        {
+            log?.Invoke("AwsPatcher", "ApplyInstallOrUpdateOverride 跳过：检测到 acad.exe 运行中。");
+            return 0;
+        }
+
+        var paths = EnumerateTargetAwsFiles(brand, version, registryBasePath).ToArray();
+        if (paths.Length == 0)
+        {
+            log?.Invoke("AwsPatcher", "ApplyInstallOrUpdateOverride 跳过：未找到任何 FixedProfile.aws，等待 CAD 首次启动生成。");
+            return 0;
+        }
+
+        int count = 0;
+        foreach (var path in paths)
+        {
+            try
+            {
+                if (WriteInstallOrUpdateOverrideNode(path)) count++;
+            }
+            catch (System.Exception ex)
+            {
+                log?.Invoke("AwsPatcher", $"安装/更新覆盖 {path} 失败：{ex.Message}");
+            }
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// 插件运行期专用：跳过 acad.exe 进程检查，只覆盖缺失 SHX 弹窗对应节点。
+    /// </summary>
+    /// <remarks>
+    /// 用于手动 NETLOAD 首次安装 / 更新场景。调用后仍需提示用户重启 CAD，确保宿主重新读取 Profile。
+    /// </remarks>
+    /// <returns>实际写入或刷新的文件数量。</returns>
+    public static int ApplyInstallOrUpdateOverrideInRunningHost(
+        string brand,
+        string version,
+        string registryBasePath,
+        System.Action<string, string>? log = null)
+    {
+        var paths = EnumerateTargetAwsFiles(brand, version, registryBasePath).ToArray();
+        if (paths.Length == 0)
+        {
+            log?.Invoke("AwsPatcher", "ApplyInstallOrUpdateOverrideInRunningHost 跳过：未找到任何 FixedProfile.aws。");
+            return 0;
+        }
+
+        int count = 0;
+        foreach (var path in paths)
+        {
+            try
+            {
+                if (WriteInstallOrUpdateOverrideNode(path)) count++;
+            }
+            catch (System.Exception ex)
+            {
+                log?.Invoke("AwsPatcher", $"运行期覆盖 {path} 失败：{ex.Message}");
+            }
+        }
+        return count;
+    }
+
+    /// <summary>
     /// 删除指定 CAD 版本对应 <c>FixedProfile.aws</c> 中所有带 AFR 所有权标记的抑制节点。
     /// 用户手动设置（无标记）的同名节点不会被删除。
     /// </summary>
@@ -133,6 +212,22 @@ internal static class AwsHideableDialogPatcherCore
                       .FirstOrDefault(e => e.Name.LocalName == "HideableDialog"
                                         && (string?)e.Attribute("id") == DialogId);
         return node?.ToString(SaveOptions.DisableFormatting) ?? string.Empty;
+    }
+
+    /// <summary>判断指定 .aws 中的缺失 SHX 弹窗节点是否已经是 AFR 标准抑制节点。</summary>
+    public static bool IsDialogNodeUpToDate(string awsPath)
+    {
+        if (!File.Exists(awsPath)) return false;
+        var doc = XDocument.Load(awsPath);
+        var profile = doc.Root;
+        if (profile is null || profile.Name.LocalName != "Profile") return false;
+        var ns = profile.GetDefaultNamespace();
+
+        var nodes = profile.Descendants()
+                           .Where(e => e.Name.LocalName == "HideableDialog"
+                                    && (string?)e.Attribute("id") == DialogId)
+                           .ToList();
+        return nodes.Count == 1 && IsOwnedNodeUpToDate(nodes[0], ns);
     }
 
     /// <summary>判断 acad.exe 是否在运行。任何异常一律视为"在运行"，从安全侧拒绝写入。</summary>
@@ -213,6 +308,37 @@ internal static class AwsHideableDialogPatcherCore
         return true;
     }
 
+    /// <summary>
+    /// 安装 / 更新时只替换缺失 SHX 弹窗对应节点；其它 .aws 内容保持不变。
+    /// </summary>
+    private static bool WriteInstallOrUpdateOverrideNode(string path)
+    {
+        if (!File.Exists(path)) return false;
+
+        var doc = XDocument.Load(path, LoadOptions.PreserveWhitespace);
+        var profile = doc.Root;
+        if (profile is null || profile.Name.LocalName != "Profile") return false;
+        var ns = profile.GetDefaultNamespace();
+
+        var storageRoot = profile.Element(ns + "StorageRoot")  ?? AddChild(profile,     ns + "StorageRoot");
+        var acApData    = storageRoot.Element(ns + "AcApData") ?? AddChild(storageRoot, ns + "AcApData");
+        var hideables   = acApData.Element(ns + "HideableDialogs") ?? AddChild(acApData, ns + "HideableDialogs");
+
+        var existingNodes = hideables.Elements(ns + "HideableDialog")
+                                     .Where(e => (string?)e.Attribute("id") == DialogId)
+                                     .ToList();
+
+        if (existingNodes.Count == 1 && IsOwnedNodeUpToDate(existingNodes[0], ns))
+            return false;
+
+        foreach (var existing in existingNodes)
+            existing.Remove();
+
+        hideables.Add(BuildOwnedNode(ns));
+        SaveAtomically(doc, path);
+        return true;
+    }
+
     /// <summary>构造带 AFR 标记的目标节点（结构与 AutoCAD 自写一致）。</summary>
     private static XElement BuildOwnedNode(XNamespace ns)
     {
@@ -234,6 +360,7 @@ internal static class AwsHideableDialogPatcherCore
     /// <summary>判断已存在的自有节点结构是否已经与当前目标完全一致（用于跳过冗余写入）。</summary>
     private static bool IsOwnedNodeUpToDate(XElement existing, XNamespace ns)
     {
+        if ((string?)existing.Attribute(OwnershipAttr) != OwnershipToken) return false;
         if ((string?)existing.Attribute("title")       != DialogTitle)  return false;
         if ((string?)existing.Attribute("category")    != DialogTitle)  return false;
         if ((string?)existing.Attribute("application") != "")           return false;

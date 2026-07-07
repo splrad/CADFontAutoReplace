@@ -6,6 +6,31 @@ using AFR.Services;
 
 namespace AFR.Hosting;
 
+internal enum PluginInitializationState
+{
+    NormalRun = 0,
+    CompletingStagedInstall = 1,
+    Updated = 2,
+    FirstInstall = 3,
+}
+
+internal sealed class PluginInitializationResult
+{
+    public PluginInitializationResult(PluginInitializationState state)
+    {
+        State = state;
+    }
+
+    public PluginInitializationState State { get; }
+
+    public bool IsFirstInstall => State == PluginInitializationState.FirstInstall;
+
+    public bool ShouldApplyAwsOverride => State is PluginInitializationState.FirstInstall
+                                                or PluginInitializationState.Updated;
+
+    public bool ShouldSkipRuntimeStartup => State == PluginInitializationState.FirstInstall;
+}
+
 /// <summary>
 /// 处理插件的首次注册表初始化、自动加载键值设置以及默认配置创建。
 /// <para>
@@ -30,11 +55,11 @@ internal static class AppInitializer
     /// <summary>
     /// 执行注册表初始化：为所有匹配的 CAD 配置文件创建/更新自动加载条目。
     /// </summary>
-    /// <returns>true 表示首次安装（至少一个配置文件是新建的），false 表示更新已有配置。</returns>
-    public static bool Initialize()
+    /// <returns>本次初始化聚合状态。</returns>
+    public static PluginInitializationResult Initialize()
     {
         var log = LogService.Instance;
-        bool isFirstRun = false;
+        var state = PluginInitializationState.NormalRun;
         try
         {
             var dllPath = GetCurrentDllPath();
@@ -48,14 +73,13 @@ internal static class AppInitializer
                     "GetAcadProfiles",
                     "未找到有效的 AutoCAD 配置文件",
                     new Dictionary<string, object?> { ["versionTag"] = versionTag });
-                return false;
+                return new PluginInitializationResult(state);
             }
 
             foreach (var profile in profiles)
             {
                 var appPath = $@"{AutoCadBasePath}\{profile}\Applications\{AppName}";
-                if (InitializeProfile(appPath, dllPath))
-                    isFirstRun = true;
+                state = MaxState(state, InitializeProfile(appPath, dllPath));
             }
 
             #if AFR_EXTERNAL_REGISTRY
@@ -63,16 +87,12 @@ internal static class AppInitializer
             // 定义 AFR_EXTERNAL_REGISTRY 则 NETLOAD 与部署工具共用同一份声明。
             ExternalRegistryDefaultsApplier.Apply();
             #endif
-
-            // 抑制 AutoCAD“缺少 SHX 文件”弹窗：写入 FixedProfile.aws。
-            // 仅在 AutoCAD 未运行时生效；NETLOAD 现场加载会被 Apply 内部进程检查拒绝。
-            try { Diagnostics.AwsHideableDialogPatcher.Apply(); } catch { }
         }
         catch (Exception ex)
         {
             log.Error("初始化失败", ex);
         }
-        return isFirstRun;
+        return new PluginInitializationResult(state);
     }
 
     /// <summary>
@@ -81,8 +101,8 @@ internal static class AppInitializer
     /// </summary>
     /// <param name="appPath">该配置文件对应的完整注册表路径。</param>
     /// <param name="dllPath">插件 DLL 的完整文件路径。</param>
-    /// <returns>true 表示是首次创建（之前不存在该注册表键）。</returns>
-    private static bool InitializeProfile(string appPath, string dllPath)
+    /// <returns>该配置文件的初始化状态。</returns>
+    private static PluginInitializationState InitializeProfile(string appPath, string dllPath)
     {
         bool isNewKey = !RegistryService.KeyExists(Registry.CurrentUser, appPath);
         string currentPluginVersion = PluginVersionService.GetDisplayVersion();
@@ -91,6 +111,19 @@ internal static class AppInitializer
         string? installedPluginVersion = RegistryService.ReadString(Registry.CurrentUser, appPath, PluginVersionValueName);
         string? installedBuildId = RegistryService.ReadString(Registry.CurrentUser, appPath, PluginBuildIdValueName);
         int? installedConfigSchemaVersion = RegistryService.ReadDword(Registry.CurrentUser, appPath, ConfigSchemaVersionValueName);
+        int? installedInitialized = RegistryService.ReadDword(Registry.CurrentUser, appPath, "IsInitialized");
+        bool versionChanged = !isNewKey
+                           && (!string.Equals(installedPluginVersion, currentPluginVersion, StringComparison.Ordinal)
+                            || !string.Equals(installedBuildId, currentBuildId, StringComparison.Ordinal));
+        bool schemaChanged = !isNewKey && installedConfigSchemaVersion != currentConfigSchemaVersion;
+        bool isStagedInstall = !isNewKey && installedInitialized != 1;
+        var state = isNewKey
+            ? PluginInitializationState.FirstInstall
+            : versionChanged || schemaChanged
+                ? PluginInitializationState.Updated
+                : isStagedInstall
+                    ? PluginInitializationState.CompletingStagedInstall
+                    : PluginInitializationState.NormalRun;
 
         // 自动加载键值（幂等写入 — 仅在值与预期不同时才写入注册表）
         WriteIfChanged(appPath, "LOADER", dllPath);
@@ -106,14 +139,14 @@ internal static class AppInitializer
             WriteDefaultConfiguration(appPath);
             WriteIfChanged(appPath, ConfigSchemaVersionValueName, currentConfigSchemaVersion);
         }
-        else if (RegistryService.ReadDword(Registry.CurrentUser, appPath, "IsInitialized") != 1)
+        else if (isStagedInstall)
         {
             // 部署工具预创建注册表键时仅写入默认字体名 + IsInitialized=0，
             // 需要在插件首次加载时释放内嵌 SHX 到 CAD Fonts 目录并将 IsInitialized 翻为 1。
             CompleteDeployerInitialization(appPath);
             WriteIfChanged(appPath, ConfigSchemaVersionValueName, currentConfigSchemaVersion);
         }
-        else if (installedConfigSchemaVersion != currentConfigSchemaVersion)
+        else if (schemaChanged)
         {
             MigrateConfiguration(appPath, installedConfigSchemaVersion);
             WriteIfChanged(appPath, ConfigSchemaVersionValueName, currentConfigSchemaVersion);
@@ -128,8 +161,8 @@ internal static class AppInitializer
                     ["toConfigSchemaVersion"] = currentConfigSchemaVersion
                 });
         }
-        else if (!string.Equals(installedPluginVersion, currentPluginVersion, StringComparison.Ordinal)
-              || !string.Equals(installedBuildId, currentBuildId, StringComparison.Ordinal))
+
+        if (versionChanged)
         {
             DiagnosticLogger.Ok(
                 "AppInitializer",
@@ -144,8 +177,21 @@ internal static class AppInitializer
                     ["toBuildId"] = currentBuildId
                 });
         }
-        return isNewKey;
+
+        DiagnosticLogger.Ok(
+            "AppInitializer",
+            "InitializeProfile",
+            "配置文件初始化状态已判定",
+            new Dictionary<string, object?>
+            {
+                ["appPath"] = appPath,
+                ["state"] = state.ToString()
+            });
+        return state;
     }
+
+    private static PluginInitializationState MaxState(PluginInitializationState left, PluginInitializationState right)
+        => (PluginInitializationState)Math.Max((int)left, (int)right);
 
     /// <summary>
     /// 完成由部署工具预创建注册表键时的剩余初始化。

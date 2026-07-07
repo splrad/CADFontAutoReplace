@@ -24,7 +24,7 @@ internal static class AfrUnloadCommand
             var config = ConfigService.Instance;
             config.DeleteAllApplicationKeys();
 
-            log.Info("AFR 已卸载，重启 CAD 后可通过 NETLOAD 重新加载。");
+            log.InfoLast("AFR 已卸载，重启 CAD 后可通过 NETLOAD 重新加载。");
             DiagnosticLogger.Ok("AfrUnloadCommand", "Execute", "AFRUNLOAD 隐藏卸载完成");
             log.Flush();
         }
