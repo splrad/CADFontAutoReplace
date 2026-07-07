@@ -165,7 +165,7 @@ internal static class AwsHideableDialogPatcherCore
 
     /// <summary>枚举本 CAD 版本对应的所有 <c>FixedProfile.aws</c> 候选路径（诊断用）。</summary>
     public static string[] ListTargetAwsFiles(string brand, string version, string registryBasePath)
-        => EnumerateTargetAwsFiles(brand, version, registryBasePath).ToArray();
+        => [.. EnumerateTargetAwsFiles(brand, version, registryBasePath)];
 
     /// <summary>定位活动 <c>FixedProfile.aws</c>：候选中最近修改的一个；无候选返回 null。</summary>
     public static string? LocateActiveAwsPath(string brand, string version, string registryBasePath)
@@ -272,7 +272,7 @@ internal static class AwsHideableDialogPatcherCore
     {
         if (string.IsNullOrEmpty(registryBasePath)) return string.Empty;
         var idx = registryBasePath.LastIndexOf('\\');
-        return idx >= 0 ? registryBasePath.Substring(idx + 1) : registryBasePath;
+        return idx >= 0 ? registryBasePath[(idx + 1)..] : registryBasePath;
     }
 
     /// <summary>

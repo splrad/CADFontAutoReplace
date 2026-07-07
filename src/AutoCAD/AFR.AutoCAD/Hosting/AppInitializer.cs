@@ -14,17 +14,13 @@ internal enum PluginInitializationState
     FirstInstall = 3,
 }
 
-internal sealed class PluginInitializationResult
+internal sealed class PluginInitializationResult(
+    PluginInitializationState state,
+    bool awsSuppressionWarningShown)
 {
-    public PluginInitializationResult(PluginInitializationState state, bool awsSuppressionWarningShown)
-    {
-        State = state;
-        AwsSuppressionWarningShown = awsSuppressionWarningShown;
-    }
+    public PluginInitializationState State { get; } = state;
 
-    public PluginInitializationState State { get; }
-
-    public bool AwsSuppressionWarningShown { get; }
+    public bool AwsSuppressionWarningShown { get; } = awsSuppressionWarningShown;
 
     public bool IsFirstInstall => State == PluginInitializationState.FirstInstall;
 
@@ -74,7 +70,7 @@ internal static class AppInitializer
             var profiles = GetAcadProfiles();
             if (profiles.Count == 0)
             {
-                var versionTag = AutoCadBasePath.Substring(AutoCadBasePath.LastIndexOf('\\') + 1);
+                var versionTag = AutoCadBasePath[(AutoCadBasePath.LastIndexOf('\\') + 1)..];
                 DiagnosticLogger.Skip(
                     "AppInitializer",
                     "GetAcadProfiles",
@@ -158,7 +154,7 @@ internal static class AppInitializer
         }
         else if (schemaChanged)
         {
-            MigrateConfiguration(appPath, installedConfigSchemaVersion);
+            MigrateConfiguration(appPath);
             WriteIfChanged(appPath, ConfigSchemaVersionValueName, currentConfigSchemaVersion);
             DiagnosticLogger.Ok(
                 "AppInitializer",
@@ -219,16 +215,12 @@ internal static class AppInitializer
             yield return $@"{AutoCadBasePath}\{profile}\Applications\{AppName}";
     }
 
-    private readonly struct ProfileInitializationResult
+    private readonly struct ProfileInitializationResult(
+        PluginInitializationState state,
+        bool awsSuppressionWarningShown)
     {
-        public ProfileInitializationResult(PluginInitializationState state, bool awsSuppressionWarningShown)
-        {
-            State = state;
-            AwsSuppressionWarningShown = awsSuppressionWarningShown;
-        }
-
-        public PluginInitializationState State { get; }
-        public bool AwsSuppressionWarningShown { get; }
+        public PluginInitializationState State { get; } = state;
+        public bool AwsSuppressionWarningShown { get; } = awsSuppressionWarningShown;
     }
 
     /// <summary>
@@ -316,8 +308,7 @@ internal static class AppInitializer
     /// </para>
     /// </summary>
     /// <param name="appPath">该配置文件对应的完整注册表路径。</param>
-    /// <param name="installedConfigSchemaVersion">注册表中已有的配置架构版本。</param>
-    private static void MigrateConfiguration(string appPath, int? installedConfigSchemaVersion)
+    private static void MigrateConfiguration(string appPath)
     {
         EmbeddedFontDeployer.Deploy();
 

@@ -18,7 +18,7 @@ public class AfrCommands
     /// AFR：保存替换字体配置，并在 Hook 已安装时处理当前图纸。
     /// </summary>
     [CommandMethod(AFR.Constants.CommandNames.Main)]
-    public void AfrCommand()
+    public static void AfrCommand()
     {
         var log = LogService.Instance;
         DiagnosticLogger.Start("AfrCommands", "AfrCommand", "AFR 命令启动");
@@ -111,7 +111,7 @@ public class AfrCommands
     /// </para>
     /// </summary>
     [CommandMethod(AFR.Constants.CommandNames.Log)]
-    public void AfrLogCommand()
+    public static void AfrLogCommand()
     {
         var log = LogService.Instance;
         DiagnosticLogger.Start("AfrCommands", "AfrLogCommand", "AFRLOG 命令启动");
@@ -197,87 +197,89 @@ public class AfrCommands
                     ["fontMappingCount"] = vm.FontMappingCount
                 });
 
-            var window = new FontReplacementLogWindow(vm);
-            window.ApplyReplacementsHandler = replacements =>
+            var window = new FontReplacementLogWindow(vm)
             {
-                DiagnosticLogger.Start(
-                    "AfrCommands",
-                    "ApplyReplacementsHandler",
-                    "AFRLOG 手动替换请求处理开始",
-                    new Dictionary<string, object?> { ["replacementCount"] = replacements.Count });
-                for (int i = 0; i < replacements.Count; i++)
+                ApplyReplacementsHandler = replacements =>
                 {
-                    var r = replacements[i];
-                    DiagnosticLogger.Ok(
-                        "AfrCommands",
-                        "ApplyReplacementRequest",
-                        "AFRLOG 手动替换请求明细",
-                        new Dictionary<string, object?>
-                        {
-                            ["index"] = i,
-                            ["styleName"] = r.StyleName,
-                            ["mainFont"] = r.MainFontReplacement,
-                            ["bigFont"] = r.BigFontReplacement,
-                            ["isTrueType"] = r.IsTrueType
-                        });
-                }
-
-                using (doc.LockDocument())
-                {
-                    // 手动替换与自动执行隔离缓存。
-                    var replaceContext = new FontDetectionContext(doc.Database);
-                    int count = FontReplacer.ReplaceByStyleMapping(replacements, replaceContext);
-                    DiagnosticLogger.Ok(
+                    DiagnosticLogger.Start(
                         "AfrCommands",
                         "ApplyReplacementsHandler",
-                        "AFRLOG 手动替换请求处理完成",
-                        new Dictionary<string, object?> { ["replacedCount"] = count });
-                    if (count > 0)
-                        doc.Editor.Regen();
-                    return count;
-                }
-            };
-
-            // 手动替换后刷新窗口数据，不重新推导运行时映射。
-            window.RefreshHandler = () =>
-            {
-                List<FontCheckResult> freshResults;
-                HashSet<string>? freshMissing = null;
-                Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? freshFonts = null;
-                List<RuntimeFontMappingResultRecord>? freshRuntimeMappings = null;
-
-                using (doc.LockDocument())
-                {
-                    var freshContext = new FontDetectionContext(doc.Database);
-                    var currentMissing = FontDetector.DetectMissingFonts(freshContext);
-                    freshRuntimeMappings = DocumentContextManager.Instance.GetRuntimeFontMappingResults(doc);
-
-                    var stored = DocumentContextManager.Instance.GetDetectionResults(doc);
-                    if (stored != null && stored.Count > 0)
+                        "AFRLOG 手动替换请求处理开始",
+                        new Dictionary<string, object?> { ["replacementCount"] = replacements.Count });
+                    for (int i = 0; i < replacements.Count; i++)
                     {
-                        freshResults = stored;
-                        freshMissing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                        for (int i = 0; i < currentMissing.Count; i++)
-                            freshMissing.Add(currentMissing[i].StyleName);
+                        var r = replacements[i];
+                        DiagnosticLogger.Ok(
+                            "AfrCommands",
+                            "ApplyReplacementRequest",
+                            "AFRLOG 手动替换请求明细",
+                            new Dictionary<string, object?>
+                            {
+                                ["index"] = i,
+                                ["styleName"] = r.StyleName,
+                                ["mainFont"] = r.MainFontReplacement,
+                                ["bigFont"] = r.BigFontReplacement,
+                                ["isTrueType"] = r.IsTrueType
+                            });
                     }
-                    else
+
+                    using (doc.LockDocument())
                     {
-                        freshResults = currentMissing;
-                        if (currentMissing.Count > 0)
+                        // 手动替换与自动执行隔离缓存。
+                        var replaceContext = new FontDetectionContext(doc.Database);
+                        int count = FontReplacer.ReplaceByStyleMapping(replacements, replaceContext);
+                        DiagnosticLogger.Ok(
+                            "AfrCommands",
+                            "ApplyReplacementsHandler",
+                            "AFRLOG 手动替换请求处理完成",
+                            new Dictionary<string, object?> { ["replacedCount"] = count });
+                        if (count > 0)
+                            doc.Editor.Regen();
+                        return count;
+                    }
+                },
+
+                // 手动替换后刷新窗口数据，不重新推导运行时映射。
+                RefreshHandler = () =>
+                {
+                    List<FontCheckResult> freshResults;
+                    HashSet<string>? freshMissing = null;
+                    Dictionary<string, (string FileName, string BigFontFileName, string TypeFace)>? freshFonts = null;
+                    List<RuntimeFontMappingResultRecord>? freshRuntimeMappings = null;
+
+                    using (doc.LockDocument())
+                    {
+                        var freshContext = new FontDetectionContext(doc.Database);
+                        var currentMissing = FontDetector.DetectMissingFonts(freshContext);
+                        freshRuntimeMappings = DocumentContextManager.Instance.GetRuntimeFontMappingResults(doc);
+
+                        var stored = DocumentContextManager.Instance.GetDetectionResults(doc);
+                        if (stored != null && stored.Count > 0)
                         {
+                            freshResults = stored;
                             freshMissing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                             for (int i = 0; i < currentMissing.Count; i++)
                                 freshMissing.Add(currentMissing[i].StyleName);
                         }
+                        else
+                        {
+                            freshResults = currentMissing;
+                            if (currentMissing.Count > 0)
+                            {
+                                freshMissing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                for (int i = 0; i < currentMissing.Count; i++)
+                                    freshMissing.Add(currentMissing[i].StyleName);
+                            }
+                        }
+
+                        if (freshResults.Count > 0)
+                            freshFonts = FontDetector.ReadCurrentFontAssignments(doc.Database);
                     }
 
-                    if (freshResults.Count > 0)
-                        freshFonts = FontDetector.ReadCurrentFontAssignments(doc.Database);
+                    return new FontReplacementLogViewModel(
+                        freshResults, config.MainFont, config.BigFont, config.TrueTypeFont,
+                        freshFonts, freshRuntimeMappings, freshMissing);
                 }
-
-                return new FontReplacementLogViewModel(
-                    freshResults, config.MainFont, config.BigFont, config.TrueTypeFont,
-                    freshFonts, freshRuntimeMappings, freshMissing);
             };
 
             PlatformManager.Host.ShowModalWindow(window);

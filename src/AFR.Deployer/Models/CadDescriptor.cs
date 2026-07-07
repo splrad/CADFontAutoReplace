@@ -46,7 +46,7 @@ internal static class CadDescriptors
     /// <summary>按 (品牌, 版本) 升序排列的所有支持版本。</summary>
     internal static readonly IReadOnlyList<CadDescriptor> All = LoadFromEmbeddedSidecars();
 
-    private static IReadOnlyList<CadDescriptor> LoadFromEmbeddedSidecars()
+    private static List<CadDescriptor> LoadFromEmbeddedSidecars()
     {
         var assembly = typeof(CadDescriptors).Assembly;
         var sidecarNames = assembly.GetManifestResourceNames()
@@ -78,10 +78,9 @@ internal static class CadDescriptors
                 EmbeddedResourceKey: dto.EmbeddedResourceKey ?? $"{ResourcePrefix}{dto.AppName}.dll"));
         }
 
-        return list
+        return [.. list
             .OrderBy(d => d.Brand,   StringComparer.OrdinalIgnoreCase)
-            .ThenBy (d => d.Version, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            .ThenBy (d => d.Version, StringComparer.OrdinalIgnoreCase)];
     }
 
     /// <summary>JSON Sidecar 反序列化 DTO（与 EmitCadDescriptorJson Target 输出字段一致）。</summary>

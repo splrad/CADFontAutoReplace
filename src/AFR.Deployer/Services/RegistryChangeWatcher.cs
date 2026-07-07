@@ -21,7 +21,7 @@ namespace AFR.Deployer.Services;
 /// 自动回退到祖先继续等待。
 /// </para>
 /// </summary>
-internal sealed class RegistryChangeWatcher : IDisposable
+internal sealed partial class RegistryChangeWatcher : IDisposable
 {
     private const int KEY_NOTIFY      = 0x0010;
     private const int KEY_WOW64_64KEY = 0x0100;
@@ -33,19 +33,20 @@ internal sealed class RegistryChangeWatcher : IDisposable
 
     private static readonly IntPtr HKEY_CURRENT_USER = new(unchecked((int)0x80000001));
 
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern int RegOpenKeyEx(
+    [LibraryImport("advapi32.dll", EntryPoint = "RegOpenKeyExW",
+        StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    private static partial int RegOpenKeyEx(
         IntPtr hKey, string subKey, int options, int samDesired, out SafeRegistryHandle phkResult);
 
-    [DllImport("advapi32.dll", SetLastError = true)]
-    private static extern int RegNotifyChangeKeyValue(
-        SafeRegistryHandle hKey, bool watchSubtree, int notifyFilter,
-        SafeWaitHandle hEvent, bool asynchronous);
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    private static partial int RegNotifyChangeKeyValue(
+        SafeRegistryHandle hKey, [MarshalAs(UnmanagedType.Bool)] bool watchSubtree, int notifyFilter,
+        SafeWaitHandle hEvent, [MarshalAs(UnmanagedType.Bool)] bool asynchronous);
 
     private readonly string                  _targetSubKey;
     private readonly string                  _fallbackRoot;
     private readonly CancellationTokenSource _cts = new();
-    private readonly object                  _gate = new();
+    private readonly Lock                    _gate = new();
 
     private SafeRegistryHandle?   _keyHandle;
     private ManualResetEvent?     _signal;

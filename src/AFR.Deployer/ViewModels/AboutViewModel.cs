@@ -19,13 +19,13 @@ internal sealed partial class AboutViewModel : ObservableObject
         _showInfoAsync = showInfoAsync;
     }
 
-    public string ProductName => "AFR-CAD 缺失字体自动替换插件部署工具";
+    public static string ProductName => "AFR-CAD 缺失字体自动替换插件部署工具";
 
-    public string Description => "自动扫描 AutoCAD 2018-2027 并完成 AFR 插件安装、卸载、字体释放和状态检查。";
+    public static string Description => "自动扫描 AutoCAD 2018-2027 并完成 AFR 插件安装、卸载、字体释放和状态检查。";
 
-    public string VersionText => $"v{DeployerVersionService.GetDisplayVersion()}";
+    public static string VersionText => $"v{DeployerVersionService.GetDisplayVersion()}";
 
-    public string BuildIdText
+    public static string BuildIdText
     {
         get
         {
@@ -34,13 +34,13 @@ internal sealed partial class AboutViewModel : ObservableObject
         }
     }
 
-    public string Author => "splrad 秋夕寻星";
+    public static string Author => "splrad 秋夕寻星";
 
-    public string LicenseName => "Apache License 2.0";
+    public static string LicenseName => "Apache License 2.0";
 
-    public string GitHubUrl => "https://github.com/splrad/CADFontAutoReplace";
+    public static string GitHubUrl => "https://github.com/splrad/CADFontAutoReplace";
 
-    public string GiteeUrl => "https://gitee.com/splrad/CADFontAutoReplace";
+    public static string GiteeUrl => "https://gitee.com/splrad/CADFontAutoReplace";
 
     [RelayCommand]
     private Task OpenGitHubAsync() => OpenUrlAsync(GitHubUrl);

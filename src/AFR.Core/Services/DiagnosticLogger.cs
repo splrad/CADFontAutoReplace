@@ -52,8 +52,12 @@ internal static class DiagnosticLogger
     private static long _currentFileSize;
 
     // ── 环境上下文 ──
-    private static readonly Dictionary<string, string> _context = new();
+    private static readonly Dictionary<string, string> _context = [];
+#if NET9_0_OR_GREATER
+    private static readonly System.Threading.Lock _contextLock = new();
+#else
     private static readonly object _contextLock = new();
+#endif
 
     private static long _sequence;
 
@@ -230,7 +234,11 @@ internal static class DiagnosticLogger
         IReadOnlyDictionary<string, object?>? fields = null,
         [CallerMemberName] string caller = "")
     {
+#if NET6_0_OR_GREATER
+        ArgumentNullException.ThrowIfNull(action);
+#else
         if (action == null) throw new ArgumentNullException(nameof(action));
+#endif
 
         var timer = Stopwatch.StartNew();
         Start(module, operation, startMessage, fields, caller);
