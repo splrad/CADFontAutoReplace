@@ -498,20 +498,24 @@ internal sealed partial class MainViewModel : ObservableObject
 
         await Task.Run(() =>
         {
-            // 收集安装成功的 CAD 版本，稍后统一处理 FixedProfile.aws。
-            var patchedDescriptors = new HashSet<CadDescriptor>();
+            // 仅首次安装 / 更新 / 修复缺失 DLL 时接管缺失 SHX 弹窗节点；同版本重复安装保留用户后续手动设置。
+            var awsOverrideDescriptors = new HashSet<CadDescriptor>();
 
             foreach (var entry in selected)
             {
                 var key = entry.Installation.Descriptor.AppName;
                 var fresh = freshResults.GetValueOrDefault(key, entry.Installation);
+                bool shouldOverrideAws = fresh.Status is PluginDeployStatus.NotInstalled
+                                                      or PluginDeployStatus.InstalledOutdated
+                                                      or PluginDeployStatus.DllMissing;
 
                 if (!PluginDeployer.TryInstall(fresh, DeployPath, out var err, out var installWarning))
                     errors.Add($"{fresh.Descriptor.DisplayName}：{err}");
                 else
                 {
                     successes++;
-                    patchedDescriptors.Add(fresh.Descriptor);
+                    if (shouldOverrideAws)
+                        awsOverrideDescriptors.Add(fresh.Descriptor);
                     if (!string.IsNullOrWhiteSpace(installWarning))
                         warnings.Add($"{fresh.Descriptor.DisplayName}：{installWarning}");
 
@@ -526,10 +530,10 @@ internal sealed partial class MainViewModel : ObservableObject
                 }
             }
 
-            // 抑制“缺少 SHX 文件”对话框：在全部写入完成后统一处理 FixedProfile.aws。
-            foreach (var desc in patchedDescriptors)
+            // 安装/更新时只覆盖缺失 SHX 弹窗对应节点，不改动 FixedProfile.aws 其它内容。
+            foreach (var desc in awsOverrideDescriptors)
             {
-                try { AwsHideableDialogPatcher.Apply(desc); }
+                try { AwsHideableDialogPatcher.ApplyInstallOrUpdateOverride(desc); }
                 catch { /* 单个版本失败不影响其它版本；安装本身已成功 */ }
             }
         });
