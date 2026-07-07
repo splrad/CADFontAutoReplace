@@ -5,19 +5,14 @@ internal interface INativeFontHookExportsProvider
     NativeFontHookProfile NativeFontHookProfile { get; }
 }
 
-internal sealed class NativeFontHookProfile
+internal sealed class NativeFontHookProfile(
+    NativeHookTarget ldFile,
+    NativeHookTarget? shpLoad = null)
 {
-    public NativeFontHookProfile(
-        NativeHookTarget ldFile,
-        NativeHookTarget? shpLoad = null)
-    {
-        LdFile = ldFile;
-        ShpLoad = shpLoad ?? NativeHookTarget.Disabled("shpload", "未提供已验证的 shpload TrueType 入口");
-    }
+    public NativeHookTarget LdFile { get; } = ldFile;
 
-    public NativeHookTarget LdFile { get; }
-
-    public NativeHookTarget ShpLoad { get; }
+    public NativeHookTarget ShpLoad { get; } =
+        shpLoad ?? NativeHookTarget.Disabled("shpload", "未提供已验证的 shpload TrueType 入口");
 }
 
 internal sealed class NativeHookTarget

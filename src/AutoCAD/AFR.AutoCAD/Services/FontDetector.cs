@@ -121,7 +121,7 @@ internal static class FontDetector
 
                         isMainMissing = true;
                     }
-                    else if (IsTrueTypeFontAvailable(typeFace, fileName, context))
+                    else if (IsTrueTypeFontAvailable(typeFace, fileName))
                     {
                         DiagnosticLogger.LogFontAvailability(typeFace, "TrueType", true);
                         continue;
@@ -133,11 +133,11 @@ internal static class FontDetector
                 }
                 else if (!string.IsNullOrWhiteSpace(fileName))
                 {
-                    isMainMissing = !IsShxFontAvailable(fileName, context) || IsShxTypeMismatch(fileName, context, expectBigFont: false);
+                    isMainMissing = !IsShxFontAvailable(fileName) || IsShxTypeMismatch(fileName, expectBigFont: false);
                 }
                 if (!isTrueType && !string.IsNullOrWhiteSpace(bigFontName))
                 {
-                    isBigMissing = !IsShxFontAvailable(bigFontName, context) || IsShxTypeMismatch(bigFontName, context, expectBigFont: true);
+                    isBigMissing = !IsShxFontAvailable(bigFontName) || IsShxTypeMismatch(bigFontName, expectBigFont: true);
                 }
                 if (isMainMissing || isBigMissing)
                 {
@@ -207,21 +207,21 @@ internal static class FontDetector
     /// <summary>
     /// 检查 SHX 文件是否在共享索引中精确存在。
     /// </summary>
-    internal static bool IsShxFontAvailable(string fileName, FontDetectionContext context)
+    internal static bool IsShxFontAvailable(string fileName)
     {
         if (string.IsNullOrWhiteSpace(fileName)) return true;
         return ShxFontAvailabilityIndex.IsExactAvailable(fileName);
     }
 
     /// <summary>检查 TrueType 字体是否可用（仅字族名版本，无 FileName 辅助）。</summary>
-    internal static bool IsTrueTypeFontAvailable(string typeface, FontDetectionContext context)
-        => IsTrueTypeFontAvailable(typeface, string.Empty, context);
+    internal static bool IsTrueTypeFontAvailable(string typeface)
+        => IsTrueTypeFontAvailable(typeface, string.Empty);
 
     /// <summary>
     /// 检查 TrueType 字体是否可用。
     /// @ 前缀在索引中按基础字体处理。
     /// </summary>
-    private static bool IsTrueTypeFontAvailable(string typeface, string fileName, FontDetectionContext context)
+    private static bool IsTrueTypeFontAvailable(string typeface, string fileName)
     {
         if (string.IsNullOrWhiteSpace(typeface)) return true;
 
@@ -234,7 +234,7 @@ internal static class FontDetector
     /// 检查 SHX 字体文件的实际类型（主字体/大字体）是否与期望类型匹配。
     /// 不匹配时返回 true，表示虽然文件存在但类型错误（如主字体槽位引用了大字体文件）。
     /// </summary>
-    internal static bool IsShxTypeMismatch(string fileName, FontDetectionContext context, bool expectBigFont)
+    internal static bool IsShxTypeMismatch(string fileName, bool expectBigFont)
     {
         if (!ShxFontAvailabilityIndex.IsExactAvailable(fileName))
             return false;
@@ -306,7 +306,14 @@ internal static class FontDetector
         {
             if (oldFont != IntPtr.Zero && hdc != IntPtr.Zero) SelectObject(hdc, oldFont);
             if (hFont != IntPtr.Zero) DeleteObject(hFont);
-            if (hdc != IntPtr.Zero) ReleaseDC(IntPtr.Zero, hdc);
+            if (hdc != IntPtr.Zero && ReleaseDC(IntPtr.Zero, hdc) == 0)
+            {
+                DiagnosticLogger.Fail(
+                    "FontDetector",
+                    "QueryFontMetricsFromGdi.ReleaseDC",
+                    "GDI 设备上下文释放失败",
+                    fields: new Dictionary<string, object?> { ["fontName"] = fontName });
+            }
         }
     }
 

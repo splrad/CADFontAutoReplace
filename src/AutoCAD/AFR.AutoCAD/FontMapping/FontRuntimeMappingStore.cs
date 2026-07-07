@@ -85,11 +85,10 @@ internal static class FontRuntimeMappingStore
     }
 
     internal static List<RuntimeFontMappingResultRecord> GetRuntimeMappingResults()
-        => RuntimeMappings.Values
+        => [.. RuntimeMappings.Values
             .OrderBy(x => x.Source, StringComparer.Ordinal)
             .ThenBy(x => x.Owner, StringComparer.Ordinal)
-            .ThenBy(x => x.OriginalFont, StringComparer.Ordinal)
-            .ToList();
+            .ThenBy(x => x.OriginalFont, StringComparer.Ordinal)];
 
     private static string NormalizeSource(string source)
     {

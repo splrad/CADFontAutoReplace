@@ -42,12 +42,12 @@ internal static class FontReplacer
 
         // 写回前先校验替换字体，避免把样式写成不可用值。
         bool mainFontValid = !string.IsNullOrEmpty(mainFont)
-            && FontDetector.IsShxFontAvailable(mainFont, context);
+            && FontDetector.IsShxFontAvailable(mainFont);
         bool bigFontValid = !string.IsNullOrEmpty(bigFont)
-            && FontDetector.IsShxFontAvailable(bigFont, context)
-            && !FontDetector.IsShxTypeMismatch(bigFont, context, expectBigFont: true);
+            && FontDetector.IsShxFontAvailable(bigFont)
+            && !FontDetector.IsShxTypeMismatch(bigFont, expectBigFont: true);
         bool trueTypeFontValid = !string.IsNullOrEmpty(trueTypeFont)
-            && FontDetector.IsTrueTypeFontAvailable(FontRedirectResolver.StripLeadingAtPrefix(trueTypeFont), context);
+            && FontDetector.IsTrueTypeFontAvailable(FontRedirectResolver.StripLeadingAtPrefix(trueTypeFont));
 
         if (!string.IsNullOrEmpty(mainFont) && !mainFontValid)
             log.Warning($"SHX 替换字体 '{mainFont}' 不可用，已跳过，请执行 AFR 重新配置");
@@ -240,7 +240,7 @@ internal static class FontReplacer
                         string replacementLookup = FontRedirectResolver.StripLeadingAtPrefix(replacement.MainFontReplacement);
                         bool replacementAvailable = preserveAtPrefix
                             ? TrueTypeFontAvailabilityIndex.TryGetResolvedAtTrueTypeFont(out _, out _)
-                            : FontDetector.IsTrueTypeFontAvailable(replacementLookup, context);
+                            : FontDetector.IsTrueTypeFontAvailable(replacementLookup);
                         if (!replacementAvailable)
                         {
                             log.Warning($"样式 '{replacement.StyleName}': 字体 '{replacement.MainFontReplacement}' 不可用，已跳过");
@@ -271,7 +271,7 @@ internal static class FontReplacer
                     }
                     else
                     {
-                        if (!FontDetector.IsShxFontAvailable(replacement.MainFontReplacement, context))
+                        if (!FontDetector.IsShxFontAvailable(replacement.MainFontReplacement))
                         {
                             log.Warning($"样式 '{replacement.StyleName}': 字体 '{replacement.MainFontReplacement}' 不可用，已跳过");
                         }
@@ -283,8 +283,8 @@ internal static class FontReplacer
 
                             // 主字体变更时同步重建 BigFont，避免旧值残留。
                             if (!string.IsNullOrEmpty(replacement.BigFontReplacement)
-                                && FontDetector.IsShxFontAvailable(replacement.BigFontReplacement, context)
-                                && !FontDetector.IsShxTypeMismatch(replacement.BigFontReplacement, context, expectBigFont: true))
+                                && FontDetector.IsShxFontAvailable(replacement.BigFontReplacement)
+                                && !FontDetector.IsShxTypeMismatch(replacement.BigFontReplacement, expectBigFont: true))
                             {
                                 style.BigFontFileName = replacement.BigFontReplacement;
                             }
@@ -304,8 +304,8 @@ internal static class FontReplacer
                          && !string.IsNullOrEmpty(replacement.BigFontReplacement)
                          && !string.IsNullOrEmpty(style.FileName))
                 {
-                    if (FontDetector.IsShxFontAvailable(replacement.BigFontReplacement, context)
-                        && !FontDetector.IsShxTypeMismatch(replacement.BigFontReplacement, context, expectBigFont: true))
+                    if (FontDetector.IsShxFontAvailable(replacement.BigFontReplacement)
+                        && !FontDetector.IsShxTypeMismatch(replacement.BigFontReplacement, expectBigFont: true))
                     {
                         style.BigFontFileName = replacement.BigFontReplacement;
                         changed = true;
@@ -342,7 +342,6 @@ internal static class FontReplacer
     /// <returns>被清理的样式数量。</returns>
     public static int CleanupStaleShxReferences(FontDetectionContext context)
     {
-        var log = LogService.Instance;
         int cleaned = 0;
 
         // 系统字体索引未就绪时跳过，避免误清理。
@@ -386,7 +385,7 @@ internal static class FontReplacer
                 if (string.IsNullOrEmpty(font.TypeFace)) continue;
 
                 if (!FontDetector.IsSystemFont(font.TypeFace)
-                    && !FontDetector.IsTrueTypeFontAvailable(font.TypeFace, context))
+                    && !FontDetector.IsTrueTypeFontAvailable(font.TypeFace))
                     continue;
 
                 var fileName = style.FileName ?? string.Empty;
@@ -395,7 +394,7 @@ internal static class FontReplacer
                 if (FontDetector.IsTrueTypeFontFile(fileName))
                     continue;
 
-                if (FontDetector.IsShxFontAvailable(fileName, context))
+                if (FontDetector.IsShxFontAvailable(fileName))
                     continue; // SHX 存在，无需清理
 
                 style.UpgradeOpen();
