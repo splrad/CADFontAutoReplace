@@ -327,6 +327,10 @@ internal static class FontDetector
         public byte tmItalic, tmUnderlined, tmStruckOut, tmPitchAndFamily, tmCharSet;
     }
 
+    // VS 设计时编译未稳定生成 LibraryImport 实现；保留 DllImport 并仅抑制迁移建议。
+#if NET7_0_OR_GREATER
+#pragma warning disable SYSLIB1054
+#endif
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
@@ -334,6 +338,9 @@ internal static class FontDetector
     [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr hdc, IntPtr h);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] private static extern bool GetTextMetricsW(IntPtr hdc, out TEXTMETRICW lptm);
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr ho);
+#if NET7_0_OR_GREATER
+#pragma warning restore SYSLIB1054
+#endif
 
     #endregion
 }
