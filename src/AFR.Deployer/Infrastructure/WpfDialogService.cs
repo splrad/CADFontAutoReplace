@@ -1,5 +1,7 @@
 using System.Threading.Tasks;
 using System.Windows;
+using AFR.Deployer.ViewModels;
+using AFR.Deployer.Views;
 using Wpf.Ui.Controls;
 using WpfUiMessageBox = Wpf.Ui.Controls.MessageBox;
 using WpfUiMessageBoxResult = Wpf.Ui.Controls.MessageBoxResult;
@@ -16,7 +18,10 @@ internal sealed class WpfDialogService : IDialogService
 
     internal WpfDialogService(Window owner) => _owner = owner;
 
-    public async Task ShowInfoAsync(string message, string title)
+    public Task ShowInfoAsync(string message, string title)
+        => ShowInfoAsync(message, title, _owner);
+
+    private static async Task ShowInfoAsync(string message, string title, Window owner)
     {
         var box = new WpfUiMessageBox
         {
@@ -24,7 +29,7 @@ internal sealed class WpfDialogService : IDialogService
             Content               = message,
             CloseButtonText       = "确定",
             CloseButtonAppearance = ControlAppearance.Primary,
-            Owner                 = _owner,
+            Owner                 = owner,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
         };
         await box.ShowDialogAsync();
@@ -42,6 +47,24 @@ internal sealed class WpfDialogService : IDialogService
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
         };
         await box.ShowDialogAsync();
+    }
+
+    public async Task ShowAboutAsync()
+    {
+        try
+        {
+            var window = new AboutWindow
+            {
+                Owner                 = _owner,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            };
+            window.Initialize(new AboutViewModel((message, title) => ShowInfoAsync(message, title, window)));
+            window.ShowDialog();
+        }
+        catch (System.Exception ex)
+        {
+            await ShowWarningAsync($"无法打开关于窗口：\n{ex.Message}", "AFR 部署工具");
+        }
     }
 
     public async Task<bool> ConfirmAsync(string message, string title)

@@ -23,14 +23,6 @@ public static class AwsHideableDialogPatcher
     public static int Apply()
         => AwsHideableDialogPatcherCore.Apply(Brand, GetVersion(), GetRegistry(), Log);
 
-    /// <summary>手动 NETLOAD 首次安装 / 更新时，运行中覆盖缺失 SHX 弹窗对应节点。</summary>
-    public static int ApplyInstallOrUpdateOverrideInRunningHost()
-        => AwsHideableDialogPatcherCore.ApplyInstallOrUpdateOverrideInRunningHost(
-            Brand,
-            GetVersion(),
-            GetRegistry(),
-            Log);
-
     /// <summary>删除当前插件版本对应的所有 .aws 文件中带 AFR 所有权标记的抑制节点。</summary>
     public static int Cleanup()
         => AwsHideableDialogPatcherCore.Cleanup(Brand, GetVersion(), GetRegistry(), Log);
@@ -47,12 +39,9 @@ public static class AwsHideableDialogPatcher
     public static string ReadDialogNodeXml(string awsPath)
         => AwsHideableDialogPatcherCore.ReadDialogNodeXml(awsPath);
 
-    /// <summary>判断当前活动 .aws 的缺失 SHX 弹窗节点是否已经是 AFR 标准抑制节点。</summary>
-    public static bool IsActiveDialogNodeUpToDate()
-    {
-        var path = LocateActiveAwsPath();
-        return path is not null && path.Length > 0 && AwsHideableDialogPatcherCore.IsDialogNodeUpToDate(path);
-    }
+    /// <summary>只读判断当前 CAD 版本是否已正确忽略缺少 SHX 对话框。</summary>
+    internal static AwsDialogSuppressionState GetUnresolvedFontDialogSuppressionState()
+        => AwsHideableDialogPatcherCore.GetSuppressionState(Brand, GetVersion(), GetRegistry(), Log);
 
     private static string GetVersion()    => PlatformManager.Platform.VersionName;
     private static string GetRegistry()   => PlatformManager.Platform.RegistryBasePath;

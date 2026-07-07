@@ -14,28 +14,37 @@ namespace AFR.UI;
 /// 将"样式+主字体缺失"和"样式+大字体缺失"拆分为独立行，
 /// 使表格布局紧凑统一。
 /// </summary>
-public sealed class FontReplacementRow : INotifyPropertyChanged
+public sealed class FontReplacementRow(
+    string styleName,
+    string fontCategory,
+    string missingFontName,
+    bool isTrueType,
+    bool isBigFont,
+    bool isReplaced,
+    ObservableCollection<string> availableFonts,
+    string autoReplacement,
+    bool preserveTrueTypeAtPrefix = false) : INotifyPropertyChanged
 {
-    private string _selectedReplacement = string.Empty;
+    private string _selectedReplacement = autoReplacement;
 
-    public string StyleName { get; }
-    public string FontCategory { get; }
-    public string MissingFontName { get; }
-    public bool IsTrueType { get; }
-    public bool IsBigFont { get; }
-    public bool PreserveTrueTypeAtPrefix { get; }
+    public string StyleName { get; } = styleName;
+    public string FontCategory { get; } = fontCategory;
+    public string MissingFontName { get; } = missingFontName;
+    public bool IsTrueType { get; } = isTrueType;
+    public bool IsBigFont { get; } = isBigFont;
+    public bool PreserveTrueTypeAtPrefix { get; } = preserveTrueTypeAtPrefix;
 
     /// <summary>该缺失字体是否已被成功替换。</summary>
-    public bool IsReplaced { get; }
+    public bool IsReplaced { get; } = isReplaced;
 
     /// <summary>构造时预填的初始替换字体（用于判断用户是否修改了选择）。</summary>
-    public string OriginalReplacement { get; }
+    public string OriginalReplacement { get; } = autoReplacement;
 
     /// <summary>显示用缺失字体名（未替换时加 ⚠ 前缀）。</summary>
     public string DisplayMissingFontName => IsReplaced ? MissingFontName : $"⚠ {MissingFontName}";
 
     /// <summary>可供选择的替换字体列表（根据字体类型自动匹配）。</summary>
-    public ObservableCollection<string> AvailableFonts { get; }
+    public ObservableCollection<string> AvailableFonts { get; } = availableFonts;
 
     public string SelectedReplacement
     {
@@ -48,29 +57,6 @@ public sealed class FontReplacementRow : INotifyPropertyChanged
         }
     }
 
-    public FontReplacementRow(
-        string styleName,
-        string fontCategory,
-        string missingFontName,
-        bool isTrueType,
-        bool isBigFont,
-        bool isReplaced,
-        ObservableCollection<string> availableFonts,
-        string autoReplacement,
-        bool preserveTrueTypeAtPrefix = false)
-    {
-        StyleName = styleName;
-        FontCategory = fontCategory;
-        MissingFontName = missingFontName;
-        IsTrueType = isTrueType;
-        IsBigFont = isBigFont;
-        PreserveTrueTypeAtPrefix = preserveTrueTypeAtPrefix;
-        IsReplaced = isReplaced;
-        AvailableFonts = availableFonts;
-        OriginalReplacement = autoReplacement;
-        _selectedReplacement = autoReplacement;
-    }
-
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>
@@ -80,43 +66,31 @@ public sealed class FontReplacementRow : INotifyPropertyChanged
 /// <summary>
 /// AFRLOG 字体映射只读展示行。
 /// </summary>
-public sealed class FontMappingDisplayRow
+public sealed class FontMappingDisplayRow(
+    string source,
+    string styleName,
+    string missingFont,
+    string baseFont,
+    string fontType,
+    string replacementFont,
+    string executingHook,
+    string status)
 {
-    public FontMappingDisplayRow(
-        string source,
-        string styleName,
-        string missingFont,
-        string baseFont,
-        string fontType,
-        string replacementFont,
-        string executingHook,
-        string status)
-    {
-        Source = source;
-        StyleName = styleName;
-        MissingFont = missingFont;
-        BaseFont = baseFont;
-        FontType = fontType;
-        ReplacementFont = replacementFont;
-        ExecutingHook = executingHook;
-        Status = status;
-    }
+    public string Source { get; } = source;
 
-    public string Source { get; }
+    public string StyleName { get; } = styleName;
 
-    public string StyleName { get; }
+    public string MissingFont { get; } = missingFont;
 
-    public string MissingFont { get; }
+    public string BaseFont { get; } = baseFont;
 
-    public string BaseFont { get; }
+    public string FontType { get; } = fontType;
 
-    public string FontType { get; }
+    public string ReplacementFont { get; } = replacementFont;
 
-    public string ReplacementFont { get; }
+    public string ExecutingHook { get; } = executingHook;
 
-    public string ExecutingHook { get; }
-
-    public string Status { get; }
+    public string Status { get; } = status;
 
     public bool IsFailed =>
         string.IsNullOrWhiteSpace(ReplacementFont)
@@ -146,8 +120,8 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
     private string _batchTrueTypeFont = string.Empty;
     private bool _hasUserChanges;
 
-    public ObservableCollection<FontReplacementRow> Items { get; } = new();
-    public ObservableCollection<FontMappingDisplayRow> FontMappingItems { get; } = new();
+    public ObservableCollection<FontReplacementRow> Items { get; } = [];
+    public ObservableCollection<FontMappingDisplayRow> FontMappingItems { get; } = [];
     public string SummaryText { get; }
     public int ShxCount { get; }
     public int TrueTypeCount { get; }
@@ -360,7 +334,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
         }
     }
 
-    private IReadOnlyList<StyleFontReplacement> BuildReplacementRequests()
+    private List<StyleFontReplacement> BuildReplacementRequests()
     {
         var map = new Dictionary<string, StyleFontReplacement>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in Items)
@@ -394,7 +368,7 @@ public sealed class FontReplacementLogViewModel : INotifyPropertyChanged
                 };
         }
 
-        return map.Values.ToList();
+        return [.. map.Values];
     }
 
     public FontReplacementLogViewModel(

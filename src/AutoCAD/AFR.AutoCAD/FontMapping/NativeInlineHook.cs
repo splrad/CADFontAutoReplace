@@ -11,16 +11,19 @@ namespace AFR.FontMapping;
 /// </para>
 /// </summary>
 /// <typeparam name="TDelegate">目标函数对应的托管委托类型。</typeparam>
-internal sealed class NativeInlineHook<TDelegate> where TDelegate : Delegate
+internal sealed class NativeInlineHook<TDelegate>(
+    string tag,
+    string name,
+    uint rva) where TDelegate : Delegate
 {
     private const uint MemCommit = 0x1000;
     private const uint PageExecuteReadWrite = 0x40;
     private const uint MemReserveCommit = 0x3000;
     private const uint MemRelease = 0x8000;
 
-    private readonly string _tag;
-    private readonly string _name;
-    private readonly uint _rva;
+    private readonly string _tag = tag;
+    private readonly string _name = name;
+    private readonly uint _rva = rva;
 
     private TDelegate? _hookDelegate;
     private IntPtr _targetAddr;
@@ -29,17 +32,6 @@ internal sealed class NativeInlineHook<TDelegate> where TDelegate : Delegate
     private IntPtr _returnAddressStorage;
     private byte[]? _savedBytes;
     private int _prologueSize;
-
-    /// <summary>初始化 Hook 辅助器。</summary>
-    /// <param name="tag">诊断日志标签。</param>
-    /// <param name="name">目标函数名称。</param>
-    /// <param name="rva">目标函数 RVA。</param>
-    public NativeInlineHook(string tag, string name, uint rva)
-    {
-        _tag = tag;
-        _name = name;
-        _rva = rva;
-    }
 
     /// <summary>是否已成功安装。</summary>
     public bool IsInstalled { get; private set; }
@@ -298,7 +290,7 @@ internal sealed class NativeInlineHook<TDelegate> where TDelegate : Delegate
     {
         try
         {
-            return NativeInlineHookInterop.VirtualQuery(address, out NativeInlineHookInterop.MemoryBasicInformation info, (uint)Marshal.SizeOf<NativeInlineHookInterop.MemoryBasicInformation>()) != IntPtr.Zero
+            return NativeInlineHookInterop.VirtualQuery(address, out var info, (uint)Marshal.SizeOf<NativeInlineHookInterop.MemoryBasicInformation>()) != IntPtr.Zero
                 && info.State == MemCommit;
         }
         catch { return false; }
@@ -448,8 +440,31 @@ internal sealed class NativeInlineHook<TDelegate> where TDelegate : Delegate
 /// <summary>
 /// 非泛型 P/Invoke 容器。
 /// </summary>
-internal static class NativeInlineHookInterop
+internal static partial class NativeInlineHookInterop
 {
+#if NET7_0_OR_GREATER
+    /// <summary>更改内存保护属性。</summary>
+    [LibraryImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool VirtualProtect(IntPtr lpAddress, uint dwSize, uint flNewProtect, out uint lpflOldProtect);
+
+    /// <summary>查询虚拟内存区域。</summary>
+    [LibraryImport("kernel32.dll")]
+    public static partial IntPtr VirtualQuery(IntPtr lpAddress, out MemoryBasicInformation lpBuffer, uint dwLength);
+
+    /// <summary>分配虚拟内存。</summary>
+    [LibraryImport("kernel32.dll")]
+    public static partial IntPtr VirtualAlloc(IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
+
+    /// <summary>释放虚拟内存。</summary>
+    [LibraryImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool VirtualFree(IntPtr lpAddress, uint dwSize, uint dwFreeType);
+
+    /// <summary>读取模块导出函数地址。</summary>
+    [LibraryImport("kernel32.dll", EntryPoint = "GetProcAddress")]
+    public static partial IntPtr GetProcAddress(IntPtr hModule, [MarshalAs(UnmanagedType.LPStr)] string lpProcName);
+#else
     /// <summary>更改内存保护属性。</summary>
     [DllImport("kernel32.dll")]
     public static extern bool VirtualProtect(IntPtr lpAddress, uint dwSize, uint flNewProtect, out uint lpflOldProtect);
@@ -468,7 +483,8 @@ internal static class NativeInlineHookInterop
 
     /// <summary>读取模块导出函数地址。</summary>
     [DllImport("kernel32.dll", CharSet = CharSet.Ansi, ExactSpelling = true)]
-    public static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
+    public static extern IntPtr GetProcAddress(IntPtr hModule, [MarshalAs(UnmanagedType.LPStr)] string lpProcName);
+#endif
 
     /// <summary>虚拟内存区域信息。</summary>
     [StructLayout(LayoutKind.Sequential)]

@@ -88,11 +88,11 @@ public static class RegistryService
         try
         {
             using var key = baseKey.OpenSubKey(subKeyPath, false);
-            return key?.GetSubKeyNames() ?? Array.Empty<string>();
+            return key?.GetSubKeyNames() ?? [];
         }
         catch
         {
-            return Array.Empty<string>();
+            return [];
         }
     }
 

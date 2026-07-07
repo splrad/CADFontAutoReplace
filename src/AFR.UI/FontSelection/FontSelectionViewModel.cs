@@ -89,7 +89,7 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
     internal static IReadOnlyCollection<string> ScanAvailableMainShxFonts()
     {
         return PlatformManager.FontScanner?.ScanAvailableMainShxFonts()
-            ?? Array.Empty<string>();
+            ?? [];
     }
 
     /// <summary>
@@ -98,7 +98,7 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
     internal static IReadOnlyCollection<string> ScanAvailableBigShxFonts()
     {
         return PlatformManager.FontScanner?.ScanAvailableBigShxFonts()
-            ?? Array.Empty<string>();
+            ?? [];
     }
 
     /// <summary>
@@ -107,7 +107,7 @@ internal sealed class FontSelectionViewModel : INotifyPropertyChanged
     internal static IReadOnlyCollection<string> ScanSystemTrueTypeFonts()
     {
         return PlatformManager.FontScanner?.ScanSystemTrueTypeFonts()
-            ?? Array.Empty<string>();
+            ?? [];
     }
 
     /// <summary>从注册表读取当前配置作为默认选中项。</summary>

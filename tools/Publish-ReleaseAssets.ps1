@@ -110,7 +110,7 @@ function Get-ReleaseVersion {
 $ReleaseVersion = Get-ReleaseVersion
 $ReleaseTag = "v$ReleaseVersion"
 
-# ── Step 1：构建所有插件 DLL ──────────────────────────────────────────────
+# ── Step 1：构建所有插件 DLL ─────────────────────────────────────────────
 # 仅在未指定 -SkipPluginBuild 时执行。
 # 成功后，DLL/JSON 留在 artifacts\bin\AFR-ACAD20XX\release\ 标准输出目录。
 if (-not $SkipPluginBuild) {

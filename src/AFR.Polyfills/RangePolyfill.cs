@@ -2,27 +2,22 @@
 // ReSharper disable once CheckNamespace
 namespace System
 {
-    internal readonly struct Index : IEquatable<Index>
+    internal readonly struct Index(int value, bool fromEnd = false) : IEquatable<Index>
     {
-        private readonly int _value;
+        private readonly int _value = fromEnd ? ~value : value;
 
-        public Index(int value, bool fromEnd = false)
-        {
-            _value = fromEnd ? ~value : value;
-        }
+        public static Index Start => new(0);
+        public static Index End => new(~0);
 
-        public static Index Start => new Index(0);
-        public static Index End => new Index(~0);
-
-        public static Index FromStart(int value) => new Index(value);
-        public static Index FromEnd(int value) => new Index(~value);
+        public static Index FromStart(int value) => new(value);
+        public static Index FromEnd(int value) => new(~value);
 
         public int Value => _value < 0 ? ~_value : _value;
         public bool IsFromEnd => _value < 0;
 
         public int GetOffset(int length) => IsFromEnd ? length - Value : Value;
 
-        public static implicit operator Index(int value) => new Index(value);
+        public static implicit operator Index(int value) => new(value);
 
         public bool Equals(Index other) => _value == other._value;
         public override bool Equals(object? obj) => obj is Index other && Equals(other);
@@ -30,20 +25,14 @@ namespace System
         public override string ToString() => IsFromEnd ? $"^{Value}" : Value.ToString();
     }
 
-    internal readonly struct Range : IEquatable<Range>
+    internal readonly struct Range(Index start, Index end) : IEquatable<Range>
     {
-        public Index Start { get; }
-        public Index End { get; }
+        public Index Start { get; } = start;
+        public Index End { get; } = end;
 
-        public Range(Index start, Index end)
-        {
-            Start = start;
-            End = end;
-        }
-
-        public static Range StartAt(Index start) => new Range(start, Index.End);
-        public static Range EndAt(Index end) => new Range(Index.Start, end);
-        public static Range All => new Range(Index.Start, Index.End);
+        public static Range StartAt(Index start) => new(start, Index.End);
+        public static Range EndAt(Index end) => new(Index.Start, end);
+        public static Range All => new(Index.Start, Index.End);
 
         public (int Offset, int Length) GetOffsetAndLength(int length)
         {

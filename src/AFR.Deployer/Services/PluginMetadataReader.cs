@@ -124,7 +124,7 @@ internal static class PluginMetadataReader
         }
     }
 
-    private static IReadOnlyList<RegistryDefault> ReadRegistryDefaults(MetadataReader reader)
+    private static List<RegistryDefault> ReadRegistryDefaults(MetadataReader reader)
     {
         var list = new List<RegistryDefault>();
         if (!reader.IsAssembly) return list;

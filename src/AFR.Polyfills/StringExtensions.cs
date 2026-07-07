@@ -12,7 +12,7 @@ internal static class Net48StringExtensions
 
     public static string[] Split(this string source, char separator, StringSplitOptions options)
     {
-        return source.Split(new[] { separator }, options);
+        return source.Split([separator], options);
     }
 }
 #endif

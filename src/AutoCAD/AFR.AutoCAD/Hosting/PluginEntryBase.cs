@@ -5,6 +5,7 @@ using System.Reflection;
 using AFR.Abstractions;
 using AFR.Commands;
 using AFR.Constants;
+using AFR.HostIntegration;
 using AFR.Platform;
 using AFR.Services;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
@@ -146,12 +147,13 @@ public abstract class PluginEntryBase : IExtensionApplication
                 new Dictionary<string, object?>
                 {
                     ["state"] = initResult.State.ToString(),
-                    ["isFirstInstall"] = initResult.IsFirstInstall
+                    ["isFirstInstall"] = initResult.IsFirstInstall,
+                    ["awsSuppressionWarningShown"] = initResult.AwsSuppressionWarningShown
                 });
 
-            if (initResult.ShouldApplyAwsOverride)
+            if (initResult.ShouldCheckAwsSuppression)
             {
-                TryApplyInstallOrUpdateAwsOverride(initResult, log);
+                WarnIfAwsSuppressionNotConfigured(initResult, log);
             }
 
             if (initResult.ShouldSkipRuntimeStartup)
@@ -231,42 +233,54 @@ public abstract class PluginEntryBase : IExtensionApplication
         }
     }
 
-    private static bool TryApplyInstallOrUpdateAwsOverride(PluginInitializationResult initResult, LogService log)
+    private static void WarnIfAwsSuppressionNotConfigured(PluginInitializationResult initResult, LogService log)
     {
         try
         {
-            int changedCount = Diagnostics.AwsHideableDialogPatcher.ApplyInstallOrUpdateOverrideInRunningHost();
-            bool activeNodeReady = Diagnostics.AwsHideableDialogPatcher.IsActiveDialogNodeUpToDate();
+            var suppressionState = Diagnostics.AwsHideableDialogPatcher.GetUnresolvedFontDialogSuppressionState();
             DiagnosticLogger.Ok(
                 "PluginEntry",
-                "ApplyInstallOrUpdateAwsOverride",
-                "运行期缺失 SHX 弹窗抑制处理完成",
+                "EvaluateAwsSuppression",
+                "缺失 SHX 弹窗抑制状态检测完成",
                 new Dictionary<string, object?>
                 {
                     ["state"] = initResult.State.ToString(),
-                    ["changedCount"] = changedCount,
-                    ["activeNodeReady"] = activeNodeReady
+                    ["awsSuppressionWarningShown"] = initResult.AwsSuppressionWarningShown,
+                    ["suppressionState"] = suppressionState.ToString()
                 });
 
-            if (changedCount > 0 || activeNodeReady)
+            if (suppressionState == AwsDialogSuppressionState.Correct)
             {
-                log.InfoLast("缺失 SHX 弹窗抑制已设置。请重启 CAD 后生效。");
-                return true;
+                return;
             }
 
-            log.WarningLast("缺失 SHX 弹窗抑制未写入：未找到 FixedProfile.aws 或写入失败。请关闭 CAD 后使用 AFR 部署工具重新安装。");
+            log.WarningFinal("当前CAD软件SHX缺失弹窗未关闭，如果需要关闭请关闭 CAD 后运行 AFR 部署工具修复安装。");
+            MarkAwsSuppressionWarningShownSafely();
         }
         catch (System.Exception ex)
         {
             DiagnosticLogger.Fail(
                 "PluginEntry",
-                "ApplyInstallOrUpdateAwsOverride",
-                "运行期缺失 SHX 弹窗抑制处理失败",
+                "EvaluateAwsSuppression",
+                "缺失 SHX 弹窗抑制状态检测失败",
                 ex,
                 new Dictionary<string, object?> { ["state"] = initResult.State.ToString() });
-            log.WarningLast("缺失 SHX 弹窗抑制处理失败：" + ex.Message);
+            log.WarningFinal("当前CAD软件SHX缺失弹窗未关闭，如果需要关闭请关闭 CAD 后运行 AFR 部署工具修复安装。");
+            MarkAwsSuppressionWarningShownSafely();
         }
-        return false;
+    }
+
+    private static void MarkAwsSuppressionWarningShownSafely()
+    {
+        try
+        {
+            AppInitializer.MarkAwsSuppressionWarningShown();
+            DiagnosticLogger.Ok("PluginEntry", "MarkAwsSuppressionWarningShown", "缺失 SHX 弹窗抑制提示已标记为显示过");
+        }
+        catch (System.Exception ex)
+        {
+            DiagnosticLogger.Fail("PluginEntry", "MarkAwsSuppressionWarningShown", "缺失 SHX 弹窗抑制提示标记写入失败", ex);
+        }
     }
 
     /// <summary>AutoCAD 卸载插件时调用（通常在 CAD 退出时）。</summary>

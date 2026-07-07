@@ -27,6 +27,13 @@ internal static class AwsHideableDialogPatcher
             descriptor.Version,
             descriptor.RegistryBasePath);
 
+    /// <summary>只读判断指定 CAD 版本是否已正确忽略缺少 SHX 对话框。</summary>
+    public static AwsDialogSuppressionState GetSuppressionState(CadDescriptor descriptor)
+        => AwsHideableDialogPatcherCore.GetSuppressionState(
+            descriptor.Brand,
+            descriptor.Version,
+            descriptor.RegistryBasePath);
+
     /// <summary>删除指定 CAD 版本对应 <c>FixedProfile.aws</c> 中带 AFR 所有权标记的抑制节点。</summary>
     /// <returns>实际清理的文件数量。</returns>
     public static int Cleanup(CadDescriptor descriptor)
