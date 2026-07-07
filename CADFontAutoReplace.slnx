@@ -18,7 +18,6 @@
 
   <Folder Name="/Docs/">
     <File Path="README.md" />
-    <File Path="PROJECT_HANDOVER.md" />
     <File Path="docs/autodesk-fonts.md" />
     <File Path="docs/developer-guide-advanced.md" />
     <File Path="docs/developer-guide-beginner.md" />
@@ -27,7 +26,6 @@
   </Folder>
 
   <Folder Name="/GitHub/">
-    <File Path=".github/copilot-instructions.md" />
     <File Path=".github/deepseek-model.txt" />
   </Folder>
 
