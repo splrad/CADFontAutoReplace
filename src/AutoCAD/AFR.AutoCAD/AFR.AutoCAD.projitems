@@ -21,6 +21,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\ShpLoadHook.cs" Link="FontMapping\ShpLoadHook.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FontMapping\TrueTypeFontAvailabilityIndex.cs" Link="FontMapping\TrueTypeFontAvailabilityIndex.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AppInitializer.cs" Link="Hosting\AppInitializer.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Hosting\AwsPatchAgentLauncher.cs" Link="Hosting\AwsPatchAgentLauncher.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\AutoCadHost.cs" Link="Hosting\AutoCadHost.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\CadDialogSystemVariableScope.cs" Link="Hosting\CadDialogSystemVariableScope.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\DocumentContextManager.cs" Link="Hosting\DocumentContextManager.cs" />
@@ -37,5 +38,11 @@
     <Compile Include="$(MSBuildThisFileDirectory)Hosting\ExternalRegistryDefaultsApplier.cs" Link="Hosting\ExternalRegistryDefaultsApplier.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Diagnostics\AwsHideableDialogPatcher.cs" Link="Diagnostics\AwsHideableDialogPatcher.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)DebugCommands\MTextEditorCommand.cs" Link="DebugCommands\MTextEditorCommand.cs" Condition="'$(Configuration)'=='Debug'" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)..\..\..\artifacts\bin\AFR.AwsPatchAgent\release\AFR.AwsPatchAgent.exe"
+                      Condition="Exists('$(MSBuildThisFileDirectory)..\..\..\artifacts\bin\AFR.AwsPatchAgent\release\AFR.AwsPatchAgent.exe')">
+      <LogicalName>AFR.Resources.AFR.AwsPatchAgent.exe</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 </Project>

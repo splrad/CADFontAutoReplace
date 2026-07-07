@@ -7,6 +7,13 @@ using System.Xml.Linq;
 
 namespace AFR.HostIntegration;
 
+internal enum AwsDialogSuppressionState
+{
+    Correct = 0,
+    Missing = 1,
+    Incorrect = 2,
+}
+
 /// <summary>
 /// AutoCAD 2018+ "缺少 SHX 文件"对话框（id=Acad.UnresolvedFontFiles）抑制器的共享核心实现。
 /// <para>
@@ -129,41 +136,6 @@ internal static class AwsHideableDialogPatcherCore
     }
 
     /// <summary>
-    /// 插件运行期专用：跳过 acad.exe 进程检查，只覆盖缺失 SHX 弹窗对应节点。
-    /// </summary>
-    /// <remarks>
-    /// 用于手动 NETLOAD 首次安装 / 更新场景。调用后仍需提示用户重启 CAD，确保宿主重新读取 Profile。
-    /// </remarks>
-    /// <returns>实际写入或刷新的文件数量。</returns>
-    public static int ApplyInstallOrUpdateOverrideInRunningHost(
-        string brand,
-        string version,
-        string registryBasePath,
-        System.Action<string, string>? log = null)
-    {
-        var paths = EnumerateTargetAwsFiles(brand, version, registryBasePath).ToArray();
-        if (paths.Length == 0)
-        {
-            log?.Invoke("AwsPatcher", "ApplyInstallOrUpdateOverrideInRunningHost 跳过：未找到任何 FixedProfile.aws。");
-            return 0;
-        }
-
-        int count = 0;
-        foreach (var path in paths)
-        {
-            try
-            {
-                if (WriteInstallOrUpdateOverrideNode(path)) count++;
-            }
-            catch (System.Exception ex)
-            {
-                log?.Invoke("AwsPatcher", $"运行期覆盖 {path} 失败：{ex.Message}");
-            }
-        }
-        return count;
-    }
-
-    /// <summary>
     /// 删除指定 CAD 版本对应 <c>FixedProfile.aws</c> 中所有带 AFR 所有权标记的抑制节点。
     /// 用户手动设置（无标记）的同名节点不会被删除。
     /// </summary>
@@ -230,6 +202,36 @@ internal static class AwsHideableDialogPatcherCore
         return nodes.Count == 1 && IsOwnedNodeUpToDate(nodes[0], ns);
     }
 
+    /// <summary>
+    /// 只读判断指定 CAD 版本是否已经正确忽略缺少 SHX 对话框。
+    /// 用户自设节点只要唯一且 <c>result="1002"</c> 即视为正确，不要求 AFR 所有权标记。
+    /// </summary>
+    public static AwsDialogSuppressionState GetSuppressionState(
+        string brand,
+        string version,
+        string registryBasePath,
+        System.Action<string, string>? log = null)
+    {
+        var paths = EnumerateTargetAwsFiles(brand, version, registryBasePath).ToArray();
+        if (paths.Length == 0)
+        {
+            log?.Invoke("AwsPatcher", "GetSuppressionState：未找到任何 FixedProfile.aws。");
+            return AwsDialogSuppressionState.Missing;
+        }
+
+        var aggregate = AwsDialogSuppressionState.Correct;
+        foreach (var path in paths)
+        {
+            var state = GetFileSuppressionState(path, log);
+            if (state == AwsDialogSuppressionState.Incorrect)
+                return AwsDialogSuppressionState.Incorrect;
+            if (state == AwsDialogSuppressionState.Missing)
+                aggregate = AwsDialogSuppressionState.Missing;
+        }
+
+        return aggregate;
+    }
+
     /// <summary>判断 acad.exe 是否在运行。任何异常一律视为"在运行"，从安全侧拒绝写入。</summary>
     private static bool IsAutoCadRunning()
     {
@@ -270,7 +272,7 @@ internal static class AwsHideableDialogPatcherCore
     {
         if (string.IsNullOrEmpty(registryBasePath)) return string.Empty;
         var idx = registryBasePath.LastIndexOf('\\');
-        return idx >= 0 ? registryBasePath[(idx + 1)..] : registryBasePath;
+        return idx >= 0 ? registryBasePath.Substring(idx + 1) : registryBasePath;
     }
 
     /// <summary>
@@ -328,6 +330,9 @@ internal static class AwsHideableDialogPatcherCore
                                      .Where(e => (string?)e.Attribute("id") == DialogId)
                                      .ToList();
 
+        if (existingNodes.Count == 1 && IsUserSuppressionCorrect(existingNodes[0]))
+            return false;
+
         if (existingNodes.Count == 1 && IsOwnedNodeUpToDate(existingNodes[0], ns))
             return false;
 
@@ -338,6 +343,37 @@ internal static class AwsHideableDialogPatcherCore
         SaveAtomically(doc, path);
         return true;
     }
+
+    private static AwsDialogSuppressionState GetFileSuppressionState(
+        string path,
+        System.Action<string, string>? log)
+    {
+        try
+        {
+            if (!File.Exists(path)) return AwsDialogSuppressionState.Missing;
+
+            var doc = XDocument.Load(path, LoadOptions.PreserveWhitespace);
+            var nodes = doc.Descendants()
+                           .Where(e => e.Name.LocalName == "HideableDialog"
+                                    && (string?)e.Attribute("id") == DialogId)
+                           .ToList();
+
+            if (nodes.Count == 0) return AwsDialogSuppressionState.Missing;
+            if (nodes.Count != 1) return AwsDialogSuppressionState.Incorrect;
+
+            return IsUserSuppressionCorrect(nodes[0])
+                ? AwsDialogSuppressionState.Correct
+                : AwsDialogSuppressionState.Incorrect;
+        }
+        catch (System.Exception ex)
+        {
+            log?.Invoke("AwsPatcher", $"读取 {path} 的 SHX 弹窗抑制状态失败：{ex.Message}");
+            return AwsDialogSuppressionState.Incorrect;
+        }
+    }
+
+    private static bool IsUserSuppressionCorrect(XElement existing)
+        => (string?)existing.Attribute("result") == DialogResult;
 
     /// <summary>构造带 AFR 标记的目标节点（结构与 AutoCAD 自写一致）。</summary>
     private static XElement BuildOwnedNode(XNamespace ns)

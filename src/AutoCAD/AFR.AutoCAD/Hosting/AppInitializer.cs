@@ -16,17 +16,22 @@ internal enum PluginInitializationState
 
 internal sealed class PluginInitializationResult
 {
-    public PluginInitializationResult(PluginInitializationState state)
+    public PluginInitializationResult(PluginInitializationState state, bool hasPendingAwsOverride)
     {
         State = state;
+        HasPendingAwsOverride = hasPendingAwsOverride;
     }
 
     public PluginInitializationState State { get; }
 
+    public bool HasPendingAwsOverride { get; }
+
     public bool IsFirstInstall => State == PluginInitializationState.FirstInstall;
 
-    public bool ShouldApplyAwsOverride => State is PluginInitializationState.FirstInstall
-                                                or PluginInitializationState.Updated;
+    public bool IsInstallOrUpdate => State is PluginInitializationState.FirstInstall
+                                           or PluginInitializationState.Updated;
+
+    public bool ShouldEvaluateAwsSuppression => IsInstallOrUpdate || HasPendingAwsOverride;
 
     public bool ShouldSkipRuntimeStartup => State == PluginInitializationState.FirstInstall;
 }
@@ -51,6 +56,9 @@ internal static class AppInitializer
     private const string PluginVersionValueName = "PluginVersion";
     private const string PluginBuildIdValueName = "PluginBuildId";
     private const string ConfigSchemaVersionValueName = "ConfigSchemaVersion";
+    private const string PendingAwsOverrideValueName = "PendingAwsOverride";
+    private const string PendingAwsOverrideBuildIdValueName = "PendingAwsOverrideBuildId";
+    private const string PendingAwsOverrideReasonValueName = "PendingAwsOverrideReason";
 
     /// <summary>
     /// 执行注册表初始化：为所有匹配的 CAD 配置文件创建/更新自动加载条目。
@@ -60,6 +68,7 @@ internal static class AppInitializer
     {
         var log = LogService.Instance;
         var state = PluginInitializationState.NormalRun;
+        var hasPendingAwsOverride = false;
         try
         {
             var dllPath = GetCurrentDllPath();
@@ -73,13 +82,15 @@ internal static class AppInitializer
                     "GetAcadProfiles",
                     "未找到有效的 AutoCAD 配置文件",
                     new Dictionary<string, object?> { ["versionTag"] = versionTag });
-                return new PluginInitializationResult(state);
+                return new PluginInitializationResult(state, hasPendingAwsOverride);
             }
 
             foreach (var profile in profiles)
             {
                 var appPath = $@"{AutoCadBasePath}\{profile}\Applications\{AppName}";
-                state = MaxState(state, InitializeProfile(appPath, dllPath));
+                var profileResult = InitializeProfile(appPath, dllPath);
+                state = MaxState(state, profileResult.State);
+                hasPendingAwsOverride |= profileResult.HasPendingAwsOverride;
             }
 
             #if AFR_EXTERNAL_REGISTRY
@@ -92,7 +103,7 @@ internal static class AppInitializer
         {
             log.Error("初始化失败", ex);
         }
-        return new PluginInitializationResult(state);
+        return new PluginInitializationResult(state, hasPendingAwsOverride);
     }
 
     /// <summary>
@@ -102,7 +113,7 @@ internal static class AppInitializer
     /// <param name="appPath">该配置文件对应的完整注册表路径。</param>
     /// <param name="dllPath">插件 DLL 的完整文件路径。</param>
     /// <returns>该配置文件的初始化状态。</returns>
-    private static PluginInitializationState InitializeProfile(string appPath, string dllPath)
+    private static ProfileInitializationResult InitializeProfile(string appPath, string dllPath)
     {
         bool isNewKey = !RegistryService.KeyExists(Registry.CurrentUser, appPath);
         string currentPluginVersion = PluginVersionService.GetDisplayVersion();
@@ -112,6 +123,7 @@ internal static class AppInitializer
         string? installedBuildId = RegistryService.ReadString(Registry.CurrentUser, appPath, PluginBuildIdValueName);
         int? installedConfigSchemaVersion = RegistryService.ReadDword(Registry.CurrentUser, appPath, ConfigSchemaVersionValueName);
         int? installedInitialized = RegistryService.ReadDword(Registry.CurrentUser, appPath, "IsInitialized");
+        bool hasPendingAwsOverride = RegistryService.ReadDword(Registry.CurrentUser, appPath, PendingAwsOverrideValueName) == 1;
         bool versionChanged = !isNewKey
                            && (!string.Equals(installedPluginVersion, currentPluginVersion, StringComparison.Ordinal)
                             || !string.Equals(installedBuildId, currentBuildId, StringComparison.Ordinal));
@@ -185,13 +197,55 @@ internal static class AppInitializer
             new Dictionary<string, object?>
             {
                 ["appPath"] = appPath,
-                ["state"] = state.ToString()
+                ["state"] = state.ToString(),
+                ["hasPendingAwsOverride"] = hasPendingAwsOverride
             });
-        return state;
+        return new ProfileInitializationResult(state, hasPendingAwsOverride);
     }
 
     private static PluginInitializationState MaxState(PluginInitializationState left, PluginInitializationState right)
         => (PluginInitializationState)Math.Max((int)left, (int)right);
+
+    /// <summary>标记缺失 SHX 弹窗抑制需要在 CAD 关闭后由 agent 补写。</summary>
+    public static void MarkAwsOverridePending(PluginInitializationState reason)
+    {
+        var currentBuildId = PluginVersionService.GetBuildId();
+        foreach (var appPath in GetAppPaths())
+        {
+            RegistryService.WriteDword(Registry.CurrentUser, appPath, PendingAwsOverrideValueName, 1);
+            RegistryService.WriteString(Registry.CurrentUser, appPath, PendingAwsOverrideBuildIdValueName, currentBuildId);
+            RegistryService.WriteString(Registry.CurrentUser, appPath, PendingAwsOverrideReasonValueName, reason.ToString());
+        }
+    }
+
+    /// <summary>清除缺失 SHX 弹窗抑制的离线补写 pending 标记。</summary>
+    public static void ClearAwsOverridePending()
+    {
+        foreach (var appPath in GetAppPaths())
+        {
+            RegistryService.DeleteValue(Registry.CurrentUser, appPath, PendingAwsOverrideValueName);
+            RegistryService.DeleteValue(Registry.CurrentUser, appPath, PendingAwsOverrideBuildIdValueName);
+            RegistryService.DeleteValue(Registry.CurrentUser, appPath, PendingAwsOverrideReasonValueName);
+        }
+    }
+
+    private static IEnumerable<string> GetAppPaths()
+    {
+        foreach (var profile in GetAcadProfiles())
+            yield return $@"{AutoCadBasePath}\{profile}\Applications\{AppName}";
+    }
+
+    private readonly struct ProfileInitializationResult
+    {
+        public ProfileInitializationResult(PluginInitializationState state, bool hasPendingAwsOverride)
+        {
+            State = state;
+            HasPendingAwsOverride = hasPendingAwsOverride;
+        }
+
+        public PluginInitializationState State { get; }
+        public bool HasPendingAwsOverride { get; }
+    }
 
     /// <summary>
     /// 完成由部署工具预创建注册表键时的剩余初始化。

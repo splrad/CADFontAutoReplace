@@ -30,6 +30,8 @@ internal sealed class LogService : ILogService
     private readonly List<(LogCategory Category, string Message, DateTime Timestamp)> _buffer = [];
     // 必须压在本轮命令行输出最后的条目。
     private readonly List<(LogCategory Category, string Message)> _tailBuffer = [];
+    // 即使其它 tail 条目稍后加入，也必须压在最末尾的操作提示。
+    private readonly List<(LogCategory Category, string Message)> _finalTailBuffer = [];
     // 每个文档只显示一次版本横幅。
     private readonly HashSet<string> _headerShownDocuments = new(StringComparer.OrdinalIgnoreCase);
 #if NET9_0_OR_GREATER
@@ -47,12 +49,22 @@ internal sealed class LogService : ILogService
     {
         AddTailEntry(LogCategory.Info, message);
     }
+    /// <summary>记录一条必须在本轮 Flush 绝对最后输出的信息。</summary>
+    public void InfoFinal(string message)
+    {
+        AddFinalTailEntry(LogCategory.Info, message);
+    }
     /// <summary>记录一条警告级别日志到缓冲区。</summary>
     public void Warning(string message) => AddEntry(LogCategory.Warning, message);
     /// <summary>记录一条必须在本轮 Flush 最后输出的警告。</summary>
     public void WarningLast(string message)
     {
         AddTailEntry(LogCategory.Warning, message);
+    }
+    /// <summary>记录一条必须在本轮 Flush 绝对最后输出的警告。</summary>
+    public void WarningFinal(string message)
+    {
+        AddFinalTailEntry(LogCategory.Warning, message);
     }
     /// <summary>记录一条错误级别日志到缓冲区。</summary>
     public void Error(string message) => AddEntry(LogCategory.Error, message);
@@ -189,6 +201,14 @@ internal sealed class LogService : ILogService
         }
     }
 
+    private void AddFinalTailEntry(LogCategory category, string message)
+    {
+        lock (_lock)
+        {
+            _finalTailBuffer.Add((category, message));
+        }
+    }
+
     /// <summary>
     /// 重置指定文档的日志头显示状态。
     /// <para>
@@ -223,12 +243,13 @@ internal sealed class LogService : ILogService
             const int bucketCount = 4;
             List<string>?[] buckets = new List<string>?[bucketCount];
             List<(LogCategory Category, string Message)>? tail = null;
+            List<(LogCategory Category, string Message)>? finalTail = null;
             bool showHeader;
             string docName;
 
             lock (_lock)
             {
-                if (_buffer.Count == 0 && _tailBuffer.Count == 0) return;
+                if (_buffer.Count == 0 && _tailBuffer.Count == 0 && _finalTailBuffer.Count == 0) return;
                 for (int i = 0; i < _buffer.Count; i++)
                 {
                     var (category, message, _) = _buffer[i];
@@ -248,6 +269,11 @@ internal sealed class LogService : ILogService
                 {
                     tail = [.. _tailBuffer];
                     _tailBuffer.Clear();
+                }
+                if (_finalTailBuffer.Count > 0)
+                {
+                    finalTail = [.. _finalTailBuffer];
+                    _finalTailBuffer.Clear();
                 }
 
                 docName = doc?.Name ?? string.Empty;
@@ -283,6 +309,22 @@ internal sealed class LogService : ILogService
                 for (int i = 0; i < tail.Count; i++)
                 {
                     var (category, message) = tail[i];
+                    string formatted = category switch
+                    {
+                        LogCategory.Error => $"\n[错误] {message}",
+                        LogCategory.Warning => $"\n[警告] {message}",
+                        LogCategory.Info => $"\n[信息] {message}",
+                        _ => $"\n{message}"
+                    };
+                    editor.WriteMessage(formatted);
+                }
+            }
+
+            if (finalTail is not null)
+            {
+                for (int i = 0; i < finalTail.Count; i++)
+                {
+                    var (category, message) = finalTail[i];
                     string formatted = category switch
                     {
                         LogCategory.Error => $"\n[错误] {message}",

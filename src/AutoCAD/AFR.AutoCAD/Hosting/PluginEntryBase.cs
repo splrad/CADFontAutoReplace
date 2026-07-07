@@ -5,6 +5,7 @@ using System.Reflection;
 using AFR.Abstractions;
 using AFR.Commands;
 using AFR.Constants;
+using AFR.HostIntegration;
 using AFR.Platform;
 using AFR.Services;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
@@ -146,12 +147,13 @@ public abstract class PluginEntryBase : IExtensionApplication
                 new Dictionary<string, object?>
                 {
                     ["state"] = initResult.State.ToString(),
-                    ["isFirstInstall"] = initResult.IsFirstInstall
+                    ["isFirstInstall"] = initResult.IsFirstInstall,
+                    ["hasPendingAwsOverride"] = initResult.HasPendingAwsOverride
                 });
 
-            if (initResult.ShouldApplyAwsOverride)
+            if (initResult.ShouldEvaluateAwsSuppression)
             {
-                TryApplyInstallOrUpdateAwsOverride(initResult, log);
+                TryScheduleOfflineAwsOverride(initResult, log);
             }
 
             if (initResult.ShouldSkipRuntimeStartup)
@@ -231,40 +233,68 @@ public abstract class PluginEntryBase : IExtensionApplication
         }
     }
 
-    private static bool TryApplyInstallOrUpdateAwsOverride(PluginInitializationResult initResult, LogService log)
+    private static bool TryScheduleOfflineAwsOverride(PluginInitializationResult initResult, LogService log)
     {
         try
         {
-            int changedCount = Diagnostics.AwsHideableDialogPatcher.ApplyInstallOrUpdateOverrideInRunningHost();
-            bool activeNodeReady = Diagnostics.AwsHideableDialogPatcher.IsActiveDialogNodeUpToDate();
+            var suppressionState = Diagnostics.AwsHideableDialogPatcher.GetUnresolvedFontDialogSuppressionState();
             DiagnosticLogger.Ok(
                 "PluginEntry",
-                "ApplyInstallOrUpdateAwsOverride",
-                "运行期缺失 SHX 弹窗抑制处理完成",
+                "EvaluateAwsSuppression",
+                "缺失 SHX 弹窗抑制状态检测完成",
                 new Dictionary<string, object?>
                 {
                     ["state"] = initResult.State.ToString(),
-                    ["changedCount"] = changedCount,
-                    ["activeNodeReady"] = activeNodeReady
+                    ["hasPendingAwsOverride"] = initResult.HasPendingAwsOverride,
+                    ["suppressionState"] = suppressionState.ToString()
                 });
 
-            if (changedCount > 0 || activeNodeReady)
+            if (suppressionState == AwsDialogSuppressionState.Correct)
             {
-                log.InfoLast("缺失 SHX 弹窗抑制已设置。请重启 CAD 后生效。");
+                if (initResult.HasPendingAwsOverride)
+                    AppInitializer.ClearAwsOverridePending();
                 return true;
             }
 
-            log.WarningLast("缺失 SHX 弹窗抑制未写入：未找到 FixedProfile.aws 或写入失败。请关闭 CAD 后使用 AFR 部署工具重新安装。");
+            if (initResult.IsInstallOrUpdate)
+                AppInitializer.MarkAwsOverridePending(initResult.State);
+
+            if (AwsPatchAgentLauncher.TryStart(out var errorMessage))
+            {
+                DiagnosticLogger.Ok(
+                    "PluginEntry",
+                    "StartAwsPatchAgent",
+                    "缺失 SHX 弹窗抑制离线补写 agent 已启动",
+                    new Dictionary<string, object?>
+                    {
+                        ["state"] = initResult.State.ToString(),
+                        ["suppressionState"] = suppressionState.ToString()
+                    });
+                log.InfoFinal("缺失 SHX 弹窗抑制已安排在 CAD 关闭后写入，请重启 CAD 后生效。");
+                return true;
+            }
+
+            DiagnosticLogger.Fail(
+                "PluginEntry",
+                "StartAwsPatchAgent",
+                "缺失 SHX 弹窗抑制离线补写 agent 启动失败",
+                fields: new Dictionary<string, object?>
+                {
+                    ["state"] = initResult.State.ToString(),
+                    ["suppressionState"] = suppressionState.ToString(),
+                    ["error"] = errorMessage
+                });
+            log.WarningFinal("缺失 SHX 弹窗抑制需要在 CAD 关闭后写入，请关闭 CAD 后使用 AFR 部署工具修复安装。");
         }
         catch (System.Exception ex)
         {
             DiagnosticLogger.Fail(
                 "PluginEntry",
-                "ApplyInstallOrUpdateAwsOverride",
-                "运行期缺失 SHX 弹窗抑制处理失败",
+                "ScheduleOfflineAwsOverride",
+                "缺失 SHX 弹窗抑制离线补写安排失败",
                 ex,
                 new Dictionary<string, object?> { ["state"] = initResult.State.ToString() });
-            log.WarningLast("缺失 SHX 弹窗抑制处理失败：" + ex.Message);
+            log.WarningFinal("缺失 SHX 弹窗抑制处理失败：" + ex.Message);
         }
         return false;
     }

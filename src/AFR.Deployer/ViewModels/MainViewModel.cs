@@ -11,6 +11,7 @@ using System.Windows.Threading;
 using AFR.Deployer.Infrastructure;
 using AFR.Deployer.Models;
 using AFR.Deployer.Services;
+using AFR.HostIntegration;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -533,7 +534,11 @@ internal sealed partial class MainViewModel : ObservableObject
             // 安装/更新时只覆盖缺失 SHX 弹窗对应节点，不改动 FixedProfile.aws 其它内容。
             foreach (var desc in awsOverrideDescriptors)
             {
-                try { AwsHideableDialogPatcher.ApplyInstallOrUpdateOverride(desc); }
+                try
+                {
+                    if (AwsHideableDialogPatcher.GetSuppressionState(desc) != AwsDialogSuppressionState.Correct)
+                        AwsHideableDialogPatcher.ApplyInstallOrUpdateOverride(desc);
+                }
                 catch { /* 单个版本失败不影响其它版本；安装本身已成功 */ }
             }
         });
