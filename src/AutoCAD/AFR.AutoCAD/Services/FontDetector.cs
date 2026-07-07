@@ -13,7 +13,7 @@ namespace AFR.Services;
 /// SHX 和 TrueType 可用性统一走共享索引；上下文只保存本次执行需要的度量缓存。
 /// </para>
 /// </summary>
-internal static class FontDetector
+internal static partial class FontDetector
 {
     /// <summary>预热系统 TrueType 字体索引。</summary>
     public static void PrewarmSystemFonts() => TrueTypeFontAvailabilityIndex.Initialize();
@@ -317,29 +317,48 @@ internal static class FontDetector
         }
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    // WCHAR 字段以 ushort 表示（布局与 char16_t 一致），使结构体严格 blittable，
+    // LibraryImport 源生成器才能直接封送，无需程序集级 DisableRuntimeMarshalling。
+    [StructLayout(LayoutKind.Sequential)]
     private struct TEXTMETRICW
     {
         public int tmHeight, tmAscent, tmDescent, tmInternalLeading, tmExternalLeading;
         public int tmAveCharWidth, tmMaxCharWidth, tmWeight, tmOverhang;
         public int tmDigitizedAspectX, tmDigitizedAspectY;
-        public char tmFirstChar, tmLastChar, tmDefaultChar, tmBreakChar;
+        public ushort tmFirstChar, tmLastChar, tmDefaultChar, tmBreakChar;
         public byte tmItalic, tmUnderlined, tmStruckOut, tmPitchAndFamily, tmCharSet;
     }
 
-    // VS 设计时编译未稳定生成 LibraryImport 实现；保留 DllImport 并仅抑制迁移建议。
 #if NET7_0_OR_GREATER
-#pragma warning disable SYSLIB1054
-#endif
+    // .NET 7+ 使用源生成 P/Invoke：编译期生成封送代码，支持 AOT/裁剪且无运行时 IL stub 开销。
+    [LibraryImport("user32.dll")]
+    private static partial IntPtr GetDC(IntPtr hWnd);
+
+    [LibraryImport("user32.dll")]
+    private static partial int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [LibraryImport("gdi32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial IntPtr CreateFontW(int cHeight, int cWidth, int cEscapement, int cOrientation, int cWeight, uint bItalic, uint bUnderline, uint bStrikeOut, uint iCharSet, uint iOutPrecision, uint iClipPrecision, uint iQuality, uint iPitchAndFamily, string pszFaceName);
+
+    [LibraryImport("gdi32.dll")]
+    private static partial IntPtr SelectObject(IntPtr hdc, IntPtr h);
+
+    [LibraryImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetTextMetricsW(IntPtr hdc, out TEXTMETRICW lptm);
+
+    [LibraryImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool DeleteObject(IntPtr ho);
+#else
+    // .NET Framework 不支持 LibraryImport 源生成器，保留经典 DllImport。
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateFontW(int cHeight, int cWidth, int cEscapement, int cOrientation, int cWeight, uint bItalic, uint bUnderline, uint bStrikeOut, uint iCharSet, uint iOutPrecision, uint iClipPrecision, uint iQuality, uint iPitchAndFamily, string pszFaceName);
     [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr hdc, IntPtr h);
-    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] private static extern bool GetTextMetricsW(IntPtr hdc, out TEXTMETRICW lptm);
+    [DllImport("gdi32.dll")] private static extern bool GetTextMetricsW(IntPtr hdc, out TEXTMETRICW lptm);
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr ho);
-#if NET7_0_OR_GREATER
-#pragma warning restore SYSLIB1054
 #endif
 
     #endregion
