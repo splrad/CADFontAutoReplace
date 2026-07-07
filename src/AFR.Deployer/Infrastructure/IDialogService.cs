@@ -13,6 +13,9 @@ internal interface IDialogService
     /// <summary>显示警告对话框。</summary>
     Task ShowWarningAsync(string message, string title);
 
+    /// <summary>显示部署工具“关于”窗口。</summary>
+    Task ShowAboutAsync();
+
     /// <summary>显示需要用户确认的对话框。</summary>
     /// <returns>true 表示用户点击了"确定"。</returns>
     Task<bool> ConfirmAsync(string message, string title);

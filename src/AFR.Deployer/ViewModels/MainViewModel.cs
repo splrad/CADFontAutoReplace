@@ -475,6 +475,9 @@ internal sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    [RelayCommand]
+    private Task OpenAboutAsync() => _dialog.ShowAboutAsync();
+
     // ── 安装 ──
 
     [RelayCommand(CanExecute = nameof(CanOperate))]

@@ -1,0 +1,207 @@
+<ui:FluentWindow x:Class="AFR.Deployer.Views.AboutWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="关于 AFR 部署工具"
+        Width="560" Height="420"
+        MinWidth="560" MinHeight="420"
+        MaxWidth="560" MaxHeight="420"
+        Icon="pack://application:,,,/AFR-Deployer;component/Icons/app.ico"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        WindowBackdropType="Mica"
+        ExtendsContentIntoTitleBar="True"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="ClearType"
+        TextOptions.TextHintingMode="Fixed"
+        RenderOptions.ClearTypeHint="Enabled">
+
+    <ui:FluentWindow.Resources>
+        <Style x:Key="InfoLabelTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="InfoValueTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <Style x:Key="InfoAccentValueTextStyle" TargetType="TextBlock" BasedOn="{StaticResource InfoValueTextStyle}">
+            <Setter Property="Foreground" Value="#0F6CBD" />
+        </Style>
+
+        <Style x:Key="InfoSuccessValueTextStyle" TargetType="TextBlock" BasedOn="{StaticResource InfoValueTextStyle}">
+            <Setter Property="Foreground" Value="#10884B" />
+        </Style>
+
+        <Style x:Key="SectionTitleTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="7,0,0,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="#0F6CBD" />
+        </Style>
+
+        <Style x:Key="ProjectHomeButtonStyle" TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+            <Setter Property="Appearance" Value="Secondary" />
+            <Setter Property="Background" Value="#F7FBFF" />
+            <Setter Property="BorderBrush" Value="#BFD7F3" />
+            <Setter Property="Foreground" Value="#0F6CBD" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </ui:FluentWindow.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0"
+                     Title="关于 AFR 部署工具"
+                     ShowMaximize="False"
+                     ShowMinimize="False">
+            <ui:TitleBar.Icon>
+                <ui:ImageIcon Source="pack://application:,,,/AFR-Deployer;component/Icons/app.ico" />
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
+
+        <Grid Grid.Row="1" Margin="28,14,28,26">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Orientation="Horizontal">
+                <Border Width="64"
+                        Height="64"
+                        CornerRadius="14"
+                        Background="#E8F1FB"
+                        VerticalAlignment="Top">
+                    <Image Source="pack://application:,,,/AFR-Deployer;component/Icons/app.ico"
+                           Width="46"
+                           Height="46"
+                           Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center" />
+                </Border>
+
+                <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding ProductName}"
+                               FontSize="19"
+                               FontWeight="SemiBold"
+                               Foreground="#1F4E79"
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding Description}"
+                               Margin="0,7,0,0"
+                               FontSize="13"
+                               Foreground="#6B7280"
+                               TextWrapping="Wrap"
+                               Width="400" />
+                </StackPanel>
+            </StackPanel>
+
+            <Border Grid.Row="1"
+                    Height="1"
+                    Margin="0,20,0,18"
+                    Background="{DynamicResource CardStrokeColorDefaultBrush}" />
+
+            <Border Grid.Row="2"
+                    Background="{DynamicResource LayerFillColorDefaultBrush}"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="18,16,18,20">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Info24"
+                                       FontSize="16"
+                                       Foreground="#0F6CBD"
+                                       VerticalAlignment="Center" />
+                        <TextBlock Text="软件信息" Style="{StaticResource SectionTitleTextStyle}" />
+                    </StackPanel>
+
+                    <Grid Grid.Row="1" Margin="0,13,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="74" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="74" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="软件版本" Style="{StaticResource InfoLabelTextStyle}" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding VersionText}" Style="{StaticResource InfoAccentValueTextStyle}" />
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="构建号" Style="{StaticResource InfoLabelTextStyle}" />
+                        <TextBlock Grid.Row="0" Grid.Column="3" Text="{Binding BuildIdText}" Style="{StaticResource InfoAccentValueTextStyle}" />
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="作者" Margin="0,12,0,0" Style="{StaticResource InfoLabelTextStyle}" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Author}" Margin="0,12,0,0" Style="{StaticResource InfoValueTextStyle}" />
+                        <TextBlock Grid.Row="1" Grid.Column="2" Text="开源协议" Margin="0,12,0,0" Style="{StaticResource InfoLabelTextStyle}" />
+                        <TextBlock Grid.Row="1" Grid.Column="3" Text="{Binding LicenseName}" Margin="0,12,0,0" Style="{StaticResource InfoSuccessValueTextStyle}" />
+                    </Grid>
+
+                    <Border Grid.Row="2"
+                            Height="1"
+                            Margin="0,17,0,14"
+                            Background="{DynamicResource CardStrokeColorDefaultBrush}" />
+
+                    <StackPanel Grid.Row="3" Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Link24"
+                                       FontSize="16"
+                                       Foreground="#0F6CBD"
+                                       VerticalAlignment="Center" />
+                        <TextBlock Text="项目主页" Style="{StaticResource SectionTitleTextStyle}" />
+                    </StackPanel>
+
+                    <Grid Grid.Row="4"
+                          Margin="0,13,0,0"
+                          HorizontalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170" />
+                            <ColumnDefinition Width="14" />
+                            <ColumnDefinition Width="170" />
+                        </Grid.ColumnDefinitions>
+
+                        <ui:Button Grid.Column="0"
+                                   Content="GitHub 项目主页"
+                                   Icon="{ui:SymbolIcon Code24}"
+                                   Style="{StaticResource ProjectHomeButtonStyle}"
+                                   Height="36"
+                                   HorizontalAlignment="Stretch"
+                                   Command="{Binding OpenGitHubCommand}"
+                                   ToolTip="{Binding GitHubUrl}" />
+                        <ui:Button Grid.Column="2"
+                                   Content="Gitee 项目主页"
+                                   Icon="{ui:SymbolIcon Globe24}"
+                                   Style="{StaticResource ProjectHomeButtonStyle}"
+                                   Height="36"
+                                   HorizontalAlignment="Stretch"
+                                   Command="{Binding OpenGiteeCommand}"
+                                   ToolTip="{Binding GiteeUrl}" />
+                    </Grid>
+                </Grid>
+            </Border>
+
+        </Grid>
+    </Grid>
+</ui:FluentWindow>
