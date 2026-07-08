@@ -1,0 +1,163 @@
+# 📋 复用到新项目时的配置步骤：
+#   1) 在仓库 Variables 中配置 TRUSTED_DEVELOPERS，格式为 JSON 数组：
+#      ["your-login", "another-login"]。
+#      该名单用于自动 APPROVE、main 快速通道和受保护配置审批。
+#   2) 在仓库 Settings -> Actions -> General 中确认：
+#      - Workflow permissions：Read and write permissions
+#      - Allow GitHub Actions to create and approve pull requests：启用
+#      否则 Auto Approve 可能无法提交 APPROVE。
+#   3) 分支保护 / ruleset 的 required checks 建议配置为：
+#      - test: PR Governance / Protected Configuration Gate
+#      - main: PR Governance / Main Authorization Gate
+#      - main: PR Governance / Source Branch Gate
+#      - main: PR Governance / Copilot Review Gate
+#      不要把 Auto Approve 设置为 required check。
+#   4) 如新项目受保护配置文件不在 .github/workflows、.github/actions、.github/scripts 等路径，
+#      修改 .github/scripts/pr-governance.js 中的 isProtectedConfig()。
+#   5) Copilot Review Gate 只检查 main 目标 PR。
+#      它依赖 ruleset 已自动请求 Copilot code review，并依赖 .github/copilot-instructions.md
+#      要求 Copilot comment 标注 Severity: blocking 或 Severity: suggestion。
+#   6) 如果 GitHub App 创建 PR 导致 PR 作者显示为 bot，PR Automation 会在 PR 正文写入
+#      workflow:source-actor 隐藏标记；本 workflow 会按该原始推送人判断 TRUSTED_DEVELOPERS。
+name: PR Governance
+
+on:
+  # pull_request_target 允许在受保护的默认分支上下文中读取治理脚本和提交审批/评论。
+  # 脚本 checkout 固定到 base.sha，避免执行来自 PR head 的不可信 workflow 脚本。
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # 审批变化后重新计算 main 授权门禁。
+  pull_request_review:
+    types: [submitted, dismissed]
+  # Copilot review thread/comment 变化后重新计算 Copilot Review Gate。
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+
+concurrency:
+  group: pr-governance-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  # contents: read 用于检出治理脚本；
+  # pull-requests: write 用于 Auto Approve 和读取/提交 review；
+  # issues: write 用于 gate 状态评论。
+  contents: read
+  pull-requests: write
+  issues: write
+
+env:
+  # 以下 PR 上下文供 .github/scripts/pr-governance.js 使用。
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+  PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+  PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+  PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+  TRUSTED_DEVELOPERS: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
+
+jobs:
+  auto-approve:
+    name: Auto Approve
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # 该 job 不能作为 required check；它只负责尝试给核心开发者提交的 PR 自动 APPROVE。
+    # 是否真的是核心开发者由脚本读取 TRUSTED_DEVELOPERS 和 workflow:source-actor 后判断。
+    if: github.event_name == 'pull_request_target'
+    steps:
+      - name: Checkout governance scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Submit approval for trusted author
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/pr-governance.js auto-approve
+
+  protected-configuration-gate:
+    name: Protected Configuration Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # test 目标 PR 只检查受保护配置文件是否被非核心开发者修改。
+    # 如果新项目测试分支不是 test，这里和 required check 配置需要一起修改。
+    if: github.event.pull_request.base.ref == 'test'
+    steps:
+      - name: Checkout governance scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Check protected automation configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_COMMENT_TOKEN: ${{ github.token }}
+        run: node .github/scripts/pr-governance.js protected-config
+
+  main-authorization-gate:
+    name: Main Authorization Gate
+    needs: auto-approve
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # main 目标 PR 必须满足：原始提交人是核心开发者，或当前 head SHA 获得核心开发者审批。
+    if: >-
+      always() &&
+      github.event.pull_request.base.ref == 'main'
+    steps:
+      - name: Checkout governance scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Check trusted approval for main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_COMMENT_TOKEN: ${{ github.token }}
+        run: node .github/scripts/pr-governance.js main-authorization
+
+  source-branch-gate:
+    name: Source Branch Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # main 默认只允许 test -> main；核心开发者可从功能分支快速通道到 main。
+    # 外部 fork 不允许直达 main。
+    if: github.event.pull_request.base.ref == 'main'
+    steps:
+      - name: Checkout governance scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Check source branch policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_COMMENT_TOKEN: ${{ github.token }}
+        run: node .github/scripts/pr-governance.js source-branch
+
+  copilot-review-gate:
+    name: Copilot Review Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Copilot code review 本身只会 comment，不会作为 approval/request-changes 阻断合并。
+    # 因此这里用独立 check 阻断“未完成 Copilot review”或“未解决重大 Copilot 问题”。
+    if: github.event.pull_request.base.ref == 'main'
+    steps:
+      - name: Checkout governance scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Check Copilot review completion and blocking comments
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_COMMENT_TOKEN: ${{ github.token }}
+        run: node .github/scripts/pr-governance.js copilot-review

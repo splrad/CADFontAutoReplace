@@ -238,16 +238,29 @@ dotnet build CADFontAutoReplace.slnx
 > 将 `20XX` 替换为当前目标版本（例如 `2027`）。插件统一版本号集中在根目录的 `Version.props`（发版时仅修改这个文件）。
 
 4. 验证关键命令（`AFR` / `AFRLOG`，Debug 下可验证 `AFRVIEW`）。
-5. 推送分支后，流程会自动创建/更新 `你的分支 -> test` 的 PR。
-6. `test` 合并后，流程会自动创建/更新 `test -> main` 的 PR。
-7. 提交说明与 PR 描述会自动生成；不准确时请在 PR 评论补充。
+5. 推送分支后，`PR Automation` 会按身份自动创建/更新 PR：
+   - 非核心开发者：`你的分支 -> test`
+   - 核心开发者：`你的分支 -> main`
+   - `test` 分支更新：`test -> main`
+6. PR 标题和说明会基于当前代码差异自动生成；优先使用 GitHub Copilot CLI，未配置时使用确定性代码差异摘要兜底。
+7. `main` 合并后，`Release` 负责发布资产与 GitHub 官方生成发布说明，`PR Cleanup` 会同步 `test` 分支。
 
 ### 审批与权限规则
 
-- 核心开发者（`TRUSTED_DEVELOPERS`）提交的 PR 会自动审批授权。
-- 非核心开发者提交到 `main` 的 PR，需要至少 1 位核心开发者有效审批。
-- 非核心开发者向 `test` 提交 PR 时，禁止修改 `.github/workflows/` 下文件。
-- `main` 仅允许 `test` 分支发起合并，且禁止外部 Fork 直接向 `main` 提 PR。
+- 核心开发者（`TRUSTED_DEVELOPERS`）提交的 PR 会由 `PR Governance` 自动提交 `APPROVE`。
+- 非核心开发者提交到 `main` 的 PR，需要至少 1 位核心开发者对当前 head SHA 有效审批。
+- 非核心开发者向 `test` 提交 PR 时，修改 `.github/workflows/`、`.github/scripts/`、`.github/actions/`、`.github/skills/`、`.github/copilot-instructions.md` 或 `.github/pull_request_template.md` 需要核心开发者审批。
+- `main` 默认仅允许 `test` 分支发起合并；核心开发者可走快速通道，外部 Fork 禁止直接向 `main` 提 PR。
+- `main` 目标 PR 需要当前 head SHA 完成 Copilot 代码审查，且不存在未解决的重大 Copilot 问题。
+
+### 自动化配置
+
+- 仓库变量 `TRUSTED_DEVELOPERS`：JSON 数组格式的核心开发者用户名。
+- 仓库变量 `WORKFLOW_AUTOMATION_APP_CLIENT_ID`：自动化 GitHub App 的 Client ID。
+- 仓库密钥 `WORKFLOW_AUTOMATION_APP_PRIVATE_KEY`：自动化 GitHub App 的私钥。
+- 仓库密钥 `COPILOT_CLI_TOKEN`：用于 `PR Automation` 调用 GitHub Copilot CLI 生成代码内容驱动的 PR 标题与摘要；未配置时会使用确定性代码差异摘要兜底。
+
+自动化 GitHub App 需要安装到本仓库，并授予最小仓库权限：`Contents: Read and write`、`Pull requests: Read and write`、`Issues: Read and write`。其中 `Contents: Write` 用于 `PR Cleanup` 将 `test` 分支同步到 `main`；如果 `test` 受 ruleset 保护，需要把该 GitHub App 加入允许同步 `test` 的 bypass 规则。
 
 ### 贡献约定
 

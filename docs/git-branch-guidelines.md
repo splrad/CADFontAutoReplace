@@ -12,7 +12,7 @@ tags:
 
 | 分支 | 用途 | 权限 |
 | --- | --- | --- |
-| `main` | 生产环境的主干分支，包含所有已发布的稳定代码。| 受保护，**禁止直接推送**。仅允许通过 `test` 分支的 PR 合并。 |
+| `main` | 生产环境的主干分支，包含所有已发布的稳定代码。| 受保护，**禁止直接推送**。默认仅允许通过 `test` 分支的 PR 合并；核心开发者可走快速通道。 |
 | `test` | 集成测试分支，用于汇聚各个功能分支并进行自动化测试和回归验证。 | 受保护。允许合并来自于功能分支的 PR。 |
 
 ## 2. 短期分支命名规范
@@ -41,10 +41,30 @@ tags:
 2. **创建分支**：`git checkout -b feature/my-new-feature`
 3. **本地提交**：完成代码编写与本地测试。
 4. **推送到远端**：`git push origin feature/my-new-feature`
-5. **创建 PR**：通过 GitHub 流程，将分支合并请求指向 `test` 分支。
+5. **自动创建 PR**：推送分支后由 `PR Automation` 自动创建或更新合并请求。
 6. **自动化流转**：
-   - 流程会自动创建/更新 `feature -> test` 的 PR。
+   - 非核心开发者：自动创建/更新 `feature -> test` 的 PR。
+   - 核心开发者：自动创建/更新 `feature -> main` 的快速通道 PR。
    - `test` 验证通过并合并后，流程自动创建/更新 `test -> main` 的 PR。
+7. **合并门禁**：`PR Governance` 保留核心开发者自动审批、受保护配置审查、`main` 来源限制，并要求 `main` 目标 PR 完成 Copilot 代码审查且无未解决重大问题。
+
+## 4. 必需状态检查
+
+重构后的分支保护规则建议使用以下状态检查：
+
+- `test`：`PR Governance / Protected Configuration Gate`
+- `main`：`PR Governance / Main Authorization Gate`
+- `main`：`PR Governance / Source Branch Gate`
+- `main`：`PR Governance / Copilot Review Gate`
+
+## 5. 工作流迁移顺序
+
+1. 创建并安装自动化 GitHub App，建议命名为 `Workflow Automation`；配置仓库变量 `WORKFLOW_AUTOMATION_APP_CLIENT_ID` 和仓库密钥 `WORKFLOW_AUTOMATION_APP_PRIVATE_KEY`。
+2. 确认 App 至少具备 `Contents: Read and write`、`Pull requests: Read and write`、`Issues: Read and write` 仓库权限；若 `test` 受 ruleset 保护，将该 App 加入允许同步 `test` 的 bypass 规则。
+3. 合并工作流重构 PR，让新的 workflow 文件进入默认分支。
+4. 使用临时 PR 触发新的 `PR Governance` 检查，确认 GitHub UI 中已经出现上述 4 个状态检查名称。
+5. 将 ruleset / branch protection 的 required checks 切换到上述新名称。
+6. 确认新门禁生效后关闭临时 PR。
 
 # 分支结构
 ```
@@ -61,6 +81,7 @@ docs/<文档>              # 文档
 - main 永远稳定（随时可用）
 - test 用来“过渡验证”
 - 所有开发都从 main 拉分支
+- PR 标题与说明必须来自代码差异，不能只使用来源分支和目标分支
 - 临时分支**用完就删**
 # 分支模板
 ## ✅ 功能开发（feature/）
