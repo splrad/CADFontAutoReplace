@@ -302,9 +302,18 @@ function copilotReviewsForHead() {
     '--slurp',
   ]) || []);
   return reviews.filter((review) => {
-    const login = String(review?.user?.login || '').toLowerCase();
-    return login.includes('copilot') && review.commit_id === headSha;
+    const login = normalizeGitHubLogin(review?.user?.login);
+    return login === 'copilot-pull-request-reviewer' && review.commit_id === headSha;
   });
+}
+
+function normalizeGitHubLogin(login) {
+  return String(login || '').toLowerCase().replace(/\[bot\]$/, '');
+}
+
+function isCopilotReviewCommentAuthor(login) {
+  const normalized = normalizeGitHubLogin(login);
+  return normalized === 'copilot-pull-request-reviewer' || normalized === 'copilot';
 }
 
 function unresolvedBlockingCopilotThreads() {
@@ -329,7 +338,7 @@ function unresolvedBlockingCopilotThreads() {
       }
     }
   `;
-  const blockingPattern = /(severity\s*:\s*(blocking|high|critical)|\b(blocking|critical)\b|重大|严重|高风险)/i;
+  const blockingPattern = /^\s*(severity\s*[:：]\s*blocking|严重程度\s*[:：]\s*阻断)(?:\s|$)/im;
   const blocking = [];
   let cursor = null;
 
@@ -348,9 +357,8 @@ function unresolvedBlockingCopilotThreads() {
       if (thread.isResolved) continue;
       const comments = thread.comments?.nodes || [];
       const copilotComment = comments.find((comment) => {
-        const login = String(comment?.author?.login || '').toLowerCase();
         const body = String(comment?.body || '');
-        return login.includes('copilot') && blockingPattern.test(body);
+        return isCopilotReviewCommentAuthor(comment?.author?.login) && blockingPattern.test(body);
       });
       if (copilotComment) {
         blocking.push({

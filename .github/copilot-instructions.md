@@ -1,10 +1,12 @@
-When reviewing pull requests in this repository, focus on concrete correctness, safety, workflow, release, and compatibility risks.
+When reviewing pull requests in this repository, write the pull request overview and every review comment in Simplified Chinese.
 
-For every review comment, start the comment body with exactly one severity line:
+Focus on concrete correctness, safety, workflow, release, and compatibility risks.
 
-- `Severity: blocking` for issues that should block merging until fixed.
-- `Severity: suggestion` for non-blocking improvements, style suggestions, or optional cleanup.
+For every review comment, start the comment body with exactly one machine-readable severity line:
 
-Use `Severity: blocking` only for bugs, security issues, broken CI/CD behavior, release/package regressions, data loss risk, or changes that invalidate the branch and approval rules documented in this repository.
+- `严重程度：阻断` for issues that should block merging until fixed.
+- `严重程度：建议` for non-blocking improvements, style suggestions, or optional cleanup.
+
+Use `严重程度：阻断` only for bugs, security issues, broken CI/CD behavior, release/package regressions, data loss risk, or changes that invalidate the branch and approval rules documented in this repository.
 
 Do not mark ordinary refactors, naming preferences, formatting concerns, or subjective readability suggestions as blocking.
