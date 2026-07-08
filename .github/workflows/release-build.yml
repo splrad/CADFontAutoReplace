@@ -1,8 +1,8 @@
 # 📋 复用到新项目时的配置步骤：
 #   1) 这条 Release workflow 包含当前项目专用发布逻辑。
 #      跨仓库复用时，必须重点修改：
-#      - on.push.paths：哪些文件变化会触发发布
-#      - Version.props：版本号读取来源
+#      - on.push.paths：哪个版本源变化代表“准备发布”
+#      - Version.props：版本号读取来源；本项目只在它变化时自动发布
 #      - tools/Publish-ReleaseAssets.ps1：构建/打包命令
 #      - artifacts/ReleaseAssets 下的资产文件名检查
 #      - release notes 中的固定下载说明
@@ -21,14 +21,11 @@ on:
   push:
     branches:
       - main
-    # 当前项目专用触发路径；复用到新项目时按实际发布输入文件修改。
+    # 自动发布只由版本源变化触发。
+    # 普通源码、文档、workflow 或脚本变更会被后续版本发布一起打包，但不应单独触发 Release。
+    # 复用到其他项目时，把这里替换为 package.json、Directory.Build.props 等“版本变更即发布”的文件。
     paths:
       - Version.props
-      - chore/Fonts.zip
-      - tools/Publish-ReleaseAssets.ps1
-      - src/**
-      - .github/workflows/release-build.yml
-      - .github/scripts/**
   workflow_dispatch:
 
 concurrency:
