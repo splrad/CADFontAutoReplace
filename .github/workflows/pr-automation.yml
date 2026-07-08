@@ -79,6 +79,7 @@ jobs:
           # - trusted feature  -> main
           # - normal feature   -> test
           # 复用到其他项目时，如果分支名称不是 test/main，只改这一段即可。
+          # 后续脚本会优先复用同一来源分支已有的 open PR，并在必要时改用该 PR 的实际 base。
           trusted="$(printf '%s' "${TRUSTED_DEVELOPERS:-[]}" | jq -r --arg actor "${GITHUB_ACTOR}" 'if type == "array" and index($actor) then "true" else "false" end' 2>/dev/null || echo "false")"
 
           if [ "${SOURCE_BRANCH}" = "test" ]; then

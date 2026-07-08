@@ -5,7 +5,7 @@ const path = require('node:path');
 const repo = process.env.GITHUB_REPOSITORY || '';
 const [owner, repoName] = repo.split('/');
 const sourceBranch = process.env.SOURCE_BRANCH || process.env.GITHUB_REF_NAME || '';
-const targetBranch = process.env.TARGET_BRANCH || '';
+let targetBranch = process.env.TARGET_BRANCH || '';
 const actor = process.env.GITHUB_ACTOR || 'unknown';
 const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
 const runnerTemp = process.env.RUNNER_TEMP || workspace;
@@ -401,18 +401,47 @@ function buildBody(existingBody, summary, context) {
   return `${template.trim()}\n\n${autoBlock}\n`;
 }
 
-function findOpenPullRequest() {
+function findOpenPullRequestsForSource() {
   const result = ghJson([
     '--method', 'GET',
     `repos/${repo}/pulls`,
     '-f', 'state=open',
     '-f', `head=${owner}:${sourceBranch}`,
-    '-f', `base=${targetBranch}`,
-    '-f', 'sort=created',
+    '-f', 'sort=updated',
     '-f', 'direction=desc',
-    '-f', 'per_page=1',
+    '-f', 'per_page=20',
   ]);
-  return Array.isArray(result) ? result[0] : null;
+  return Array.isArray(result) ? result : [];
+}
+
+function prBaseRef(pr) {
+  return String(pr?.base?.ref || '');
+}
+
+function selectOpenPullRequest(prs, preferredBase) {
+  return prs.find((pr) => prBaseRef(pr) === 'main')
+    || prs.find((pr) => prBaseRef(pr) === preferredBase)
+    || prs.find((pr) => prBaseRef(pr) === 'test')
+    || prs[0]
+    || null;
+}
+
+function findOpenPullRequest() {
+  return selectOpenPullRequest(findOpenPullRequestsForSource(), targetBranch);
+}
+
+function adoptExistingPullRequestTarget() {
+  const current = findOpenPullRequest();
+  const currentBase = prBaseRef(current);
+  if (!currentBase) return current;
+
+  if (currentBase !== targetBranch) {
+    console.log(`Reusing existing PR #${current.number}: ${sourceBranch} -> ${currentBase}; overriding resolved target ${targetBranch}.`);
+    targetBranch = currentBase;
+    appendEnv({ TARGET_BRANCH: targetBranch });
+  }
+
+  return current;
 }
 
 function mentionText() {
@@ -471,6 +500,7 @@ function generate() {
     throw new Error('Missing repository or branch context.');
   }
 
+  const existingPullRequest = adoptExistingPullRequestTarget();
   runAllowFail('git', [
     'fetch',
     '--no-tags',
@@ -511,7 +541,11 @@ function generate() {
     PR_FALLBACK_PATH: fallbackPath,
     PR_COPILOT_PROMPT_PATH: promptPath,
   });
-  writeOutput({ skipped: 'false' });
+  writeOutput({
+    skipped: 'false',
+    existing_pr_number: existingPullRequest?.number || '',
+    target_branch: targetBranch,
+  });
 }
 
 function applySummary() {
@@ -539,6 +573,13 @@ function applySummary() {
   const releaseLabels = inferReleaseLabels(context, summary);
   context.generationMode = generationMode;
   const current = findOpenPullRequest();
+  if (current) {
+    const currentBase = prBaseRef(current);
+    if (currentBase && currentBase !== targetBranch) {
+      targetBranch = currentBase;
+      context.targetBranch = currentBase;
+    }
+  }
   const currentBody = current?.body || '';
   const body = buildBody(currentBody, summary, context);
   let prNumber = current?.number;
