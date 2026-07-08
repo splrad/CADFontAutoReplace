@@ -238,6 +238,13 @@ jobs:
               '(?m)^\s*(?:\*\*)?Full Changelog(?:\*\*)?:\s*.*(?:\r?\n)?',
               ''
           ).Trim()
+          if ([string]::IsNullOrWhiteSpace($generatedBody)) {
+              $generatedBody = @(
+                  '## Changes',
+                  '',
+                  "- Release generated from merged PR #${{ steps.merged-pr-guard.outputs.pr_number }}."
+              ) -join "`n"
+          }
 
           $lines = @(
               '## 下载说明',

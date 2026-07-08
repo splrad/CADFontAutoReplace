@@ -15,6 +15,7 @@ const releaseLabelDefinitions = [
   { name: 'feature', color: '1d76db', description: 'Release notes: new user-facing features or enhancements.' },
   { name: 'bug', color: 'd73a4a', description: 'Release notes: bug fixes or regressions.' },
   { name: 'performance', color: 'fbca04', description: 'Release notes: performance improvements.' },
+  { name: 'build', color: 'fef2c0', description: 'Release notes: build system or packaging changes.' },
   { name: 'workflow', color: '5319e7', description: 'Release notes: CI/CD, automation, or release workflow changes.' },
   { name: 'dependencies', color: '0366d6', description: 'Release notes: dependency or package updates.' },
   { name: 'docs', color: '0075ca', description: 'Release notes: documentation changes.' },
@@ -95,20 +96,41 @@ function fileCategory(file) {
   return 'project';
 }
 
-function buildTitle(files) {
-  const categories = files.map((line) => {
-    const parts = line.split(/\t+/);
-    return fileCategory(parts[parts.length - 1] || line);
-  });
-  const has = (category) => categories.includes(category);
+function statusFilePath(line) {
+  const parts = String(line || '').split(/\t+/);
+  return (parts[parts.length - 1] || line).replace(/\\/g, '/');
+}
 
-  if (has('github')) return '重构 GitHub 自动化流程';
-  if (has('tools')) return '优化构建与发布工具';
-  if (has('source')) return '更新项目代码实现';
-  if (has('tests')) return '完善测试覆盖';
-  if (has('version') || has('assets')) return '更新版本与发布资源';
-  if (has('docs')) return '完善项目文档说明';
-  return '更新项目实现';
+function titleSubject(title) {
+  return String(title || '').replace(/^(feat|fix|refactor|perf|style|docs|test|ci|chore|revert)(\([a-z0-9-]+\))?!?:\s*/i, '').trim();
+}
+
+function conventionalPrefix(type, scope) {
+  return scope ? `${type}(${scope})` : type;
+}
+
+function buildTitle(files) {
+  const paths = files.map(statusFilePath);
+  const categories = paths.map(fileCategory);
+  const has = (category) => categories.includes(category);
+  const changed = (pattern) => paths.some((file) => pattern.test(file));
+
+  if (has('github')) {
+    const scope = changed(/^\.github\/workflows\/release-/) || changed(/^\.github\/release\.yml$/) ? 'release' : 'workflow';
+    return `${conventionalPrefix('ci', scope)}: 调整 GitHub 自动化流程`;
+  }
+  if (has('tools')) return 'build(release): 优化构建与发布工具';
+  if (has('tests')) return 'test: 完善测试覆盖';
+  if (has('docs')) return 'docs: 完善项目文档说明';
+  if (has('version') || has('assets')) return 'chore(release): 更新版本与发布资源';
+  if (has('source')) {
+    if (changed(/^src\/AFR\.Deployer\//i)) return 'feat(deployer): 更新部署工具实现';
+    if (changed(/^src\/AFR\.UI\//i)) return 'feat(ui): 更新界面交互实现';
+    if (changed(/^src\/AFR\.Core\//i)) return 'refactor(core): 更新核心服务实现';
+    if (changed(/^src\/AutoCAD\//i)) return 'fix(autocad): 更新 AutoCAD 插件实现';
+    return 'refactor: 更新项目代码实现';
+  }
+  return 'chore: 更新项目维护内容';
 }
 
 function buildChanges(files) {
@@ -135,12 +157,13 @@ function buildChanges(files) {
 }
 
 function buildFallback(context) {
-  const files = cleanLines(context.changedFiles, 80);
+  const allFiles = cleanLines(context.changedFiles, 10000);
+  const files = allFiles.slice(0, 80);
   const title = buildTitle(files);
   const changes = buildChanges(files);
   return {
     title,
-    summary: `${title}，涉及 ${files.length || 0} 个文件。`,
+    summary: `${titleSubject(title)}，涉及 ${allFiles.length || 0} 个文件。`,
     changes,
     validation: [
       '请根据变更范围运行对应构建或手工验证。',
@@ -159,8 +182,12 @@ function buildPrompt(context, fallback) {
     '你是 GitHub Pull Request 标题与说明生成器。',
     '只根据下面提供的代码差异、文件清单、提交信息生成内容，不要使用来源分支名或目标分支名代替变更主题。',
     '请输出严格 JSON，不要输出 Markdown 代码块或额外解释。',
-    'JSON 格式：{"title":"中文 PR 标题","summary":"一句话摘要","changes":["主要改动"],"validation":["验证建议"],"risk":["风险或影响"]}',
-    '标题要求：中文，动宾结构，不超过 50 字，体现代码内容，不得写成“分支 A 到分支 B”。',
+    'JSON 格式：{"title":"Conventional Commits 风格 PR 标题","summary":"一句话摘要","changes":["主要改动"],"validation":["验证建议"],"risk":["风险或影响"]}',
+    '标题要求：必须使用 Conventional Commits 风格，格式为 type(scope): 中文标题；scope 可省略。',
+    '允许的 type：feat、fix、refactor、perf、style、docs、test、build、ci、chore、revert。',
+    'scope 使用小写英文、数字或连字符，例如 deployer、release、workflow、core、ui、autocad。',
+    '标题 subject 用中文动宾结构，不超过 50 字，不加句号，体现代码内容，不得写成“分支 A 到分支 B”。',
+    '标题示例：feat(deployer): 新增关于窗口；ci(release): 限制发布流程仅由版本变更触发。',
     '正文要求：简洁，面向审查者，避免夸张宣传语。',
     '',
     `兜底标题参考：${fallback.title}`,
@@ -203,7 +230,8 @@ function resolveJsonCandidate(raw) {
 function sanitizeGenerated(generated, fallback) {
   const title = String(generated?.title || '').trim();
   const branchTitlePattern = new RegExp(`^\\s*${escapeRegExp(sourceBranch)}\\s*(-|→|->|➔|to)\\s*${escapeRegExp(targetBranch)}\\s*$`, 'i');
-  const safeTitle = title && !branchTitlePattern.test(title) && title.length <= 80
+  const conventionalTitlePattern = /^(feat|fix|refactor|perf|style|docs|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?:\s*\S.{0,80}$/;
+  const safeTitle = title && conventionalTitlePattern.test(title) && !branchTitlePattern.test(title) && title.length <= 100
     ? title
     : fallback.title;
 
@@ -224,6 +252,13 @@ function sanitizeGenerated(generated, fallback) {
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function htmlCommentValue(value) {
+  return String(value ?? '')
+    .replace(/--/g, '- -')
+    .replace(/>/g, '&gt;')
+    .replace(/\r?\n/g, ' ');
 }
 
 function changedFilePaths(context) {
@@ -248,6 +283,7 @@ function inferReleaseLabels(context, summary) {
   if (/(^|\s|\n)(fix|bug|bugfix|regression|修复|缺陷|问题)/i.test(text)) labels.add('bug');
   if (/(^|\s|\n)(feat|feature|enhancement|新增|添加|功能)/i.test(text)) labels.add('feature');
   if (/(perf|performance|性能)/i.test(text)) labels.add('performance');
+  if (/(^|\s|\n)(build|packag|打包|构建)/i.test(text)) labels.add('build');
   if (files.some((file) => file.startsWith('.github/') || file.startsWith('tools/') || file.startsWith('scripts/'))
     || /(workflow|github actions|release|ci|工作流|发布)/i.test(text)) labels.add('workflow');
   if (files.some((file) => /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|packages\.lock\.json)$/.test(file))
@@ -301,18 +337,13 @@ function applyReleaseLabels(prNumber, labels) {
 
 function buildAutoBlock(summary, context) {
   const bulletList = (items) => items.map((item) => `- ${item}`).join('\n');
-  const changedFiles = cleanLines(context.changedFiles, 20)
-    .map((line) => `- \`${line.replace(/\t/g, ' ')}\``)
-    .join('\n') || '- 无';
+  const changedFileCount = cleanLines(context.changedFiles, 10000).length;
 
   return [
     '<!-- workflow:auto-summary:start -->',
     `<!-- workflow:source-actor:${actor} -->`,
+    `<!-- workflow:auto-context:source=${htmlCommentValue(context.sourceBranch)};target=${htmlCommentValue(context.targetBranch)};generation=${htmlCommentValue(context.generationMode)};changed-files=${changedFileCount} -->`,
     '### 自动生成摘要',
-    '',
-    `- 分支流向：\`${context.sourceBranch} -> ${context.targetBranch}\``,
-    `- 提交人：\`${actor}\``,
-    `- 生成方式：${context.generationMode}`,
     '',
     summary.summary,
     '',
@@ -325,12 +356,6 @@ function buildAutoBlock(summary, context) {
     '### 风险与影响',
     bulletList(summary.risk),
     '',
-    '<details>',
-    '<summary>变更文件</summary>',
-    '',
-    changedFiles,
-    '',
-    '</details>',
     '<!-- workflow:auto-summary:end -->',
   ].join('\n');
 }

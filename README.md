@@ -49,6 +49,8 @@
 
 部署工具是推荐方式；如果只需要单 DLL 场景（例如维护、测试、受限环境），可以手动 `NETLOAD`：
 
+> 注意：单 DLL 手动安装不支持自动抑制 AutoCAD “缺少 SHX 文件”弹窗；如需该能力，请使用部署工具安装。
+
 1. 在 [Releases](https://github.com/splrad/CADFontAutoReplace/releases) 下载 `AFR-DLL_vX.Y.Z.zip` 并解压。
 2. 按 AutoCAD 版本选择对应 DLL，例如 AutoCAD 2026 使用 `AFR-ACAD2026.dll`。
 3. 在 AutoCAD 命令行输入 `NETLOAD`，选择该 DLL。

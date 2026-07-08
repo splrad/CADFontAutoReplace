@@ -39,8 +39,9 @@ changelog:
       labels:
         - performance
         - perf
-    - title: 工作流与发布
+    - title: 构建、工作流与发布
       labels:
+        - build
         - workflow
         - ci
         - github-actions
