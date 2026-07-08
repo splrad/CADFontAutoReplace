@@ -211,7 +211,7 @@ function protectedConfigGate() {
   const marker = '<!-- workflow:protected-config-gate -->';
   const body = [
     marker,
-    failed ? '## Protected Configuration Gate 未通过' : '## Protected Configuration Gate 已通过',
+    failed ? '## 受保护配置门禁未通过' : '## 受保护配置门禁已通过',
     '',
     `- 状态：${status}`,
     `- 分支流向：${headRef} -> ${baseRef}`,
@@ -244,7 +244,7 @@ function mainAuthorizationGate() {
       detail = `已获得核心开发者 ${trustedApprover} 对当前提交的审批。`;
     } else {
       status = 'failed_missing_trusted_approval';
-      detail = 'main 目标 PR 需要核心开发者对当前 head SHA 的有效审批。';
+      detail = 'main 目标 PR 需要核心开发者对当前提交的有效审批。';
       failed = true;
     }
   }
@@ -252,7 +252,7 @@ function mainAuthorizationGate() {
   const marker = '<!-- workflow:main-authorization-gate -->';
   const body = [
     marker,
-    failed ? '## Main Authorization Gate 未通过' : '## Main Authorization Gate 已通过',
+    failed ? '## 主分支授权门禁未通过' : '## 主分支授权门禁已通过',
     '',
     `- 状态：${status}`,
     `- 分支流向：${headRef} -> ${baseRef}`,
@@ -277,7 +277,7 @@ function sourceBranchGate() {
 
   const body = [
     marker,
-    allowed ? '## Source Branch Gate 已通过' : '## Source Branch Gate 未通过',
+    allowed ? '## 来源分支门禁已通过' : '## 来源分支门禁未通过',
     '',
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- 来源仓库：${headRepo || 'unknown'}`,
@@ -370,25 +370,25 @@ function copilotReviewGate() {
   const reviews = copilotReviewsForHead();
   const marker = '<!-- workflow:copilot-review-gate -->';
   let failed = false;
-  let title = '## Copilot Review Gate 已通过';
-  let detail = '当前 head SHA 已完成 Copilot code review，且未发现未解决的重大问题。';
+  let title = '## Copilot 审查门禁已通过';
+  let detail = '当前提交已完成 Copilot 代码审查，且未发现未解决的重大问题。';
   let blocking = [];
 
   if (reviews.length === 0) {
     failed = true;
-    title = '## Copilot Review Gate 未通过';
-    detail = '当前 head SHA 尚未检测到 Copilot code review。请等待 ruleset 自动审查完成，或重新推送触发审查。';
+    title = '## Copilot 审查门禁未通过';
+    detail = '当前提交尚未检测到 Copilot 代码审查。请等待规则集自动审查完成，或重新推送触发审查。';
   } else {
     blocking = unresolvedBlockingCopilotThreads();
     if (blocking.length > 0) {
       failed = true;
-      title = '## Copilot Review Gate 未通过';
+      title = '## Copilot 审查门禁未通过';
       detail = '检测到 Copilot 留下的未解决重大问题。';
     }
   }
 
   const blockingList = blocking.length
-    ? blocking.map((item) => `- ${item.url ? `[${item.body || 'Copilot comment'}](${item.url})` : item.body}`).join('\n')
+    ? blocking.map((item) => `- ${item.url ? `[${item.body || 'Copilot 评论'}](${item.url})` : item.body}`).join('\n')
     : '- 无';
 
   const body = [
@@ -396,8 +396,8 @@ function copilotReviewGate() {
     title,
     '',
     `- 分支流向：${headRef} -> ${baseRef}`,
-    `- 当前 head：${headSha}`,
-    `- Copilot review 数量：${reviews.length}`,
+    `- 当前提交：${headSha}`,
+    `- Copilot 审查数量：${reviews.length}`,
     `- 通知对象：${mentionText()}`,
     '',
     detail,
