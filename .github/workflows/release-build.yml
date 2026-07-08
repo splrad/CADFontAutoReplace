@@ -236,6 +236,11 @@ jobs:
                   "- Release generated from merged PR #${{ steps.merged-pr-guard.outputs.pr_number }}."
               ) -join "`n"
           }
+          $generatedBody = [regex]::Replace(
+              $generatedBody,
+              '(?m)^\s*(?:\*\*)?Full Changelog(?:\*\*)?:\s*.*(?:\r?\n)?',
+              ''
+          ).Trim()
 
           $lines = @(
               '## 下载说明',

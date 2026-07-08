@@ -1,0 +1,65 @@
+# GitHub 官方自动发布说明配置。
+# 复用到新项目时优先保留这份文件，再按项目实际 label 体系调整 labels。
+# 规则说明：
+#   - GitHub releases/generate-notes 会按 PR label 归类到下面的 categories。
+#   - 同一个 PR 命中多个分类时，通常按 categories 顺序进入最先匹配的分类。
+#   - 未命中任何分类的 PR 会进入最后的“其他变更”，因此必须保留 labels: ["*"] 兜底。
+#   - PR Automation 会自动补充 feature/bug/workflow/docs 等中立 label；
+#     人工创建 PR 时也可以直接使用这些 label。
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+      - skip-changelog
+      - no-changelog
+      - no-release-notes
+  categories:
+    - title: 破坏性变更
+      labels:
+        - breaking-change
+        - breaking
+        - semver-major
+    - title: 安全修复
+      labels:
+        - security
+        - vulnerability
+    - title: 新增功能
+      labels:
+        - feature
+        - feat
+        - enhancement
+        - semver-minor
+    - title: 问题修复
+      labels:
+        - bug
+        - fix
+        - bugfix
+        - regression
+    - title: 性能优化
+      labels:
+        - performance
+        - perf
+    - title: 工作流与发布
+      labels:
+        - workflow
+        - ci
+        - github-actions
+        - release
+    - title: 依赖更新
+      labels:
+        - dependencies
+        - dependency
+        - deps
+    - title: 文档
+      labels:
+        - docs
+        - documentation
+    - title: 维护与重构
+      labels:
+        - refactor
+        - chore
+        - maintenance
+        - cleanup
+    - title: 其他变更
+      labels:
+        - "*"

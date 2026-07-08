@@ -9,6 +9,18 @@ const targetBranch = process.env.TARGET_BRANCH || '';
 const actor = process.env.GITHUB_ACTOR || 'unknown';
 const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
 const runnerTemp = process.env.RUNNER_TEMP || workspace;
+const releaseLabelDefinitions = [
+  { name: 'breaking-change', color: 'b60205', description: 'Release notes: breaking or incompatible changes.' },
+  { name: 'security', color: 'd73a4a', description: 'Release notes: security fixes or vulnerability hardening.' },
+  { name: 'feature', color: '1d76db', description: 'Release notes: new user-facing features or enhancements.' },
+  { name: 'bug', color: 'd73a4a', description: 'Release notes: bug fixes or regressions.' },
+  { name: 'performance', color: 'fbca04', description: 'Release notes: performance improvements.' },
+  { name: 'workflow', color: '5319e7', description: 'Release notes: CI/CD, automation, or release workflow changes.' },
+  { name: 'dependencies', color: '0366d6', description: 'Release notes: dependency or package updates.' },
+  { name: 'docs', color: '0075ca', description: 'Release notes: documentation changes.' },
+  { name: 'refactor', color: 'cfd3d7', description: 'Release notes: internal refactors without direct feature changes.' },
+  { name: 'chore', color: 'ededed', description: 'Release notes: maintenance and cleanup changes.' },
+];
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -214,6 +226,79 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function changedFilePaths(context) {
+  return cleanLines(context.changedFiles, 200).map((line) => {
+    const parts = line.split(/\t+/);
+    return (parts[parts.length - 1] || line).replace(/\\/g, '/');
+  });
+}
+
+function inferReleaseLabels(context, summary) {
+  const files = changedFilePaths(context).map((file) => file.toLowerCase());
+  const text = [
+    summary.title,
+    summary.summary,
+    ...(summary.changes || []),
+    context.commits,
+  ].join('\n').toLowerCase();
+  const labels = new Set();
+
+  if (/(breaking|破坏性|不兼容|semver-major)/i.test(text)) labels.add('breaking-change');
+  if (/(security|安全|漏洞|vulnerab|cve)/i.test(text)) labels.add('security');
+  if (/(^|\s|\n)(fix|bug|bugfix|regression|修复|缺陷|问题)/i.test(text)) labels.add('bug');
+  if (/(^|\s|\n)(feat|feature|enhancement|新增|添加|功能)/i.test(text)) labels.add('feature');
+  if (/(perf|performance|性能)/i.test(text)) labels.add('performance');
+  if (files.some((file) => file.startsWith('.github/') || file.startsWith('tools/') || file.startsWith('scripts/'))
+    || /(workflow|github actions|release|ci|工作流|发布)/i.test(text)) labels.add('workflow');
+  if (files.some((file) => /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|packages\.lock\.json)$/.test(file))
+    || /(dependenc|依赖)/i.test(text)) labels.add('dependencies');
+  if (files.some((file) => file.startsWith('docs/') || file.toLowerCase().includes('readme') || file.endsWith('.md'))
+    || /(docs|documentation|文档)/i.test(text)) labels.add('docs');
+  if (/(refactor|重构)/i.test(text)) labels.add('refactor');
+  if (/(chore|cleanup|maintenance|清理|维护)/i.test(text)) labels.add('chore');
+
+  return [...labels];
+}
+
+function ensureReleaseLabel(labelName) {
+  const definition = releaseLabelDefinitions.find((item) => item.name === labelName);
+  if (!definition) return;
+
+  const encoded = encodeURIComponent(definition.name);
+  const existing = runAllowFail('gh', [
+    'api',
+    '--method', 'GET',
+    `repos/${repo}/labels/${encoded}`,
+  ], {
+    env: { ...process.env, GH_TOKEN: process.env.GH_TOKEN || '' },
+  });
+  if (existing) return;
+
+  gh([
+    '--method', 'POST',
+    `repos/${repo}/labels`,
+    '--input', '-',
+  ], JSON.stringify(definition));
+}
+
+function applyReleaseLabels(prNumber, labels) {
+  const releaseLabels = labels.filter((label) => releaseLabelDefinitions.some((item) => item.name === label));
+  if (!releaseLabels.length) return;
+
+  try {
+    for (const label of releaseLabels) {
+      ensureReleaseLabel(label);
+    }
+    gh([
+      '--method', 'POST',
+      `repos/${repo}/issues/${prNumber}/labels`,
+      '--input', '-',
+    ], JSON.stringify({ labels: releaseLabels }));
+  } catch (error) {
+    console.warn(`::warning::Failed to apply release note labels: ${error.message}`);
+  }
+}
+
 function buildAutoBlock(summary, context) {
   const bulletList = (items) => items.map((item) => `- ${item}`).join('\n');
   const changedFiles = cleanLines(context.changedFiles, 20)
@@ -408,6 +493,7 @@ function applySummary() {
   }
 
   const summary = sanitizeGenerated(generated, fallback);
+  const releaseLabels = inferReleaseLabels(context, summary);
   context.generationMode = generationMode;
   const current = findOpenPullRequest();
   const currentBody = current?.body || '';
@@ -434,8 +520,14 @@ function applySummary() {
     prNumber = created.number;
   }
 
+  applyReleaseLabels(prNumber, releaseLabels);
   upsertSuccessComment(prNumber, summary.title);
-  writeOutput({ pr_number: prNumber, pr_title: summary.title, generation_mode: generationMode });
+  writeOutput({
+    pr_number: prNumber,
+    pr_title: summary.title,
+    generation_mode: generationMode,
+    release_labels: releaseLabels.join(','),
+  });
 }
 
 const command = process.argv[2];
