@@ -16,10 +16,10 @@
 #      修改 .github/scripts/pr-governance.js 中的 isProtectedConfig()。
 #   5) Copilot Review Gate 只检查 main 目标 PR。
 #      它依赖 ruleset 已自动请求 Copilot Code Review，并依赖 .github/copilot-instructions.md
-#      要求 Copilot 使用简体中文，并在 comment 第一行标注：
-#      - 严重程度：阻断
-#      - 严重程度：建议
-#      该严重程度是本仓库自定义协议，不是 Copilot 官方结构化字段。
+#      要求 Copilot 审查正文主体使用简体中文，并在 comment 第一行标注：
+#      - 严重程度：阻断 / Severity: blocking
+#      - 严重程度：建议 / Severity: suggestion
+#      该严重程度是本仓库自定义协议，不是 Copilot 官方结构化字段，也不依赖 Low/Medium 等 UI 徽标。
 #   6) 如果 GitHub App 创建 PR 导致 PR 作者显示为 bot，PR Automation 会在 PR 正文写入
 #      workflow:source-actor 隐藏标记；本 workflow 会按该原始推送人判断 TRUSTED_DEVELOPERS。
 name: PR Governance
@@ -29,10 +29,10 @@ on:
   # 脚本 checkout 固定到 base.sha，避免执行来自 PR head 的不可信 workflow 脚本。
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
-  # 审批变化后重新计算 main 授权门禁。
+  # 审批或 Copilot review 正文变化后重新计算 main 授权门禁和 Copilot Review Gate。
   pull_request_review:
-    types: [submitted, dismissed]
-  # Copilot review thread/comment 变化后重新计算 Copilot Review Gate。
+    types: [submitted, edited, dismissed]
+  # Copilot inline comment 变化后重新计算 Copilot Review Gate。
   pull_request_review_comment:
     types: [created, edited, deleted]
 
@@ -150,7 +150,12 @@ jobs:
     timeout-minutes: 5
     # Copilot Code Review 本身只会 comment，不会作为 approval/request-changes 阻断合并。
     # 因此这里用独立 check 阻断“未完成 Copilot review”或“未解决重大 Copilot 问题”。
-    # 缺少“严重程度：阻断/建议”的 Copilot 评论只会在门禁评论中警告，不直接阻断。
+    # 会自动重跑的场景：
+    # - Copilot 延迟提交 review: pull_request_review submitted
+    # - Copilot 新增/编辑 inline comment: pull_request_review_comment
+    # - 用户接受建议并推送修正: pull_request_target synchronize
+    # 仅点击 Resolve/Unresolve conversation 不会触发 GitHub Actions；下次有其他事件触发时会读取最新 isResolved。
+    # 缺少“严重程度：阻断/建议”或 “Severity: blocking/suggestion” 的 Copilot 评论只会警告，不直接阻断。
     if: github.event.pull_request.base.ref == 'main'
     steps:
       - name: Checkout governance scripts

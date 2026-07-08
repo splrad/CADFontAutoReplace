@@ -314,9 +314,11 @@ function normalizeGitHubLogin(login) {
   return String(login || '').toLowerCase().replace(/\[bot\]$/, '');
 }
 
-function isCopilotReviewCommentAuthor(login) {
-  const normalized = normalizeGitHubLogin(login);
-  return normalized === 'copilot-pull-request-reviewer' || normalized === 'copilot';
+function isCopilotCodeReviewComment(comment) {
+  const reviewAuthor = normalizeGitHubLogin(comment?.pullRequestReview?.author?.login);
+  if (reviewAuthor) return reviewAuthor === 'copilot-pull-request-reviewer';
+
+  return normalizeGitHubLogin(comment?.author?.login) === 'copilot-pull-request-reviewer';
 }
 
 function unresolvedCopilotThreadFindings() {
@@ -328,9 +330,13 @@ function unresolvedCopilotThreadFindings() {
             pageInfo { hasNextPage endCursor }
             nodes {
               isResolved
+              isOutdated
               comments(first: 20) {
                 nodes {
                   author { login }
+                  pullRequestReview {
+                    author { login }
+                  }
                   body
                   url
                 }
@@ -359,9 +365,9 @@ function unresolvedCopilotThreadFindings() {
     const payload = ghJson(args);
     const threads = payload?.data?.repository?.pullRequest?.reviewThreads;
     for (const thread of threads?.nodes || []) {
-      if (thread.isResolved) continue;
+      if (thread.isResolved || thread.isOutdated) continue;
       const comments = thread.comments?.nodes || [];
-      const copilotComments = comments.filter((comment) => isCopilotReviewCommentAuthor(comment?.author?.login));
+      const copilotComments = comments.filter((comment) => isCopilotCodeReviewComment(comment));
       const blockingComment = copilotComments.find((comment) => {
         return blockingPattern.test(String(comment?.body || ''));
       });

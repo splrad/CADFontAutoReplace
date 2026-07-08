@@ -2,9 +2,9 @@
 applyTo: ".github/workflows/**"
 ---
 
-所有 GitHub Copilot Code Review 输出必须使用简体中文。只保留 workflow 关键字、权限名、action 名称、命令和文件路径为英文。
+GitHub Copilot Code Review 输出的主体语言必须是简体中文。为了保留技术含义，可以使用英文 workflow 关键字、权限名、action 名称、job 名称、required check、命令、文件路径和难以准确翻译的专有名词。
 
-每条 review comment 第一行必须是 `严重程度：阻断` 或 `严重程度：建议`。
+每条 review comment 第一行必须提供严重程度标记，优先使用 `严重程度：阻断` 或 `严重程度：建议`，也兼容 `Severity: blocking` 或 `Severity: suggestion`。
 
 审查 GitHub Actions workflow 时，优先检查：
 
