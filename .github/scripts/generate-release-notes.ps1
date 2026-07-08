@@ -99,15 +99,10 @@ function Get-PullRequestModel([int]$Number) {
         '-H', 'X-GitHub-Api-Version: 2022-11-28',
         "repos/$Repo/pulls/$Number"
     )
-    $issue = Invoke-GhJson @(
-        '-H', 'Accept: application/vnd.github+json',
-        '-H', 'X-GitHub-Api-Version: 2022-11-28',
-        "repos/$Repo/issues/$Number"
-    )
 
     $labels = @()
-    if ($issue.labels) {
-        $labels = @($issue.labels | ForEach-Object { [string]$_.name })
+    if ($pull.labels) {
+        $labels = @($pull.labels | ForEach-Object { [string]$_.name })
     }
 
     [pscustomobject]@{
