@@ -18,6 +18,14 @@ const releaseLabelDefinitions = [
   { name: 'build', color: 'fef2c0', description: 'Release notes: installer, packaging, or runtime build changes.' },
   { name: 'plugin', color: 'cfd3d7', description: 'Release notes: runtime plugin changes.' },
 ];
+const kindLabelDefinitions = [
+  { name: 'kind:feature', color: '1d76db', description: 'PR type: feature or enhancement.' },
+  { name: 'kind:fix', color: 'd73a4a', description: 'PR type: bug fix or regression fix.' },
+  { name: 'kind:performance', color: 'fbca04', description: 'PR type: performance improvement.' },
+  { name: 'kind:refactor', color: 'c5def5', description: 'PR type: internal refactor without intended behavior change.' },
+  { name: 'kind:docs', color: '0075ca', description: 'PR type: documentation-only change.' },
+  { name: 'kind:chore', color: 'ededed', description: 'PR type: maintenance, build, workflow, or repository housekeeping.' },
+];
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -88,7 +96,7 @@ function fileCategory(file) {
   if (normalized.startsWith('test/') || normalized.startsWith('tests/') || normalized.includes('/tests/')) return 'tests';
   if (normalized.startsWith('tools/') || normalized.startsWith('scripts/')) return 'tools';
   if (normalized.startsWith('docs/') || normalized.toLowerCase().includes('readme')) return 'docs';
-  if (normalized.startsWith('chore/') || normalized.startsWith('assets/')) return 'assets';
+  if (normalized.toLowerCase() === 'chore/fonts.zip') return 'assets';
   return 'project';
 }
 
@@ -179,6 +187,7 @@ function buildPrompt(context, fallback) {
     '只根据下面提供的代码差异、文件清单、提交信息生成内容，不要使用来源分支名或目标分支名代替变更主题。',
     '请输出严格 JSON，不要输出 Markdown 代码块或额外解释。',
     'JSON 格式：{"title":"Conventional Commits 风格 PR 标题","summary":"一句话摘要","changes":["主要改动"],"validation":["验证建议"],"risk":["风险或影响"]}',
+    '所有 JSON 字符串内容必须使用简体中文；只保留代码标识符、文件路径、命令、API 名称和 label 名称为英文。',
     '标题要求：必须使用 Conventional Commits 风格，格式为 type(scope): 中文标题；scope 可省略。',
     '允许的 type：feat、fix、refactor、perf、style、docs、test、build、ci、chore、revert。',
     'scope 使用小写英文、数字或连字符，例如 deployer、release、workflow、core、ui、autocad。',
@@ -314,8 +323,30 @@ function inferReleaseLabels(context, summary) {
   return [...labels];
 }
 
-function ensureReleaseLabel(labelName) {
-  const definition = releaseLabelDefinitions.find((item) => item.name === labelName);
+function inferKindLabels(context, summary) {
+  const files = changedFilePaths(context);
+  const normalizedFiles = files.map(normalizeRepoPath);
+  const docsOnly = normalizedFiles.length > 0 && normalizedFiles.every((file) => {
+    return file.startsWith('docs/')
+      || file === 'readme.md'
+      || (!file.startsWith('.github/') && file.endsWith('.md'));
+  });
+  const titleType = String(summary.title || '').match(/^(feat|fix|refactor|perf|docs|test|build|ci|chore|style|revert)(?:\([a-z0-9-]+\))?!?:/i)?.[1]?.toLowerCase();
+
+  if (titleType === 'feat') return ['kind:feature'];
+  if (titleType === 'fix') return ['kind:fix'];
+  if (titleType === 'perf') return ['kind:performance'];
+  if (titleType === 'refactor') return ['kind:refactor'];
+  if (titleType === 'docs' || docsOnly) return ['kind:docs'];
+  return ['kind:chore'];
+}
+
+function labelDefinition(labelName) {
+  return [...releaseLabelDefinitions, ...kindLabelDefinitions].find((item) => item.name === labelName);
+}
+
+function ensureLabel(labelName) {
+  const definition = labelDefinition(labelName);
   if (!definition) return;
 
   const encoded = encodeURIComponent(definition.name);
@@ -335,22 +366,36 @@ function ensureReleaseLabel(labelName) {
   ], JSON.stringify(definition));
 }
 
-function applyReleaseLabels(prNumber, labels) {
-  const releaseLabels = labels.filter((label) => releaseLabelDefinitions.some((item) => item.name === label));
-  if (!releaseLabels.length) return;
+function applyLabels(prNumber, labels, groupName) {
+  const knownLabels = labels.filter((label) => labelDefinition(label));
+  if (!knownLabels.length) return;
 
   try {
-    for (const label of releaseLabels) {
-      ensureReleaseLabel(label);
+    for (const label of knownLabels) {
+      ensureLabel(label);
     }
     gh([
       '--method', 'POST',
       `repos/${repo}/issues/${prNumber}/labels`,
       '--input', '-',
-    ], JSON.stringify({ labels: releaseLabels }));
+    ], JSON.stringify({ labels: knownLabels }));
   } catch (error) {
-    console.warn(`::warning::Failed to apply release note labels: ${error.message}`);
+    console.warn(`::warning::Failed to apply ${groupName} labels: ${error.message}`);
   }
+}
+
+function applyReleaseLabels(prNumber, labels) {
+  const releaseLabels = labels.filter((label) => releaseLabelDefinitions.some((item) => item.name === label));
+  applyLabels(prNumber, releaseLabels, 'release note');
+}
+
+function applyKindLabels(prNumber, labels) {
+  const kindLabels = labels.filter((label) => kindLabelDefinitions.some((item) => item.name === label));
+  applyLabels(prNumber, kindLabels, 'PR type');
+}
+
+function formatLabels(labels) {
+  return labels.length ? labels.map((label) => `\`${label}\``).join('、') : '无';
 }
 
 function buildAutoBlock(summary, context) {
@@ -458,7 +503,7 @@ function mentionText() {
   return mentions.length ? mentions.join('；') : '（未配置通知对象）';
 }
 
-function upsertSuccessComment(prNumber, title) {
+function upsertSuccessComment(prNumber, title, labelInfo = {}) {
   const commentToken = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
   const marker = '<!-- workflow:pr-success-notice -->';
   const comments = ghJson([
@@ -475,6 +520,9 @@ function upsertSuccessComment(prNumber, title) {
     `- 提交人：**${actor}**`,
     `- 分支流向：**${sourceBranch} -> ${targetBranch}**`,
     `- PR 链接：https://github.com/${repo}/pull/${prNumber}`,
+    `- 区域标签：由 **PR Labeler** workflow 根据 \`.github/labeler.yml\` 维护`,
+    `- PR 类型标签：${formatLabels(labelInfo.kindLabels || [])}`,
+    `- Release Notes 标签：${formatLabels(labelInfo.releaseLabels || [])}`,
     `- 通知对象：${mentionText()}`,
     '',
     '> 本通知由 GitHub Actions 自动发布。',
@@ -570,6 +618,7 @@ function applySummary() {
   }
 
   const summary = sanitizeGenerated(generated, fallback);
+  const kindLabels = inferKindLabels(context, summary);
   const releaseLabels = inferReleaseLabels(context, summary);
   context.generationMode = generationMode;
   const current = findOpenPullRequest();
@@ -604,12 +653,14 @@ function applySummary() {
     prNumber = created.number;
   }
 
+  applyKindLabels(prNumber, kindLabels);
   applyReleaseLabels(prNumber, releaseLabels);
-  upsertSuccessComment(prNumber, summary.title);
+  upsertSuccessComment(prNumber, summary.title, { kindLabels, releaseLabels });
   writeOutput({
     pr_number: prNumber,
     pr_title: summary.title,
     generation_mode: generationMode,
+    kind_labels: kindLabels.join(','),
     release_labels: releaseLabels.join(','),
   });
 }

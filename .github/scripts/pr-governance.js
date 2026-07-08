@@ -108,7 +108,10 @@ function isProtectedConfig(file) {
     || normalized.startsWith('.github/actions/')
     || normalized.startsWith('.github/skills/')
     || normalized.startsWith('.github/scripts/')
+    || normalized.startsWith('.github/instructions/')
     || normalized === '.github/copilot-instructions.md'
+    || normalized === '.github/dependabot.yml'
+    || normalized === '.github/labeler.yml'
     || normalized === '.github/pull_request_template.md'
     || normalized === '.github/release.yml';
 }
@@ -316,7 +319,7 @@ function isCopilotReviewCommentAuthor(login) {
   return normalized === 'copilot-pull-request-reviewer' || normalized === 'copilot';
 }
 
-function unresolvedBlockingCopilotThreads() {
+function unresolvedCopilotThreadFindings() {
   const query = `
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -339,7 +342,9 @@ function unresolvedBlockingCopilotThreads() {
     }
   `;
   const blockingPattern = /^\s*(severity\s*[:：]\s*blocking|严重程度\s*[:：]\s*阻断)(?:\s|$)/im;
+  const severityPattern = /^\s*(severity\s*[:：]\s*(blocking|suggestion)|严重程度\s*[:：]\s*(阻断|建议))(?:\s|$)/im;
   const blocking = [];
+  const unclassified = [];
   let cursor = null;
 
   do {
@@ -356,21 +361,32 @@ function unresolvedBlockingCopilotThreads() {
     for (const thread of threads?.nodes || []) {
       if (thread.isResolved) continue;
       const comments = thread.comments?.nodes || [];
-      const copilotComment = comments.find((comment) => {
-        const body = String(comment?.body || '');
-        return isCopilotReviewCommentAuthor(comment?.author?.login) && blockingPattern.test(body);
+      const copilotComments = comments.filter((comment) => isCopilotReviewCommentAuthor(comment?.author?.login));
+      const blockingComment = copilotComments.find((comment) => {
+        return blockingPattern.test(String(comment?.body || ''));
       });
-      if (copilotComment) {
+
+      if (blockingComment) {
         blocking.push({
-          url: copilotComment.url || '',
-          body: String(copilotComment.body || '').split(/\r?\n/)[0].slice(0, 140),
+          url: blockingComment.url || '',
+          body: String(blockingComment.body || '').split(/\r?\n/)[0].slice(0, 140),
+        });
+      }
+
+      const unclassifiedComment = copilotComments.find((comment) => {
+        return !severityPattern.test(String(comment?.body || ''));
+      });
+      if (unclassifiedComment) {
+        unclassified.push({
+          url: unclassifiedComment.url || '',
+          body: String(unclassifiedComment.body || '').split(/\r?\n/)[0].slice(0, 140) || 'Copilot 评论',
         });
       }
     }
     cursor = threads?.pageInfo?.hasNextPage ? threads.pageInfo.endCursor : null;
   } while (cursor);
 
-  return blocking;
+  return { blocking, unclassified };
 }
 
 function copilotReviewGate() {
@@ -381,13 +397,16 @@ function copilotReviewGate() {
   let title = '## Copilot 审查门禁已通过';
   let detail = '当前提交已完成 Copilot 代码审查，且未发现未解决的重大问题。';
   let blocking = [];
+  let unclassified = [];
 
   if (reviews.length === 0) {
     failed = true;
     title = '## Copilot 审查门禁未通过';
     detail = '当前提交尚未检测到 Copilot 代码审查。请等待规则集自动审查完成，或重新推送触发审查。';
   } else {
-    blocking = unresolvedBlockingCopilotThreads();
+    const findings = unresolvedCopilotThreadFindings();
+    blocking = findings.blocking;
+    unclassified = findings.unclassified;
     if (blocking.length > 0) {
       failed = true;
       title = '## Copilot 审查门禁未通过';
@@ -398,6 +417,9 @@ function copilotReviewGate() {
   const blockingList = blocking.length
     ? blocking.map((item) => `- ${item.url ? `[${item.body || 'Copilot 评论'}](${item.url})` : item.body}`).join('\n')
     : '- 无';
+  const unclassifiedList = unclassified.length
+    ? unclassified.map((item) => `- ${item.url ? `[${item.body || 'Copilot 评论'}](${item.url})` : item.body}`).join('\n')
+    : '- 无';
 
   const body = [
     marker,
@@ -406,12 +428,20 @@ function copilotReviewGate() {
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- 当前提交：${headSha}`,
     `- Copilot 审查数量：${reviews.length}`,
+    `- 未识别严重程度评论：${unclassified.length}`,
     `- 通知对象：${mentionText()}`,
     '',
     detail,
     '',
     '### 未解决重大问题',
     blockingList,
+    '',
+    '### 未识别严重程度评论',
+    unclassifiedList,
+    '',
+    unclassified.length
+      ? '> 未识别严重程度评论不会阻断合并，但说明 Copilot 未完全遵守本仓库中文审查指令。'
+      : '> Copilot 评论均符合本仓库严重程度标记约定。',
     '',
     '> 本通知由 GitHub Actions 自动发布。',
   ].join('\n');

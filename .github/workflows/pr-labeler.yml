@@ -1,0 +1,57 @@
+# 使用官方 actions/labeler 维护 PR 区域标签。
+# 这些 area:* 标签只用于 PR 管理和筛选，不作为 Release Notes 分类依据。
+name: PR Labeler
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+concurrency:
+  group: pr-labeler-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  label:
+    name: Apply Area Labels
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ensure managed labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          labels='[
+            {"name":"area:runtime","color":"0e8a16","description":"PR area: runtime plugin, deployer, build config, or package content."},
+            {"name":"area:release","color":"5319e7","description":"PR area: versioning, release workflow, release notes, or package assets."},
+            {"name":"area:workflow","color":"5319e7","description":"PR area: GitHub Actions workflow files."},
+            {"name":"area:automation","color":"1d76db","description":"PR area: repository automation scripts and GitHub automation config."},
+            {"name":"area:docs","color":"0075ca","description":"PR area: documentation."},
+            {"name":"area:config","color":"cfd3d7","description":"PR area: repository configuration."},
+            {"name":"kind:feature","color":"1d76db","description":"PR type: feature or enhancement."},
+            {"name":"kind:fix","color":"d73a4a","description":"PR type: bug fix or regression fix."},
+            {"name":"kind:performance","color":"fbca04","description":"PR type: performance improvement."},
+            {"name":"kind:refactor","color":"c5def5","description":"PR type: internal refactor without intended behavior change."},
+            {"name":"kind:docs","color":"0075ca","description":"PR type: documentation-only change."},
+            {"name":"kind:chore","color":"ededed","description":"PR type: maintenance, build, workflow, or repository housekeeping."}
+          ]'
+
+          echo "$labels" | jq -c '.[]' | while read -r label; do
+            name="$(jq -r '.name' <<< "$label")"
+            encoded="$(jq -rn --arg value "$name" '$value|@uri')"
+            if gh api --method GET "repos/${GITHUB_REPOSITORY}/labels/${encoded}" >/dev/null 2>&1; then
+              continue
+            fi
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/labels" --input - <<< "$label"
+          done
+
+      - name: Apply labels from changed files
+        uses: actions/labeler@v6
+        with:
+          configuration-path: .github/labeler.yml
+          sync-labels: false

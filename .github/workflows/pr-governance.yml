@@ -15,8 +15,11 @@
 #   4) 如新项目受保护配置文件不在 .github/workflows、.github/actions、.github/scripts 等路径，
 #      修改 .github/scripts/pr-governance.js 中的 isProtectedConfig()。
 #   5) Copilot Review Gate 只检查 main 目标 PR。
-#      它依赖 ruleset 已自动请求 Copilot code review，并依赖 .github/copilot-instructions.md
-#      要求 Copilot comment 标注 Severity: blocking 或 Severity: suggestion。
+#      它依赖 ruleset 已自动请求 Copilot Code Review，并依赖 .github/copilot-instructions.md
+#      要求 Copilot 使用简体中文，并在 comment 第一行标注：
+#      - 严重程度：阻断
+#      - 严重程度：建议
+#      该严重程度是本仓库自定义协议，不是 Copilot 官方结构化字段。
 #   6) 如果 GitHub App 创建 PR 导致 PR 作者显示为 bot，PR Automation 会在 PR 正文写入
 #      workflow:source-actor 隐藏标记；本 workflow 会按该原始推送人判断 TRUSTED_DEVELOPERS。
 name: PR Governance
@@ -145,8 +148,9 @@ jobs:
     name: Copilot Review Gate
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Copilot code review 本身只会 comment，不会作为 approval/request-changes 阻断合并。
+    # Copilot Code Review 本身只会 comment，不会作为 approval/request-changes 阻断合并。
     # 因此这里用独立 check 阻断“未完成 Copilot review”或“未解决重大 Copilot 问题”。
+    # 缺少“严重程度：阻断/建议”的 Copilot 评论只会在门禁评论中警告，不直接阻断。
     if: github.event.pull_request.base.ref == 'main'
     steps:
       - name: Checkout governance scripts
