@@ -148,7 +148,7 @@ function Get-AssociatedPullRequestNumbers {
 }
 
 function Normalize-RepoPath([string]$Path) {
-    return $Path.Replace('\', '/').TrimStart('./')
+    return ($Path.Replace('\', '/') -replace '^\./', '')
 }
 
 function Test-RuntimeReleasePath([string]$Path) {

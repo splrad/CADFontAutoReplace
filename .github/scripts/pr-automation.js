@@ -98,7 +98,7 @@ function statusFilePath(line) {
 }
 
 function titleSubject(title) {
-  return String(title || '').replace(/^(feat|fix|refactor|perf|style|docs|test|ci|chore|revert)(\([a-z0-9-]+\))?!?:\s*/i, '').trim();
+  return String(title || '').replace(/^(feat|fix|refactor|perf|style|docs|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?:\s*/i, '').trim();
 }
 
 function conventionalPrefix(type, scope) {
