@@ -179,7 +179,7 @@ function Test-RuntimeReleasePath([string]$Path) {
         return $true
     }
 
-    if ($lower -eq 'chore/fonts.zip' -or $lower.StartsWith('chore/assets/')) {
+    if ($lower -eq 'chore/fonts.zip') {
         return $true
     }
 
@@ -190,11 +190,20 @@ function Test-InstallOrPackagePath([string]$Path) {
     $lower = (Normalize-RepoPath $Path).ToLowerInvariant()
     return $lower -eq 'tools/publish-releaseassets.ps1' -or
         $lower -eq 'chore/fonts.zip' -or
-        $lower.StartsWith('chore/assets/') -or
         $lower -in @('directory.build.props', 'directory.build.targets', 'directory.packages.props', 'global.json')
 }
 
+function Test-ReleaseNotesExcluded($PullRequest) {
+    $excludedLabels = @('ignore-for-release', 'skip-changelog', 'no-changelog', 'no-release-notes')
+    $labels = @($PullRequest.Labels | ForEach-Object { $_.ToLowerInvariant() })
+    return @($labels | Where-Object { $excludedLabels -contains $_ }).Count -gt 0
+}
+
 function Test-IncludedPullRequest($PullRequest) {
+    if (Test-ReleaseNotesExcluded $PullRequest) {
+        return $false
+    }
+
     return @($PullRequest.Files | Where-Object { Test-RuntimeReleasePath $_ }).Count -gt 0
 }
 
@@ -221,20 +230,26 @@ function Get-ChangeCategory($PullRequest) {
     }
 
     if ($labels -contains 'feature' -or $labels -contains 'feat' -or $labels -contains 'enhancement' -or $labels -contains 'semver-minor' -or
-        $text -match '(^|\s|\n)(feat|feature|enhancement|新增|添加|功能)') {
+        $text -match '(^|\s|\n)(feat|feature|enhancement)(\([a-z0-9-]+\))?!?:' -or
+        $text -match '(新增|添加|功能)') {
         return '新增功能'
     }
 
     if ($labels -contains 'bug' -or $labels -contains 'fix' -or $labels -contains 'bugfix' -or $labels -contains 'regression' -or
-        $text -match '(^|\s|\n)(fix|bug|bugfix|regression|修复|缺陷|问题)') {
+        $text -match '(^|\s|\n)(fix|bug|bugfix|regression)(\([a-z0-9-]+\))?!?:' -or
+        $text -match '(修复|缺陷|问题)') {
         return '问题修复'
     }
 
-    if ($labels -contains 'performance' -or $labels -contains 'perf' -or $text -match '(perf|performance|性能)') {
+    if ($labels -contains 'performance' -or $labels -contains 'perf' -or
+        $text -match '(^|\s|\n)(perf|performance)(\([a-z0-9-]+\))?!?:' -or
+        $text -match '性能') {
         return '性能优化'
     }
 
-    if ($labels -contains 'build' -or @($PullRequest.Files | Where-Object { Test-InstallOrPackagePath $_ }).Count -gt 0) {
+    if ($labels -contains 'build' -or
+        $text -match '(^|\s|\n)build(\([a-z0-9-]+\))?!?:' -or
+        @($PullRequest.Files | Where-Object { Test-InstallOrPackagePath $_ }).Count -gt 0) {
         return '安装与发布包'
     }
 

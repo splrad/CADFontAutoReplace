@@ -273,7 +273,7 @@ function isRuntimeReleasePath(file) {
   if (normalized.startsWith('src/')) return true;
   if (normalized === 'tools/publish-releaseassets.ps1') return true;
   if (['directory.build.props', 'directory.build.targets', 'directory.packages.props', 'global.json'].includes(normalized)) return true;
-  if (normalized === 'chore/fonts.zip' || normalized.startsWith('chore/assets/')) return true;
+  if (normalized === 'chore/fonts.zip') return true;
   return false;
 }
 
@@ -281,8 +281,11 @@ function isInstallOrPackagePath(file) {
   const normalized = normalizeRepoPath(file);
   return normalized === 'tools/publish-releaseassets.ps1'
     || normalized === 'chore/fonts.zip'
-    || normalized.startsWith('chore/assets/')
     || ['directory.build.props', 'directory.build.targets', 'directory.packages.props', 'global.json'].includes(normalized);
+}
+
+function hasConventionalType(text, types) {
+  return new RegExp(`(^|\\s|\\n)(${types})(\\([a-z0-9-]+\\))?!?:`, 'i').test(text);
 }
 
 function inferReleaseLabels(context, summary) {
@@ -300,11 +303,12 @@ function inferReleaseLabels(context, summary) {
 
   if (/(breaking|破坏性|不兼容|semver-major)/i.test(text)) labels.add('breaking-change');
   if (/(security|安全|漏洞|vulnerab|cve)/i.test(text)) labels.add('security');
-  if (/(^|\s|\n)(fix|bug|bugfix|regression|修复|缺陷|问题)/i.test(text)) labels.add('bug');
-  if (/(^|\s|\n)(feat|feature|enhancement|新增|添加|功能)/i.test(text)) labels.add('feature');
-  if (/(perf|performance|性能)/i.test(text)) labels.add('performance');
+  if (hasConventionalType(text, 'fix|bug|bugfix|regression') || /(修复|缺陷|问题)/i.test(text)) labels.add('bug');
+  if (hasConventionalType(text, 'feat|feature|enhancement') || /(新增|添加|功能)/i.test(text)) labels.add('feature');
+  if (hasConventionalType(text, 'perf|performance') || /性能/i.test(text)) labels.add('performance');
   if (runtimeFiles.some(isInstallOrPackagePath)
-    || /(^|\s|\n)(build|packag|package|installer|打包|构建|安装|发布包)/i.test(text)) labels.add('build');
+    || hasConventionalType(text, 'build')
+    || /(packag|package|installer|打包|构建|安装|发布包)/i.test(text)) labels.add('build');
   if (!labels.size) labels.add('plugin');
 
   return [...labels];
