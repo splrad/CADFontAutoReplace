@@ -15,12 +15,8 @@ const releaseLabelDefinitions = [
   { name: 'feature', color: '1d76db', description: 'Release notes: new user-facing features or enhancements.' },
   { name: 'bug', color: 'd73a4a', description: 'Release notes: bug fixes or regressions.' },
   { name: 'performance', color: 'fbca04', description: 'Release notes: performance improvements.' },
-  { name: 'build', color: 'fef2c0', description: 'Release notes: build system or packaging changes.' },
-  { name: 'workflow', color: '5319e7', description: 'Release notes: CI/CD, automation, or release workflow changes.' },
-  { name: 'dependencies', color: '0366d6', description: 'Release notes: dependency or package updates.' },
-  { name: 'docs', color: '0075ca', description: 'Release notes: documentation changes.' },
-  { name: 'refactor', color: 'cfd3d7', description: 'Release notes: internal refactors without direct feature changes.' },
-  { name: 'chore', color: 'ededed', description: 'Release notes: maintenance and cleanup changes.' },
+  { name: 'build', color: 'fef2c0', description: 'Release notes: installer, packaging, or runtime build changes.' },
+  { name: 'plugin', color: 'cfd3d7', description: 'Release notes: runtime plugin changes.' },
 ];
 
 function run(command, args, options = {}) {
@@ -268,8 +264,32 @@ function changedFilePaths(context) {
   });
 }
 
+function normalizeRepoPath(file) {
+  return String(file || '').replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+}
+
+function isRuntimeReleasePath(file) {
+  const normalized = normalizeRepoPath(file);
+  if (normalized.startsWith('src/')) return true;
+  if (normalized === 'tools/publish-releaseassets.ps1') return true;
+  if (['directory.build.props', 'directory.build.targets', 'directory.packages.props', 'global.json'].includes(normalized)) return true;
+  if (normalized === 'chore/fonts.zip' || normalized.startsWith('chore/assets/')) return true;
+  return false;
+}
+
+function isInstallOrPackagePath(file) {
+  const normalized = normalizeRepoPath(file);
+  return normalized === 'tools/publish-releaseassets.ps1'
+    || normalized === 'chore/fonts.zip'
+    || normalized.startsWith('chore/assets/')
+    || ['directory.build.props', 'directory.build.targets', 'directory.packages.props', 'global.json'].includes(normalized);
+}
+
 function inferReleaseLabels(context, summary) {
-  const files = changedFilePaths(context).map((file) => file.toLowerCase());
+  const files = changedFilePaths(context);
+  const runtimeFiles = files.filter(isRuntimeReleasePath);
+  if (!runtimeFiles.length) return [];
+
   const text = [
     summary.title,
     summary.summary,
@@ -283,15 +303,9 @@ function inferReleaseLabels(context, summary) {
   if (/(^|\s|\n)(fix|bug|bugfix|regression|修复|缺陷|问题)/i.test(text)) labels.add('bug');
   if (/(^|\s|\n)(feat|feature|enhancement|新增|添加|功能)/i.test(text)) labels.add('feature');
   if (/(perf|performance|性能)/i.test(text)) labels.add('performance');
-  if (/(^|\s|\n)(build|packag|打包|构建)/i.test(text)) labels.add('build');
-  if (files.some((file) => file.startsWith('.github/') || file.startsWith('tools/') || file.startsWith('scripts/'))
-    || /(workflow|github actions|release|ci|工作流|发布)/i.test(text)) labels.add('workflow');
-  if (files.some((file) => /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|packages\.lock\.json)$/.test(file))
-    || /(dependenc|依赖)/i.test(text)) labels.add('dependencies');
-  if (files.some((file) => file.startsWith('docs/') || file.toLowerCase().includes('readme') || file.endsWith('.md'))
-    || /(docs|documentation|文档)/i.test(text)) labels.add('docs');
-  if (/(refactor|重构)/i.test(text)) labels.add('refactor');
-  if (/(chore|cleanup|maintenance|清理|维护)/i.test(text)) labels.add('chore');
+  if (runtimeFiles.some(isInstallOrPackagePath)
+    || /(^|\s|\n)(build|packag|package|installer|打包|构建|安装|发布包)/i.test(text)) labels.add('build');
+  if (!labels.size) labels.add('plugin');
 
   return [...labels];
 }

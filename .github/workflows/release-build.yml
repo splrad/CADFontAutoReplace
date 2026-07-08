@@ -9,7 +9,7 @@
 #   2) 保留的通用规则：
 #      - 只允许来自已合并 PR 的 main 提交发布
 #      - tag 已存在时跳过发布
-#      - Release notes 优先使用 GitHub 官方 releases/generate-notes API
+#      - Release notes 由 .github/scripts/generate-release-notes.ps1 生成
 #      - 发布结果会回写到触发发布的 merged PR
 #   3) 如果新项目不是 Version.props 版本源，需要修改 Read version and release state 步骤。
 #   4) 如果新项目没有发布资产打包脚本，需要替换 Build deployer / Package release assets / Create GitHub Release。
@@ -194,83 +194,18 @@ jobs:
           TAG_NAME: ${{ steps.version.outputs.tag_name }}
           LATEST_TAG: ${{ steps.version.outputs.latest_tag }}
         run: |
-          # 使用 GitHub 官方 release notes API 生成 merged PR、contributors、changelog。
-          # 下方“下载说明/升级说明”是当前项目固定文案，复用时按项目替换。
+          # 只保留运行代码相关 PR；纯 workflow、文档、版本号 PR 不进入发布说明。
           $notesPath = Join-Path $env:GITHUB_WORKSPACE 'release-notes.md'
-          $headers = @{
-              Accept = 'application/vnd.github+json'
-              Authorization = "Bearer $env:GH_TOKEN"
-              'X-GitHub-Api-Version' = '2022-11-28'
-          }
 
-          $request = @{
-              tag_name = $env:TAG_NAME
-              target_commitish = '${{ github.sha }}'
-          }
-          if (-not [string]::IsNullOrWhiteSpace($env:LATEST_TAG)) {
-              $request.previous_tag_name = $env:LATEST_TAG
-          }
+          & (Join-Path $env:GITHUB_WORKSPACE '.github/scripts/generate-release-notes.ps1') `
+              -Repo $env:GH_REPO `
+              -TagName $env:TAG_NAME `
+              -PreviousTag $env:LATEST_TAG `
+              -TargetSha '${{ github.sha }}' `
+              -TriggerPrNumber '${{ steps.merged-pr-guard.outputs.pr_number }}' `
+              -OutputPath $notesPath `
+              -OwnerLogin '${{ github.repository_owner }}'
 
-          $generatedBody = ''
-          $response = Invoke-WebRequest `
-              -Uri "https://api.github.com/repos/$env:GH_REPO/releases/generate-notes" `
-              -Method Post `
-              -Headers $headers `
-              -ContentType 'application/json' `
-              -Body ($request | ConvertTo-Json -Compress) `
-              -SkipHttpErrorCheck
-
-          if ($response.StatusCode -eq 200) {
-              $generatedBody = [string](($response.Content | ConvertFrom-Json).body)
-          } else {
-              Write-Host "::warning::GitHub generated release notes failed with HTTP $($response.StatusCode)."
-          }
-
-          if ([string]::IsNullOrWhiteSpace($generatedBody)) {
-              $generatedBody = @(
-                  '## Changes',
-                  '',
-                  "- Release generated from merged PR #${{ steps.merged-pr-guard.outputs.pr_number }}."
-              ) -join "`n"
-          }
-          $generatedBody = [regex]::Replace(
-              $generatedBody,
-              '(?m)^\s*(?:\*\*)?Full Changelog(?:\*\*)?:\s*.*(?:\r?\n)?',
-              ''
-          ).Trim()
-          if ([string]::IsNullOrWhiteSpace($generatedBody)) {
-              $generatedBody = @(
-                  '## Changes',
-                  '',
-                  "- Release generated from merged PR #${{ steps.merged-pr-guard.outputs.pr_number }}."
-              ) -join "`n"
-          }
-
-          $lines = @(
-              '## 下载说明',
-              '',
-              '| 文件 | 说明 |',
-              '| --- | --- |',
-              "| **AFR-Deployer_$env:TAG_NAME.exe** | 主安装程序，双击运行并选择 AutoCAD 版本 |",
-              "| AFR-DLL_$env:TAG_NAME.zip | 手动 NETLOAD 用插件 DLL 包 |",
-              '| Fonts.zip | 字体资源包（用于手动补充或备份） |',
-              '',
-              "一般用户只需下载：**AFR-Deployer_$env:TAG_NAME.exe**",
-              '',
-              '------',
-              '',
-              $generatedBody.Trim(),
-              '',
-              '------',
-              '',
-              '## 升级说明',
-              '',
-              '- 支持直接覆盖安装',
-              '- 无需卸载旧版本',
-              '- 已安装字体不会被删除'
-          )
-
-          $lines | Set-Content -LiteralPath $notesPath -Encoding utf8
           "notes_path=$notesPath" >> $env:GITHUB_OUTPUT
 
       - name: Create GitHub Release

@@ -15,8 +15,8 @@
 #      并同步修改 PR Governance、PR Cleanup 和分支保护 required checks。
 #   5) 保留 .github/pull_request_template.md 中的 workflow:auto-summary 标记。
 #      workflow 只覆盖该自动区块，人工补充内容会保留。
-#   6) 保留 .github/release.yml 中的 changelog 分类配置。
-#      PR Automation 会自动补充中立 label，供 GitHub 官方 release notes 归类使用。
+#   6) 保留 .github/release.yml 中的软件发布分类配置。
+#      PR Automation 只会为运行代码变化补充 release notes label。
 #   7) 验证建议：推送一个 feature 分支，确认自动创建/更新 PR，且标题来自代码内容。
 name: PR Automation
 
@@ -59,7 +59,7 @@ jobs:
           # 这里不要填写 App ID，也不要填写 client secret。
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
-          # PR 创建/更新需要 pull-requests: write；通知评论和 release notes 分类 label 需要 issues: write；
+          # PR 创建/更新需要 pull-requests: write；通知评论和 release notes label 需要 issues: write；
           # checkout 和 diff 分析需要 contents: read。
           permission-contents: read
           permission-pull-requests: write
