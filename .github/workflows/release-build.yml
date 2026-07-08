@@ -197,14 +197,28 @@ jobs:
           # 只保留运行代码相关 PR；纯 workflow、文档、版本号 PR 不进入发布说明。
           $notesPath = Join-Path $env:GITHUB_WORKSPACE 'release-notes.md'
 
-          & (Join-Path $env:GITHUB_WORKSPACE '.github/scripts/generate-release-notes.ps1') `
-              -Repo $env:GH_REPO `
-              -TagName $env:TAG_NAME `
-              -PreviousTag $env:LATEST_TAG `
-              -TargetSha '${{ github.sha }}' `
-              -TriggerPrNumber '${{ steps.merged-pr-guard.outputs.pr_number }}' `
-              -OutputPath $notesPath `
-              -OwnerLogin '${{ github.repository_owner }}'
+          try {
+              & (Join-Path $env:GITHUB_WORKSPACE '.github/scripts/generate-release-notes.ps1') `
+                  -Repo $env:GH_REPO `
+                  -TagName $env:TAG_NAME `
+                  -PreviousTag $env:LATEST_TAG `
+                  -TargetSha '${{ github.sha }}' `
+                  -TriggerPrNumber '${{ steps.merged-pr-guard.outputs.pr_number }}' `
+                  -OutputPath $notesPath `
+                  -OwnerLogin '${{ github.repository_owner }}'
+          } catch {
+              @(
+                  '## 插件变更'
+                  ''
+                  '- 本版本发布说明生成失败，已使用最小发布说明兜底。'
+                  ''
+                  '> 自动发布过程中生成详细发布说明失败；请查看 GitHub Actions 运行日志。'
+              ) | Set-Content -LiteralPath $notesPath -Encoding utf8
+
+              $errorMessage = ($_.Exception.Message -replace "\r?\n", ' ')
+              "Release notes generation failed; wrote fallback notes." | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+              "Error: $errorMessage" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          }
 
           "notes_path=$notesPath" >> $env:GITHUB_OUTPUT
 

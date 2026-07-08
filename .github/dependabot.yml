@@ -18,7 +18,6 @@ updates:
   - package-ecosystem: "nuget"
     directories:
       - "/src/AFR.Deployer"
-      - "/src/AFR.Benchmarks"
       - "/src/AutoCAD/AFR-ACAD2018"
       - "/src/AutoCAD/AFR-ACAD2019"
       - "/src/AutoCAD/AFR-ACAD2020"
