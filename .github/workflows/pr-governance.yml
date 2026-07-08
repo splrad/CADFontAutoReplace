@@ -8,9 +8,15 @@
 #      否则 Auto Approve 可能无法提交 APPROVE。
 #   3) 分支保护 / ruleset 的 required checks 建议配置为：
 #      - test: PR Governance / Protected Configuration Gate
+#      - test: CodeQL / Analyze C#
+#      - test: CodeQL / Analyze JavaScript
+#      - test: CodeQL / CodeQL
 #      - main: PR Governance / Main Authorization Gate
 #      - main: PR Governance / Source Branch Gate
 #      - main: PR Governance / Copilot Review Gate
+#      - main: CodeQL / Analyze C#
+#      - main: CodeQL / Analyze JavaScript
+#      - main: CodeQL / CodeQL
 #      不要把 Auto Approve 设置为 required check。
 #   4) 如新项目受保护配置文件不在 .github/workflows、.github/actions、.github/scripts 等路径，
 #      修改 .github/scripts/pr-governance.js 中的 isProtectedConfig()。

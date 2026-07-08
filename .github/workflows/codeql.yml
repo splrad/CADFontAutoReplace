@@ -1,4 +1,8 @@
-# CodeQL 先作为观察性安全检查启用，不加入 ruleset required checks。
+# CodeQL 参与 ruleset required checks：
+# - Analyze C# / Analyze JavaScript 阻断构建、提取或分析失败。
+# - CodeQL 是 GitHub Advanced Security 生成的 code scanning 结果检查，
+#   高严重度 alert 按 GitHub 默认策略阻断合并。
+# CodeQL alert 反馈使用 GitHub 官方 PR annotation、Files changed 标注和 Security / Code scanning 页面。
 name: CodeQL
 
 on:
