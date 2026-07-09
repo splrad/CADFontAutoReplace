@@ -21,6 +21,7 @@ const headSha = process.env.PR_HEAD_SHA || '';
 const eventName = process.env.GITHUB_EVENT_NAME || '';
 const copilotReviewerLogin = 'copilot-pull-request-reviewer[bot]';
 const copilotCheckName = process.env.COPILOT_REVIEW_CHECK_NAME || 'Copilot Code Review Gate';
+const copilotNoBlockingConclusion = '结论：未发现需要阻断合并的问题。';
 let prDetailsCache = null;
 let effectiveAuthorCache = null;
 
@@ -421,8 +422,8 @@ function requestCopilotReview() {
     writeStepSummary('Copilot 审查请求失败', [
       `- 分支流向：${headRef} -> ${baseRef}`,
       `- 当前提交：${headSha}`,
-      '- 原因：未提供请求 Copilot 审查的 GitHub App installation token。',
-      '- 请确认 `Create Copilot review app token` 步骤成功，且 GitHub App 已安装到本仓库并具有 `Pull requests: Read and write`。',
+      '- 原因：未提供请求 Copilot 审查的 token。',
+      '- 请配置仓库 secret `COPILOT_REVIEW_REQUEST_TOKEN`：拥有 Copilot 订阅的用户 fine-grained PAT，仓库权限 `Pull requests: Read and write`。',
     ]);
     process.exit(1);
   }
@@ -494,7 +495,9 @@ function requestCopilotReview() {
       `- 当前 head Copilot review 数量：${confirmation.reviews.length}`,
       '',
       'GitHub API 调用返回成功，但 timeline 中没有检测到本次 Copilot review request，且当前 head 也没有 Copilot review。',
-      '请确认 GitHub App 已安装到本仓库、拥有 `Pull requests: Read and write`，且仓库已启用 Copilot Code Review。',
+      'GitHub 会静默忽略 GitHub App installation token 发起的 Copilot review request。',
+      '请配置仓库 secret `COPILOT_REVIEW_REQUEST_TOKEN`：拥有 Copilot 订阅的用户的 fine-grained PAT，仓库权限 `Pull requests: Read and write`。',
+      '同时确认仓库已启用 Copilot Code Review。',
     ]);
     process.exit(1);
   }
@@ -531,14 +534,29 @@ function copilotReviewsForHead() {
   return copilotReviews().filter((review) => review.commit_id === headSha);
 }
 
+function hasCopilotNoBlockingConclusion(reviews) {
+  return reviews.some((review) => String(review?.body || '').includes(copilotNoBlockingConclusion));
+}
+
 function latestCopilotReviewRequestEvent() {
   return copilotReviewRequestEvents()
     .sort((a, b) => String(a?.created_at || '').localeCompare(String(b?.created_at || '')))
     .pop();
 }
 
+let expectedRequestActorCache = null;
+
 function expectedRequestActor() {
-  return String(process.env.EXPECTED_REQUEST_ACTOR || process.env.REQUEST_ACTOR || '').trim();
+  const configured = String(process.env.EXPECTED_REQUEST_ACTOR || process.env.REQUEST_ACTOR || '').trim();
+  if (configured) return configured;
+  if (expectedRequestActorCache !== null) return expectedRequestActorCache;
+  try {
+    // 使用用户 PAT 时可解析实际请求账号；App installation token 不支持 /user，忽略失败。
+    expectedRequestActorCache = String(ghJson(['--method', 'GET', 'user'])?.login || '').trim();
+  } catch {
+    expectedRequestActorCache = '';
+  }
+  return expectedRequestActorCache;
 }
 
 function requestActorDiagnosticLines(confirmation) {
@@ -810,8 +828,10 @@ function copilotReviewGate() {
   let checkConclusion = 'success';
   let checkTitle = 'Copilot 审查门禁已通过';
   let detail = '当前提交已完成 Copilot 代码审查，且未发现未解决的重大问题。';
+  let handling = '处理：请检查 Request Copilot Review job 日志，修复后重新触发工作流。';
   let blocking = [];
   let unclassified = [];
+  let hasNoBlockingConclusion = false;
 
   if (reviews.length === 0) {
     if (requestFailed) {
@@ -826,6 +846,7 @@ function copilotReviewGate() {
       detail = '当前提交尚未检测到 Copilot 代码审查；自定义 Checks API 门禁会保持 in_progress，等 Copilot 提交 review 后由 pull_request_review 事件重新触发并完成。';
     }
   } else {
+    hasNoBlockingConclusion = hasCopilotNoBlockingConclusion(reviews);
     const findings = unresolvedCopilotThreadFindings();
     blocking = findings.blocking;
     unclassified = findings.unclassified;
@@ -834,6 +855,16 @@ function copilotReviewGate() {
       checkConclusion = 'failure';
       checkTitle = 'Copilot 审查门禁未通过';
       detail = '检测到 Copilot 留下的未解决重大问题。';
+      handling = '处理：请修复或回复并 resolve 上述 Copilot 阻断评论。';
+    } else if (!hasNoBlockingConclusion) {
+      checkStatus = 'completed';
+      checkConclusion = 'failure';
+      checkTitle = 'Copilot 审查结论缺失';
+      detail = `Copilot review 已到达且未检测到未解决阻断问题，但 review 正文缺少固定结论句：${copilotNoBlockingConclusion}`;
+      handling = '处理：请重新触发 Copilot review，或要求 Copilot 按 .github/copilot-instructions.md 输出固定无阻断结论句。';
+    } else {
+      detail = '当前提交已完成 Copilot 代码审查，review 正文包含固定无阻断结论句，且未发现未解决的重大问题。';
+      handling = '';
     }
   }
 
@@ -857,6 +888,7 @@ function copilotReviewGate() {
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- 当前提交：${headSha}`,
     `- Copilot 审查数量：${reviews.length}`,
+    `- 无阻断结论句：${hasNoBlockingConclusion ? '已检测到' : '未检测到'}`,
     `- 未解决重大问题：${blocking.length}`,
     `- 未识别严重程度评论：${unclassified.length}`,
     '',
@@ -897,9 +929,7 @@ function copilotReviewGate() {
       ...blocking.map((item) => item.url
         ? `未解决重大问题：[${item.body || 'Copilot 评论'}](${item.url})`
         : `未解决重大问题：${item.body || 'Copilot 评论'}`),
-      blocking.length
-        ? '处理：请修复或回复并 resolve 上述 Copilot 阻断评论。'
-        : '处理：请检查 Request Copilot Review job 日志，修复后重新触发工作流。',
+      handling,
     ],
   });
 }

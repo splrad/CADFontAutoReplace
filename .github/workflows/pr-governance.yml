@@ -21,6 +21,11 @@
 #      不要把 Auto Approve 或 Update Copilot Review Check 设置为 required check。
 #   5) Copilot Code Review Gate 只检查 main 目标 PR。
 #      本 workflow 会通过 REST API 显式请求 Copilot Code Review；ruleset 自动审查仍可兜底人工 PR。
+#      重要：GitHub 会静默忽略 GitHub App installation token 发起的 Copilot review request
+#      （API 返回成功但不产生 review_requested 事件），且 ruleset 自动审查不覆盖 bot 创建的 PR。
+#      因此必须配置仓库 secret COPILOT_REVIEW_REQUEST_TOKEN：
+#      一个拥有 Copilot 订阅的用户的 fine-grained PAT，仓库权限 Pull requests: Read and write。
+#      未配置该 secret 时会回退 App token，请求大概率被静默忽略并导致该 job 失败提示。
 #      它依赖 .github/copilot-instructions.md
 #      要求 Copilot 审查正文主体使用简体中文，并在 comment 第一行标注：
 #      - 严重程度：阻断 / Severity: blocking
@@ -92,9 +97,12 @@ jobs:
 
       - name: Request Copilot code review
         env:
-          GH_TOKEN: ${{ steps.copilot-review-token.outputs.token }}
+          # GitHub 会静默忽略 App token 的 Copilot review request；
+          # 优先使用有 Copilot 订阅的用户 PAT（COPILOT_REVIEW_REQUEST_TOKEN），无则回退 App token。
+          GH_TOKEN: ${{ secrets.COPILOT_REVIEW_REQUEST_TOKEN || steps.copilot-review-token.outputs.token }}
           GH_READ_TOKEN: ${{ steps.copilot-review-token.outputs.token }}
-          EXPECTED_REQUEST_ACTOR: ${{ steps.copilot-review-token.outputs.app-slug }}[bot]
+          # 使用 PAT 时留空，由脚本通过 gh api user 解析实际请求账号。
+          EXPECTED_REQUEST_ACTOR: ${{ secrets.COPILOT_REVIEW_REQUEST_TOKEN == '' && format('{0}[bot]', steps.copilot-review-token.outputs.app-slug) || '' }}
           COPILOT_REVIEW_REQUEST_CONFIRM_SECONDS: '60'
           COPILOT_REVIEW_REQUEST_POLL_SECONDS: '5'
         run: node .github/scripts/pr-governance.js request-copilot-review
@@ -152,7 +160,8 @@ jobs:
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
           permission-contents: read
-          permission-pull-requests: read
+          # 在 PR 上创建/更新 issue comment 需要 App 的 Pull requests: write（Issues: write 只覆盖真正的 issue）。
+          permission-pull-requests: write
           permission-issues: write
 
       - name: Checkout governance scripts
@@ -205,7 +214,8 @@ jobs:
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
           permission-contents: read
-          permission-pull-requests: read
+          # 在 PR 上创建/更新 issue comment 需要 App 的 Pull requests: write（Issues: write 只覆盖真正的 issue）。
+          permission-pull-requests: write
           permission-issues: write
           permission-checks: write
 
