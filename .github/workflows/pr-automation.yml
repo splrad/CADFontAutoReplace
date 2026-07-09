@@ -22,11 +22,8 @@
 #   7) 保留 .github/release.yml 中的软件发布分类配置。
 #      PR Classification 负责 release labels；共享分类规则统一维护在 .github/pr-classification-rules.json。
 #   8) Copilot CLI 只用于生成中文 PR 标题和摘要；失败时使用确定性中文兜底。
-#   9) 合并本次 main-only 分支模型迁移后，更新远端 ruleset：
-#      从 main-protection 移除 Source Branch Gate required check；
-#      停用或删除 test-protection；确认没有 test 目标 PR 后再删除远端 test 分支。
-#   10) 成功创建/更新 PR 后依赖 GitHub 官方 PR 通知，不再额外发布成功评论。
-#   11) 验证建议：推送一个人工 feature 分支，确认自动创建/更新 main 目标 PR，且标题来自代码内容。
+#   9) 成功创建/更新 PR 后依赖 GitHub 官方 PR 通知，不再额外发布成功评论。
+#   10) 验证建议：推送一个人工 feature 分支，确认自动创建/更新 main 目标 PR，且标题来自代码内容。
 name: PR Automation
 
 on:

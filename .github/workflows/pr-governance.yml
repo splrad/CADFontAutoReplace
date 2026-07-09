@@ -13,22 +13,20 @@
 #      本 workflow 用该 App 的短期 installation token 请求 GitHub Copilot Code Review，
 #      并维护 Copilot Code Review Gate 自定义 check run。
 #   4) 分支保护 / ruleset 的 required checks 建议配置为：
-#      - main: PR Governance / Main Authorization Gate
-#      - main: Copilot Code Review Gate
+#      - main: PR Governance / Main Authorization Gate，source 保持 GitHub Actions。
+#      - main: Copilot Code Review Gate，source 必须选本 GitHub App 或 Any source；
+#        该 check run 由 GitHub App installation token 通过 Checks API 创建，不属于 GitHub Actions job。
 #      CodeQL 使用 GitHub Advanced Security default setup 和 ruleset 的
 #      Require code scanning results 管理，不再维护本仓库自定义 CodeQL workflow。
 #      不要把 Auto Approve 或 Update Copilot Review Check 设置为 required check。
-#   5) 合并本次 main-only 分支模型迁移后，更新远端 ruleset：
-#      从 main-protection 移除 Source Branch Gate required check；
-#      停用或删除 test-protection；确认没有 test 目标 PR 后再删除远端 test 分支。
-#   6) Copilot Code Review Gate 只检查 main 目标 PR。
+#   5) Copilot Code Review Gate 只检查 main 目标 PR。
 #      本 workflow 会通过 REST API 显式请求 Copilot Code Review；ruleset 自动审查仍可兜底人工 PR。
 #      它依赖 .github/copilot-instructions.md
 #      要求 Copilot 审查正文主体使用简体中文，并在 comment 第一行标注：
 #      - 严重程度：阻断 / Severity: blocking
 #      - 严重程度：建议 / Severity: suggestion
 #      该严重程度是本仓库自定义协议，不是 Copilot 官方结构化字段，也不依赖 Low/Medium 等 UI 徽标。
-#   7) 如果 GitHub App 创建 PR 导致 PR 作者显示为 bot，PR Automation 会在 PR 正文写入
+#   6) 如果 GitHub App 创建 PR 导致 PR 作者显示为 bot，PR Automation 会在 PR 正文写入
 #      workflow:source-actor 隐藏标记；本 workflow 会按该原始推送人判断 TRUSTED_DEVELOPERS。
 name: PR Governance
 
