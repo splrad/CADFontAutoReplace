@@ -95,16 +95,39 @@ function ensureLabel(labelName) {
 
 function applyPublicLabels(labels) {
   const knownLabels = labels.filter(labelDefinition);
-  if (!knownLabels.length) return;
+  const desiredLabels = new Set(knownLabels);
+  const managedLabels = new Set(labelDefinitions.map((label) => label.name));
+  const issue = ghJson([
+    '--method', 'GET',
+    `repos/${repo}/issues/${prNumber}`,
+  ]) || {};
+  const currentLabels = Array.isArray(issue.labels)
+    ? issue.labels.map((label) => label.name).filter(Boolean)
+    : [];
 
-  for (const label of knownLabels) {
+  const labelsToRemove = currentLabels.filter((label) => {
+    return managedLabels.has(label) && !desiredLabels.has(label);
+  });
+  for (const label of labelsToRemove) {
+    const encoded = encodeURIComponent(label);
+    gh([
+      '--method', 'DELETE',
+      `repos/${repo}/issues/${prNumber}/labels/${encoded}`,
+    ]);
+  }
+
+  const currentLabelSet = new Set(currentLabels);
+  const labelsToAdd = knownLabels.filter((label) => !currentLabelSet.has(label));
+  if (!labelsToAdd.length) return;
+
+  for (const label of labelsToAdd) {
     ensureLabel(label);
   }
   gh([
     '--method', 'POST',
     `repos/${repo}/issues/${prNumber}/labels`,
     '--input', '-',
-  ], JSON.stringify({ labels: knownLabels }));
+  ], JSON.stringify({ labels: labelsToAdd }));
 }
 
 function removeVisibleInternalLabels() {
