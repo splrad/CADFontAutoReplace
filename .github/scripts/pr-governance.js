@@ -22,6 +22,7 @@ const eventName = process.env.GITHUB_EVENT_NAME || '';
 const copilotReviewerLogin = 'copilot-pull-request-reviewer[bot]';
 const copilotCheckName = process.env.COPILOT_REVIEW_CHECK_NAME || 'Copilot Code Review Gate';
 const copilotNoBlockingConclusion = '结论：未发现需要阻断合并的问题。';
+const copilotNoNewCommentsPattern = /Copilot reviewed \d+ out of \d+ changed files in this pull request and generated no new comments\./i;
 let prDetailsCache = null;
 let effectiveAuthorCache = null;
 
@@ -40,6 +41,16 @@ function gh(args, input, token) {
 function ghJson(args, input, token) {
   const out = gh(args, input, token);
   return out ? JSON.parse(out) : null;
+}
+
+function isOwnPullRequestApprovalError(error) {
+  const output = [
+    error?.stdout,
+    error?.stderr,
+    Array.isArray(error?.output) ? error.output.join('\n') : '',
+    error?.message,
+  ].map((value) => String(value || '')).join('\n');
+  return /Review Can not approve your own pull request/i.test(output);
 }
 
 function ghReadToken() {
@@ -343,8 +354,19 @@ function autoApprove() {
   ensurePrContext();
   const effectiveAuthor = effectivePrAuthor();
   const effectiveAuthorDisplay = authorDisplayText(effectiveAuthor);
+  const reviewer = process.env.AUTO_APPROVE_REVIEWER || '';
   if (!isTrusted(effectiveAuthor)) {
     console.log(`PR submitter ${effectiveAuthorDisplay} is not trusted; auto approval skipped.`);
+    return;
+  }
+
+  if (normalizeGitHubLogin(prAuthor) && normalizeGitHubLogin(prAuthor) === normalizeGitHubLogin(reviewer)) {
+    writeStepSummary('自动审批已跳过', [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- PR 提交人：${effectiveAuthorDisplay}`,
+      `- 当前提交：${headSha.slice(0, 12) || 'unknown'}`,
+      '- 原因：GitHub 不允许 PR 作者审批自己的 PR；main 授权由 Main Authorization Gate 使用真实提交人判断。',
+    ]);
     return;
   }
 
@@ -358,11 +380,22 @@ function autoApprove() {
     return;
   }
 
-  gh([
-    '--method', 'POST',
-    `repos/${repo}/pulls/${prNumber}/reviews`,
-    '--input', '-',
-  ], JSON.stringify({ event: 'APPROVE', commit_id: headSha }));
+  try {
+    gh([
+      '--method', 'POST',
+      `repos/${repo}/pulls/${prNumber}/reviews`,
+      '--input', '-',
+    ], JSON.stringify({ event: 'APPROVE', commit_id: headSha }));
+  } catch (error) {
+    if (!isOwnPullRequestApprovalError(error)) throw error;
+    writeStepSummary('自动审批已跳过', [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- PR 提交人：${effectiveAuthorDisplay}`,
+      `- 当前提交：${headSha.slice(0, 12) || 'unknown'}`,
+      '- 原因：GitHub 拒绝自审 approval；main 授权由 Main Authorization Gate 使用真实提交人判断。',
+    ]);
+    return;
+  }
   writeStepSummary('自动审批已完成', [
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- PR 提交人：${effectiveAuthorDisplay}`,
@@ -536,6 +569,12 @@ function copilotReviewsForHead() {
 
 function hasCopilotNoBlockingConclusion(reviews) {
   return reviews.some((review) => String(review?.body || '').includes(copilotNoBlockingConclusion));
+}
+
+function copilotPassingConclusionSource(reviews) {
+  if (hasCopilotNoBlockingConclusion(reviews)) return 'fixed-conclusion';
+  if (reviews.some((review) => copilotNoNewCommentsPattern.test(String(review?.body || '')))) return 'no-new-comments';
+  return '';
 }
 
 function latestCopilotReviewRequestEvent() {
@@ -810,7 +849,7 @@ function copilotDiagnosticLines(diagnostics) {
     `- 当前 head Copilot review：${diagnostics.reviewsForHead.length}`,
     `- 旧 head Copilot review：${diagnostics.oldHeadReviews.length}`,
     `- 最近旧 head review：${diagnostics.latestOldHeadReview ? `${diagnostics.latestOldHeadReview.commit_id?.slice(0, 12) || 'unknown'} @ ${diagnostics.latestOldHeadReview.submitted_at}` : '无'}`,
-    '- Gate 模式：事件驱动（等待 pull_request_review / pull_request_review_comment 重新触发）',
+    '- Gate 模式：事件驱动（等待 pull_request_review 重新触发）',
     '- 本次检查：即时检查，无长轮询',
   ];
 }
@@ -831,7 +870,7 @@ function copilotReviewGate() {
   let handling = '处理：请检查 Request Copilot Review job 日志，修复后重新触发工作流。';
   let blocking = [];
   let unclassified = [];
-  let hasNoBlockingConclusion = false;
+  let passingConclusionSource = '';
 
   if (reviews.length === 0) {
     if (requestFailed) {
@@ -846,7 +885,7 @@ function copilotReviewGate() {
       detail = '当前提交尚未检测到 Copilot 代码审查；自定义 Checks API 门禁会保持 in_progress，等 Copilot 提交 review 后由 pull_request_review 事件重新触发并完成。';
     }
   } else {
-    hasNoBlockingConclusion = hasCopilotNoBlockingConclusion(reviews);
+    passingConclusionSource = copilotPassingConclusionSource(reviews);
     const findings = unresolvedCopilotThreadFindings();
     blocking = findings.blocking;
     unclassified = findings.unclassified;
@@ -856,14 +895,16 @@ function copilotReviewGate() {
       checkTitle = 'Copilot 审查门禁未通过';
       detail = '检测到 Copilot 留下的未解决重大问题。';
       handling = '处理：请修复或回复并 resolve 上述 Copilot 阻断评论。';
-    } else if (!hasNoBlockingConclusion) {
+    } else if (!passingConclusionSource) {
       checkStatus = 'completed';
       checkConclusion = 'failure';
       checkTitle = 'Copilot 审查结论缺失';
-      detail = `Copilot review 已到达且未检测到未解决阻断问题，但 review 正文缺少固定结论句：${copilotNoBlockingConclusion}`;
+      detail = `Copilot review 已到达且未检测到未解决阻断问题，但 review 正文缺少通过型结论：固定结论句 ${copilotNoBlockingConclusion}，或 Copilot 官方无新增评论模板。`;
       handling = '处理：请重新触发 Copilot review，或要求 Copilot 按 .github/copilot-instructions.md 输出固定无阻断结论句。';
     } else {
-      detail = '当前提交已完成 Copilot 代码审查，review 正文包含固定无阻断结论句，且未发现未解决的重大问题。';
+      detail = passingConclusionSource === 'no-new-comments'
+        ? '当前提交已完成 Copilot 代码审查，review 正文为官方无新增评论模板，且未发现未解决的重大问题。'
+        : '当前提交已完成 Copilot 代码审查，review 正文包含固定无阻断结论句，且未发现未解决的重大问题。';
       handling = '';
     }
   }
@@ -875,6 +916,9 @@ function copilotReviewGate() {
     ? unclassified.map((item) => `- ${item.url ? `[${item.body || 'Copilot 评论'}](${item.url})` : item.body}`).join('\n')
     : '- 无';
   const diagnosticList = copilotDiagnosticLines(diagnostics).join('\n');
+  const requestResultDisplay = eventName === 'pull_request_target'
+    ? (requestResult || '未提供')
+    : '不适用于本事件';
 
   const summaryTitle = checkStatus === 'in_progress'
     ? 'Copilot 审查等待中'
@@ -884,11 +928,11 @@ function copilotReviewGate() {
   const summaryLines = [
     `- Checks API 名称：${copilotCheckName}`,
     `- Checks API 状态：${checkStatus}${checkConclusion ? ` / ${checkConclusion}` : ''}`,
-    `- Request Copilot Review job：${requestResult || '未提供'}`,
+    `- Request Copilot Review job：${requestResultDisplay}`,
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- 当前提交：${headSha}`,
     `- Copilot 审查数量：${reviews.length}`,
-    `- 无阻断结论句：${hasNoBlockingConclusion ? '已检测到' : '未检测到'}`,
+    `- 通过型结论：${passingConclusionSource || '未检测到'}`,
     `- 未解决重大问题：${blocking.length}`,
     `- 未识别严重程度评论：${unclassified.length}`,
     '',
@@ -923,8 +967,9 @@ function copilotReviewGate() {
     title: checkTitle,
     failed: checkStatus === 'completed' && checkConclusion === 'failure',
     details: [
-      `Request Copilot Review job：${requestResult || '未提供'}`,
+      `Request Copilot Review job：${requestResultDisplay}`,
       `Copilot 审查数量：${reviews.length}`,
+      `通过型结论：${passingConclusionSource || '未检测到'}`,
       `问题：${detail}`,
       ...blocking.map((item) => item.url
         ? `未解决重大问题：[${item.body || 'Copilot 评论'}](${item.url})`
