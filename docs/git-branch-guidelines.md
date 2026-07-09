@@ -72,7 +72,7 @@ git diff --check
 
 如果你不确定目标分支，优先选择 `main`；自动生成的 PR 说明不清楚时，补充一句改动目的。
 
-如果需要本地复测 PR 时，请直接拉取 PR head 或 PR merge ref 到你本地的测试分支，例如 `gh pr checkout <PR号>`，或 `git fetch upstream refs/pull/<PR号>/merge:review/pr-<PR号>-merge`,不要在`main`分支上进行修改。
+如果需要本地复测 PR，请直接拉取 PR head 或 PR merge ref 到你本地的测试分支，例如 `gh pr checkout <PR号>`，或 `git fetch upstream refs/pull/<PR号>/merge:review/pr-<PR号>-merge`，不要在 `main` 分支上进行修改。
 
 ## 提交建议
 
