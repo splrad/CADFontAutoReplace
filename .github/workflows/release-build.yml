@@ -9,8 +9,8 @@
 #   2) 保留的通用规则：
 #      - 只允许来自已合并 PR 的 main 提交发布
 #      - tag 已存在时跳过发布
-#      - Release notes 优先使用 GitHub 官方 releases/generate-notes API
-#      - 发布结果会回写到触发发布的 merged PR
+#      - Release notes 由 .github/scripts/generate-release-notes.ps1 生成
+#      - 发布失败时会回写到触发发布的 merged PR
 #   3) 如果新项目不是 Version.props 版本源，需要修改 Read version and release state 步骤。
 #   4) 如果新项目没有发布资产打包脚本，需要替换 Build deployer / Package release assets / Create GitHub Release。
 #   5) 不要把 Release job 设置为 required check；
@@ -34,7 +34,7 @@ concurrency:
 
 permissions:
   # contents: write 用于创建 Release；
-  # pull-requests/issues: write 用于把发布结果评论回 merged PR。
+  # pull-requests/issues: write 用于发布失败时评论回 merged PR。
   contents: write
   pull-requests: write
   issues: write
@@ -194,76 +194,32 @@ jobs:
           TAG_NAME: ${{ steps.version.outputs.tag_name }}
           LATEST_TAG: ${{ steps.version.outputs.latest_tag }}
         run: |
-          # 使用 GitHub 官方 release notes API 生成 merged PR、contributors、changelog。
-          # 下方“下载说明/升级说明”是当前项目固定文案，复用时按项目替换。
+          # 只保留运行代码相关 PR；纯 workflow、文档、版本号 PR 不进入发布说明。
           $notesPath = Join-Path $env:GITHUB_WORKSPACE 'release-notes.md'
-          $headers = @{
-              Accept = 'application/vnd.github+json'
-              Authorization = "Bearer $env:GH_TOKEN"
-              'X-GitHub-Api-Version' = '2022-11-28'
+
+          try {
+              & (Join-Path $env:GITHUB_WORKSPACE '.github/scripts/generate-release-notes.ps1') `
+                  -Repo $env:GH_REPO `
+                  -TagName $env:TAG_NAME `
+                  -PreviousTag $env:LATEST_TAG `
+                  -TargetSha '${{ github.sha }}' `
+                  -TriggerPrNumber '${{ steps.merged-pr-guard.outputs.pr_number }}' `
+                  -OutputPath $notesPath `
+                  -OwnerLogin '${{ github.repository_owner }}'
+          } catch {
+              @(
+                  '## 插件变更'
+                  ''
+                  '- 本版本发布说明生成失败，已使用最小发布说明兜底。'
+                  ''
+                  '> 自动发布过程中生成详细发布说明失败；请查看 GitHub Actions 运行日志。'
+              ) | Set-Content -LiteralPath $notesPath -Encoding utf8
+
+              $errorMessage = ($_.Exception.Message -replace "\r?\n", ' ')
+              "Release notes generation failed; wrote fallback notes." | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+              "Error: $errorMessage" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
           }
 
-          $request = @{
-              tag_name = $env:TAG_NAME
-              target_commitish = '${{ github.sha }}'
-          }
-          if (-not [string]::IsNullOrWhiteSpace($env:LATEST_TAG)) {
-              $request.previous_tag_name = $env:LATEST_TAG
-          }
-
-          $generatedBody = ''
-          $response = Invoke-WebRequest `
-              -Uri "https://api.github.com/repos/$env:GH_REPO/releases/generate-notes" `
-              -Method Post `
-              -Headers $headers `
-              -ContentType 'application/json' `
-              -Body ($request | ConvertTo-Json -Compress) `
-              -SkipHttpErrorCheck
-
-          if ($response.StatusCode -eq 200) {
-              $generatedBody = [string](($response.Content | ConvertFrom-Json).body)
-          } else {
-              Write-Host "::warning::GitHub generated release notes failed with HTTP $($response.StatusCode)."
-          }
-
-          if ([string]::IsNullOrWhiteSpace($generatedBody)) {
-              $generatedBody = @(
-                  '## Changes',
-                  '',
-                  "- Release generated from merged PR #${{ steps.merged-pr-guard.outputs.pr_number }}."
-              ) -join "`n"
-          }
-          $generatedBody = [regex]::Replace(
-              $generatedBody,
-              '(?m)^\s*(?:\*\*)?Full Changelog(?:\*\*)?:\s*.*(?:\r?\n)?',
-              ''
-          ).Trim()
-
-          $lines = @(
-              '## 下载说明',
-              '',
-              '| 文件 | 说明 |',
-              '| --- | --- |',
-              "| **AFR-Deployer_$env:TAG_NAME.exe** | 主安装程序，双击运行并选择 AutoCAD 版本 |",
-              "| AFR-DLL_$env:TAG_NAME.zip | 手动 NETLOAD 用插件 DLL 包 |",
-              '| Fonts.zip | 字体资源包（用于手动补充或备份） |',
-              '',
-              "一般用户只需下载：**AFR-Deployer_$env:TAG_NAME.exe**",
-              '',
-              '------',
-              '',
-              $generatedBody.Trim(),
-              '',
-              '------',
-              '',
-              '## 升级说明',
-              '',
-              '- 支持直接覆盖安装',
-              '- 无需卸载旧版本',
-              '- 已安装字体不会被删除'
-          )
-
-          $lines | Set-Content -LiteralPath $notesPath -Encoding utf8
           "notes_path=$notesPath" >> $env:GITHUB_OUTPUT
 
       - name: Create GitHub Release
@@ -294,9 +250,10 @@ jobs:
     if: >-
       always() &&
       needs.release.outputs.should_release == 'true' &&
-      needs.release.outputs.merged_pr_number != ''
+      needs.release.outputs.merged_pr_number != '' &&
+      needs.release.result != 'success'
     steps:
-      - name: Comment release result on merged PR
+      - name: Comment failed release result on merged PR
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -307,17 +264,11 @@ jobs:
           RELEASE_RESULT: ${{ needs.release.result }}
           TRUSTED_DEVELOPERS: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
         run: |
-          # 该评论仅用于通知，不负责触发后续 workflow，因此使用当前 github.token 即可。
+          # 仅在 Release 失败时评论通知；成功发布以 Release 页面和 Actions summary 为准。
           marker="<!-- workflow:release-result:${{ github.run_id }}:${{ github.run_attempt }} -->"
-          if [ "$RELEASE_RESULT" = "success" ]; then
-            title="## Release 已完成"
-            result="Release 创建成功"
-            release_url="https://github.com/$GH_REPO/releases/tag/$TAG_NAME"
-          else
-            title="## Release 未完成"
-            result="Release 创建失败"
-            release_url="未生成"
-          fi
+          title="## Release 未完成"
+          result="Release 创建失败或已取消"
+          release_url="未生成"
 
           mentions="$(printf '%s' "${TRUSTED_DEVELOPERS:-[]}" | jq -r 'if type == "array" then map(select(type == "string" and length > 0) | "@" + .) | unique | join("；") else "" end' 2>/dev/null || true)"
           [ -z "$mentions" ] && mentions="（未配置通知对象）"

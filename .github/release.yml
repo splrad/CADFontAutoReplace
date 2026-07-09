@@ -3,9 +3,9 @@
 # 规则说明：
 #   - GitHub releases/generate-notes 会按 PR label 归类到下面的 categories。
 #   - 同一个 PR 命中多个分类时，通常按 categories 顺序进入最先匹配的分类。
-#   - 未命中任何分类的 PR 会进入最后的“其他变更”，因此必须保留 labels: ["*"] 兜底。
-#   - PR Automation 会自动补充 feature/bug/workflow/docs 等中立 label；
-#     人工创建 PR 时也可以直接使用这些 label。
+#   - 只保留运行代码、安装器、发布包相关分类；纯 workflow/docs/chore 不进入发布说明。
+#   - PR Labeler 的 area:* 和 PR Automation 的 kind:* 是管理标签，不作为发布说明分类依据。
+#   - PR Automation 只会为运行代码变化自动补充下面这些 release labels。
 changelog:
   exclude:
     labels:
@@ -39,27 +39,10 @@ changelog:
       labels:
         - performance
         - perf
-    - title: 工作流与发布
+    - title: 安装与发布包
       labels:
-        - workflow
-        - ci
-        - github-actions
-        - release
-    - title: 依赖更新
+        - build
+    - title: 其他插件变更
       labels:
-        - dependencies
-        - dependency
-        - deps
-    - title: 文档
-      labels:
-        - docs
-        - documentation
-    - title: 维护与重构
-      labels:
-        - refactor
-        - chore
-        - maintenance
-        - cleanup
-    - title: 其他变更
-      labels:
-        - "*"
+        - plugin
+        - runtime

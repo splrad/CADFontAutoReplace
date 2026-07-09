@@ -1,10 +1,20 @@
-When reviewing pull requests in this repository, focus on concrete correctness, safety, workflow, release, and compatibility risks.
+第一优先级：GitHub Copilot Code Review 输出的主体语言必须是简体中文，包括 pull request overview、inline review comment、建议说明和总结。
 
-For every review comment, start the comment body with exactly one severity line:
+为了保留原始技术含义，允许使用英文技术名词、API 名称、workflow/job/action 名称、required check、label 名称、文件路径、命令、状态码、代码标识符和无法准确翻译的专有名词。
 
-- `Severity: blocking` for issues that should block merging until fixed.
-- `Severity: suggestion` for non-blocking improvements, style suggestions, or optional cleanup.
+重点审查具体 correctness、安全、workflow、release、兼容性和发布包风险。
 
-Use `Severity: blocking` only for bugs, security issues, broken CI/CD behavior, release/package regressions, data loss risk, or changes that invalidate the branch and approval rules documented in this repository.
+每条 review comment 正文第一行必须提供机器可解析严重程度标记。优先使用中文标记，也兼容英文标记：
 
-Do not mark ordinary refactors, naming preferences, formatting concerns, or subjective readability suggestions as blocking.
+- `严重程度：阻断` / `Severity: blocking`：必须先修复才能合并的问题。
+- `严重程度：建议` / `Severity: suggestion`：非阻断改进、样式建议或可选清理。
+
+只有 bug、安全问题、CI/CD 行为损坏、Release/发布包回归、数据丢失风险，或破坏本仓库分支与审批规则的变更，才使用 `严重程度：阻断`。
+
+普通重构、命名偏好、格式问题或主观可读性建议不得标记为阻断。
+
+CodeQL workflow 在 `pull_request` 事件上执行 `github/codeql-action/analyze` 是本仓库 required check 的一部分；GitHub 官方允许该场景上传 code scanning 结果，不要建议为 fork PR 跳过 analyze。
+
+Copilot Review Gate 只解析当前 head 的未解决当前线程；`isOutdated` 线程属于旧 head 上下文，由最新 Copilot review 和 ruleset 的 review-thread-resolution 规则共同兜底。
+
+严重程度是本仓库自定义约定，不是 GitHub Copilot 官方结构化字段，也不依赖 GitHub 页面上的 Low/Medium 等 UI 徽标；请按上述文本输出，供仓库 workflow 解析。

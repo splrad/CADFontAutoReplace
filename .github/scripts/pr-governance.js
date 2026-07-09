@@ -1,4 +1,5 @@
 const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
 
 const repo = process.env.GITHUB_REPOSITORY || '';
 const [owner, repoName] = repo.split('/');
@@ -7,8 +8,6 @@ const prAuthor = process.env.PR_AUTHOR || 'unknown';
 const headRef = process.env.PR_HEAD_REF || '';
 const baseRef = process.env.PR_BASE_REF || '';
 const headSha = process.env.PR_HEAD_SHA || '';
-const headRepo = process.env.PR_HEAD_REPO || '';
-const actor = process.env.GITHUB_ACTOR || 'unknown';
 let prDetailsCache = null;
 let effectiveAuthorCache = null;
 
@@ -91,28 +90,6 @@ function latestApproversForHead() {
     .map((review) => review.user.login);
 }
 
-function changedFiles() {
-  const files = ghJson([
-    '--method', 'GET',
-    `repos/${repo}/pulls/${prNumber}/files`,
-    '--paginate',
-    '--slurp',
-  ]) || [];
-  const flattened = Array.isArray(files[0]) ? files.flat() : files;
-  return flattened.map((file) => String(file.filename || '')).filter(Boolean);
-}
-
-function isProtectedConfig(file) {
-  const normalized = file.replace(/\\/g, '/');
-  return normalized.startsWith('.github/workflows/')
-    || normalized.startsWith('.github/actions/')
-    || normalized.startsWith('.github/skills/')
-    || normalized.startsWith('.github/scripts/')
-    || normalized === '.github/copilot-instructions.md'
-    || normalized === '.github/pull_request_template.md'
-    || normalized === '.github/release.yml';
-}
-
 function mentionText() {
   const trusted = parseTrustedDevelopers();
   const mentions = [...new Set(trusted)].map((user) => `@${user}`);
@@ -123,14 +100,18 @@ function mentionText() {
   return mentions.length ? mentions.join('；') : '（未配置通知对象）';
 }
 
-function upsertComment(marker, body) {
-  const token = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
+function findMarkerComment(marker, token) {
   const comments = ghJson([
     '--method', 'GET',
     `repos/${repo}/issues/${prNumber}/comments`,
     '-f', 'per_page=100',
   ], undefined, token) || [];
-  const existing = comments.find((comment) => String(comment.body || '').includes(marker));
+  return comments.find((comment) => String(comment.body || '').includes(marker));
+}
+
+function upsertComment(marker, body) {
+  const token = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
+  const existing = findMarkerComment(marker, token);
   if (existing) {
     gh([
       '--method', 'PATCH',
@@ -146,8 +127,39 @@ function upsertComment(marker, body) {
   }
 }
 
-function formatFiles(files) {
-  return files.length ? files.map((file) => `- \`${file}\``).join('\n') : '- 无';
+function deleteComment(marker) {
+  const token = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
+  const existing = findMarkerComment(marker, token);
+  if (!existing) return;
+
+  gh([
+    '--method', 'DELETE',
+    `repos/${repo}/issues/comments/${existing.id}`,
+  ], undefined, token);
+}
+
+function writeStepSummary(title, lines) {
+  const summaryLines = [
+    `## ${title}`,
+    '',
+    ...lines,
+    '',
+  ];
+  const summary = summaryLines.join('\n');
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary, 'utf8');
+  }
+  console.log(summary);
+}
+
+function finishGate({ marker, failed, body, summaryTitle, summaryLines }) {
+  writeStepSummary(summaryTitle, summaryLines);
+  if (failed) {
+    upsertComment(marker, body);
+    process.exit(1);
+  }
+
+  deleteComment(marker);
 }
 
 function ensurePrContext() {
@@ -164,69 +176,15 @@ function autoApprove() {
     return;
   }
 
-  const body = [
-    '## 自动审批已完成',
-    '',
-    '- 动作类型：APPROVE',
-    `- 分支流向：${headRef} -> ${baseRef}`,
-    `- PR 提交人：${effectiveAuthor}`,
-    '',
-    '> 本审批由 GitHub Actions 自动完成。',
-  ].join('\n');
-
   gh([
     '--method', 'POST',
     `repos/${repo}/pulls/${prNumber}/reviews`,
     '-f', 'event=APPROVE',
-    '-f', `body=${body}`,
   ]);
-}
-
-function protectedConfigGate() {
-  ensurePrContext();
-  const protectedFiles = changedFiles().filter(isProtectedConfig);
-  const effectiveAuthor = effectivePrAuthor();
-  let status = 'passed_no_protected_changes';
-  let detail = '未检测到受保护自动化配置变更。';
-  let failed = false;
-
-  if (protectedFiles.length > 0) {
-    if (isTrusted(effectiveAuthor)) {
-      status = 'passed_trusted_author';
-      detail = `检测到受保护自动化配置变更，PR 提交人 ${effectiveAuthor} 属于核心开发者。`;
-    } else {
-      const approvers = latestApproversForHead();
-      const trustedApprover = approvers.find(isTrusted);
-      if (trustedApprover) {
-        status = 'passed_trusted_approval';
-        detail = `检测到受保护自动化配置变更，已获得核心开发者 ${trustedApprover} 对当前提交的审批。`;
-      } else {
-        status = 'failed_missing_trusted_approval';
-        detail = '检测到受保护自动化配置变更，但当前提交尚未获得核心开发者有效审批。';
-        failed = true;
-      }
-    }
-  }
-
-  const marker = '<!-- workflow:protected-config-gate -->';
-  const body = [
-    marker,
-    failed ? '## Protected Configuration Gate 未通过' : '## Protected Configuration Gate 已通过',
-    '',
-    `- 状态：${status}`,
+  writeStepSummary('自动审批已完成', [
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- PR 提交人：${effectiveAuthor}`,
-    `- 通知对象：${mentionText()}`,
-    '',
-    detail,
-    '',
-    '### 受保护文件',
-    formatFiles(protectedFiles),
-    '',
-    '> 本通知由 GitHub Actions 自动发布。',
-  ].join('\n');
-  upsertComment(marker, body);
-  if (failed) process.exit(1);
+  ]);
 }
 
 function mainAuthorizationGate() {
@@ -244,7 +202,7 @@ function mainAuthorizationGate() {
       detail = `已获得核心开发者 ${trustedApprover} 对当前提交的审批。`;
     } else {
       status = 'failed_missing_trusted_approval';
-      detail = 'main 目标 PR 需要核心开发者对当前 head SHA 的有效审批。';
+      detail = 'main 目标 PR 需要核心开发者对当前提交的有效审批。';
       failed = true;
     }
   }
@@ -252,7 +210,7 @@ function mainAuthorizationGate() {
   const marker = '<!-- workflow:main-authorization-gate -->';
   const body = [
     marker,
-    failed ? '## Main Authorization Gate 未通过' : '## Main Authorization Gate 已通过',
+    failed ? '## 主分支授权门禁未通过' : '## 主分支授权门禁已通过',
     '',
     `- 状态：${status}`,
     `- 分支流向：${headRef} -> ${baseRef}`,
@@ -263,35 +221,19 @@ function mainAuthorizationGate() {
     '',
     '> 本通知由 GitHub Actions 自动发布。',
   ].join('\n');
-  upsertComment(marker, body);
-  if (failed) process.exit(1);
-}
-
-function sourceBranchGate() {
-  ensurePrContext();
-  const sameRepo = !headRepo || headRepo === repo;
-  const effectiveAuthor = effectivePrAuthor();
-  const trustedAuthor = isTrusted(effectiveAuthor);
-  const allowed = sameRepo && (headRef === 'test' || trustedAuthor);
-  const marker = '<!-- workflow:source-branch-gate -->';
-
-  const body = [
+  finishGate({
     marker,
-    allowed ? '## Source Branch Gate 已通过' : '## Source Branch Gate 未通过',
-    '',
-    `- 分支流向：${headRef} -> ${baseRef}`,
-    `- 来源仓库：${headRepo || 'unknown'}`,
-    `- PR 提交人：${effectiveAuthor}`,
-    `- 通知对象：${mentionText()}`,
-    '',
-    allowed
-      ? (trustedAuthor && headRef !== 'test' ? '核心开发者快速通道允许非 test 分支合入 main。' : '来源分支符合 test -> main 规则。')
-      : 'main 仅允许 test 分支发起 PR；核心开发者可走快速通道；外部 fork 禁止直达 main。',
-    '',
-    '> 本通知由 GitHub Actions 自动发布。',
-  ].join('\n');
-  upsertComment(marker, body);
-  if (!allowed) process.exit(1);
+    failed,
+    body,
+    summaryTitle: failed ? '主分支授权门禁未通过' : '主分支授权门禁已通过',
+    summaryLines: [
+      `- 状态：${status}`,
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- PR 提交人：${effectiveAuthor}`,
+      '',
+      detail,
+    ],
+  });
 }
 
 function copilotReviewsForHead() {
@@ -302,12 +244,23 @@ function copilotReviewsForHead() {
     '--slurp',
   ]) || []);
   return reviews.filter((review) => {
-    const login = String(review?.user?.login || '').toLowerCase();
-    return login.includes('copilot') && review.commit_id === headSha;
+    const login = normalizeGitHubLogin(review?.user?.login);
+    return login === 'copilot-pull-request-reviewer' && review.commit_id === headSha;
   });
 }
 
-function unresolvedBlockingCopilotThreads() {
+function normalizeGitHubLogin(login) {
+  return String(login || '').toLowerCase().replace(/\[bot\]$/, '');
+}
+
+function isCopilotCodeReviewComment(comment) {
+  const reviewAuthor = normalizeGitHubLogin(comment?.pullRequestReview?.author?.login);
+  if (reviewAuthor) return reviewAuthor === 'copilot-pull-request-reviewer';
+
+  return normalizeGitHubLogin(comment?.author?.login) === 'copilot-pull-request-reviewer';
+}
+
+function unresolvedCopilotThreadFindings() {
   const query = `
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -316,9 +269,13 @@ function unresolvedBlockingCopilotThreads() {
             pageInfo { hasNextPage endCursor }
             nodes {
               isResolved
+              isOutdated
               comments(first: 20) {
                 nodes {
                   author { login }
+                  pullRequestReview {
+                    author { login }
+                  }
                   body
                   url
                 }
@@ -329,8 +286,10 @@ function unresolvedBlockingCopilotThreads() {
       }
     }
   `;
-  const blockingPattern = /(severity\s*:\s*(blocking|high|critical)|\b(blocking|critical)\b|重大|严重|高风险)/i;
+  const blockingPattern = /^\s*(severity\s*[:：]\s*blocking|严重程度\s*[:：]\s*阻断)(?:\s|$)/im;
+  const severityPattern = /^\s*(severity\s*[:：]\s*(blocking|suggestion)|严重程度\s*[:：]\s*(阻断|建议))(?:\s|$)/im;
   const blocking = [];
+  const unclassified = [];
   let cursor = null;
 
   do {
@@ -345,24 +304,36 @@ function unresolvedBlockingCopilotThreads() {
     const payload = ghJson(args);
     const threads = payload?.data?.repository?.pullRequest?.reviewThreads;
     for (const thread of threads?.nodes || []) {
-      if (thread.isResolved) continue;
+      // Outdated 线程属于旧 head 的代码上下文。当前 head 是否可合并由最新 Copilot review、
+      // 未解决的当前线程，以及 ruleset 的 required review thread resolution 共同约束。
+      if (thread.isResolved || thread.isOutdated) continue;
       const comments = thread.comments?.nodes || [];
-      const copilotComment = comments.find((comment) => {
-        const login = String(comment?.author?.login || '').toLowerCase();
-        const body = String(comment?.body || '');
-        return login.includes('copilot') && blockingPattern.test(body);
+      const copilotComments = comments.filter((comment) => isCopilotCodeReviewComment(comment));
+      const blockingComment = copilotComments.find((comment) => {
+        return blockingPattern.test(String(comment?.body || ''));
       });
-      if (copilotComment) {
+
+      if (blockingComment) {
         blocking.push({
-          url: copilotComment.url || '',
-          body: String(copilotComment.body || '').split(/\r?\n/)[0].slice(0, 140),
+          url: blockingComment.url || '',
+          body: String(blockingComment.body || '').split(/\r?\n/)[0].slice(0, 140),
+        });
+      }
+
+      const unclassifiedComment = copilotComments.find((comment) => {
+        return !severityPattern.test(String(comment?.body || ''));
+      });
+      if (unclassifiedComment) {
+        unclassified.push({
+          url: unclassifiedComment.url || '',
+          body: String(unclassifiedComment.body || '').split(/\r?\n/)[0].slice(0, 140) || 'Copilot 评论',
         });
       }
     }
     cursor = threads?.pageInfo?.hasNextPage ? threads.pageInfo.endCursor : null;
   } while (cursor);
 
-  return blocking;
+  return { blocking, unclassified };
 }
 
 function copilotReviewGate() {
@@ -370,25 +341,31 @@ function copilotReviewGate() {
   const reviews = copilotReviewsForHead();
   const marker = '<!-- workflow:copilot-review-gate -->';
   let failed = false;
-  let title = '## Copilot Review Gate 已通过';
-  let detail = '当前 head SHA 已完成 Copilot code review，且未发现未解决的重大问题。';
+  let title = '## Copilot 审查门禁已通过';
+  let detail = '当前提交已完成 Copilot 代码审查，且未发现未解决的重大问题。';
   let blocking = [];
+  let unclassified = [];
 
   if (reviews.length === 0) {
     failed = true;
-    title = '## Copilot Review Gate 未通过';
-    detail = '当前 head SHA 尚未检测到 Copilot code review。请等待 ruleset 自动审查完成，或重新推送触发审查。';
+    title = '## Copilot 审查门禁未通过';
+    detail = '当前提交尚未检测到 Copilot 代码审查。请等待规则集自动审查完成，或重新推送触发审查。';
   } else {
-    blocking = unresolvedBlockingCopilotThreads();
+    const findings = unresolvedCopilotThreadFindings();
+    blocking = findings.blocking;
+    unclassified = findings.unclassified;
     if (blocking.length > 0) {
       failed = true;
-      title = '## Copilot Review Gate 未通过';
+      title = '## Copilot 审查门禁未通过';
       detail = '检测到 Copilot 留下的未解决重大问题。';
     }
   }
 
   const blockingList = blocking.length
-    ? blocking.map((item) => `- ${item.url ? `[${item.body || 'Copilot comment'}](${item.url})` : item.body}`).join('\n')
+    ? blocking.map((item) => `- ${item.url ? `[${item.body || 'Copilot 评论'}](${item.url})` : item.body}`).join('\n')
+    : '- 无';
+  const unclassifiedList = unclassified.length
+    ? unclassified.map((item) => `- ${item.url ? `[${item.body || 'Copilot 评论'}](${item.url})` : item.body}`).join('\n')
     : '- 无';
 
   const body = [
@@ -396,8 +373,9 @@ function copilotReviewGate() {
     title,
     '',
     `- 分支流向：${headRef} -> ${baseRef}`,
-    `- 当前 head：${headSha}`,
-    `- Copilot review 数量：${reviews.length}`,
+    `- 当前提交：${headSha}`,
+    `- Copilot 审查数量：${reviews.length}`,
+    `- 未识别严重程度评论：${unclassified.length}`,
     `- 通知对象：${mentionText()}`,
     '',
     detail,
@@ -405,21 +383,43 @@ function copilotReviewGate() {
     '### 未解决重大问题',
     blockingList,
     '',
+    '### 未识别严重程度评论',
+    unclassifiedList,
+    '',
+    unclassified.length
+      ? '> 未识别严重程度评论不会阻断合并，但说明 Copilot 未完全遵守本仓库中文审查指令。'
+      : '> Copilot 评论均符合本仓库严重程度标记约定。',
+    '',
     '> 本通知由 GitHub Actions 自动发布。',
   ].join('\n');
-  upsertComment(marker, body);
-  if (failed) process.exit(1);
+  finishGate({
+    marker,
+    failed,
+    body,
+    summaryTitle: failed ? 'Copilot 审查门禁未通过' : 'Copilot 审查门禁已通过',
+    summaryLines: [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- 当前提交：${headSha}`,
+      `- Copilot 审查数量：${reviews.length}`,
+      `- 未解决重大问题：${blocking.length}`,
+      `- 未识别严重程度评论：${unclassified.length}`,
+      '',
+      detail,
+      '',
+      '### 未解决重大问题',
+      blockingList,
+      '',
+      '### 未识别严重程度评论',
+      unclassifiedList,
+    ],
+  });
 }
 
 const command = process.argv[2];
 if (command === 'auto-approve') {
   autoApprove();
-} else if (command === 'protected-config') {
-  protectedConfigGate();
 } else if (command === 'main-authorization') {
   mainAuthorizationGate();
-} else if (command === 'source-branch') {
-  sourceBranchGate();
 } else if (command === 'copilot-review') {
   copilotReviewGate();
 } else {

@@ -1,0 +1,46 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:10"
+      timezone: "Asia/Bangkok"
+    open-pull-requests-limit: 5
+    labels:
+      - "area:workflow"
+      - "area:automation"
+      - "kind:chore"
+    commit-message:
+      prefix: "chore(actions)"
+
+  - package-ecosystem: "nuget"
+    directories:
+      - "/src/AFR.Deployer"
+      - "/src/AutoCAD/AFR-ACAD2018"
+      - "/src/AutoCAD/AFR-ACAD2019"
+      - "/src/AutoCAD/AFR-ACAD2020"
+      - "/src/AutoCAD/AFR-ACAD2021"
+      - "/src/AutoCAD/AFR-ACAD2022"
+      - "/src/AutoCAD/AFR-ACAD2023"
+      - "/src/AutoCAD/AFR-ACAD2024"
+      - "/src/AutoCAD/AFR-ACAD2025"
+      - "/src/AutoCAD/AFR-ACAD2026"
+      - "/src/AutoCAD/AFR-ACAD2027"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:20"
+      timezone: "Asia/Bangkok"
+    open-pull-requests-limit: 5
+    labels:
+      - "area:runtime"
+      - "area:config"
+      - "kind:chore"
+    commit-message:
+      prefix: "chore(nuget)"
+    groups:
+      dotnet-dependencies:
+        patterns:
+          - "*"
