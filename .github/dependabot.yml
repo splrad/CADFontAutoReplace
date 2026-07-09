@@ -40,6 +40,10 @@ updates:
       - "kind:chore"
     commit-message:
       prefix: "chore(nuget)"
+    ignore:
+      # AutoCAD.NET is pinned per AutoCAD host version. Dependabot can compile
+      # with a newer SDK package while still breaking runtime version alignment.
+      - dependency-name: "AutoCAD.NET"
     groups:
       dotnet-dependencies:
         patterns:
