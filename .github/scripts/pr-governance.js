@@ -274,11 +274,26 @@ function autoApprove() {
     '- 合并仍需通过 `Main Authorization Gate`、`Copilot Code Review Gate` 和 CodeQL。',
   ].join('\n');
 
-  gh([
-    '--method', 'POST',
-    `repos/${repo}/pulls/${prNumber}/reviews`,
-    '--input', '-',
-  ], JSON.stringify({ event: 'APPROVE', body: approvalBody }));
+  try {
+    gh([
+      '--method', 'POST',
+      `repos/${repo}/pulls/${prNumber}/reviews`,
+      '--input', '-',
+    ], JSON.stringify({ event: 'APPROVE', body: approvalBody }));
+  } catch (error) {
+    const detail = `${error.stdout || ''}\n${error.stderr || ''}\n${error.message || ''}`;
+    if (/Can not approve your own pull request/i.test(detail)) {
+      writeStepSummary('自动审批已跳过', [
+        `- 分支流向：${headRef} -> ${baseRef}`,
+        `- PR 提交人：${effectiveAuthor}`,
+        `- 当前提交：${headSha.slice(0, 12) || 'unknown'}`,
+        '- 原因：当前 PR 由自动化 GitHub App 创建，GitHub 不允许同一 App 审批自己的 PR。',
+        '- 处理方式：跳过自动审批，由 Main Authorization Gate 根据 workflow:source-actor 和 TRUSTED_DEVELOPERS 继续判定。',
+      ]);
+      return;
+    }
+    throw error;
+  }
   writeStepSummary('自动审批已完成', [
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- PR 提交人：${effectiveAuthor}`,
@@ -414,9 +429,9 @@ function requestCopilotReview() {
       `- 当前 head Copilot review 数量：${confirmation.reviews.length}`,
       '',
       'GitHub API 调用返回成功，但 timeline 中没有检测到本次 Copilot review request，且当前 head 也没有 Copilot review。',
-      '请确认 GitHub App 已安装到本仓库、拥有 `Pull requests: Read and write`，且仓库已启用 Copilot Code Review。',
+      '本 job 将保持成功，让 Copilot Code Review Gate 进入等待状态；如果一直没有 Copilot review，请检查仓库 Copilot Code Review 可用性。',
     ]);
-    process.exit(1);
+    return;
   }
 
   writeStepSummary('Copilot 审查请求已提交', [
