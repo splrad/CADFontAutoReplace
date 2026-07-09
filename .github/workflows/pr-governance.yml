@@ -6,23 +6,26 @@
 #      - Workflow permissions：Read and write permissions
 #      - Allow GitHub Actions to create and approve pull requests：启用
 #      否则 Auto Approve 可能无法提交 APPROVE。
-#   3) 分支保护 / ruleset 的 required checks 建议配置为：
+#   3) 在仓库 Secrets 中配置 COPILOT_REVIEW_TOKEN：
+#      使用固定维护者账号的 fine-grained PAT，限定本仓库 Pull requests: Read and write。
+#      该 token 只用于代表维护者请求 GitHub Copilot Code Review。
+#   4) 分支保护 / ruleset 的 required checks 建议配置为：
 #      - main: PR Governance / Main Authorization Gate
-#      - main: PR Governance / Copilot Review Gate
+#      - main: Copilot Code Review Gate
 #      CodeQL 使用 GitHub Advanced Security default setup 和 ruleset 的
 #      Require code scanning results 管理，不再维护本仓库自定义 CodeQL workflow。
-#      不要把 Auto Approve 设置为 required check。
-#   4) 合并本次 main-only 分支模型迁移后，更新远端 ruleset：
+#      不要把 Auto Approve 或 Update Copilot Review Check 设置为 required check。
+#   5) 合并本次 main-only 分支模型迁移后，更新远端 ruleset：
 #      从 main-protection 移除 Source Branch Gate required check；
 #      停用或删除 test-protection；确认没有 test 目标 PR 后再删除远端 test 分支。
-#   5) Copilot Review Gate 只检查 main 目标 PR。
+#   6) Copilot Code Review Gate 只检查 main 目标 PR。
 #      本 workflow 会通过 REST API 显式请求 Copilot Code Review；ruleset 自动审查仍可兜底人工 PR。
 #      它依赖 .github/copilot-instructions.md
 #      要求 Copilot 审查正文主体使用简体中文，并在 comment 第一行标注：
 #      - 严重程度：阻断 / Severity: blocking
 #      - 严重程度：建议 / Severity: suggestion
 #      该严重程度是本仓库自定义协议，不是 Copilot 官方结构化字段，也不依赖 Low/Medium 等 UI 徽标。
-#   6) 如果 GitHub App 创建 PR 导致 PR 作者显示为 bot，PR Automation 会在 PR 正文写入
+#   7) 如果 GitHub App 创建 PR 导致 PR 作者显示为 bot，PR Automation 会在 PR 正文写入
 #      workflow:source-actor 隐藏标记；本 workflow 会按该原始推送人判断 TRUSTED_DEVELOPERS。
 name: PR Governance
 
@@ -31,10 +34,10 @@ on:
   # 脚本 checkout 固定到 base.sha，避免执行来自 PR head 的不可信 workflow 脚本。
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
-  # 审批或 Copilot review 正文变化后重新计算 main 授权门禁和 Copilot Review Gate。
+  # 审批或 Copilot review 正文变化后重新计算 main 授权门禁和 Copilot Code Review Gate。
   pull_request_review:
     types: [submitted, edited, dismissed]
-  # Copilot inline comment 变化后重新计算 Copilot Review Gate。
+  # Copilot inline comment 变化后重新计算 Copilot Code Review Gate。
   pull_request_review_comment:
     types: [created, edited, deleted]
 
@@ -46,9 +49,11 @@ permissions:
   # contents: read 用于检出治理脚本；
   # pull-requests: write 用于 Auto Approve 和读取/提交 review；
   # issues: write 用于 gate 失败通知，以及通过后清理旧 gate marker 评论。
+  # checks: write 用于创建/更新自定义 Copilot Code Review Gate check run。
   contents: read
   pull-requests: write
   issues: write
+  checks: write
 
 env:
   # 以下 PR 上下文供 .github/scripts/pr-governance.js 使用。
@@ -65,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # ruleset 自动审查对 GitHub App / bot 作者不可靠；这里显式请求官方 Copilot reviewer。
-    # 该 job 不作为 required check；Copilot Review Gate 负责最终阻断。
+    # 该 job 不作为 required check；Copilot Code Review Gate 自定义 check run 负责最终阻断。
     if: >-
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.base.ref == 'main'
@@ -79,7 +84,10 @@ jobs:
 
       - name: Request Copilot code review
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.COPILOT_REVIEW_TOKEN }}
+          GH_READ_TOKEN: ${{ github.token }}
+          COPILOT_REVIEW_REQUEST_CONFIRM_SECONDS: '60'
+          COPILOT_REVIEW_REQUEST_POLL_SECONDS: '5'
         run: node .github/scripts/pr-governance.js request-copilot-review
 
   auto-approve:
@@ -125,19 +133,29 @@ jobs:
           GH_COMMENT_TOKEN: ${{ github.token }}
         run: node .github/scripts/pr-governance.js main-authorization
 
-  copilot-review-gate:
-    name: Copilot Review Gate
+  copilot-review-check:
+    name: Update Copilot Review Check
+    needs: request-copilot-review
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    concurrency:
+      group: copilot-review-check-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: true
     # Copilot Code Review 本身只会 comment，不会作为 approval/request-changes 阻断合并。
-    # 因此这里用独立 check 阻断“未完成 Copilot review”或“未解决重大 Copilot 问题”。
+    # 因此这里通过 Checks API 维护自定义 required check: Copilot Code Review Gate。
+    # 该 job 自身不作为 required check；它只负责把自定义 check run 更新为
+    # in_progress / success / failure。
+    # 该门禁不长时间轮询 Copilot；首次未检测到 review 时保持自定义 check in_progress，
+    # 等 Copilot 提交 review 后，由下面的 review 事件重新触发并完成同名 required check。
     # 会自动重跑的场景：
     # - Copilot 延迟提交 review: pull_request_review submitted
     # - Copilot 新增/编辑 inline comment: pull_request_review_comment
     # - 用户接受建议并推送修正: pull_request_target synchronize
     # 仅点击 Resolve/Unresolve conversation 不会触发 GitHub Actions；下次有其他事件触发时会读取最新 isResolved。
     # 缺少“严重程度：阻断/建议”或 “Severity: blocking/suggestion” 的 Copilot 评论只会警告，不直接阻断。
-    if: github.event.pull_request.base.ref == 'main'
+    if: >-
+      always() &&
+      github.event.pull_request.base.ref == 'main'
     steps:
       - name: Checkout governance scripts
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -146,8 +164,11 @@ jobs:
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: false
 
-      - name: Check Copilot review completion and blocking comments
+      - name: Update Copilot review check run
         env:
           GH_TOKEN: ${{ github.token }}
           GH_COMMENT_TOKEN: ${{ github.token }}
+          GH_CHECKS_TOKEN: ${{ github.token }}
+          COPILOT_REVIEW_CHECK_NAME: Copilot Code Review Gate
+          REQUEST_COPILOT_RESULT: ${{ needs.request-copilot-review.result }}
         run: node .github/scripts/pr-governance.js copilot-review
