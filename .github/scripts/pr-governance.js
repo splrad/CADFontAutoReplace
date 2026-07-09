@@ -127,6 +127,15 @@ function upsertComment(marker, body) {
   }
 }
 
+function createComment(body) {
+  const token = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
+  gh([
+    '--method', 'POST',
+    `repos/${repo}/issues/${prNumber}/comments`,
+    '--input', '-',
+  ], JSON.stringify({ body }), token);
+}
+
 function deleteComment(marker) {
   const token = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
   const existing = findMarkerComment(marker, token);
@@ -152,10 +161,17 @@ function writeStepSummary(title, lines) {
   console.log(summary);
 }
 
-function finishGate({ marker, failed, body, summaryTitle, summaryLines }) {
+function finishGate({ marker, failed, body, summaryTitle, summaryLines, commentPolicy = 'upsert' }) {
   writeStepSummary(summaryTitle, summaryLines);
   if (failed) {
-    upsertComment(marker, body);
+    if (commentPolicy === 'none') {
+      deleteComment(marker);
+    } else if (commentPolicy === 'replace') {
+      deleteComment(marker);
+      createComment(body);
+    } else {
+      upsertComment(marker, body);
+    }
     process.exit(1);
   }
 
@@ -341,6 +357,7 @@ function copilotReviewGate() {
   const reviews = copilotReviewsForHead();
   const marker = '<!-- workflow:copilot-review-gate -->';
   let failed = false;
+  let commentPolicy = 'upsert';
   let title = '## Copilot 审查门禁已通过';
   let detail = '当前提交已完成 Copilot 代码审查，且未发现未解决的重大问题。';
   let blocking = [];
@@ -348,6 +365,7 @@ function copilotReviewGate() {
 
   if (reviews.length === 0) {
     failed = true;
+    commentPolicy = 'none';
     title = '## Copilot 审查门禁未通过';
     detail = '当前提交尚未检测到 Copilot 代码审查。请等待规则集自动审查完成，或重新推送触发审查。';
   } else {
@@ -356,6 +374,7 @@ function copilotReviewGate() {
     unclassified = findings.unclassified;
     if (blocking.length > 0) {
       failed = true;
+      commentPolicy = 'replace';
       title = '## Copilot 审查门禁未通过';
       detail = '检测到 Copilot 留下的未解决重大问题。';
     }
@@ -396,6 +415,7 @@ function copilotReviewGate() {
     marker,
     failed,
     body,
+    commentPolicy,
     summaryTitle: failed ? 'Copilot 审查门禁未通过' : 'Copilot 审查门禁已通过',
     summaryLines: [
       `- 分支流向：${headRef} -> ${baseRef}`,
