@@ -322,8 +322,6 @@ function contributorBlock(logins) {
     '',
     logins.map(contributorAvatar).join(' '),
     '',
-    logins.join(', '),
-    '',
   ].join('\n');
 }
 
@@ -362,7 +360,18 @@ function stripManagedCoAuthorBlock(body) {
 
 function appendCoAuthorBlock(body, trailers) {
   if (!Array.isArray(trailers) || trailers.length === 0) return body;
-  return `${String(body || '').trimEnd()}\n\n<!-- workflow:co-authored-by -->\n${trailers.join('\n')}\n`;
+  return [
+    String(body || '').trimEnd(),
+    '',
+    '<!-- workflow:co-authored-by -->',
+    '<details>',
+    '<summary>Co-authored-by</summary>',
+    '',
+    ...trailers,
+    '',
+    '</details>',
+    '',
+  ].join('\n');
 }
 
 function buildAutoBlock(summary, context, existingBody = '') {
@@ -377,7 +386,7 @@ function buildAutoBlock(summary, context, existingBody = '') {
     `<!-- workflow:source-actor:${sourceActor} -->`,
     `<!-- workflow:source-contributors:${contributors.join(',')} -->`,
     `<!-- workflow:auto-context:source=${htmlCommentValue(context.sourceBranch)};target=${htmlCommentValue(context.targetBranch)};generation=${htmlCommentValue(context.generationMode)};changed-files=${changedFileCount} -->`,
-    '### 自动生成摘要',
+    '### 摘要',
     '',
     summary.summary,
     '',
