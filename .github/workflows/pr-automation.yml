@@ -5,7 +5,6 @@
 #      不使用个人 PAT，也不使用 GitHub App 的 client secret。
 #   2) 在仓库 Variables 中配置：
 #      - WORKFLOW_AUTOMATION_APP_CLIENT_ID：GitHub App 页面显示的 Client ID，不是 App ID。
-#      - TRUSTED_DEVELOPERS：可选 JSON 数组，仅用于自动通知对象；不再影响目标分支选择。
 #   3) 在仓库 Secrets 中配置：
 #      - WORKFLOW_AUTOMATION_APP_PRIVATE_KEY：GitHub App private key 的 .pem 完整内容。
 #      - COPILOT_CLI_TOKEN：可选；用于 Copilot CLI 生成 PR 标题/摘要。
@@ -25,7 +24,8 @@
 #   9) 合并本次 main-only 分支模型迁移后，更新远端 ruleset：
 #      从 main-protection 移除 Source Branch Gate required check；
 #      停用或删除 test-protection；确认没有 test 目标 PR 后再删除远端 test 分支。
-#   10) 验证建议：推送一个人工 feature 分支，确认自动创建/更新 main 目标 PR，且标题来自代码内容。
+#   10) 成功创建/更新 PR 后依赖 GitHub 官方 PR 通知，不再额外发布成功评论。
+#   11) 验证建议：推送一个人工 feature 分支，确认自动创建/更新 main 目标 PR，且标题来自代码内容。
 name: PR Automation
 
 on:
@@ -40,7 +40,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  # 内置 github.token 只用于最小只读权限；PR 创建和新建成功通知使用 GitHub App token。
+  # 内置 github.token 只用于最小只读权限；PR 创建/更新和标签写入使用 GitHub App token。
   contents: read
 
 jobs:
@@ -67,7 +67,7 @@ jobs:
           # 这里不要填写 App ID，也不要填写 client secret。
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
-          # PR 创建/更新需要 pull-requests: write；新建成功通知和 release notes label 需要 issues: write；
+          # PR 创建/更新需要 pull-requests: write；release notes label 需要 issues: write；
           # checkout 和 diff 分析需要 contents: read。
           permission-contents: read
           permission-pull-requests: write
@@ -95,7 +95,6 @@ jobs:
         env:
           # 使用 GitHub App token 创建/更新 PR，避免 github.token 触发的事件不再触发后续 workflow。
           GH_TOKEN: ${{ steps.automation-token.outputs.token }}
-          GH_COMMENT_TOKEN: ${{ steps.automation-token.outputs.token }}
         run: node .github/scripts/pr-automation.js generate
 
       - name: Set up Node.js for Copilot CLI
@@ -120,12 +119,11 @@ jobs:
           copilot -p "$(cat "$PR_COPILOT_PROMPT_PATH")" --allow-tool='shell(git:*)' --no-ask-user > "$output_path"
           echo "PR_COPILOT_OUTPUT_PATH=$output_path" >> "$GITHUB_ENV"
 
-      - name: Apply PR title, body, and notification
+      - name: Apply PR title and body
         if: env.SKIP_PR_AUTOMATION != 'true'
         id: apply
         env:
-          # 该步骤会创建或更新 PR、写入自动摘要区块；只有新建 PR 时写成功通知评论。
+          # 该步骤会创建或更新 PR、写入自动摘要区块，并补充 release notes label。
+          # 成功通知由 GitHub 官方 PR 通知处理，避免额外评论造成重复邮件。
           GH_TOKEN: ${{ steps.automation-token.outputs.token }}
-          GH_COMMENT_TOKEN: ${{ steps.automation-token.outputs.token }}
-          TRUSTED_DEVELOPERS: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
         run: node .github/scripts/pr-automation.js apply

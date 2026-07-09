@@ -363,10 +363,6 @@ function applyReleaseLabels(prNumber, labels) {
   applyLabels(prNumber, releaseLabels, 'release note');
 }
 
-function formatLabels(labels) {
-  return labels.length ? labels.map((label) => `\`${label}\``).join('、') : '无';
-}
-
 function buildAutoBlock(summary, context) {
   const bulletList = (items) => items.map((item) => `- ${item}`).join('\n');
   const changedFileCount = cleanLines(context.changedFiles, 10000).length;
@@ -427,62 +423,6 @@ function findOpenPullRequest() {
     '-f', 'per_page=20',
   ]);
   return Array.isArray(result) ? result[0] || null : null;
-}
-
-function mentionText() {
-  let trusted = [];
-  try {
-    const parsed = JSON.parse(process.env.TRUSTED_DEVELOPERS || '[]');
-    if (Array.isArray(parsed)) trusted = parsed.filter((item) => typeof item === 'string' && item.trim());
-  } catch {
-    trusted = [];
-  }
-  const unique = [...new Set(trusted.map((item) => item.trim()))];
-  const mentions = unique.map((item) => `@${item}`);
-  if (actor && actor !== 'unknown' && !unique.includes(actor)) mentions.push(`@${actor}`);
-  return mentions.length ? mentions.join('；') : '（未配置通知对象）';
-}
-
-function upsertSuccessComment(prNumber, title, labelInfo = {}, options = {}) {
-  const commentToken = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
-  const createIfMissing = options.createIfMissing !== false;
-  const marker = '<!-- workflow:pr-success-notice -->';
-  const comments = ghJson([
-    '--method', 'GET',
-    `repos/${repo}/issues/${prNumber}/comments`,
-    '-f', 'per_page=100',
-  ], undefined, commentToken) || [];
-  const existing = comments.find((comment) => String(comment.body || '').includes(marker));
-  const body = [
-    marker,
-    '## PR 自动化已完成',
-    '',
-    `- PR 标题：**${title}**`,
-    `- 提交人：**${actor}**`,
-    `- 分支流向：**${sourceBranch} -> ${targetBranch}**`,
-    `- PR 链接：https://github.com/${repo}/pull/${prNumber}`,
-    `- 可见 PR 标签：由 **PR Classification** workflow 维护`,
-    `- Release Notes 标签：${formatLabels(labelInfo.releaseLabels || [])}`,
-    `- 通知对象：${mentionText()}`,
-    '',
-    '> 本通知由 GitHub Actions 自动发布。',
-  ].join('\n');
-
-  if (existing) {
-    gh([
-      '--method', 'PATCH',
-      `repos/${repo}/issues/comments/${existing.id}`,
-      '--input', '-',
-    ], JSON.stringify({ body }), commentToken);
-  } else if (createIfMissing) {
-    gh([
-      '--method', 'POST',
-      `repos/${repo}/issues/${prNumber}/comments`,
-      '--input', '-',
-    ], JSON.stringify({ body }), commentToken);
-  } else {
-    console.log('PR success notice does not exist; skipped creating one for an existing PR update.');
-  }
 }
 
 function generate() {
@@ -566,7 +506,6 @@ function applySummary() {
   const currentBody = current?.body || '';
   const body = buildBody(currentBody, summary, context);
   let prNumber = current?.number;
-  let createdPullRequest = false;
 
   if (prNumber) {
     gh([
@@ -586,13 +525,9 @@ function applySummary() {
       body,
     }));
     prNumber = created.number;
-    createdPullRequest = true;
   }
 
   applyReleaseLabels(prNumber, releaseLabels);
-  upsertSuccessComment(prNumber, summary.title, { releaseLabels }, {
-    createIfMissing: createdPullRequest,
-  });
   writeOutput({
     pr_number: prNumber,
     pr_title: summary.title,
