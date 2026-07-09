@@ -153,6 +153,20 @@ function buildChanges(files) {
   return changes.slice(0, 5);
 }
 
+function buildReviewNotes(files) {
+  const notes = [];
+  if (files.some((line) => /^\.github\/(workflows|scripts)\//i.test((line.split(/\t+/).pop() || line).trim()))) {
+    notes.push('涉及 GitHub 自动化，请重点核对 workflow 触发条件、权限范围和 required check 名称。');
+  }
+  if (files.some((line) => /^src\/AutoCAD\//i.test((line.split(/\t+/).pop() || line).trim()))) {
+    notes.push('涉及 AutoCAD 插件运行时，请重点关注加载流程和不同 AutoCAD 版本兼容性。');
+  }
+  if (files.some((line) => /(^|\/)(Version\.props|release\.yml|generate-release-notes\.ps1)$/i.test((line.split(/\t+/).pop() || line).trim()))) {
+    notes.push('涉及发布元数据，请重点核对版本号、发布分类和 release notes 输入是否一致。');
+  }
+  return notes.slice(0, 3);
+}
+
 function buildFallback(context) {
   const allFiles = cleanLines(context.changedFiles, 10000);
   const files = allFiles.slice(0, 80);
@@ -162,15 +176,7 @@ function buildFallback(context) {
     title,
     summary: `${titleSubject(title)}，涉及 ${allFiles.length || 0} 个文件。`,
     changes,
-    validation: [
-      '请根据变更范围运行对应构建或手工验证。',
-      '若涉及工作流变更，请在 PR 检查列表确认新门禁均已运行。',
-    ],
-    risk: [
-      files.some((line) => line.includes('.github/'))
-        ? '工作流和权限规则变更会影响 PR 流转与发布门禁。'
-        : '风险取决于本次代码差异覆盖的功能范围。',
-    ],
+    reviewNotes: buildReviewNotes(files),
   };
 }
 
@@ -179,14 +185,15 @@ function buildPrompt(context, fallback) {
     '你是 GitHub Pull Request 标题与说明生成器。',
     '只根据下面提供的代码差异、文件清单、提交信息生成内容，不要使用来源分支名或目标分支名代替变更主题。',
     '请输出严格 JSON，不要输出 Markdown 代码块或额外解释。',
-    'JSON 格式：{"title":"Conventional Commits 风格 PR 标题","summary":"一句话摘要","changes":["主要改动"],"validation":["验证建议"],"risk":["风险或影响"]}',
+    'JSON 格式：{"title":"Conventional Commits 风格 PR 标题","summary":"一句话摘要","changes":["改动内容"],"reviewNotes":["可选审查提示"]}',
     '所有 JSON 字符串内容必须使用简体中文；只保留代码标识符、文件路径、命令、API 名称和 label 名称为英文。',
     '标题要求：必须使用 Conventional Commits 风格，格式为 type(scope): 中文标题；scope 可省略。',
     '允许的 type：feat、fix、refactor、perf、style、docs、test、build、ci、chore、revert。',
     'scope 使用小写英文、数字或连字符，例如 deployer、release、workflow、core、ui、autocad。',
     '标题 subject 用中文动宾结构，不超过 50 字，不加句号，体现代码内容，不得写成“分支 A 到分支 B”。',
     '标题示例：feat(deployer): 新增关于窗口；ci(release): 限制发布流程仅由版本变更触发。',
-    '正文要求：简洁，面向审查者，避免夸张宣传语。',
+    '正文要求：简洁，面向审查者，避免夸张宣传语；不要生成发布说明、升级说明、下载说明或用户变更日志口吻。',
+    'reviewNotes 只写审查者需要特别留意的兼容性、权限、运行环境或流程边界；没有高信号提示时输出空数组。',
     '',
     `兜底标题参考：${fallback.title}`,
     `分支流向：${context.sourceBranch} -> ${context.targetBranch}`,
@@ -243,8 +250,7 @@ function sanitizeGenerated(generated, fallback) {
     title: safeTitle,
     summary: String(generated?.summary || fallback.summary).trim(),
     changes: toList(generated?.changes, fallback.changes),
-    validation: toList(generated?.validation, fallback.validation),
-    risk: toList(generated?.risk, fallback.risk),
+    reviewNotes: toList(generated?.reviewNotes, fallback.reviewNotes),
   };
 }
 
@@ -380,6 +386,7 @@ function buildAutoBlock(summary, context, existingBody = '') {
   const contributors = contributorLogins(existingBody);
   const sourceActor = parseSourceActor(existingBody) || normalizeLogin(actor) || 'unknown';
   const contributorSection = contributorBlock(contributors);
+  const reviewNotes = Array.isArray(summary.reviewNotes) ? summary.reviewNotes.filter(Boolean) : [];
 
   return [
     '<!-- workflow:auto-summary:start -->',
@@ -393,6 +400,7 @@ function buildAutoBlock(summary, context, existingBody = '') {
     '### 改动内容',
     bulletList(summary.changes),
     '',
+    ...(reviewNotes.length ? ['### 审查提示', bulletList(reviewNotes), ''] : []),
     ...(contributorSection ? [contributorSection] : []),
     '<!-- workflow:auto-summary:end -->',
   ].join('\n');
