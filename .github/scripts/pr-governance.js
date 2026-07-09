@@ -208,14 +208,31 @@ function autoApprove() {
     return;
   }
 
+  const approvalBody = [
+    '## 自动审批说明',
+    '',
+    '本审批由 PR Governance 自动提交，用于满足 main ruleset 的 required approval 要求。',
+    '',
+    '### 判定依据',
+    `- 有效提交者：\`${effectiveAuthor}\``,
+    `- 分支流向：\`${headRef} -> ${baseRef}\``,
+    `- 当前提交：\`${headSha.slice(0, 12) || 'unknown'}\``,
+    '- 授权依据：有效提交者属于 `TRUSTED_DEVELOPERS`。',
+    '',
+    '### 注意',
+    '- 这不是人工代码审查结论。',
+    '- 合并仍需通过 `Main Authorization Gate`、`Copilot Review Gate` 和 CodeQL。',
+  ].join('\n');
+
   gh([
     '--method', 'POST',
     `repos/${repo}/pulls/${prNumber}/reviews`,
-    '-f', 'event=APPROVE',
-  ]);
+    '--input', '-',
+  ], JSON.stringify({ event: 'APPROVE', body: approvalBody }));
   writeStepSummary('自动审批已完成', [
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- PR 提交人：${effectiveAuthor}`,
+    `- 当前提交：${headSha.slice(0, 12) || 'unknown'}`,
   ]);
 }
 
