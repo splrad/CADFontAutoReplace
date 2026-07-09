@@ -63,6 +63,14 @@ function contributorLoginsFromBody(body) {
     .filter(Boolean));
 }
 
+function realContributorLoginsFromBody({ body, prAuthor = '' }) {
+  return uniqueLogins([
+    ...contributorLoginsFromBody(body),
+    sourceActorFromBody(body),
+    normalizeLogin(prAuthor),
+  ]);
+}
+
 function effectiveAuthorFromBody({ body, prAuthor = '', actor = '', fallback = 'unknown' }) {
   return [
     sourceActorFromBody(body),
@@ -152,6 +160,7 @@ module.exports = {
   createIssueComment,
   deleteMarkerComments,
   effectiveAuthorFromBody,
+  realContributorLoginsFromBody,
   isBotLogin,
   listMarkerComments,
   mentionText,

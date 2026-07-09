@@ -1,7 +1,8 @@
 # 📋 复用到新项目时的配置步骤：
 #   1) 在仓库 Variables 中配置 TRUSTED_DEVELOPERS，格式为 JSON 数组：
 #      ["your-login", "another-login"]。
-#      该名单用于自动 APPROVE 和 main 授权门禁。
+#      该名单用于自动 APPROVE 和 main 授权门禁；只要真实贡献者中有 1 人不在名单内，
+#      就必须由核心开发者手动 approval。
 #   2) 内置 GITHUB_TOKEN 只保留 contents: read。
 #      PR 审查、评论、Copilot request 和 Checks API 写操作均使用下面的 GitHub App token。
 #   3) 配置 PR Automation 复用的 GitHub App：
@@ -9,9 +10,11 @@
 #      - WORKFLOW_AUTOMATION_APP_PRIVATE_KEY
 #      该 App 必须安装到本仓库，并建议授予仓库权限：
 #      Contents: Read and write；Pull requests: Read and write；
-#      Issues: Read and write；Checks: Read and write。
+#      Issues: Read and write；Checks: Read and write；Actions: Read and write。
 #      本 workflow 用该 App 的短期 installation token 请求 GitHub Copilot Code Review，
-#      并维护 Copilot Code Review Gate 自定义 check run。
+#      并维护 Copilot Code Review Gate 自定义 check run。Actions: write 由
+#      Copilot Review Recovery workflow 用于恢复 Copilot review 触发后被 GitHub
+#      标记为 action_required 的治理 workflow run。
 #   4) 分支保护 / ruleset 的 required checks 建议配置为：
 #      - main: PR Governance / Main Authorization Gate，source 保持 GitHub Actions。
 #      - main: Copilot Code Review Gate，source 必须选本 GitHub App 或 Any source；
@@ -31,8 +34,13 @@
 #      - 严重程度：阻断 / Severity: blocking
 #      - 严重程度：建议 / Severity: suggestion
 #      该严重程度是本仓库自定义协议，不是 Copilot 官方结构化字段，也不依赖 Low/Medium 等 UI 徽标。
-#   6) 如果 GitHub App 创建 PR 导致 PR 作者显示为 bot，PR Automation 会在 PR 正文写入
-#      workflow:source-actor 隐藏标记；本 workflow 会按该原始推送人判断 TRUSTED_DEVELOPERS。
+#   6) 配置 CORE_AUTO_APPROVAL_TOKEN：
+#      一个核心开发者的 fine-grained PAT，仓库权限 Pull requests: Read and write。
+#      只有全部真实贡献者都在 TRUSTED_DEVELOPERS 时，才会用该 PAT 提交带
+#      workflow:auto-approval 标记的 GitHub 原生 approval。
+#   7) 如果 GitHub App 创建 PR 导致 PR 作者显示为 bot，PR Automation 会在 PR 正文写入
+#      workflow:source-actor / workflow:source-contributors 隐藏标记；本 workflow 还会合并
+#      PR commits 中关联到 GitHub 账号的 author login，再按真实贡献者集合判断 TRUSTED_DEVELOPERS。
 name: PR Governance
 
 on:
@@ -110,8 +118,8 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-    # 该 job 不能作为 required check；它只负责尝试给核心开发者提交的 PR 自动 APPROVE。
-    # 是否真的是核心开发者由脚本读取 TRUSTED_DEVELOPERS 和 workflow:source-actor 后判断。
+    # 该 job 不能作为 required check；它只负责在全部真实贡献者均为核心开发者时，
+    # 用 CORE_AUTO_APPROVAL_TOKEN 提交 GitHub 原生 approval。
     if: github.event_name == 'pull_request_target'
     steps:
       - name: Create governance app token
@@ -121,7 +129,7 @@ jobs:
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
           permission-contents: read
-          permission-pull-requests: write
+          permission-pull-requests: read
 
       - name: Checkout governance scripts
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -134,8 +142,8 @@ jobs:
 
       - name: Submit approval for trusted author
         env:
-          GH_TOKEN: ${{ steps.governance-token.outputs.token }}
-          AUTO_APPROVE_REVIEWER: ${{ steps.governance-token.outputs.app-slug }}[bot]
+          GH_TOKEN: ${{ secrets.CORE_AUTO_APPROVAL_TOKEN }}
+          GH_READ_TOKEN: ${{ steps.governance-token.outputs.token }}
         run: node .github/scripts/pr-governance.js auto-approve
 
   main-authorization-gate:
@@ -145,7 +153,9 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-    # main 目标 PR 必须满足：原始提交人是核心开发者，或当前 head SHA 获得核心开发者审批。
+    # main 目标 PR 必须满足：真实贡献者可识别；若全部真实贡献者均为核心开发者，
+    # 当前 head 需要核心开发者 approval（可由 CORE_AUTO_APPROVAL_TOKEN 自动提交）；
+    # 若存在任一非核心贡献者，则当前 head 必须有核心开发者手动 approval。
     if: >-
       always() &&
       github.event.pull_request.base.ref == 'main'

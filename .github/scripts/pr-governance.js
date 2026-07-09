@@ -1,14 +1,14 @@
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const {
-  authorDisplayText,
-  coreAndAuthorMentionText,
   createIssueComment,
   deleteMarkerComments,
-  effectiveAuthorFromBody,
   listMarkerComments,
+  mentionText: notificationMentionText,
   normalizeLogin,
   parseTrustedDevelopers,
+  realContributorLoginsFromBody,
+  uniqueLogins,
 } = require('./pr-notifications');
 
 const repo = process.env.GITHUB_REPOSITORY || '';
@@ -23,11 +23,16 @@ const copilotReviewerLogin = 'copilot-pull-request-reviewer[bot]';
 const copilotCheckName = process.env.COPILOT_REVIEW_CHECK_NAME || 'Copilot Code Review Gate';
 const copilotNoBlockingConclusion = '结论：未发现需要阻断合并的问题。';
 const copilotNoCommentsPattern = /Copilot reviewed \d+ out of \d+ changed files in this pull request and generated no (?:new )?comments\./i;
+const autoApprovalMarker = '<!-- workflow:auto-approval -->';
 let prDetailsCache = null;
-let effectiveAuthorCache = null;
+let realContributorsCache = null;
 
 function gh(args, input, token) {
-  return execFileSync('gh', ['api', ...args], {
+  const executable = process.env.GH_EXECUTABLE || 'gh';
+  const prefixArgs = process.env.GH_EXECUTABLE_ARGS
+    ? JSON.parse(process.env.GH_EXECUTABLE_ARGS)
+    : [];
+  return execFileSync(executable, [...prefixArgs, 'api', ...args], {
     encoding: 'utf8',
     input,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -61,6 +66,10 @@ function ghChecksToken() {
   return process.env.GH_CHECKS_TOKEN || process.env.GH_TOKEN || '';
 }
 
+function ghActionsToken() {
+  return process.env.GH_ACTIONS_TOKEN || process.env.GH_TOKEN || '';
+}
+
 function parsePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(String(value || ''), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -78,7 +87,12 @@ function isAtOrAfter(timestamp, threshold) {
 }
 
 function isTrusted(user) {
-  return parseTrustedDevelopers().includes(normalizeLogin(user));
+  const normalized = normalizeGitHubLogin(user);
+  return parseTrustedDevelopers().some((trusted) => normalizeGitHubLogin(trusted) === normalized);
+}
+
+function trustedDeveloperLogins() {
+  return parseTrustedDevelopers();
 }
 
 function prDetails() {
@@ -91,15 +105,39 @@ function prDetails() {
   return prDetailsCache;
 }
 
-function effectivePrAuthor() {
-  if (effectiveAuthorCache) return effectiveAuthorCache;
-  const body = String(prDetails().body || '');
-  effectiveAuthorCache = effectiveAuthorFromBody({ body, prAuthor });
-  return effectiveAuthorCache;
+function pullRequestCommitAuthorLogins() {
+  const commits = flattenReviews(ghJson([
+    '--method', 'GET',
+    `repos/${repo}/pulls/${prNumber}/commits`,
+    '-f', 'per_page=100',
+    '--paginate',
+    '--slurp',
+  ], undefined, ghReadToken()) || []);
+
+  return uniqueLogins(commits.map((commit) => commit?.author?.login || ''));
 }
 
-function effectivePrAuthorDisplay() {
-  return authorDisplayText(effectivePrAuthor());
+function realContributorLogins() {
+  if (realContributorsCache) return realContributorsCache;
+  const body = String(prDetails().body || '');
+  realContributorsCache = uniqueLogins([
+    ...realContributorLoginsFromBody({ body, prAuthor }),
+    ...pullRequestCommitAuthorLogins(),
+  ]);
+  return realContributorsCache;
+}
+
+function realContributorDisplay() {
+  const contributors = realContributorLogins();
+  return contributors.length ? contributors.join(', ') : '未识别真实贡献者';
+}
+
+function untrustedContributorLogins() {
+  return realContributorLogins().filter((login) => !isTrusted(login));
+}
+
+function failureMentionText() {
+  return notificationMentionText([...trustedDeveloperLogins(), ...realContributorLogins()]);
 }
 
 function flattenReviews(payload) {
@@ -108,7 +146,7 @@ function flattenReviews(payload) {
   return payload;
 }
 
-function latestApproversForHead() {
+function latestReviewsForHeadByUser() {
   const reviews = flattenReviews(ghJson([
     '--method', 'GET',
     `repos/${repo}/pulls/${prNumber}/reviews`,
@@ -127,8 +165,19 @@ function latestApproversForHead() {
   }
 
   return [...byUser.values()]
-    .filter((review) => review.state === 'APPROVED' && review.commit_id === headSha)
-    .map((review) => review.user.login);
+    .filter((review) => review.commit_id === headSha);
+}
+
+function latestApprovalsForHead({ includeAutomation = true } = {}) {
+  return latestReviewsForHeadByUser()
+    .filter((review) => review.state === 'APPROVED')
+    .filter((review) => includeAutomation || !isAutomationApproval(review));
+}
+
+function latestTrustedApproversForHead({ includeAutomation = true } = {}) {
+  return latestApprovalsForHead({ includeAutomation })
+    .map((review) => review.user.login)
+    .filter(isTrusted);
 }
 
 function isAutomationApproval(review) {
@@ -138,14 +187,11 @@ function isAutomationApproval(review) {
   return review?.state === 'APPROVED'
     && review?.commit_id === headSha
     && (
-      type === 'bot'
+      String(review?.body || '').includes(autoApprovalMarker)
       || login === 'github-actions'
+      || type === 'bot'
       || (expectedReviewer && login === expectedReviewer)
     );
-}
-
-function hasAutomationApprovalForHead() {
-  return pullRequestReviews().some(isAutomationApproval);
 }
 
 function requestedReviewerLogins() {
@@ -185,10 +231,6 @@ function copilotReviewRequestEventsSince(threshold) {
 function isCopilotReviewRequestLogin(login) {
   const normalized = normalizeGitHubLogin(login);
   return normalized === 'copilot-pull-request-reviewer' || normalized === 'copilot';
-}
-
-function mentionText() {
-  return coreAndAuthorMentionText(effectivePrAuthor());
 }
 
 function commentToken() {
@@ -245,12 +287,12 @@ function blockingFailureBody(state) {
     `<!-- workflow:pr-blocking-failures-state:${encodeBlockingState(state)} -->`,
     `## PR 暂不能合并（${failures.length} 项阻断）`,
     '',
-    mentionText(),
+    failureMentionText(),
     '',
     '### 当前上下文',
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- 当前提交：${headSha}`,
-    `- 提交人：${effectivePrAuthorDisplay()}`,
+    `- 真实贡献者：${realContributorDisplay()}`,
     `- 阻断项：${failures.map((failure) => failure.title).join('；')}`,
     '',
     '### 需要处理',
@@ -352,30 +394,53 @@ function ensurePrContext() {
 
 function autoApprove() {
   ensurePrContext();
-  const effectiveAuthor = effectivePrAuthor();
-  const effectiveAuthorDisplay = authorDisplayText(effectiveAuthor);
+  const contributors = realContributorLogins();
+  const contributorDisplay = realContributorDisplay();
+  const untrusted = untrustedContributorLogins();
   const reviewer = process.env.AUTO_APPROVE_REVIEWER || '';
-  if (!isTrusted(effectiveAuthor)) {
-    console.log(`PR submitter ${effectiveAuthorDisplay} is not trusted; auto approval skipped.`);
+  if (contributors.length === 0) {
+    writeStepSummary('自动审批已跳过', [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      '- 原因：未识别真实贡献者。',
+    ]);
     return;
   }
 
-  if (normalizeGitHubLogin(prAuthor) && normalizeGitHubLogin(prAuthor) === normalizeGitHubLogin(reviewer)) {
+  if (untrusted.length > 0) {
     writeStepSummary('自动审批已跳过', [
       `- 分支流向：${headRef} -> ${baseRef}`,
-      `- PR 提交人：${effectiveAuthorDisplay}`,
+      `- 真实贡献者：${contributorDisplay}`,
+      `- 非核心贡献者：${untrusted.join(', ')}`,
+      '- 原因：只要存在非核心贡献者，就必须由核心开发者手动 approval。',
+    ]);
+    return;
+  }
+
+  const existingTrustedApprovers = latestTrustedApproversForHead();
+  if (existingTrustedApprovers.length > 0) {
+    writeStepSummary('自动审批已跳过', [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- 真实贡献者：${contributorDisplay}`,
+      `- 当前提交已有核心开发者 approval：${existingTrustedApprovers.join(', ')}`,
+    ]);
+    return;
+  }
+
+  if (reviewer && normalizeGitHubLogin(prAuthor) && normalizeGitHubLogin(prAuthor) === normalizeGitHubLogin(reviewer)) {
+    writeStepSummary('自动审批已跳过', [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- 真实贡献者：${contributorDisplay}`,
       `- 当前提交：${headSha.slice(0, 12) || 'unknown'}`,
       '- 原因：GitHub 不允许 PR 作者审批自己的 PR；main 授权由 Main Authorization Gate 使用真实提交人判断。',
     ]);
     return;
   }
 
-  if (hasAutomationApprovalForHead()) {
+  if (!process.env.GH_TOKEN) {
     writeStepSummary('自动审批已跳过', [
       `- 分支流向：${headRef} -> ${baseRef}`,
-      `- PR 提交人：${effectiveAuthorDisplay}`,
-      `- 当前提交：${headSha.slice(0, 12) || 'unknown'}`,
-      '- 原因：当前提交已存在自动化 approval。',
+      `- 真实贡献者：${contributorDisplay}`,
+      '- 原因：未配置 `CORE_AUTO_APPROVAL_TOKEN`，无法提交 GitHub 原生 approval。',
     ]);
     return;
   }
@@ -385,12 +450,19 @@ function autoApprove() {
       '--method', 'POST',
       `repos/${repo}/pulls/${prNumber}/reviews`,
       '--input', '-',
-    ], JSON.stringify({ event: 'APPROVE', commit_id: headSha }));
+    ], JSON.stringify({
+      event: 'APPROVE',
+      commit_id: headSha,
+      body: [
+        autoApprovalMarker,
+        '自动审批：全部真实贡献者均在核心开发者名单中。',
+      ].join('\n'),
+    }));
   } catch (error) {
     if (!isOwnPullRequestApprovalError(error)) throw error;
     writeStepSummary('自动审批已跳过', [
       `- 分支流向：${headRef} -> ${baseRef}`,
-      `- PR 提交人：${effectiveAuthorDisplay}`,
+      `- 真实贡献者：${contributorDisplay}`,
       `- 当前提交：${headSha.slice(0, 12) || 'unknown'}`,
       '- 原因：GitHub 拒绝自审 approval；main 授权由 Main Authorization Gate 使用真实提交人判断。',
     ]);
@@ -398,38 +470,53 @@ function autoApprove() {
   }
   writeStepSummary('自动审批已完成', [
     `- 分支流向：${headRef} -> ${baseRef}`,
-    `- PR 提交人：${effectiveAuthorDisplay}`,
+    `- 真实贡献者：${contributorDisplay}`,
     `- 当前提交：${headSha.slice(0, 12) || 'unknown'}`,
-    '- 审批正文：未写入 PR 对话区。',
+    `- 自动审批标记：${autoApprovalMarker}`,
   ]);
 }
 
 function mainAuthorizationGate() {
   ensurePrContext();
-  let status = 'passed_author_trusted';
-  const effectiveAuthor = effectivePrAuthor();
-  const effectiveAuthorDisplay = authorDisplayText(effectiveAuthor);
-  let detail = `PR 提交人 ${effectiveAuthorDisplay} 属于核心开发者。`;
+  let status = 'passed';
+  const contributors = realContributorLogins();
+  const contributorDisplay = realContributorDisplay();
+  const untrusted = untrustedContributorLogins();
+  const trustedApprovers = latestTrustedApproversForHead();
+  const trustedManualApprovers = latestTrustedApproversForHead({ includeAutomation: false });
+  let detail = '';
   let failed = false;
 
-  if (!isTrusted(effectiveAuthor)) {
-    const approvers = latestApproversForHead();
-    const trustedApprover = approvers.find(isTrusted);
-    if (trustedApprover) {
-      status = 'passed_trusted_approval';
-      detail = `已获得核心开发者 ${trustedApprover} 对当前提交的审批。`;
+  if (contributors.length === 0) {
+    status = 'failed_missing_real_contributors';
+    detail = 'main 目标 PR 未识别真实贡献者，不能自动或人工放行。';
+    failed = true;
+  } else if (untrusted.length > 0) {
+    if (trustedManualApprovers.length > 0) {
+      status = 'passed_manual_core_approval';
+      detail = `检测到非核心贡献者 ${untrusted.join(', ')}，但已获得核心开发者 ${trustedManualApprovers.join(', ')} 对当前提交的手动审批。`;
     } else {
-      status = 'failed_missing_trusted_approval';
-      detail = 'main 目标 PR 需要核心开发者对当前提交的有效审批。';
+      status = 'failed_untrusted_contributor_missing_manual_approval';
+      detail = `检测到非核心贡献者 ${untrusted.join(', ')}；当前 head 必须获得至少 1 位核心开发者的手动 approval。`;
       failed = true;
     }
+  } else if (trustedApprovers.length > 0) {
+    status = 'passed_all_contributors_trusted_with_approval';
+    detail = `全部真实贡献者均为核心开发者，且当前提交已有核心开发者 approval：${trustedApprovers.join(', ')}。`;
+  } else {
+    status = 'failed_trusted_contributors_missing_approval';
+    detail = '全部真实贡献者均为核心开发者，但当前 head 还没有核心开发者 approval；请配置 `CORE_AUTO_APPROVAL_TOKEN` 或手动审批。';
+    failed = true;
   }
 
   cleanupLegacyGateComment('<!-- workflow:main-authorization-gate -->');
   writeStepSummary(failed ? '主分支授权门禁未通过' : '主分支授权门禁已通过', [
     `- 状态：${status}`,
     `- 分支流向：${headRef} -> ${baseRef}`,
-    `- PR 提交人：${effectiveAuthorDisplay}`,
+    `- 真实贡献者：${contributorDisplay}`,
+    `- 非核心贡献者：${untrusted.length ? untrusted.join(', ') : '无'}`,
+    `- 核心开发者 approval：${trustedApprovers.length ? trustedApprovers.join(', ') : '无'}`,
+    `- 核心开发者手动 approval：${trustedManualApprovers.length ? trustedManualApprovers.join(', ') : '无'}`,
     '',
     detail,
   ]);
@@ -439,8 +526,10 @@ function mainAuthorizationGate() {
     failed,
     details: [
       `状态：${status}`,
-      '问题：缺少核心开发者有效审批。',
-      '处理：请核心开发者审核并提交 approval，或由核心开发者重新推送。',
+      `真实贡献者：${contributorDisplay}`,
+      `非核心贡献者：${untrusted.length ? untrusted.join(', ') : '无'}`,
+      `问题：${detail}`,
+      '处理：请核心开发者审核并提交 approval；如果全部贡献者都是核心开发者，也可以配置 CORE_AUTO_APPROVAL_TOKEN 自动审批。',
     ],
   });
 
@@ -979,6 +1068,133 @@ function copilotReviewGate() {
   });
 }
 
+function isCopilotActor(login) {
+  const normalized = normalizeGitHubLogin(login);
+  return normalized === 'copilot' || normalized === 'copilot-pull-request-reviewer';
+}
+
+function workflowRunPullRequestNumber(run) {
+  const pullRequests = Array.isArray(run?.pull_requests) ? run.pull_requests : [];
+  return Number(pullRequests[0]?.number || prNumber || '0');
+}
+
+function workflowRunMatchesCurrentPr(run) {
+  const runPrNumber = workflowRunPullRequestNumber(run);
+  const runHeadSha = String(run?.head_sha || '');
+  return runPrNumber === prNumber && (!headSha || runHeadSha === headSha);
+}
+
+function listWorkflowRunJobs(runId) {
+  const payload = ghJson([
+    '--method', 'GET',
+    `repos/${repo}/actions/runs/${runId}/jobs`,
+    '-f', 'per_page=100',
+  ], undefined, ghActionsToken()) || {};
+  return Array.isArray(payload.jobs) ? payload.jobs : [];
+}
+
+function recoverCopilotReviewRun() {
+  const runId = Number(process.env.RECOVERY_RUN_ID || process.env.GITHUB_EVENT_WORKFLOW_RUN_ID || '0');
+  if (!repo || !owner || !repoName || !runId || !prNumber) {
+    writeStepSummary('Copilot 审查恢复已跳过', [
+      `- run id：${runId || '未提供'}`,
+      `- PR：${prNumber || '未提供'}`,
+      '- 原因：缺少仓库、run 或 PR 上下文。',
+    ]);
+    return;
+  }
+
+  if (!ghActionsToken()) {
+    writeStepSummary('Copilot 审查恢复失败', [
+      `- run id：${runId}`,
+      '- 原因：未提供 `Actions: write` token。',
+    ]);
+    process.exit(1);
+  }
+
+  const run = ghJson([
+    '--method', 'GET',
+    `repos/${repo}/actions/runs/${runId}`,
+  ], undefined, ghActionsToken()) || {};
+  const actor = run?.actor?.login || '';
+  const conclusion = String(run?.conclusion || '');
+  const runEvent = String(run?.event || '');
+
+  if (run?.name !== 'PR Governance'
+    || runEvent !== 'pull_request_review'
+    || !isCopilotActor(actor)
+    || !workflowRunMatchesCurrentPr(run)) {
+    writeStepSummary('Copilot 审查恢复已跳过', [
+      `- run id：${runId}`,
+      `- workflow：${run?.name || 'unknown'}`,
+      `- event：${runEvent || 'unknown'}`,
+      `- actor：${actor || 'unknown'}`,
+      `- PR：${workflowRunPullRequestNumber(run) || 'unknown'}`,
+      `- head：${run?.head_sha || 'unknown'}`,
+      '- 原因：不是当前 PR/head 上由 Copilot review 触发的 PR Governance run。',
+    ]);
+    return;
+  }
+
+  const reviews = copilotReviewsForHead();
+  if (reviews.length === 0) {
+    writeStepSummary('Copilot 审查恢复已跳过', [
+      `- run id：${runId}`,
+      `- 当前提交：${headSha}`,
+      '- 原因：当前 head 尚未检测到 Copilot review。',
+    ]);
+    return;
+  }
+
+  if (conclusion === 'action_required') {
+    gh([
+      '--method', 'POST',
+      `repos/${repo}/actions/runs/${runId}/approve`,
+    ], undefined, ghActionsToken());
+    writeStepSummary('Copilot 审查恢复已批准', [
+      `- run id：${runId}`,
+      `- 当前提交：${headSha}`,
+      `- Copilot review 数量：${reviews.length}`,
+      '- 操作：批准该 Copilot review 触发的 PR Governance workflow run。',
+    ]);
+    return;
+  }
+
+  if (conclusion !== 'failure') {
+    writeStepSummary('Copilot 审查恢复已跳过', [
+      `- run id：${runId}`,
+      `- conclusion：${conclusion || 'unknown'}`,
+      '- 原因：该 run 不需要恢复。',
+    ]);
+    return;
+  }
+
+  const jobs = listWorkflowRunJobs(runId);
+  const failedJobs = jobs.filter((job) => ['failure', 'cancelled', 'timed_out'].includes(String(job?.conclusion || '')));
+  const updateJob = failedJobs.find((job) => job?.name === 'Update Copilot Review Check');
+  const onlyUpdateJobFailed = failedJobs.length === 1 && updateJob;
+  const runAttempt = Number(run?.run_attempt || 0);
+  if (!onlyUpdateJobFailed || runAttempt > 1) {
+    writeStepSummary('Copilot 审查恢复已跳过', [
+      `- run id：${runId}`,
+      `- run attempt：${runAttempt || 'unknown'}`,
+      `- 失败 job：${failedJobs.map((job) => job?.name || 'unknown').join(', ') || '无'}`,
+      '- 原因：不是仅 `Update Copilot Review Check` 失败，或已经重试过。',
+    ]);
+    return;
+  }
+
+  gh([
+    '--method', 'POST',
+    `repos/${repo}/actions/jobs/${updateJob.id}/rerun`,
+  ], undefined, ghActionsToken());
+  writeStepSummary('Copilot 审查恢复已重跑', [
+    `- run id：${runId}`,
+    `- job id：${updateJob.id}`,
+    '- 操作：仅重跑 `Update Copilot Review Check` job。',
+  ]);
+}
+
 const command = process.argv[2];
 if (command === 'auto-approve') {
   autoApprove();
@@ -988,6 +1204,8 @@ if (command === 'auto-approve') {
   requestCopilotReview();
 } else if (command === 'copilot-review') {
   copilotReviewGate();
+} else if (command === 'recover-copilot-review-run') {
+  recoverCopilotReviewRun();
 } else {
   throw new Error(`Unknown command: ${command}`);
 }
