@@ -414,7 +414,9 @@ function requestCopilotReview() {
       `- 当前 head Copilot review 数量：${confirmation.reviews.length}`,
       '',
       'GitHub API 调用返回成功，但 timeline 中没有检测到本次 Copilot review request，且当前 head 也没有 Copilot review。',
-      '请确认 GitHub App 已安装到本仓库、拥有 `Pull requests: Read and write`，且仓库已启用 Copilot Code Review。',
+      'GitHub 会静默忽略 GitHub App installation token 发起的 Copilot review request。',
+      '请配置仓库 secret `COPILOT_REVIEW_REQUEST_TOKEN`：拥有 Copilot 订阅的用户的 fine-grained PAT，仓库权限 `Pull requests: Read and write`。',
+      '同时确认仓库已启用 Copilot Code Review。',
     ]);
     process.exit(1);
   }
@@ -457,8 +459,19 @@ function latestCopilotReviewRequestEvent() {
     .pop();
 }
 
+let expectedRequestActorCache = null;
+
 function expectedRequestActor() {
-  return String(process.env.EXPECTED_REQUEST_ACTOR || process.env.REQUEST_ACTOR || '').trim();
+  const configured = String(process.env.EXPECTED_REQUEST_ACTOR || process.env.REQUEST_ACTOR || '').trim();
+  if (configured) return configured;
+  if (expectedRequestActorCache !== null) return expectedRequestActorCache;
+  try {
+    // 使用用户 PAT 时可解析实际请求账号；App installation token 不支持 /user，忽略失败。
+    expectedRequestActorCache = String(ghJson(['--method', 'GET', 'user'])?.login || '').trim();
+  } catch {
+    expectedRequestActorCache = '';
+  }
+  return expectedRequestActorCache;
 }
 
 function requestActorDiagnosticLines(confirmation) {
