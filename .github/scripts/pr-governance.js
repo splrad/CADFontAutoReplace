@@ -898,9 +898,9 @@ function copilotReviewGate() {
     } else if (!passingConclusionSource) {
       checkStatus = 'completed';
       checkConclusion = 'failure';
-      checkTitle = 'Copilot 审查结论缺失';
-      detail = `Copilot review 已到达且未检测到未解决阻断问题，但 review 正文缺少通过型结论：固定结论句 ${copilotNoBlockingConclusion}，或 Copilot 官方无新增评论模板。`;
-      handling = '处理：请重新触发 Copilot review，或要求 Copilot 按 .github/copilot-instructions.md 输出固定无阻断结论句。';
+      checkTitle = 'Copilot 审查通过信号缺失';
+      detail = '未识别到 Copilot 结论或 Copilot 无问题评论。';
+      handling = '处理：请重新触发 Copilot 审查。';
     } else {
       detail = passingConclusionSource === 'no-new-comments'
         ? '当前提交已完成 Copilot 代码审查，review 正文为官方无新增评论模板，且未发现未解决的重大问题。'
