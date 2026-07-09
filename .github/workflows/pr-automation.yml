@@ -1,6 +1,6 @@
 # 📋 复用到新项目时的配置步骤：
 #   1) 创建并安装一个中立命名的 GitHub App，例如 `Workflow Automation`。
-#      该 App 至少需要仓库权限：Contents 读写、Pull requests 读写、Issues 读写。
+#      该 App 至少需要仓库权限：Contents 读、Pull requests 读写。
 #      当前 workflow 用 actions/create-github-app-token 生成短期 installation token，
 #      不使用个人 PAT，也不使用 GitHub App 的 client secret。
 #   2) 在仓库 Variables 中配置：
@@ -19,7 +19,7 @@
 #   6) 保留 PR Classification workflow。
 #      它维护无前缀可见 PR 标签，并把 area:* / kind:* 写入隐藏分类元数据。
 #   7) 保留 .github/release.yml 中的软件发布分类配置。
-#      PR Automation 只补运行代码变化的 release notes label。
+#      PR Classification 负责 release labels；共享分类规则统一维护在 .github/pr-classification-rules.json。
 #   8) Copilot CLI 只用于生成中文 PR 标题和摘要；失败时使用确定性中文兜底。
 #   9) 合并本次 main-only 分支模型迁移后，更新远端 ruleset：
 #      从 main-protection 移除 Source Branch Gate required check；
@@ -40,7 +40,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  # 内置 github.token 只用于最小只读权限；PR 创建/更新和标签写入使用 GitHub App token。
+  # 内置 github.token 只用于最小只读权限；PR 创建/更新使用 GitHub App token。
   contents: read
 
 jobs:
@@ -67,11 +67,9 @@ jobs:
           # 这里不要填写 App ID，也不要填写 client secret。
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
-          # PR 创建/更新需要 pull-requests: write；release notes label 需要 issues: write；
-          # checkout 和 diff 分析需要 contents: read。
+          # PR 创建/更新需要 pull-requests: write；checkout 和 diff 分析需要 contents: read。
           permission-contents: read
           permission-pull-requests: write
-          permission-issues: write
 
       - name: Checkout source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -123,7 +121,7 @@ jobs:
         if: env.SKIP_PR_AUTOMATION != 'true'
         id: apply
         env:
-          # 该步骤会创建或更新 PR、写入自动摘要区块，并补充 release notes label。
+          # 该步骤只创建或更新 PR、写入自动摘要区块；labels 由 PR Classification 维护。
           # 成功通知由 GitHub 官方 PR 通知处理，避免额外评论造成重复邮件。
           GH_TOKEN: ${{ steps.automation-token.outputs.token }}
         run: node .github/scripts/pr-automation.js apply
