@@ -8,6 +8,7 @@ const prAuthor = process.env.PR_AUTHOR || 'unknown';
 const headRef = process.env.PR_HEAD_REF || '';
 const baseRef = process.env.PR_BASE_REF || '';
 const headSha = process.env.PR_HEAD_SHA || '';
+const copilotReviewerLogin = 'copilot-pull-request-reviewer[bot]';
 let prDetailsCache = null;
 let effectiveAuthorCache = null;
 
@@ -88,6 +89,21 @@ function latestApproversForHead() {
   return [...byUser.values()]
     .filter((review) => review.state === 'APPROVED' && review.commit_id === headSha)
     .map((review) => review.user.login);
+}
+
+function requestedReviewerLogins() {
+  const payload = ghJson([
+    '--method', 'GET',
+    `repos/${repo}/pulls/${prNumber}/requested_reviewers`,
+  ]) || {};
+  return Array.isArray(payload.users)
+    ? payload.users.map((user) => user?.login || '').filter(Boolean)
+    : [];
+}
+
+function isCopilotReviewRequestLogin(login) {
+  const normalized = normalizeGitHubLogin(login);
+  return normalized === 'copilot-pull-request-reviewer' || normalized === 'copilot';
 }
 
 function mentionText() {
@@ -252,6 +268,62 @@ function mainAuthorizationGate() {
   });
 }
 
+function requestCopilotReview() {
+  ensurePrContext();
+  const reviews = copilotReviewsForHead();
+  if (reviews.length > 0) {
+    writeStepSummary('Copilot 审查请求已跳过', [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- 当前提交：${headSha}`,
+      `- 原因：当前提交已有 Copilot 代码审查。`,
+    ]);
+    return;
+  }
+
+  const requestedReviewers = requestedReviewerLogins();
+  if (requestedReviewers.some(isCopilotReviewRequestLogin)) {
+    writeStepSummary('Copilot 审查请求已跳过', [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- 当前提交：${headSha}`,
+      `- 原因：Copilot 已在待审查人列表中。`,
+    ]);
+    return;
+  }
+
+  try {
+    gh([
+      '--method', 'POST',
+      `repos/${repo}/pulls/${prNumber}/requested_reviewers`,
+      '--input', '-',
+    ], JSON.stringify({ reviewers: [copilotReviewerLogin] }));
+  } catch (error) {
+    if (copilotReviewsForHead().length > 0 || requestedReviewerLogins().some(isCopilotReviewRequestLogin)) {
+      writeStepSummary('Copilot 审查请求已跳过', [
+        `- 分支流向：${headRef} -> ${baseRef}`,
+        `- 当前提交：${headSha}`,
+        `- 原因：Copilot 已由并发流程请求或完成审查。`,
+      ]);
+      return;
+    }
+
+    const detail = String(error.stderr || error.message || error).trim().slice(0, 800);
+    writeStepSummary('Copilot 审查请求失败', [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- 当前提交：${headSha}`,
+      `- 请求 reviewer：${copilotReviewerLogin}`,
+      '',
+      detail || 'GitHub API request failed.',
+    ]);
+    process.exit(1);
+  }
+
+  writeStepSummary('Copilot 审查请求已提交', [
+    `- 分支流向：${headRef} -> ${baseRef}`,
+    `- 当前提交：${headSha}`,
+    `- 请求 reviewer：${copilotReviewerLogin}`,
+  ]);
+}
+
 function copilotReviewsForHead() {
   const reviews = flattenReviews(ghJson([
     '--method', 'GET',
@@ -367,7 +439,7 @@ function copilotReviewGate() {
     failed = true;
     commentPolicy = 'none';
     title = '## Copilot 审查门禁未通过';
-    detail = '当前提交尚未检测到 Copilot 代码审查。请等待规则集自动审查完成，或重新推送触发审查。';
+    detail = '当前提交尚未检测到 Copilot 代码审查。请等待自动审查请求完成，或重新推送触发审查。';
   } else {
     const findings = unresolvedCopilotThreadFindings();
     blocking = findings.blocking;
@@ -440,6 +512,8 @@ if (command === 'auto-approve') {
   autoApprove();
 } else if (command === 'main-authorization') {
   mainAuthorizationGate();
+} else if (command === 'request-copilot-review') {
+  requestCopilotReview();
 } else if (command === 'copilot-review') {
   copilotReviewGate();
 } else {
