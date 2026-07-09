@@ -1,6 +1,6 @@
 # Git 分支与 PR 规则
 
-本文面向普通贡献者，说明如何命名分支、提交改动和打开 PR。
+本文面向贡献者，说明如何命名分支、提交改动和打开 PR。
 
 ## 基本原则
 
@@ -72,7 +72,7 @@ git diff --check
 
 如果你不确定目标分支，优先选择 `main`；自动生成的 PR 说明不清楚时，补充一句改动目的。
 
-维护者需要本地复测 PR 时，会直接拉取 PR head 或 PR merge ref，例如 `gh pr checkout <PR号>`，或 `git fetch upstream refs/pull/<PR号>/merge:review/pr-<PR号>-merge`。
+如果需要本地复测 PR 时，请直接拉取 PR head 或 PR merge ref 到你本地的测试分支，例如 `gh pr checkout <PR号>`，或 `git fetch upstream refs/pull/<PR号>/merge:review/pr-<PR号>-merge`,不要在`main`分支上进行修改。
 
 ## 提交建议
 
@@ -92,7 +92,7 @@ refactor: isolate shx availability lookup
 Signed-off-by: Your Name <your-email@example.com>
 ```
 
-仓库会运行非阻断的 `DCO Sign-off Advisory` 检查，提示缺少或邮箱不匹配的 `Signed-off-by`。它当前不会阻止合并，但有助于未来接收更多外部贡献，或把本项目流程复用到其它仓库。
+仓库会运行非阻断的 `DCO Sign-off Advisory` 检查，提示缺少或邮箱不匹配的 `Signed-off-by`。它当前不会阻止合并，但有助于未来接收更多外部贡献。
 
 如果已经提交后需要补签：
 
