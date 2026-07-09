@@ -7,6 +7,12 @@ const {
   loadPolicyOrDefault,
   normalizeRepoPath,
 } = require('./pr-classification-policy');
+const {
+  authorDisplayText,
+  coreAndAuthorMentionText,
+  effectiveAuthorFromBody,
+  upsertMarkerComment,
+} = require('./pr-notifications');
 
 const repo = process.env.GITHUB_REPOSITORY || '';
 const [owner, repoName] = repo.split('/');
@@ -17,6 +23,7 @@ const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
 const runnerTemp = process.env.RUNNER_TEMP || workspace;
 const policy = loadPolicyOrDefault(process.env.PR_CLASSIFICATION_RULES
   || path.join(workspace, '.github', 'pr-classification-rules.json'));
+const prCreatedNoticeMarker = '<!-- workflow:pr-created-notice -->';
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -278,6 +285,11 @@ function normalizeLogin(value) {
   return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(login) ? login : '';
 }
 
+function isBotLogin(value) {
+  const login = normalizeLogin(value).toLowerCase();
+  return !login || login === 'unknown' || login.endsWith('[bot]') || login === 'github-actions' || login === 'dependabot';
+}
+
 function unique(values) {
   const seen = new Set();
   const result = [];
@@ -300,7 +312,7 @@ function parseContributorLogins(body) {
   return unique(raw
     .split(/[,\s]+/)
     .map(normalizeLogin)
-    .filter(Boolean));
+    .filter((login) => login && !isBotLogin(login)));
 }
 
 function parseSourceActor(body) {
@@ -312,7 +324,7 @@ function contributorLogins(existingBody) {
     ...parseContributorLogins(existingBody),
     parseSourceActor(existingBody),
     normalizeLogin(actor),
-  ].filter(Boolean));
+  ].filter((login) => login && !isBotLogin(login)));
 }
 
 function contributorAvatar(login) {
@@ -449,6 +461,41 @@ function findOpenPullRequest() {
   return Array.isArray(result) ? result[0] || null : null;
 }
 
+function prNoticeToken() {
+  return process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
+}
+
+function prCreatedNoticeBody({ prNumber, title, prBody, context }) {
+  const effectiveAuthor = effectiveAuthorFromBody({ body: prBody, prAuthor: actor, actor });
+  return [
+    prCreatedNoticeMarker,
+    '## PR 创建成功',
+    '',
+    `- PR 链接：#${prNumber}`,
+    `- 标题：${title}`,
+    `- 分支流向：${context.sourceBranch} -> ${context.targetBranch}`,
+    `- 提交人：${authorDisplayText(effectiveAuthor)}`,
+    `- 摘要生成：${context.generationMode}`,
+    `- 通知对象：${coreAndAuthorMentionText(effectiveAuthor)}`,
+    '',
+    '> 本通知由 GitHub Actions 自动发布。',
+  ].join('\n');
+}
+
+function upsertPrCreatedNotice({ prNumber, title, prBody, context, createIfMissing }) {
+  upsertMarkerComment({
+    gh,
+    ghJson,
+    repo,
+    prNumber,
+    marker: prCreatedNoticeMarker,
+    body: prCreatedNoticeBody({ prNumber, title, prBody, context }),
+    token: prNoticeToken(),
+    createIfMissing,
+    position: 'first',
+  });
+}
+
 function generate() {
   if (!repo || !owner || !repoName || !sourceBranch || !targetBranch) {
     throw new Error('Missing repository or branch context.');
@@ -479,7 +526,7 @@ function generate() {
     stat: runAllowFail('git', ['diff', '--stat', '--find-renames', range]),
     changedFiles: runAllowFail('git', ['diff', '--name-status', '--find-renames', range]),
     diffSnippet: runAllowFail('git', ['diff', '--find-renames', '--unified=80', range]).slice(0, 22000),
-    authorTrailers: coAuthorTrailersFromGit(),
+    authorTrailers: isBotLogin(actor) ? [] : coAuthorTrailersFromGit(),
   };
   const fallback = buildFallback(context);
   const prompt = buildPrompt(context, fallback);
@@ -529,6 +576,7 @@ function applySummary() {
   const current = findOpenPullRequest();
   const currentBody = current?.body || '';
   const body = buildBody(currentBody, summary, context);
+  const isNewPullRequest = !current;
   let prNumber = current?.number;
 
   if (prNumber) {
@@ -550,6 +598,14 @@ function applySummary() {
     }));
     prNumber = created.number;
   }
+
+  upsertPrCreatedNotice({
+    prNumber,
+    title: summary.title,
+    prBody: body,
+    context,
+    createIfMissing: isNewPullRequest,
+  });
 
   writeOutput({
     pr_number: prNumber,

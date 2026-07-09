@@ -22,7 +22,8 @@
 #   7) 保留 .github/release.yml 中的软件发布分类配置。
 #      PR Classification 负责 release labels；共享分类规则统一维护在 .github/pr-classification-rules.json。
 #   8) Copilot CLI 只用于生成中文 PR 标题和说明；失败时使用确定性中文兜底。
-#   9) 成功创建/更新 PR 后依赖 GitHub 官方 PR 通知，不再额外发布成功评论。
+#   9) 成功创建 PR 后发布一条带 @mention 的普通评论触发 GitHub 通知；
+#      后续更新只刷新已存在的创建通知，不额外堆积评论。
 #   10) 验证方式：推送一个人工 feature 分支，确认自动创建/更新 main 目标 PR，且标题和说明来自代码内容。
 name: PR Automation
 
@@ -68,6 +69,7 @@ jobs:
           # PR 创建/更新需要 pull-requests: write；checkout 和 diff 分析只申请 contents: read。
           permission-contents: read
           permission-pull-requests: write
+          permission-issues: write
 
       - name: Checkout source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -120,7 +122,7 @@ jobs:
         if: env.SKIP_PR_AUTOMATION != 'true'
         id: apply
         env:
-          # 该步骤只创建或更新 PR、写入自动摘要区块；labels 由 PR Classification 维护。
-          # 成功通知由 GitHub 官方 PR 通知处理，避免额外评论造成重复邮件。
+          # 该步骤创建或更新 PR、写入自动摘要区块，并维护一条去重的创建通知评论。
+          # labels 由 PR Classification 维护。
           GH_TOKEN: ${{ steps.automation-token.outputs.token }}
         run: node .github/scripts/pr-automation.js apply

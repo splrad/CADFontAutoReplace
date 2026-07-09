@@ -128,6 +128,10 @@ function Select-UniqueLogins([string[]]$Logins) {
     return @($result)
 }
 
+function Select-HumanLogins([string[]]$Logins) {
+    return @(Select-UniqueLogins $Logins | Where-Object { -not (Test-BotLogin $_) })
+}
+
 function Get-WorkflowMetadataValue([string]$Body, [string]$Name) {
     if ([string]::IsNullOrWhiteSpace($Body)) {
         return ''
@@ -144,11 +148,11 @@ function Get-WorkflowMetadataValue([string]$Body, [string]$Name) {
 function Get-WorkflowContributorLogins([string]$Body) {
     $contributors = Get-WorkflowMetadataValue -Body $Body -Name 'workflow:source-contributors'
     if (-not [string]::IsNullOrWhiteSpace($contributors)) {
-        return Select-UniqueLogins @($contributors -split '[,\s]+')
+        return Select-HumanLogins @($contributors -split '[,\s]+')
     }
 
     $sourceActor = Get-WorkflowMetadataValue -Body $Body -Name 'workflow:source-actor'
-    return Select-UniqueLogins @($sourceActor)
+    return Select-HumanLogins @($sourceActor)
 }
 
 function Get-PullRequestModel([int]$Number) {

@@ -1,5 +1,15 @@
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
+const {
+  authorDisplayText,
+  coreAndAuthorMentionText,
+  createIssueComment,
+  deleteMarkerComments,
+  effectiveAuthorFromBody,
+  listMarkerComments,
+  normalizeLogin,
+  parseTrustedDevelopers,
+} = require('./pr-notifications');
 
 const repo = process.env.GITHUB_REPOSITORY || '';
 const [owner, repoName] = repo.split('/');
@@ -11,6 +21,7 @@ const headSha = process.env.PR_HEAD_SHA || '';
 const eventName = process.env.GITHUB_EVENT_NAME || '';
 const copilotReviewerLogin = 'copilot-pull-request-reviewer[bot]';
 const copilotCheckName = process.env.COPILOT_REVIEW_CHECK_NAME || 'Copilot Code Review Gate';
+const copilotNoBlockingConclusion = '结论：未发现需要阻断合并的问题。';
 let prDetailsCache = null;
 let effectiveAuthorCache = null;
 
@@ -55,19 +66,8 @@ function isAtOrAfter(timestamp, threshold) {
   return Number.isFinite(time) && Number.isFinite(thresholdTime) && time >= thresholdTime;
 }
 
-function parseTrustedDevelopers() {
-  try {
-    const parsed = JSON.parse(process.env.TRUSTED_DEVELOPERS || '[]');
-    return Array.isArray(parsed)
-      ? parsed.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
-      : [];
-  } catch {
-    return [];
-  }
-}
-
 function isTrusted(user) {
-  return parseTrustedDevelopers().includes(user);
+  return parseTrustedDevelopers().includes(normalizeLogin(user));
 }
 
 function prDetails() {
@@ -83,9 +83,12 @@ function prDetails() {
 function effectivePrAuthor() {
   if (effectiveAuthorCache) return effectiveAuthorCache;
   const body = String(prDetails().body || '');
-  const match = body.match(/<!--\s*workflow:source-actor:([A-Za-z0-9-]+)\s*-->/);
-  effectiveAuthorCache = match?.[1] || prAuthor;
+  effectiveAuthorCache = effectiveAuthorFromBody({ body, prAuthor });
   return effectiveAuthorCache;
+}
+
+function effectivePrAuthorDisplay() {
+  return authorDisplayText(effectivePrAuthor());
 }
 
 function flattenReviews(payload) {
@@ -115,6 +118,23 @@ function latestApproversForHead() {
   return [...byUser.values()]
     .filter((review) => review.state === 'APPROVED' && review.commit_id === headSha)
     .map((review) => review.user.login);
+}
+
+function isAutomationApproval(review) {
+  const login = normalizeGitHubLogin(review?.user?.login);
+  const type = String(review?.user?.type || '').toLowerCase();
+  const expectedReviewer = normalizeGitHubLogin(process.env.AUTO_APPROVE_REVIEWER || '');
+  return review?.state === 'APPROVED'
+    && review?.commit_id === headSha
+    && (
+      type === 'bot'
+      || login === 'github-actions'
+      || (expectedReviewer && login === expectedReviewer)
+    );
+}
+
+function hasAutomationApprovalForHead() {
+  return pullRequestReviews().some(isAutomationApproval);
 }
 
 function requestedReviewerLogins() {
@@ -157,60 +177,146 @@ function isCopilotReviewRequestLogin(login) {
 }
 
 function mentionText() {
-  const trusted = parseTrustedDevelopers();
-  const mentions = [...new Set(trusted)].map((user) => `@${user}`);
-  const effectiveAuthor = effectivePrAuthor();
-  if (effectiveAuthor && effectiveAuthor !== 'unknown' && !trusted.includes(effectiveAuthor)) {
-    mentions.push(`@${effectiveAuthor}`);
-  }
-  return mentions.length ? mentions.join('；') : '（未配置通知对象）';
+  return coreAndAuthorMentionText(effectivePrAuthor());
 }
 
-function findMarkerComment(marker, token) {
-  const comments = ghJson([
-    '--method', 'GET',
-    `repos/${repo}/issues/${prNumber}/comments`,
-    '-f', 'per_page=100',
-  ], undefined, token) || [];
-  return comments.find((comment) => String(comment.body || '').includes(marker));
-}
-
-function upsertComment(marker, body) {
-  const token = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
-  const existing = findMarkerComment(marker, token);
-  if (existing) {
-    gh([
-      '--method', 'PATCH',
-      `repos/${repo}/issues/comments/${existing.id}`,
-      '--input', '-',
-    ], JSON.stringify({ body }), token);
-  } else {
-    gh([
-      '--method', 'POST',
-      `repos/${repo}/issues/${prNumber}/comments`,
-      '--input', '-',
-    ], JSON.stringify({ body }), token);
-  }
-}
-
-function createComment(body) {
-  const token = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
-  gh([
-    '--method', 'POST',
-    `repos/${repo}/issues/${prNumber}/comments`,
-    '--input', '-',
-  ], JSON.stringify({ body }), token);
+function commentToken() {
+  return process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
 }
 
 function deleteComment(marker) {
-  const token = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
-  const existing = findMarkerComment(marker, token);
-  if (!existing) return;
+  const token = commentToken();
+  deleteMarkerComments({ gh, ghJson, repo, prNumber, marker, token });
+}
+
+const blockingFailuresMarker = '<!-- workflow:pr-blocking-failures -->';
+const blockingFailuresStatePattern = /<!--\s*workflow:pr-blocking-failures-state:([A-Za-z0-9+/=_-]+)\s*-->/;
+const blockingSourceOrder = ['main-authorization', 'copilot-review'];
+
+function encodeBlockingState(state) {
+  return Buffer.from(JSON.stringify(state), 'utf8').toString('base64');
+}
+
+function decodeBlockingState(body) {
+  const match = String(body || '').match(blockingFailuresStatePattern);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(match[1], 'base64').toString('utf8'));
+    return parsed && Array.isArray(parsed.failures)
+      ? { head: String(parsed.head || ''), failures: parsed.failures }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function orderedBlockingFailures(failures) {
+  return [...failures].sort((a, b) => {
+    const left = blockingSourceOrder.indexOf(a.source);
+    const right = blockingSourceOrder.indexOf(b.source);
+    return (left === -1 ? 99 : left) - (right === -1 ? 99 : right);
+  });
+}
+
+function blockingFailureBody(state) {
+  const failures = orderedBlockingFailures(state.failures);
+  const sections = [];
+  for (const failure of failures) {
+    sections.push(`#### ${failure.title}`);
+    for (const detail of failure.details) {
+      sections.push(`- ${detail}`);
+    }
+    sections.push('');
+  }
+
+  return [
+    blockingFailuresMarker,
+    `<!-- workflow:pr-blocking-failures-state:${encodeBlockingState(state)} -->`,
+    `## PR 暂不能合并（${failures.length} 项阻断）`,
+    '',
+    mentionText(),
+    '',
+    '### 当前上下文',
+    `- 分支流向：${headRef} -> ${baseRef}`,
+    `- 当前提交：${headSha}`,
+    `- 提交人：${effectivePrAuthorDisplay()}`,
+    `- 阻断项：${failures.map((failure) => failure.title).join('；')}`,
+    '',
+    '### 需要处理',
+    ...sections,
+    '> 本通知由 GitHub Actions 自动发布；相关问题全部恢复后会自动删除。',
+  ].join('\n').trimEnd();
+}
+
+function writeBlockingFailureState(state, repost) {
+  const token = commentToken();
+  const comments = listMarkerComments({
+    ghJson,
+    repo,
+    prNumber,
+    marker: blockingFailuresMarker,
+    token,
+  });
+  const existing = comments[comments.length - 1];
+
+  if (state.failures.length === 0) {
+    deleteMarkerComments({ gh, ghJson, repo, prNumber, marker: blockingFailuresMarker, token });
+    return;
+  }
+
+  const body = blockingFailureBody(state);
+  if (!existing || repost) {
+    deleteMarkerComments({ gh, ghJson, repo, prNumber, marker: blockingFailuresMarker, token });
+    createIssueComment({ gh, repo, prNumber, body, token });
+    return;
+  }
 
   gh([
-    '--method', 'DELETE',
+    '--method', 'PATCH',
     `repos/${repo}/issues/comments/${existing.id}`,
-  ], undefined, token);
+    '--input', '-',
+  ], JSON.stringify({ body }), token);
+
+  for (const stale of comments.slice(0, -1)) {
+    gh([
+      '--method', 'DELETE',
+      `repos/${repo}/issues/comments/${stale.id}`,
+    ], undefined, token);
+  }
+}
+
+function updateBlockingFailure({ source, title, failed, details }) {
+  const token = commentToken();
+  const comments = listMarkerComments({
+    ghJson,
+    repo,
+    prNumber,
+    marker: blockingFailuresMarker,
+    token,
+  });
+  const existing = comments[comments.length - 1];
+  const existingState = decodeBlockingState(existing?.body);
+  const headChanged = Boolean(existing && existingState?.head && existingState.head !== headSha);
+  const state = headChanged || !existingState
+    ? { head: headSha, failures: [] }
+    : { head: headSha, failures: existingState.failures };
+
+  state.failures = state.failures.filter((failure) => failure.source !== source);
+  if (failed) {
+    state.failures.push({
+      source,
+      title,
+      details: Array.isArray(details)
+        ? details.map((detail) => String(detail || '').trim()).filter(Boolean)
+        : [],
+    });
+  }
+
+  writeBlockingFailureState(state, headChanged);
+}
+
+function cleanupLegacyGateComment(marker) {
+  deleteComment(marker);
 }
 
 function writeStepSummary(title, lines) {
@@ -227,23 +333,6 @@ function writeStepSummary(title, lines) {
   console.log(summary);
 }
 
-function finishGate({ marker, failed, body, summaryTitle, summaryLines, commentPolicy = 'upsert' }) {
-  writeStepSummary(summaryTitle, summaryLines);
-  if (failed) {
-    if (commentPolicy === 'none') {
-      deleteComment(marker);
-    } else if (commentPolicy === 'replace') {
-      deleteComment(marker);
-      createComment(body);
-    } else {
-      upsertComment(marker, body);
-    }
-    process.exit(1);
-  }
-
-  deleteComment(marker);
-}
-
 function ensurePrContext() {
   if (!repo || !owner || !repoName || !prNumber) {
     throw new Error('Missing pull request context.');
@@ -253,36 +342,32 @@ function ensurePrContext() {
 function autoApprove() {
   ensurePrContext();
   const effectiveAuthor = effectivePrAuthor();
+  const effectiveAuthorDisplay = authorDisplayText(effectiveAuthor);
   if (!isTrusted(effectiveAuthor)) {
-    console.log(`PR submitter ${effectiveAuthor} is not trusted; auto approval skipped.`);
+    console.log(`PR submitter ${effectiveAuthorDisplay} is not trusted; auto approval skipped.`);
     return;
   }
 
-  const approvalBody = [
-    '## 自动审批说明',
-    '',
-    '本审批由 PR Governance 自动提交，用于满足 main ruleset 的 required approval 要求。',
-    '',
-    '### 判定依据',
-    `- 有效提交者：\`${effectiveAuthor}\``,
-    `- 分支流向：\`${headRef} -> ${baseRef}\``,
-    `- 当前提交：\`${headSha.slice(0, 12) || 'unknown'}\``,
-    '- 授权依据：有效提交者属于 `TRUSTED_DEVELOPERS`。',
-    '',
-    '### 注意',
-    '- 这不是人工代码审查结论。',
-    '- 合并仍需通过 `Main Authorization Gate`、`Copilot Code Review Gate` 和 CodeQL。',
-  ].join('\n');
+  if (hasAutomationApprovalForHead()) {
+    writeStepSummary('自动审批已跳过', [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- PR 提交人：${effectiveAuthorDisplay}`,
+      `- 当前提交：${headSha.slice(0, 12) || 'unknown'}`,
+      '- 原因：当前提交已存在自动化 approval。',
+    ]);
+    return;
+  }
 
   gh([
     '--method', 'POST',
     `repos/${repo}/pulls/${prNumber}/reviews`,
     '--input', '-',
-  ], JSON.stringify({ event: 'APPROVE', body: approvalBody }));
+  ], JSON.stringify({ event: 'APPROVE', commit_id: headSha }));
   writeStepSummary('自动审批已完成', [
     `- 分支流向：${headRef} -> ${baseRef}`,
-    `- PR 提交人：${effectiveAuthor}`,
+    `- PR 提交人：${effectiveAuthorDisplay}`,
     `- 当前提交：${headSha.slice(0, 12) || 'unknown'}`,
+    '- 审批正文：未写入 PR 对话区。',
   ]);
 }
 
@@ -290,7 +375,8 @@ function mainAuthorizationGate() {
   ensurePrContext();
   let status = 'passed_author_trusted';
   const effectiveAuthor = effectivePrAuthor();
-  let detail = `PR 提交人 ${effectiveAuthor} 属于核心开发者。`;
+  const effectiveAuthorDisplay = authorDisplayText(effectiveAuthor);
+  let detail = `PR 提交人 ${effectiveAuthorDisplay} 属于核心开发者。`;
   let failed = false;
 
   if (!isTrusted(effectiveAuthor)) {
@@ -306,33 +392,28 @@ function mainAuthorizationGate() {
     }
   }
 
-  const marker = '<!-- workflow:main-authorization-gate -->';
-  const body = [
-    marker,
-    failed ? '## 主分支授权门禁未通过' : '## 主分支授权门禁已通过',
-    '',
+  cleanupLegacyGateComment('<!-- workflow:main-authorization-gate -->');
+  writeStepSummary(failed ? '主分支授权门禁未通过' : '主分支授权门禁已通过', [
     `- 状态：${status}`,
     `- 分支流向：${headRef} -> ${baseRef}`,
-    `- PR 提交人：${effectiveAuthor}`,
-    `- 通知对象：${mentionText()}`,
+    `- PR 提交人：${effectiveAuthorDisplay}`,
     '',
     detail,
-    '',
-    '> 本通知由 GitHub Actions 自动发布。',
-  ].join('\n');
-  finishGate({
-    marker,
+  ]);
+  updateBlockingFailure({
+    source: 'main-authorization',
+    title: '主分支授权门禁未通过',
     failed,
-    body,
-    summaryTitle: failed ? '主分支授权门禁未通过' : '主分支授权门禁已通过',
-    summaryLines: [
-      `- 状态：${status}`,
-      `- 分支流向：${headRef} -> ${baseRef}`,
-      `- PR 提交人：${effectiveAuthor}`,
-      '',
-      detail,
+    details: [
+      `状态：${status}`,
+      '问题：缺少核心开发者有效审批。',
+      '处理：请核心开发者审核并提交 approval，或由核心开发者重新推送。',
     ],
   });
+
+  if (failed) {
+    process.exit(1);
+  }
 }
 
 function requestCopilotReview() {
@@ -341,8 +422,8 @@ function requestCopilotReview() {
     writeStepSummary('Copilot 审查请求失败', [
       `- 分支流向：${headRef} -> ${baseRef}`,
       `- 当前提交：${headSha}`,
-      '- 原因：未提供请求 Copilot 审查的 GitHub App installation token。',
-      '- 请确认 `Create Copilot review app token` 步骤成功，且 GitHub App 已安装到本仓库并具有 `Pull requests: Read and write`。',
+      '- 原因：未提供请求 Copilot 审查的 token。',
+      '- 请配置仓库 secret `COPILOT_REVIEW_REQUEST_TOKEN`：拥有 Copilot 订阅的用户 fine-grained PAT，仓库权限 `Pull requests: Read and write`。',
     ]);
     process.exit(1);
   }
@@ -414,7 +495,9 @@ function requestCopilotReview() {
       `- 当前 head Copilot review 数量：${confirmation.reviews.length}`,
       '',
       'GitHub API 调用返回成功，但 timeline 中没有检测到本次 Copilot review request，且当前 head 也没有 Copilot review。',
-      '请确认 GitHub App 已安装到本仓库、拥有 `Pull requests: Read and write`，且仓库已启用 Copilot Code Review。',
+      'GitHub 会静默忽略 GitHub App installation token 发起的 Copilot review request。',
+      '请配置仓库 secret `COPILOT_REVIEW_REQUEST_TOKEN`：拥有 Copilot 订阅的用户的 fine-grained PAT，仓库权限 `Pull requests: Read and write`。',
+      '同时确认仓库已启用 Copilot Code Review。',
     ]);
     process.exit(1);
   }
@@ -451,14 +534,29 @@ function copilotReviewsForHead() {
   return copilotReviews().filter((review) => review.commit_id === headSha);
 }
 
+function hasCopilotNoBlockingConclusion(reviews) {
+  return reviews.some((review) => String(review?.body || '').includes(copilotNoBlockingConclusion));
+}
+
 function latestCopilotReviewRequestEvent() {
   return copilotReviewRequestEvents()
     .sort((a, b) => String(a?.created_at || '').localeCompare(String(b?.created_at || '')))
     .pop();
 }
 
+let expectedRequestActorCache = null;
+
 function expectedRequestActor() {
-  return String(process.env.EXPECTED_REQUEST_ACTOR || process.env.REQUEST_ACTOR || '').trim();
+  const configured = String(process.env.EXPECTED_REQUEST_ACTOR || process.env.REQUEST_ACTOR || '').trim();
+  if (configured) return configured;
+  if (expectedRequestActorCache !== null) return expectedRequestActorCache;
+  try {
+    // 使用用户 PAT 时可解析实际请求账号；App installation token 不支持 /user，忽略失败。
+    expectedRequestActorCache = String(ghJson(['--method', 'GET', 'user'])?.login || '').trim();
+  } catch {
+    expectedRequestActorCache = '';
+  }
+  return expectedRequestActorCache;
 }
 
 function requestActorDiagnosticLines(confirmation) {
@@ -725,42 +823,48 @@ function copilotReviewGate() {
   const requestResult = process.env.REQUEST_COPILOT_RESULT || '';
   const requestFailed = eventName === 'pull_request_target'
     && (requestResult === 'failure' || requestResult === 'cancelled');
-  const marker = '<!-- workflow:copilot-review-gate -->';
+  const legacyMarker = '<!-- workflow:copilot-review-gate -->';
   let checkStatus = 'completed';
   let checkConclusion = 'success';
-  let commentPolicy = 'upsert';
-  let title = '## Copilot 审查门禁已通过';
   let checkTitle = 'Copilot 审查门禁已通过';
   let detail = '当前提交已完成 Copilot 代码审查，且未发现未解决的重大问题。';
+  let handling = '处理：请检查 Request Copilot Review job 日志，修复后重新触发工作流。';
   let blocking = [];
   let unclassified = [];
+  let hasNoBlockingConclusion = false;
 
   if (reviews.length === 0) {
-    commentPolicy = 'upsert';
     if (requestFailed) {
       checkStatus = 'completed';
       checkConclusion = 'failure';
-      title = '## Copilot 审查请求失败';
       checkTitle = 'Copilot 审查请求失败';
       detail = '当前提交尚未检测到 Copilot 代码审查，且 Request Copilot Review job 未成功。请检查该 job 日志、GitHub App 安装范围和 `Pull requests: Read and write` 权限。';
     } else {
       checkStatus = 'in_progress';
       checkConclusion = undefined;
-      title = '## Copilot 审查等待中';
       checkTitle = '等待 Copilot 代码审查';
       detail = '当前提交尚未检测到 Copilot 代码审查；自定义 Checks API 门禁会保持 in_progress，等 Copilot 提交 review 后由 pull_request_review 事件重新触发并完成。';
     }
   } else {
+    hasNoBlockingConclusion = hasCopilotNoBlockingConclusion(reviews);
     const findings = unresolvedCopilotThreadFindings();
     blocking = findings.blocking;
     unclassified = findings.unclassified;
     if (blocking.length > 0) {
       checkStatus = 'completed';
       checkConclusion = 'failure';
-      commentPolicy = 'replace';
-      title = '## Copilot 审查门禁未通过';
       checkTitle = 'Copilot 审查门禁未通过';
       detail = '检测到 Copilot 留下的未解决重大问题。';
+      handling = '处理：请修复或回复并 resolve 上述 Copilot 阻断评论。';
+    } else if (!hasNoBlockingConclusion) {
+      checkStatus = 'completed';
+      checkConclusion = 'failure';
+      checkTitle = 'Copilot 审查结论缺失';
+      detail = `Copilot review 已到达且未检测到未解决阻断问题，但 review 正文缺少固定结论句：${copilotNoBlockingConclusion}`;
+      handling = '处理：请重新触发 Copilot review，或要求 Copilot 按 .github/copilot-instructions.md 输出固定无阻断结论句。';
+    } else {
+      detail = '当前提交已完成 Copilot 代码审查，review 正文包含固定无阻断结论句，且未发现未解决的重大问题。';
+      handling = '';
     }
   }
 
@@ -771,34 +875,6 @@ function copilotReviewGate() {
     ? unclassified.map((item) => `- ${item.url ? `[${item.body || 'Copilot 评论'}](${item.url})` : item.body}`).join('\n')
     : '- 无';
   const diagnosticList = copilotDiagnosticLines(diagnostics).join('\n');
-
-  const body = [
-    marker,
-    title,
-    '',
-    `- 分支流向：${headRef} -> ${baseRef}`,
-    `- 当前提交：${headSha}`,
-    `- Copilot 审查数量：${reviews.length}`,
-    `- 未识别严重程度评论：${unclassified.length}`,
-    `- 通知对象：${mentionText()}`,
-    '',
-    detail,
-    '',
-    '### 未解决重大问题',
-    blockingList,
-    '',
-    '### 未识别严重程度评论',
-    unclassifiedList,
-    '',
-    '### Copilot 请求诊断',
-    diagnosticList,
-    '',
-    unclassified.length
-      ? '> 未识别严重程度评论不会阻断合并，但说明 Copilot 未完全遵守本仓库中文审查指令。'
-      : '> Copilot 评论均符合本仓库严重程度标记约定。',
-    '',
-    `> Required check 由自定义 Checks API check run \`${copilotCheckName}\` 承担。`,
-  ].join('\n');
 
   const summaryTitle = checkStatus === 'in_progress'
     ? 'Copilot 审查等待中'
@@ -812,6 +888,7 @@ function copilotReviewGate() {
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- 当前提交：${headSha}`,
     `- Copilot 审查数量：${reviews.length}`,
+    `- 无阻断结论句：${hasNoBlockingConclusion ? '已检测到' : '未检测到'}`,
     `- 未解决重大问题：${blocking.length}`,
     `- 未识别严重程度评论：${unclassified.length}`,
     '',
@@ -840,14 +917,21 @@ function copilotReviewGate() {
   });
   writeStepSummary(summaryTitle, summaryLines);
 
-  if (checkStatus === 'completed' && checkConclusion === 'success') {
-    deleteComment(marker);
-  } else if (commentPolicy === 'replace') {
-    deleteComment(marker);
-    createComment(body);
-  } else {
-    upsertComment(marker, body);
-  }
+  cleanupLegacyGateComment(legacyMarker);
+  updateBlockingFailure({
+    source: 'copilot-review',
+    title: checkTitle,
+    failed: checkStatus === 'completed' && checkConclusion === 'failure',
+    details: [
+      `Request Copilot Review job：${requestResult || '未提供'}`,
+      `Copilot 审查数量：${reviews.length}`,
+      `问题：${detail}`,
+      ...blocking.map((item) => item.url
+        ? `未解决重大问题：[${item.body || 'Copilot 评论'}](${item.url})`
+        : `未解决重大问题：${item.body || 'Copilot 评论'}`),
+      handling,
+    ],
+  });
 }
 
 const command = process.argv[2];

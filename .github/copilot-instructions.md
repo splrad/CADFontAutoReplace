@@ -13,6 +13,10 @@
 
 普通重构、命名偏好、格式问题或主观可读性建议不得标记为阻断。
 
+当没有发现需要阻断合并的问题时，review 正文必须包含以下固定结论句，供仓库 workflow 判定：
+
+`结论：未发现需要阻断合并的问题。`
+
 CodeQL 使用 GitHub Advanced Security default setup，并由 main ruleset 的 `Require code scanning results` 管理；本仓库不再维护自定义 CodeQL workflow，也不把 CodeQL job name 作为 required status check。
 
 Copilot Code Review Gate 只解析当前 head 的未解决当前线程；`isOutdated` 线程属于旧 head 上下文，由最新 Copilot review 和 ruleset 的 review-thread-resolution 规则共同兜底。
