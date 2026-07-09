@@ -1,5 +1,8 @@
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
+const {
+  deleteMarkerComments,
+} = require('./pr-notifications');
 
 const repo = process.env.GITHUB_REPOSITORY || '';
 const prNumber = Number(process.env.PR_NUMBER || process.env.GITHUB_EVENT_PULL_REQUEST_NUMBER || '0');
@@ -174,36 +177,6 @@ function issueLine(issue) {
   return `- \`${shortSha(issue.sha)}\` ${sanitizeMarkdownSubject(issue.subject)}: ${issueReason(issue)}`;
 }
 
-function advisoryBody(result) {
-  const lines = [
-    marker,
-    '## DCO Signed-off-by 提示',
-    '',
-    '此检查当前不是合并门禁；它参考 DCO 1.1 习惯，帮助外部贡献保持清晰来源声明。',
-    '',
-    '### 需要处理的 commits',
-    ...result.issues.slice(0, maxListedIssues).map(issueLine),
-  ];
-
-  if (result.issues.length > maxListedIssues) {
-    lines.push(`- 另有 ${result.issues.length - maxListedIssues} 个 commit 未列出。`);
-  }
-
-  lines.push(
-    '',
-    '### 修复方式',
-    '- 新提交：`git commit -s`',
-    '- 最新提交补签：`git commit --amend -s`',
-    '- 多个提交补签：`git rebase --signoff upstream/main`，或替换为当前 PR 的 base branch，然后重新推送分支。',
-    '',
-    '签名格式应为：`Signed-off-by: Name <email>`，其中 email 应与 commit author email 一致。',
-    '',
-    '> 本提示由 GitHub Actions 自动发布；当前不阻断合并。',
-  );
-
-  return lines.join('\n');
-}
-
 function writeStepSummary(result, error = '') {
   const lines = [
     '## DCO Sign-off Advisory',
@@ -231,37 +204,8 @@ function writeStepSummary(result, error = '') {
   console.log(summary);
 }
 
-function findMarkerComment() {
-  const comments = fetchAll(`repos/${repo}/issues/${prNumber}/comments`);
-  return comments.find((comment) => String(comment.body || '').includes(marker));
-}
-
-function upsertComment(body) {
-  const existing = findMarkerComment();
-  if (existing) {
-    gh([
-      '--method', 'PATCH',
-      `repos/${repo}/issues/comments/${existing.id}`,
-      '--input', '-',
-    ], JSON.stringify({ body }));
-    return;
-  }
-
-  gh([
-    '--method', 'POST',
-    `repos/${repo}/issues/${prNumber}/comments`,
-    '--input', '-',
-  ], JSON.stringify({ body }));
-}
-
 function deleteCommentIfPresent() {
-  const existing = findMarkerComment();
-  if (!existing) return;
-
-  gh([
-    '--method', 'DELETE',
-    `repos/${repo}/issues/comments/${existing.id}`,
-  ]);
+  deleteMarkerComments({ gh, ghJson, repo, prNumber, marker, token: process.env.GH_TOKEN });
 }
 
 function ensureContext() {
@@ -276,12 +220,7 @@ function runAdvisory() {
     const commits = fetchAll(`repos/${repo}/pulls/${prNumber}/commits`);
     const result = analyzeCommits(commits);
     writeStepSummary(result);
-
-    if (result.issues.length) {
-      upsertComment(advisoryBody(result));
-    } else {
-      deleteCommentIfPresent();
-    }
+    deleteCommentIfPresent();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`::warning::DCO Sign-off Advisory failed: ${message}`);

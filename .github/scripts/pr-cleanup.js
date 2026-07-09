@@ -1,8 +1,15 @@
 const { execFileSync } = require('node:child_process');
+const {
+  authorDisplayText,
+  coreAndAuthorMentionText,
+  effectiveAuthorFromBody,
+  upsertMarkerComment,
+} = require('./pr-notifications');
 
 const repo = process.env.GITHUB_REPOSITORY || '';
 const prNumber = Number(process.env.PR_NUMBER || '0');
 const marker = '<!-- workflow:pr-close-status -->';
+let prDetailsCache = null;
 
 function gh(args, input, token) {
   return execFileSync('gh', ['api', ...args], {
@@ -21,84 +28,37 @@ function ghJson(args, input, token) {
   return out ? JSON.parse(out) : null;
 }
 
-function parseTrustedDevelopers() {
-  try {
-    const parsed = JSON.parse(process.env.TRUSTED_DEVELOPERS || '[]');
-    return Array.isArray(parsed)
-      ? parsed.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
-      : [];
-  } catch {
-    return [];
+function prDetails() {
+  if (!prDetailsCache) {
+    prDetailsCache = ghJson([
+      '--method', 'GET',
+      `repos/${repo}/pulls/${prNumber}`,
+    ], undefined, process.env.GH_TOKEN) || {};
   }
+  return prDetailsCache;
 }
 
-function mentionText(author) {
-  const trusted = parseTrustedDevelopers();
-  const mentions = [...new Set(trusted)].map((user) => `@${user}`);
-  if (author && author !== 'unknown' && !trusted.includes(author)) mentions.push(`@${author}`);
-  return mentions.length ? mentions.join('；') : '（未配置通知对象）';
+function effectivePrAuthor() {
+  const details = prDetails();
+  return effectiveAuthorFromBody({
+    body: details.body || '',
+    prAuthor: process.env.PR_AUTHOR || details.user?.login || '',
+  });
 }
 
 function upsertComment(body) {
   const token = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
-  const comments = ghJson([
-    '--method', 'GET',
-    `repos/${repo}/issues/${prNumber}/comments`,
-    '-f', 'per_page=100',
-  ], undefined, token) || [];
-  const existing = comments.find((comment) => String(comment.body || '').includes(marker));
-  if (existing) {
-    gh([
-      '--method', 'PATCH',
-      `repos/${repo}/issues/comments/${existing.id}`,
-      '--input', '-',
-    ], JSON.stringify({ body }), token);
-  } else {
-    gh([
-      '--method', 'POST',
-      `repos/${repo}/issues/${prNumber}/comments`,
-      '--input', '-',
-    ], JSON.stringify({ body }), token);
-  }
+  upsertMarkerComment({ gh, ghJson, repo, prNumber, marker, body, token, position: 'first' });
 }
 
 function notifyClose() {
   if (!repo || !prNumber) throw new Error('Missing PR context.');
 
-  const author = process.env.PR_AUTHOR || 'unknown';
-  const closer = process.env.PR_CLOSED_BY || 'unknown';
+  const author = effectivePrAuthor();
   const merged = process.env.PR_MERGED === 'true';
-  const comments = ghJson([
-    '--method', 'GET',
-    `repos/${repo}/issues/${prNumber}/comments`,
-    '-f', 'per_page=100',
-  ]) || [];
-
-  const humanComments = comments
-    .filter((comment) => String(comment.body || '').trim())
-    .filter((comment) => !String(comment.body || '').includes(marker))
-    .filter((comment) => String(comment.user?.type || '').toLowerCase() !== 'bot')
-    .filter((comment) => !String(comment.user?.login || '').endsWith('[bot]'))
-    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
-  const lastHuman = humanComments[humanComments.length - 1];
-  const lastHumanBody = String(lastHuman?.body || '').replace(/\s+/g, ' ').trim();
-
-  if (!merged && (!lastHuman || lastHuman.user?.login !== closer || !lastHumanBody)) {
-    gh([
-      '--method', 'PATCH',
-      `repos/${repo}/pulls/${prNumber}`,
-      '-f', 'state=open',
-    ]);
-    gh([
-      '--method', 'POST',
-      `repos/${repo}/issues/${prNumber}/comments`,
-      '-f', 'body=当前 PR 未说明关闭原因，无法关闭。请在评论区补充关闭原因后再关闭。',
-    ], undefined, process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN);
-    throw new Error('Closed PR without a closer comment; reopened.');
-  }
 
   if (!merged) {
-    console.log('PR was closed with a human-provided reason; automated close comment skipped.');
+    console.log('PR was closed without merge; automated close comment skipped.');
     return;
   }
 
@@ -114,11 +74,11 @@ function notifyClose() {
     `- PR 链接：#${prNumber}`,
     `- 标题：${title}`,
     `- 分支流向：${source} -> ${target}`,
-    `- 提交人：${author}`,
-    merged ? '- 关闭原因：已成功合并' : `- 关闭原因：${lastHumanBody}`,
-    merged ? `- 合并人：${mergedBy}` : `- 关闭人：${closer}`,
-    merged ? `- 合并提交：${mergeSha}` : '',
-    `- 通知对象：${mentionText(author)}`,
+    `- 提交人：${authorDisplayText(author)}`,
+    '- 关闭原因：已成功合并',
+    `- 合并人：${mergedBy}`,
+    `- 合并提交：${mergeSha}`,
+    `- 通知对象：${coreAndAuthorMentionText(author)}`,
     '',
     '> 本通知由 GitHub Actions 自动发布。',
   ].filter(Boolean).join('\n');

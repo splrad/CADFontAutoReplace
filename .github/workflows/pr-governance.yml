@@ -130,6 +130,7 @@ jobs:
       - name: Submit approval for trusted author
         env:
           GH_TOKEN: ${{ steps.governance-token.outputs.token }}
+          AUTO_APPROVE_REVIEWER: ${{ steps.governance-token.outputs.app-slug }}[bot]
         run: node .github/scripts/pr-governance.js auto-approve
 
   main-authorization-gate:
@@ -171,7 +172,9 @@ jobs:
 
   copilot-review-check:
     name: Update Copilot Review Check
-    needs: request-copilot-review
+    needs:
+      - request-copilot-review
+      - main-authorization-gate
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

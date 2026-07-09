@@ -10,8 +10,8 @@
 #      - 只允许来自已合并 PR 的 main 提交发布
 #      - tag 已存在时跳过发布
 #      - Release notes 由 .github/scripts/generate-release-notes.ps1 生成
-#      - 发布失败时会回写到触发发布的 merged PR
-#   3) 复用 PR Automation 中同一个 GitHub App；Release 创建和失败评论使用 App token。
+#      - 发布失败只保留 Actions 运行失败通知，不向 PR 额外评论
+#   3) 复用 PR Automation 中同一个 GitHub App；Release 创建使用 App token。
 #   4) 如果新项目不是 Version.props 版本源，需要修改 Read version and release state 步骤。
 #   5) 如果新项目没有发布资产打包脚本，需要替换 Build deployer / Package release assets / Create GitHub Release。
 #   6) 不要把 Release job 设置为 required check；
@@ -261,64 +261,3 @@ jobs:
               --latest
 
           "Created Release ${{ steps.version.outputs.tag_name }}." | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
-
-  release-notification:
-    name: Release Notification
-    needs: release
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    if: >-
-      always() &&
-      needs.release.outputs.should_release == 'true' &&
-      needs.release.outputs.merged_pr_number != '' &&
-      needs.release.result != 'success'
-    steps:
-      - name: Create notification app token
-        id: notification-token
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
-          private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
-          permission-issues: write
-
-      - name: Comment failed release result on merged PR
-        env:
-          GH_TOKEN: ${{ steps.notification-token.outputs.token }}
-          GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ needs.release.outputs.merged_pr_number }}
-          PR_TITLE: ${{ needs.release.outputs.merged_pr_title }}
-          TAG_NAME: ${{ needs.release.outputs.tag_name }}
-          RELEASE_TITLE: ${{ needs.release.outputs.release_title }}
-          RELEASE_RESULT: ${{ needs.release.result }}
-          TRUSTED_DEVELOPERS: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
-        run: |
-          # 仅在 Release 失败时评论通知；成功发布以 Release 页面和 Actions summary 为准。
-          marker="<!-- workflow:release-result:${{ github.run_id }}:${{ github.run_attempt }} -->"
-          title="## Release 未完成"
-          result="Release 创建失败或已取消"
-          release_url="未生成"
-
-          mentions="$(printf '%s' "${TRUSTED_DEVELOPERS:-[]}" | jq -r 'if type == "array" then map(select(type == "string" and length > 0) | "@" + .) | unique | join("；") else "" end' 2>/dev/null || true)"
-          [ -z "$mentions" ] && mentions="（未配置通知对象）"
-
-          body="$(cat <<EOF
-          $marker
-          $title
-
-          - 运行结果：**$result**
-          - PR 链接：#$PR_NUMBER
-          - PR 标题：**$PR_TITLE**
-          - 版本标签：**$TAG_NAME**
-          - 发布标题：**$RELEASE_TITLE**
-          - Release 链接：$release_url
-          - 工作流运行：https://github.com/$GH_REPO/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
-          - 通知对象：$mentions
-
-          > 本通知由 GitHub Actions 自动发布。
-          EOF
-          )"
-
-          gh api --method POST \
-            -H "Accept: application/vnd.github+json" \
-            "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
-            -f body="$body"
