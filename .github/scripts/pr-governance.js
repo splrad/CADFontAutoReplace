@@ -349,11 +349,10 @@ function requestCopilotReview() {
 
   const reviews = copilotReviewsForHead();
   if (reviews.length > 0) {
-    const requestActor = requestActorLabel();
     writeStepSummary('Copilot 审查请求已跳过', [
       `- 分支流向：${headRef} -> ${baseRef}`,
       `- 当前提交：${headSha}`,
-      `- 请求账号：${requestActor}`,
+      ...requestActorDiagnosticLines(),
       `- 原因：当前提交已有 Copilot 代码审查。`,
     ]);
     return;
@@ -362,11 +361,10 @@ function requestCopilotReview() {
   const requestedReviewers = requestedReviewerLogins();
   if (requestedReviewers.some(isCopilotReviewRequestLogin)) {
     const latestRequest = latestCopilotReviewRequestEvent();
-    const requestActor = requestActorLabel({ requestEvents: latestRequest ? [latestRequest] : [] });
     writeStepSummary('Copilot 审查请求已跳过', [
       `- 分支流向：${headRef} -> ${baseRef}`,
       `- 当前提交：${headSha}`,
-      `- 请求账号：${requestActor}`,
+      ...requestActorDiagnosticLines({ requestEvents: latestRequest ? [latestRequest] : [] }),
       `- 最近请求时间：${latestRequest?.created_at || '未检测到'}`,
       `- 最近请求者：${latestRequest?.actor?.login || '未检测到'}`,
       `- 原因：Copilot 已在待审查人列表中。`,
@@ -403,13 +401,12 @@ function requestCopilotReview() {
   }
 
   const confirmation = waitForCopilotRequestConfirmation(requestStartedAt);
-  const requestActor = requestActorLabel(confirmation);
   if (!confirmation.confirmed) {
     writeStepSummary('Copilot 审查请求未确认', [
       `- 分支流向：${headRef} -> ${baseRef}`,
       `- 当前提交：${headSha}`,
       `- 请求 reviewer：${copilotReviewerLogin}`,
-      `- 请求账号：${requestActor}`,
+      ...requestActorDiagnosticLines(confirmation),
       `- 请求发起时间：${requestStartedAt}`,
       `- 确认等待：${confirmation.waitedSeconds} 秒`,
       `- 检测到本次 review_requested：${confirmation.requestEvents.length > 0 ? '是' : '否'}`,
@@ -426,7 +423,7 @@ function requestCopilotReview() {
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- 当前提交：${headSha}`,
     `- 请求 reviewer：${copilotReviewerLogin}`,
-    `- 请求账号：${requestActor}`,
+    ...requestActorDiagnosticLines(confirmation),
     `- 请求发起时间：${requestStartedAt}`,
     `- 确认等待：${confirmation.waitedSeconds} 秒`,
     `- 检测到本次 review_requested：${confirmation.requestEvents.length > 0 ? '是' : '否'}`,
@@ -460,14 +457,23 @@ function latestCopilotReviewRequestEvent() {
     .pop();
 }
 
-function requestActorLabel(confirmation) {
-  const configured = String(process.env.REQUEST_ACTOR || '').trim();
-  if (configured) return configured;
+function expectedRequestActor() {
+  return String(process.env.EXPECTED_REQUEST_ACTOR || process.env.REQUEST_ACTOR || '').trim();
+}
 
-  const confirmedActor = confirmation?.requestEvents?.at(-1)?.actor?.login || '';
-  if (confirmedActor) return confirmedActor;
-
-  return latestCopilotReviewRequestEvent()?.actor?.login || 'unknown';
+function requestActorDiagnosticLines(confirmation) {
+  const scopedToConfirmation = Boolean(confirmation);
+  const recordedActor = confirmation?.requestEvents?.at(-1)?.actor?.login
+    || (scopedToConfirmation ? '' : latestCopilotReviewRequestEvent()?.actor?.login)
+    || '';
+  const expectedActor = expectedRequestActor();
+  const lines = [
+    `- GitHub 记录的请求账号：${recordedActor || '未检测到'}`,
+  ];
+  if (expectedActor) {
+    lines.push(`- 本 workflow 预期请求账号：${expectedActor}`);
+  }
+  return lines;
 }
 
 function copilotRequestConfirmation(requestStartedAt) {

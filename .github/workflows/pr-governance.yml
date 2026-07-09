@@ -94,7 +94,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.copilot-review-token.outputs.token }}
           GH_READ_TOKEN: ${{ steps.copilot-review-token.outputs.token }}
-          REQUEST_ACTOR: ${{ steps.copilot-review-token.outputs.app-slug }}[bot]
+          EXPECTED_REQUEST_ACTOR: ${{ steps.copilot-review-token.outputs.app-slug }}[bot]
           COPILOT_REVIEW_REQUEST_CONFIRM_SECONDS: '60'
           COPILOT_REVIEW_REQUEST_POLL_SECONDS: '5'
         run: node .github/scripts/pr-governance.js request-copilot-review
