@@ -10,7 +10,9 @@
 #      - WORKFLOW_AUTOMATION_APP_PRIVATE_KEY：GitHub App private key 的 .pem 完整内容。
 #      - COPILOT_CLI_TOKEN：可选；用于 Copilot CLI 生成 PR 标题/摘要。
 #        未配置时仍会使用代码差异兜底标题和摘要，不会回退为“来源分支 -> 目标分支”。
-#   4) 默认所有非 main 分支都会自动创建或更新指向 main 的 PR。
+#   4) 默认普通人工非 main 分支都会自动创建或更新指向 main 的 PR。
+#      bot actor（*[bot]）由对应机器人自己的 PR 流程管理，
+#      PR Automation 不参与，避免 bot 上下文缺少 App private key secret 时产生阻断红叉。
 #      如新项目使用其他主分支名称，修改 Resolve target branch 步骤中的目标分支规则，
 #      并同步修改 PR Governance、PR Cleanup 和分支保护 required checks。
 #   5) 保留 .github/pull_request_template.md 中的 workflow:auto-summary 标记。
@@ -23,12 +25,12 @@
 #   9) 合并本次 main-only 分支模型迁移后，更新远端 ruleset：
 #      从 main-protection 移除 Source Branch Gate required check；
 #      停用或删除 test-protection；确认没有 test 目标 PR 后再删除远端 test 分支。
-#   10) 验证建议：推送一个 feature 分支，确认自动创建/更新 main 目标 PR，且标题来自代码内容。
+#   10) 验证建议：推送一个人工 feature 分支，确认自动创建/更新 main 目标 PR，且标题来自代码内容。
 name: PR Automation
 
 on:
   # 所有分支 push 后统一进入自动建 PR 逻辑。
-  # main 本身在 job.if 中排除，避免主分支发布提交再次创建 PR。
+  # main 和 bot actor 在 job.if 中排除。
   push:
     branches:
       - '**'
@@ -46,7 +48,9 @@ jobs:
     name: Create or Update Pull Request
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.ref_name != 'main'
+    if: >-
+      github.ref_name != 'main' &&
+      !endsWith(github.actor, '[bot]')
 
     env:
       # SOURCE_BRANCH 由 push ref 自动得到，跨仓库复用通常无需修改。
