@@ -3,33 +3,25 @@
 #      - WORKFLOW_AUTOMATION_APP_CLIENT_ID
 #      - WORKFLOW_AUTOMATION_APP_PRIVATE_KEY
 #      该 App 需要 Contents 读写、Pull requests 读写、Issues 读写。
-#   2) 本 workflow 做两件事：
-#      - main 目标 PR 合并时写入合并结果通知；未合并关闭必须先由关闭人写明原因。
-#      - main push 后，将 test 分支强制同步到 main。
-#   3) 如果新项目测试分支不是 test，修改 sync-test job env.TEST_BRANCH，
-#      并同步修改 PR Automation 的目标分支逻辑和 PR Governance 的 required checks。
-#   4) 如果 test 分支受 ruleset 保护，需要把 GitHub App 加入 test ruleset bypass。
-#      不建议给 main 分支添加 bypass，main 仍应由 PR 和 required checks 控制。
-#   5) 不要把本 workflow 的 job 设置为 required check；
+#   2) 本 workflow 在 main 目标 PR 合并时写入合并结果通知；
+#      未合并关闭必须先由关闭人写明原因。
+#   3) 不要把本 workflow 的 job 设置为 required check；
 #      它是合并后的清理流程，不是合并前门禁。
 name: PR Cleanup
 
 on:
-  # 合并 main 目标 PR 时写结果通知；push main 时同步 test 分支。
+  # 合并 main 目标 PR 时写结果通知。
   pull_request_target:
     branches:
       - main
     types: [closed]
-  push:
-    branches:
-      - main
 
 concurrency:
   group: pr-cleanup-${{ github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 permissions:
-  # 内置 github.token 只保留只读；写合并/失败原因评论和同步 test 使用 GitHub App token。
+  # 内置 github.token 只保留只读；写合并/失败原因评论使用 GitHub App token。
   contents: read
 
 jobs:
@@ -38,7 +30,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # 只处理 PR closed 事件，确保人工关闭 PR 时有关闭原因，合并关闭时写合并结果。
-    if: github.event_name == 'pull_request_target'
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PR_TITLE: ${{ github.event.pull_request.title }}
@@ -75,41 +66,3 @@ jobs:
           GH_TOKEN: ${{ steps.automation-token.outputs.token }}
           GH_COMMENT_TOKEN: ${{ steps.automation-token.outputs.token }}
         run: node .github/scripts/pr-cleanup.js notify-close
-
-  sync-test:
-    name: Sync Test Branch
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    # main 有新提交后，将 test 重置到 main，避免长期漂移。
-    # 若项目不需要 main -> test 同步，可以删除整个 sync-test job。
-    if: github.event_name == 'push'
-    env:
-      # 复用到不同分支模型时，主要修改这里。
-      TEST_BRANCH: test
-      MAIN_BRANCH: main
-    steps:
-      - name: Create automation app token
-        id: automation-token
-        uses: actions/create-github-app-token@v3
-        with:
-          # 同步 test 分支需要 Contents: write。
-          client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
-          private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
-          permission-contents: write
-
-      - name: Checkout main
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ env.MAIN_BRANCH }}
-          fetch-depth: 0
-          token: ${{ steps.automation-token.outputs.token }}
-
-      - name: Reset test branch to main
-        env:
-          GH_TOKEN: ${{ steps.automation-token.outputs.token }}
-        run: |
-          main_sha="$(git rev-parse HEAD)"
-          gh api --method PATCH "repos/${{ github.repository }}/git/refs/heads/$TEST_BRANCH" \
-            -f sha="$main_sha" \
-            -F force=true
-          echo "Synced $TEST_BRANCH to $MAIN_BRANCH at $main_sha."

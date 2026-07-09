@@ -8,8 +8,6 @@ const prAuthor = process.env.PR_AUTHOR || 'unknown';
 const headRef = process.env.PR_HEAD_REF || '';
 const baseRef = process.env.PR_BASE_REF || '';
 const headSha = process.env.PR_HEAD_SHA || '';
-const headRepo = process.env.PR_HEAD_REPO || '';
-const actor = process.env.GITHUB_ACTOR || 'unknown';
 let prDetailsCache = null;
 let effectiveAuthorCache = null;
 
@@ -92,31 +90,6 @@ function latestApproversForHead() {
     .map((review) => review.user.login);
 }
 
-function changedFiles() {
-  const files = ghJson([
-    '--method', 'GET',
-    `repos/${repo}/pulls/${prNumber}/files`,
-    '--paginate',
-    '--slurp',
-  ]) || [];
-  const flattened = Array.isArray(files[0]) ? files.flat() : files;
-  return flattened.map((file) => String(file.filename || '')).filter(Boolean);
-}
-
-function isProtectedConfig(file) {
-  const normalized = file.replace(/\\/g, '/');
-  return normalized.startsWith('.github/workflows/')
-    || normalized.startsWith('.github/actions/')
-    || normalized.startsWith('.github/skills/')
-    || normalized.startsWith('.github/scripts/')
-    || normalized.startsWith('.github/instructions/')
-    || normalized === '.github/copilot-instructions.md'
-    || normalized === '.github/dependabot.yml'
-    || normalized === '.github/labeler.yml'
-    || normalized === '.github/pull_request_template.md'
-    || normalized === '.github/release.yml';
-}
-
 function mentionText() {
   const trusted = parseTrustedDevelopers();
   const mentions = [...new Set(trusted)].map((user) => `@${user}`);
@@ -189,10 +162,6 @@ function finishGate({ marker, failed, body, summaryTitle, summaryLines }) {
   deleteComment(marker);
 }
 
-function formatFiles(files) {
-  return files.length ? files.map((file) => `- \`${file}\``).join('\n') : '- 无';
-}
-
 function ensurePrContext() {
   if (!repo || !owner || !repoName || !prNumber) {
     throw new Error('Missing pull request context.');
@@ -216,67 +185,6 @@ function autoApprove() {
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- PR 提交人：${effectiveAuthor}`,
   ]);
-}
-
-function protectedConfigGate() {
-  ensurePrContext();
-  const protectedFiles = changedFiles().filter(isProtectedConfig);
-  const effectiveAuthor = effectivePrAuthor();
-  let status = 'passed_no_protected_changes';
-  let detail = '未检测到受保护自动化配置变更。';
-  let failed = false;
-
-  if (protectedFiles.length > 0) {
-    if (isTrusted(effectiveAuthor)) {
-      status = 'passed_trusted_author';
-      detail = `检测到受保护自动化配置变更，PR 提交人 ${effectiveAuthor} 属于核心开发者。`;
-    } else {
-      const approvers = latestApproversForHead();
-      const trustedApprover = approvers.find(isTrusted);
-      if (trustedApprover) {
-        status = 'passed_trusted_approval';
-        detail = `检测到受保护自动化配置变更，已获得核心开发者 ${trustedApprover} 对当前提交的审批。`;
-      } else {
-        status = 'failed_missing_trusted_approval';
-        detail = '检测到受保护自动化配置变更，但当前提交尚未获得核心开发者有效审批。';
-        failed = true;
-      }
-    }
-  }
-
-  const marker = '<!-- workflow:protected-config-gate -->';
-  const body = [
-    marker,
-    failed ? '## 受保护配置门禁未通过' : '## 受保护配置门禁已通过',
-    '',
-    `- 状态：${status}`,
-    `- 分支流向：${headRef} -> ${baseRef}`,
-    `- PR 提交人：${effectiveAuthor}`,
-    `- 通知对象：${mentionText()}`,
-    '',
-    detail,
-    '',
-    '### 受保护文件',
-    formatFiles(protectedFiles),
-    '',
-    '> 本通知由 GitHub Actions 自动发布。',
-  ].join('\n');
-  finishGate({
-    marker,
-    failed,
-    body,
-    summaryTitle: failed ? '受保护配置门禁未通过' : '受保护配置门禁已通过',
-    summaryLines: [
-      `- 状态：${status}`,
-      `- 分支流向：${headRef} -> ${baseRef}`,
-      `- PR 提交人：${effectiveAuthor}`,
-      '',
-      detail,
-      '',
-      '### 受保护文件',
-      formatFiles(protectedFiles),
-    ],
-  });
 }
 
 function mainAuthorizationGate() {
@@ -324,46 +232,6 @@ function mainAuthorizationGate() {
       `- PR 提交人：${effectiveAuthor}`,
       '',
       detail,
-    ],
-  });
-}
-
-function sourceBranchGate() {
-  ensurePrContext();
-  const sameRepo = !headRepo || headRepo === repo;
-  const effectiveAuthor = effectivePrAuthor();
-  const trustedAuthor = isTrusted(effectiveAuthor);
-  const allowed = sameRepo && (headRef === 'test' || trustedAuthor);
-  const marker = '<!-- workflow:source-branch-gate -->';
-
-  const body = [
-    marker,
-    allowed ? '## 来源分支门禁已通过' : '## 来源分支门禁未通过',
-    '',
-    `- 分支流向：${headRef} -> ${baseRef}`,
-    `- 来源仓库：${headRepo || 'unknown'}`,
-    `- PR 提交人：${effectiveAuthor}`,
-    `- 通知对象：${mentionText()}`,
-    '',
-    allowed
-      ? (trustedAuthor && headRef !== 'test' ? '核心开发者快速通道允许非 test 分支合入 main。' : '来源分支符合 test -> main 规则。')
-      : 'main 仅允许 test 分支发起 PR；核心开发者可走快速通道；外部 fork 禁止直达 main。',
-    '',
-    '> 本通知由 GitHub Actions 自动发布。',
-  ].join('\n');
-  finishGate({
-    marker,
-    failed: !allowed,
-    body,
-    summaryTitle: allowed ? '来源分支门禁已通过' : '来源分支门禁未通过',
-    summaryLines: [
-      `- 分支流向：${headRef} -> ${baseRef}`,
-      `- 来源仓库：${headRepo || 'unknown'}`,
-      `- PR 提交人：${effectiveAuthor}`,
-      '',
-      allowed
-        ? (trustedAuthor && headRef !== 'test' ? '核心开发者快速通道允许非 test 分支合入 main。' : '来源分支符合 test -> main 规则。')
-        : 'main 仅允许 test 分支发起 PR；核心开发者可走快速通道；外部 fork 禁止直达 main。',
     ],
   });
 }
@@ -550,12 +418,8 @@ function copilotReviewGate() {
 const command = process.argv[2];
 if (command === 'auto-approve') {
   autoApprove();
-} else if (command === 'protected-config') {
-  protectedConfigGate();
 } else if (command === 'main-authorization') {
   mainAuthorizationGate();
-} else if (command === 'source-branch') {
-  sourceBranchGate();
 } else if (command === 'copilot-review') {
   copilotReviewGate();
 } else {

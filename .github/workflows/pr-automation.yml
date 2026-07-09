@@ -4,14 +4,14 @@
 #      当前 workflow 用 actions/create-github-app-token 生成短期 installation token，
 #      不使用个人 PAT，也不使用 GitHub App 的 client secret。
 #   2) 在仓库 Variables 中配置：
-#      - TRUSTED_DEVELOPERS：JSON 数组，例如 ["your-login", "another-login"]。
-#        命中该名单的用户推送非 test/main 分支时，会走 feature -> main 快速通道。
 #      - WORKFLOW_AUTOMATION_APP_CLIENT_ID：GitHub App 页面显示的 Client ID，不是 App ID。
+#      - TRUSTED_DEVELOPERS：可选 JSON 数组，仅用于自动通知对象；不再影响目标分支选择。
 #   3) 在仓库 Secrets 中配置：
 #      - WORKFLOW_AUTOMATION_APP_PRIVATE_KEY：GitHub App private key 的 .pem 完整内容。
 #      - COPILOT_CLI_TOKEN：可选；用于 Copilot CLI 生成 PR 标题/摘要。
 #        未配置时仍会使用代码差异兜底标题和摘要，不会回退为“来源分支 -> 目标分支”。
-#   4) 如新项目不是 main/test 分支模型，修改 Resolve target branch 步骤中的目标分支规则，
+#   4) 默认所有非 main 分支都会自动创建或更新指向 main 的 PR。
+#      如新项目使用其他主分支名称，修改 Resolve target branch 步骤中的目标分支规则，
 #      并同步修改 PR Governance、PR Cleanup 和分支保护 required checks。
 #   5) 保留 .github/pull_request_template.md 中的 workflow:auto-summary 标记。
 #      workflow 只覆盖该自动区块，人工补充内容会保留。
@@ -20,7 +20,10 @@
 #   7) 保留 .github/release.yml 中的软件发布分类配置。
 #      PR Automation 只补 kind:* 标签和运行代码变化的 release notes label。
 #   8) Copilot CLI 只用于生成中文 PR 标题和摘要；失败时使用确定性中文兜底。
-#   9) 验证建议：推送一个 feature 分支，确认自动创建/更新 PR，且标题来自代码内容。
+#   9) 合并本次 main-only 分支模型迁移后，更新远端 ruleset：
+#      从 main-protection 移除 Source Branch Gate required check；
+#      停用或删除 test-protection；确认没有 test 目标 PR 后再删除远端 test 分支。
+#   10) 验证建议：推送一个 feature 分支，确认自动创建/更新 main 目标 PR，且标题来自代码内容。
 name: PR Automation
 
 on:
@@ -48,8 +51,6 @@ jobs:
     env:
       # SOURCE_BRANCH 由 push ref 自动得到，跨仓库复用通常无需修改。
       SOURCE_BRANCH: ${{ github.ref_name }}
-      # TRUSTED_DEVELOPERS 必须是 JSON 数组字符串；为空或缺失时按非核心开发者处理。
-      TRUSTED_DEVELOPERS: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
       # COPILOT_CLI_TOKEN 可选；为空时跳过 Copilot CLI 并走确定性兜底。
       COPILOT_CLI_TOKEN: ${{ secrets.COPILOT_CLI_TOKEN }}
 
@@ -78,20 +79,9 @@ jobs:
         shell: bash
         run: |
           # 默认分支流转规则：
-          # - test push        -> main
-          # - trusted feature  -> main
-          # - normal feature   -> test
-          # 复用到其他项目时，如果分支名称不是 test/main，只改这一段即可。
-          # 后续脚本会优先复用同一来源分支已有的 open PR，并在必要时改用该 PR 的实际 base。
-          trusted="$(printf '%s' "${TRUSTED_DEVELOPERS:-[]}" | jq -r --arg actor "${GITHUB_ACTOR}" 'if type == "array" and index($actor) then "true" else "false" end' 2>/dev/null || echo "false")"
-
-          if [ "${SOURCE_BRANCH}" = "test" ]; then
-            target_branch="main"
-          elif [ "$trusted" = "true" ]; then
-            target_branch="main"
-          else
-            target_branch="test"
-          fi
+          # - any non-main branch -> main
+          # 复用到其他项目时，如果主分支名称不是 main，只改这一段即可。
+          target_branch="main"
 
           echo "TARGET_BRANCH=$target_branch" >> "$GITHUB_ENV"
           echo "Resolved PR flow: ${SOURCE_BRANCH} -> $target_branch"

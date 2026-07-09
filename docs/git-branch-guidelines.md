@@ -46,7 +46,7 @@ git commit -m "docs: improve developer guide"
 git push -u origin docs/developer-guide
 ```
 
-如果你使用 Fork，从 GitHub 页面打开指向上游仓库 `test` 分支的 PR。
+如果你使用 Fork，从 GitHub 页面打开指向上游仓库 `main` 分支的 PR。
 
 ## PR 要求
 
@@ -69,9 +69,11 @@ git diff --check
 
 ## 目标分支
 
-贡献者通常向 `test` 分支提交 PR。维护者会根据仓库规则处理后续合并、同步和发布。
+贡献者通常向 `main` 分支提交 PR。维护者会根据仓库规则处理后续审查、验证和发布。
 
-如果你不确定目标分支，优先选择 `test`；自动生成的 PR 说明不清楚时，补充一句改动目的。
+如果你不确定目标分支，优先选择 `main`；自动生成的 PR 说明不清楚时，补充一句改动目的。
+
+维护者需要本地复测 PR 时，会直接拉取 PR head 或 PR merge ref，例如 `gh pr checkout <PR号>`，或 `git fetch upstream refs/pull/<PR号>/merge:review/pr-<PR号>-merge`。
 
 ## 提交建议
 

@@ -1,25 +1,21 @@
 # 📋 复用到新项目时的配置步骤：
 #   1) 在仓库 Variables 中配置 TRUSTED_DEVELOPERS，格式为 JSON 数组：
 #      ["your-login", "another-login"]。
-#      该名单用于自动 APPROVE、main 快速通道和受保护配置审批。
+#      该名单用于自动 APPROVE 和 main 授权门禁。
 #   2) 在仓库 Settings -> Actions -> General 中确认：
 #      - Workflow permissions：Read and write permissions
 #      - Allow GitHub Actions to create and approve pull requests：启用
 #      否则 Auto Approve 可能无法提交 APPROVE。
 #   3) 分支保护 / ruleset 的 required checks 建议配置为：
-#      - test: PR Governance / Protected Configuration Gate
-#      - test: CodeQL / Analyze C#
-#      - test: CodeQL / Analyze JavaScript
-#      - test: CodeQL / CodeQL
 #      - main: PR Governance / Main Authorization Gate
-#      - main: PR Governance / Source Branch Gate
 #      - main: PR Governance / Copilot Review Gate
 #      - main: CodeQL / Analyze C#
 #      - main: CodeQL / Analyze JavaScript
 #      - main: CodeQL / CodeQL
 #      不要把 Auto Approve 设置为 required check。
-#   4) 如新项目受保护配置文件不在 .github/workflows、.github/actions、.github/scripts 等路径，
-#      修改 .github/scripts/pr-governance.js 中的 isProtectedConfig()。
+#   4) 合并本次 main-only 分支模型迁移后，更新远端 ruleset：
+#      从 main-protection 移除 Source Branch Gate required check；
+#      停用或删除 test-protection；确认没有 test 目标 PR 后再删除远端 test 分支。
 #   5) Copilot Review Gate 只检查 main 目标 PR。
 #      它依赖 ruleset 已自动请求 Copilot Code Review，并依赖 .github/copilot-instructions.md
 #      要求 Copilot 审查正文主体使用简体中文，并在 comment 第一行标注：
@@ -61,7 +57,6 @@ env:
   PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
   PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
   PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-  PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
   TRUSTED_DEVELOPERS: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
 
 jobs:
@@ -85,27 +80,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node .github/scripts/pr-governance.js auto-approve
 
-  protected-configuration-gate:
-    name: Protected Configuration Gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    # test 目标 PR 只检查受保护配置文件是否被非核心开发者修改。
-    # 如果新项目测试分支不是 test，这里和 required check 配置需要一起修改。
-    if: github.event.pull_request.base.ref == 'test'
-    steps:
-      - name: Checkout governance scripts
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          sparse-checkout: .github/scripts
-          sparse-checkout-cone-mode: false
-
-      - name: Check protected automation configuration
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_COMMENT_TOKEN: ${{ github.token }}
-        run: node .github/scripts/pr-governance.js protected-config
-
   main-authorization-gate:
     name: Main Authorization Gate
     needs: auto-approve
@@ -128,27 +102,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_COMMENT_TOKEN: ${{ github.token }}
         run: node .github/scripts/pr-governance.js main-authorization
-
-  source-branch-gate:
-    name: Source Branch Gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    # main 默认只允许 test -> main；核心开发者可从功能分支快速通道到 main。
-    # 外部 fork 不允许直达 main。
-    if: github.event.pull_request.base.ref == 'main'
-    steps:
-      - name: Checkout governance scripts
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          sparse-checkout: .github/scripts
-          sparse-checkout-cone-mode: false
-
-      - name: Check source branch policy
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_COMMENT_TOKEN: ${{ github.token }}
-        run: node .github/scripts/pr-governance.js source-branch
 
   copilot-review-gate:
     name: Copilot Review Gate

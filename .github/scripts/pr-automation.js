@@ -446,47 +446,18 @@ function buildBody(existingBody, summary, context) {
   return `${template.trim()}\n\n${autoBlock}\n`;
 }
 
-function findOpenPullRequestsForSource() {
+function findOpenPullRequest() {
   const result = ghJson([
     '--method', 'GET',
     `repos/${repo}/pulls`,
     '-f', 'state=open',
     '-f', `head=${owner}:${sourceBranch}`,
+    '-f', `base=${targetBranch}`,
     '-f', 'sort=updated',
     '-f', 'direction=desc',
     '-f', 'per_page=20',
   ]);
-  return Array.isArray(result) ? result : [];
-}
-
-function prBaseRef(pr) {
-  return String(pr?.base?.ref || '');
-}
-
-function selectOpenPullRequest(prs, preferredBase) {
-  return prs.find((pr) => prBaseRef(pr) === 'main')
-    || prs.find((pr) => prBaseRef(pr) === preferredBase)
-    || prs.find((pr) => prBaseRef(pr) === 'test')
-    || prs[0]
-    || null;
-}
-
-function findOpenPullRequest() {
-  return selectOpenPullRequest(findOpenPullRequestsForSource(), targetBranch);
-}
-
-function adoptExistingPullRequestTarget() {
-  const current = findOpenPullRequest();
-  const currentBase = prBaseRef(current);
-  if (!currentBase) return current;
-
-  if (currentBase !== targetBranch) {
-    console.log(`Reusing existing PR #${current.number}: ${sourceBranch} -> ${currentBase}; overriding resolved target ${targetBranch}.`);
-    targetBranch = currentBase;
-    appendEnv({ TARGET_BRANCH: targetBranch });
-  }
-
-  return current;
+  return Array.isArray(result) ? result[0] || null : null;
 }
 
 function mentionText() {
@@ -551,7 +522,7 @@ function generate() {
     throw new Error('Missing repository or branch context.');
   }
 
-  const existingPullRequest = adoptExistingPullRequestTarget();
+  const existingPullRequest = findOpenPullRequest();
   runAllowFail('git', [
     'fetch',
     '--no-tags',
@@ -625,13 +596,6 @@ function applySummary() {
   const releaseLabels = inferReleaseLabels(context, summary);
   context.generationMode = generationMode;
   const current = findOpenPullRequest();
-  if (current) {
-    const currentBase = prBaseRef(current);
-    if (currentBase && currentBase !== targetBranch) {
-      targetBranch = currentBase;
-      context.targetBranch = currentBase;
-    }
-  }
   const currentBody = current?.body || '';
   const body = buildBody(currentBody, summary, context);
   let prNumber = current?.number;
