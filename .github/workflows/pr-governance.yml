@@ -9,9 +9,8 @@
 #   3) 分支保护 / ruleset 的 required checks 建议配置为：
 #      - main: PR Governance / Main Authorization Gate
 #      - main: PR Governance / Copilot Review Gate
-#      - main: CodeQL / Analyze C#
-#      - main: CodeQL / Analyze JavaScript
-#      - main: CodeQL / CodeQL
+#      CodeQL 使用 GitHub Advanced Security default setup 和 ruleset 的
+#      Require code scanning results 管理，不再维护本仓库自定义 CodeQL workflow。
 #      不要把 Auto Approve 设置为 required check。
 #   4) 合并本次 main-only 分支模型迁移后，更新远端 ruleset：
 #      从 main-protection 移除 Source Branch Gate required check；
