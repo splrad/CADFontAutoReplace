@@ -1,8 +1,9 @@
 # 📋 复用到新项目时的配置步骤：
 #   1) 创建并安装一个中立命名的 GitHub App，例如 `Workflow Automation`。
-#      该 App 至少需要仓库权限：Contents 读、Pull requests 读写。
+#      建议复用同一个 App，并授予仓库权限：
+#      Contents 读写、Pull requests 读写、Issues 读写、Checks 读写。
 #      当前 workflow 用 actions/create-github-app-token 生成短期 installation token，
-#      不使用个人 PAT，也不使用 GitHub App 的 client secret。
+#      不使用长期个人访问令牌，也不使用 GitHub App 的 client secret。
 #   2) 在仓库 Variables 中配置：
 #      - WORKFLOW_AUTOMATION_APP_CLIENT_ID：GitHub App 页面显示的 Client ID，不是 App ID。
 #   3) 在仓库 Secrets 中配置：
@@ -21,11 +22,8 @@
 #   7) 保留 .github/release.yml 中的软件发布分类配置。
 #      PR Classification 负责 release labels；共享分类规则统一维护在 .github/pr-classification-rules.json。
 #   8) Copilot CLI 只用于生成中文 PR 标题和摘要；失败时使用确定性中文兜底。
-#   9) 合并本次 main-only 分支模型迁移后，更新远端 ruleset：
-#      从 main-protection 移除 Source Branch Gate required check；
-#      停用或删除 test-protection；确认没有 test 目标 PR 后再删除远端 test 分支。
-#   10) 成功创建/更新 PR 后依赖 GitHub 官方 PR 通知，不再额外发布成功评论。
-#   11) 验证建议：推送一个人工 feature 分支，确认自动创建/更新 main 目标 PR，且标题来自代码内容。
+#   9) 成功创建/更新 PR 后依赖 GitHub 官方 PR 通知，不再额外发布成功评论。
+#   10) 验证建议：推送一个人工 feature 分支，确认自动创建/更新 main 目标 PR，且标题来自代码内容。
 name: PR Automation
 
 on:
@@ -40,7 +38,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  # 内置 github.token 只用于最小只读权限；PR 创建/更新使用 GitHub App token。
+  # 内置 GITHUB_TOKEN 只用于最小只读权限；PR 创建/更新使用 GitHub App token。
   contents: read
 
 jobs:
@@ -67,7 +65,7 @@ jobs:
           # 这里不要填写 App ID，也不要填写 client secret。
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
-          # PR 创建/更新需要 pull-requests: write；checkout 和 diff 分析需要 contents: read。
+          # PR 创建/更新需要 pull-requests: write；checkout 和 diff 分析只申请 contents: read。
           permission-contents: read
           permission-pull-requests: write
 
@@ -76,6 +74,7 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ steps.automation-token.outputs.token }}
+          persist-credentials: false
 
       - name: Resolve target branch
         shell: bash
@@ -91,7 +90,7 @@ jobs:
       - name: Build PR summary context
         id: context
         env:
-          # 使用 GitHub App token 创建/更新 PR，避免 github.token 触发的事件不再触发后续 workflow。
+          # 使用 GitHub App token 创建/更新 PR，避免 GITHUB_TOKEN 触发的事件不再触发后续 workflow。
           GH_TOKEN: ${{ steps.automation-token.outputs.token }}
         run: node .github/scripts/pr-automation.js generate
 

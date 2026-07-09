@@ -15,6 +15,6 @@
 
 CodeQL 使用 GitHub Advanced Security default setup，并由 main ruleset 的 `Require code scanning results` 管理；本仓库不再维护自定义 CodeQL workflow，也不把 CodeQL job name 作为 required status check。
 
-Copilot Review Gate 只解析当前 head 的未解决当前线程；`isOutdated` 线程属于旧 head 上下文，由最新 Copilot review 和 ruleset 的 review-thread-resolution 规则共同兜底。
+Copilot Code Review Gate 只解析当前 head 的未解决当前线程；`isOutdated` 线程属于旧 head 上下文，由最新 Copilot review 和 ruleset 的 review-thread-resolution 规则共同兜底。
 
 严重程度是本仓库自定义约定，不是 GitHub Copilot 官方结构化字段，也不依赖 GitHub 页面上的 Low/Medium 等 UI 徽标；请按上述文本输出，供仓库 workflow 解析。

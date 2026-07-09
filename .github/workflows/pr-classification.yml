@@ -12,8 +12,6 @@ concurrency:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
 
 jobs:
   classify:
@@ -21,14 +19,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Create classification app token
+        id: classification-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-issues: write
+          permission-pull-requests: write
+
       - name: Checkout trusted base
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.base.sha }}
+          token: ${{ steps.classification-token.outputs.token }}
           persist-credentials: false
 
       - name: Apply visible labels and hidden metadata
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.classification-token.outputs.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: node .github/scripts/pr-classification.js

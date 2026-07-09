@@ -259,13 +259,123 @@ function htmlCommentValue(value) {
     .replace(/\r?\n/g, ' ');
 }
 
-function buildAutoBlock(summary, context) {
+function htmlAttribute(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function normalizeLogin(value) {
+  const login = String(value || '').trim();
+  return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(login) ? login : '';
+}
+
+function unique(values) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    const key = String(value || '').toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+  }
+  return result;
+}
+
+function metadataValue(body, name) {
+  const match = String(body || '').match(new RegExp(`<!--\\s*${escapeRegExp(name)}:([^>]*)-->`, 'i'));
+  return match?.[1]?.trim() || '';
+}
+
+function parseContributorLogins(body) {
+  const raw = metadataValue(body, 'workflow:source-contributors');
+  return unique(raw
+    .split(/[,\s]+/)
+    .map(normalizeLogin)
+    .filter(Boolean));
+}
+
+function parseSourceActor(body) {
+  return normalizeLogin(metadataValue(body, 'workflow:source-actor'));
+}
+
+function contributorLogins(existingBody) {
+  return unique([
+    ...parseContributorLogins(existingBody),
+    parseSourceActor(existingBody),
+    normalizeLogin(actor),
+  ].filter(Boolean));
+}
+
+function contributorAvatar(login) {
+  const safeLogin = htmlAttribute(login);
+  const encodedLogin = encodeURIComponent(login);
+  return `<a href="https://github.com/${encodedLogin}" title="${safeLogin}"><img src="https://github.com/${encodedLogin}.png?size=64" width="32" height="32" alt="${safeLogin}" /></a>`;
+}
+
+function contributorBlock(logins) {
+  if (!logins.length) return '';
+  return [
+    '### 贡献者',
+    '',
+    logins.map(contributorAvatar).join(' '),
+    '',
+    logins.join(', '),
+    '',
+  ].join('\n');
+}
+
+function sanitizeTrailerName(name) {
+  return String(name || '')
+    .replace(/[<>\r\n]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function sanitizeTrailerEmail(email) {
+  const value = String(email || '').trim();
+  return /^[^<>\s@]+@[^<>\s@]+$/.test(value) ? value : '';
+}
+
+function coAuthorTrailersFromGit() {
+  const out = runAllowFail('git', ['log', '--format=%aN <%aE>', `origin/${targetBranch}..origin/${sourceBranch}`]);
+  const seen = new Set();
+  const trailers = [];
+  for (const line of cleanLines(out, 100)) {
+    const match = line.match(/^(.+?)\s+<([^<>]+)>$/);
+    if (!match) continue;
+    const name = sanitizeTrailerName(match[1]);
+    const email = sanitizeTrailerEmail(match[2]);
+    const key = email.toLowerCase();
+    if (!name || !email || seen.has(key)) continue;
+    seen.add(key);
+    trailers.push(`Co-authored-by: ${name} <${email}>`);
+  }
+  return trailers;
+}
+
+function stripManagedCoAuthorBlock(body) {
+  return String(body || '').replace(/\n*\s*<!-- workflow:co-authored-by -->[\s\S]*$/i, '').trimEnd();
+}
+
+function appendCoAuthorBlock(body, trailers) {
+  if (!Array.isArray(trailers) || trailers.length === 0) return body;
+  return `${String(body || '').trimEnd()}\n\n<!-- workflow:co-authored-by -->\n${trailers.join('\n')}\n`;
+}
+
+function buildAutoBlock(summary, context, existingBody = '') {
   const bulletList = (items) => items.map((item) => `- ${item}`).join('\n');
   const changedFileCount = cleanLines(context.changedFiles, 10000).length;
+  const contributors = contributorLogins(existingBody);
+  const sourceActor = parseSourceActor(existingBody) || normalizeLogin(actor) || 'unknown';
+  const contributorSection = contributorBlock(contributors);
 
   return [
     '<!-- workflow:auto-summary:start -->',
-    `<!-- workflow:source-actor:${actor} -->`,
+    `<!-- workflow:source-actor:${sourceActor} -->`,
+    `<!-- workflow:source-contributors:${contributors.join(',')} -->`,
     `<!-- workflow:auto-context:source=${htmlCommentValue(context.sourceBranch)};target=${htmlCommentValue(context.targetBranch)};generation=${htmlCommentValue(context.generationMode)};changed-files=${changedFileCount} -->`,
     '### 自动生成摘要',
     '',
@@ -280,21 +390,26 @@ function buildAutoBlock(summary, context) {
     '### 风险与影响',
     bulletList(summary.risk),
     '',
+    ...(contributorSection ? [contributorSection] : []),
     '<!-- workflow:auto-summary:end -->',
   ].join('\n');
 }
 
 function buildBody(existingBody, summary, context) {
   const templatePath = path.join(workspace, '.github', 'pull_request_template.md');
-  const autoBlock = buildAutoBlock(summary, context);
+  const bodyWithoutCoAuthors = stripManagedCoAuthorBlock(existingBody);
+  const autoBlock = buildAutoBlock(summary, context, bodyWithoutCoAuthors);
   const markerPattern = /<!-- workflow:auto-summary:start -->[\s\S]*?<!-- workflow:auto-summary:end -->/;
+  let body;
 
-  if (existingBody && markerPattern.test(existingBody)) {
-    return existingBody.replace(markerPattern, autoBlock);
+  if (bodyWithoutCoAuthors && markerPattern.test(bodyWithoutCoAuthors)) {
+    body = bodyWithoutCoAuthors.replace(markerPattern, autoBlock);
+    return appendCoAuthorBlock(body, context.authorTrailers);
   }
 
-  if (existingBody && existingBody.trim() && !existingBody.includes('正在基于当前代码差异生成')) {
-    return `${existingBody.trim()}\n\n---\n\n${autoBlock}\n`;
+  if (bodyWithoutCoAuthors && bodyWithoutCoAuthors.trim() && !bodyWithoutCoAuthors.includes('正在基于当前代码差异生成')) {
+    body = `${bodyWithoutCoAuthors.trim()}\n\n---\n\n${autoBlock}\n`;
+    return appendCoAuthorBlock(body, context.authorTrailers);
   }
 
   const template = fs.existsSync(templatePath)
@@ -302,9 +417,11 @@ function buildBody(existingBody, summary, context) {
     : '## 变更摘要\n\n<!-- workflow:auto-summary:start -->\n等待自动生成。\n<!-- workflow:auto-summary:end -->\n';
 
   if (markerPattern.test(template)) {
-    return template.replace(markerPattern, autoBlock);
+    body = template.replace(markerPattern, autoBlock);
+    return appendCoAuthorBlock(body, context.authorTrailers);
   }
-  return `${template.trim()}\n\n${autoBlock}\n`;
+  body = `${template.trim()}\n\n${autoBlock}\n`;
+  return appendCoAuthorBlock(body, context.authorTrailers);
 }
 
 function findOpenPullRequest() {
@@ -351,6 +468,7 @@ function generate() {
     stat: runAllowFail('git', ['diff', '--stat', '--find-renames', range]),
     changedFiles: runAllowFail('git', ['diff', '--name-status', '--find-renames', range]),
     diffSnippet: runAllowFail('git', ['diff', '--find-renames', '--unified=80', range]).slice(0, 22000),
+    authorTrailers: coAuthorTrailersFromGit(),
   };
   const fallback = buildFallback(context);
   const prompt = buildPrompt(context, fallback);
