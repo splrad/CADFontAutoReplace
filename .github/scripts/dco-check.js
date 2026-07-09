@@ -51,6 +51,17 @@ function commitSubject(commit) {
   return String(commit?.commit?.message || '').split(/\r?\n/)[0].trim() || '(empty commit message)';
 }
 
+function sanitizeMarkdownSubject(subject) {
+  const sanitized = String(subject || '(empty commit message)')
+    .replace(/\r?\n/g, ' ')
+    .replace(/@/g, '@\u200b')
+    .replace(/`/g, "'")
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .trim();
+  return sanitized || '(empty commit message)';
+}
+
 function isBotIdentity(login, type, name, email) {
   const values = [login, name, email].map((value) => String(value || '').toLowerCase());
   return String(type || '').toLowerCase() === 'bot'
@@ -160,7 +171,7 @@ function issueReason(issue) {
 }
 
 function issueLine(issue) {
-  return `- \`${shortSha(issue.sha)}\` ${issue.subject}: ${issueReason(issue)}`;
+  return `- \`${shortSha(issue.sha)}\` ${sanitizeMarkdownSubject(issue.subject)}: ${issueReason(issue)}`;
 }
 
 function advisoryBody(result) {
@@ -295,6 +306,12 @@ function assertEqual(actual, expected, label) {
   }
 }
 
+function assertTrue(value, label) {
+  if (!value) {
+    throw new Error(`${label}: expected true, got false`);
+  }
+}
+
 function selfTest() {
   const fixtures = [
     fixtureCommit({
@@ -323,14 +340,36 @@ function selfTest() {
       type: 'Bot',
       message: 'chore: bump dependency',
     }),
+    fixtureCommit({
+      sha: '5555555',
+      name: 'Mallory',
+      email: 'mallory@example.com',
+      message: 'fix: ping @maintainer with `markdown` <tag>\n\nUntrusted body line',
+    }),
   ];
   const result = analyzeCommits(fixtures);
-  assertEqual(result.total, 4, 'total commits');
+  assertEqual(result.total, 5, 'total commits');
   assertEqual(result.passed, 1, 'passed commits');
   assertEqual(result.skipped, 1, 'skipped bot commits');
-  assertEqual(result.issues.length, 2, 'advisory issues');
+  assertEqual(result.issues.length, 3, 'advisory issues');
   assertEqual(result.issues[0].reason, 'missing', 'missing signoff reason');
   assertEqual(result.issues[1].reason, 'email_mismatch', 'email mismatch reason');
+  const unsafeLine = issueLine(result.issues[2]);
+  assertTrue(!unsafeLine.includes('@maintainer'), 'subject mention is neutralized');
+  assertTrue(unsafeLine.includes('@\u200bmaintainer'), 'subject mention keeps readable marker');
+  assertTrue(!unsafeLine.includes('`markdown`'), 'subject backticks are neutralized');
+  assertTrue(unsafeLine.includes("'markdown'"), 'subject backticks stay readable');
+  assertTrue(!unsafeLine.includes('<tag>'), 'subject angle brackets are neutralized');
+  assertTrue(unsafeLine.includes('&lt;tag&gt;'), 'subject angle brackets stay readable');
+  const multilineLine = issueLine({
+    sha: '6666666',
+    subject: 'fix: first line\n@team `next`',
+    reason: 'missing',
+    authorName: 'Test',
+    authorEmail: 'test@example.com',
+  });
+  assertTrue(!multilineLine.includes('\n'), 'subject newlines are collapsed');
+  assertTrue(!multilineLine.includes('@team'), 'multiline subject mention is neutralized');
   console.log('DCO self-test passed.');
 }
 

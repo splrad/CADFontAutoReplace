@@ -57,6 +57,30 @@ function loadPolicy(rulesPath = defaultRulesPath()) {
   return policy;
 }
 
+function fallbackPolicy() {
+  return {
+    areas: [],
+    runtimeRelease: {},
+    installOrPackage: {},
+    labels: {
+      public: [],
+      release: [],
+      internalPrefixes: ['area:', 'kind:'],
+    },
+    releaseCategories: [],
+  };
+}
+
+function loadPolicyOrDefault(rulesPath = defaultRulesPath()) {
+  try {
+    return loadPolicy(rulesPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`::warning::Falling back to empty PR classification policy: ${message}`);
+    return fallbackPolicy();
+  }
+}
+
 function publicLabelDefinitions(policy) {
   return policy.labels.public || [];
 }
@@ -205,6 +229,7 @@ module.exports = {
   isInstallOrPackagePath,
   isRuntimeReleasePath,
   loadPolicy,
+  loadPolicyOrDefault,
   matchesAnyPattern,
   normalizeRepoPath,
   orderedLabels,

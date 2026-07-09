@@ -4,7 +4,7 @@ const path = require('node:path');
 const {
   isInstallOrPackagePath,
   isRuntimeReleasePath,
-  loadPolicy,
+  loadPolicyOrDefault,
   normalizeRepoPath,
 } = require('./pr-classification-policy');
 
@@ -15,7 +15,7 @@ let targetBranch = process.env.TARGET_BRANCH || '';
 const actor = process.env.GITHUB_ACTOR || 'unknown';
 const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
 const runnerTemp = process.env.RUNNER_TEMP || workspace;
-const policy = loadPolicy(process.env.PR_CLASSIFICATION_RULES
+const policy = loadPolicyOrDefault(process.env.PR_CLASSIFICATION_RULES
   || path.join(workspace, '.github', 'pr-classification-rules.json'));
 
 function run(command, args, options = {}) {
