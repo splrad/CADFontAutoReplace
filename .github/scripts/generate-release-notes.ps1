@@ -93,6 +93,64 @@ function Get-PullRequestFiles([int]$Number) {
     return @($files)
 }
 
+function Normalize-GitHubLogin([string]$Login) {
+    if ([string]::IsNullOrWhiteSpace($Login)) {
+        return ''
+    }
+
+    $trimmed = $Login.Trim()
+    if ($trimmed -match '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$') {
+        return $trimmed
+    }
+
+    return ''
+}
+
+function Select-UniqueLogins([string[]]$Logins) {
+    $seen = @{}
+    $result = New-Object System.Collections.Generic.List[string]
+
+    foreach ($login in $Logins) {
+        $normalized = Normalize-GitHubLogin $login
+        if ([string]::IsNullOrWhiteSpace($normalized)) {
+            continue
+        }
+
+        $key = $normalized.ToLowerInvariant()
+        if ($seen.ContainsKey($key)) {
+            continue
+        }
+
+        $seen[$key] = $true
+        $result.Add($normalized)
+    }
+
+    return @($result)
+}
+
+function Get-WorkflowMetadataValue([string]$Body, [string]$Name) {
+    if ([string]::IsNullOrWhiteSpace($Body)) {
+        return ''
+    }
+
+    $pattern = '<!--\s*' + [regex]::Escape($Name) + ':([^>]*)-->'
+    if ($Body -match $pattern) {
+        return $Matches[1].Trim()
+    }
+
+    return ''
+}
+
+function Get-WorkflowContributorLogins([string]$Body) {
+    $contributors = Get-WorkflowMetadataValue -Body $Body -Name 'workflow:source-contributors'
+    if (-not [string]::IsNullOrWhiteSpace($contributors)) {
+        return Select-UniqueLogins @($contributors -split '[,\s]+')
+    }
+
+    $sourceActor = Get-WorkflowMetadataValue -Body $Body -Name 'workflow:source-actor'
+    return Select-UniqueLogins @($sourceActor)
+}
+
 function Get-PullRequestModel([int]$Number) {
     $pull = Invoke-GhJson @(
         '-H', 'Accept: application/vnd.github+json',
@@ -105,13 +163,20 @@ function Get-PullRequestModel([int]$Number) {
         $labels = @($pull.labels | ForEach-Object { [string]$_.name })
     }
 
+    $author = [string]$pull.user.login
+    $contributors = @(Get-WorkflowContributorLogins -Body ([string]$pull.body))
+    if ($contributors.Count -eq 0 -and -not (Test-BotLogin $author)) {
+        $contributors = @($author)
+    }
+
     [pscustomobject]@{
-        Number   = [int]$pull.number
-        Title    = [string]$pull.title
-        Author   = [string]$pull.user.login
-        MergedAt = [string]$pull.merged_at
-        Labels   = $labels
-        Files    = @(Get-PullRequestFiles -Number $Number)
+        Number       = [int]$pull.number
+        Title        = [string]$pull.title
+        Author       = $author
+        Contributors = @($contributors)
+        MergedAt     = [string]$pull.merged_at
+        Labels       = $labels
+        Files        = @(Get-PullRequestFiles -Number $Number)
     }
 }
 
@@ -156,6 +221,19 @@ function Get-PolicyArray($Value) {
     return @($Value)
 }
 
+function Get-ObjectPropertyValue($Object, [string]$Name) {
+    if ($null -eq $Object) {
+        return $null
+    }
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+
+    return $property.Value
+}
+
 function Get-ClassificationPolicy {
     if ($null -ne $script:ClassificationPolicy) {
         return $script:ClassificationPolicy
@@ -176,8 +254,8 @@ function Test-PolicyPathRule([string]$Path, $Rule) {
     }
 
     $lower = Normalize-RepoPath $Path
-    $excludePrefixes = @(Get-PolicyArray $Rule.excludePrefixes | ForEach-Object { Normalize-RepoPath ([string]$_) })
-    $excludeFiles = @(Get-PolicyArray $Rule.excludeFiles | ForEach-Object { Normalize-RepoPath ([string]$_) })
+    $excludePrefixes = @(Get-PolicyArray (Get-ObjectPropertyValue $Rule 'excludePrefixes') | ForEach-Object { Normalize-RepoPath ([string]$_) })
+    $excludeFiles = @(Get-PolicyArray (Get-ObjectPropertyValue $Rule 'excludeFiles') | ForEach-Object { Normalize-RepoPath ([string]$_) })
 
     foreach ($prefix in $excludePrefixes) {
         if ($lower.StartsWith($prefix)) {
@@ -189,8 +267,8 @@ function Test-PolicyPathRule([string]$Path, $Rule) {
         return $false
     }
 
-    $includePrefixes = @(Get-PolicyArray $Rule.includePrefixes | ForEach-Object { Normalize-RepoPath ([string]$_) })
-    $includeFiles = @(Get-PolicyArray $Rule.includeFiles | ForEach-Object { Normalize-RepoPath ([string]$_) })
+    $includePrefixes = @(Get-PolicyArray (Get-ObjectPropertyValue $Rule 'includePrefixes') | ForEach-Object { Normalize-RepoPath ([string]$_) })
+    $includeFiles = @(Get-PolicyArray (Get-ObjectPropertyValue $Rule 'includeFiles') | ForEach-Object { Normalize-RepoPath ([string]$_) })
 
     foreach ($prefix in $includePrefixes) {
         if ($lower.StartsWith($prefix)) {
@@ -276,14 +354,28 @@ function Normalize-Title([string]$Title) {
     return ($Title -replace '\s+', ' ').Trim()
 }
 
+function New-ContributorLink([string]$Login) {
+    $safeLogin = [System.Net.WebUtility]::HtmlEncode($Login)
+    return "[$safeLogin](https://github.com/$safeLogin)"
+}
+
 function New-ChangeLine($PullRequest) {
     $title = Normalize-Title $PullRequest.Title
-    return "- $title by @$($PullRequest.Author) in #$($PullRequest.Number)"
+    $contributors = @($PullRequest.Contributors)
+    if ($contributors.Count -gt 0) {
+        $byline = (@($contributors | ForEach-Object { New-ContributorLink $_ }) -join ', ')
+    } elseif (-not (Test-BotLogin $PullRequest.Author)) {
+        $byline = New-ContributorLink $PullRequest.Author
+    } else {
+        $byline = 'workflow automation'
+    }
+
+    return "- $title by $byline in #$($PullRequest.Number)"
 }
 
 function New-ContributorAvatar([string]$Login) {
     $safeLogin = [System.Net.WebUtility]::HtmlEncode($Login)
-    return "<a href=`"https://github.com/$safeLogin`" title=`"@$safeLogin`"><img src=`"https://github.com/$safeLogin.png?size=64`" width=`"48`" height=`"48`" alt=`"@$safeLogin`" /></a>"
+    return "<a href=`"https://github.com/$safeLogin`" title=`"$safeLogin`"><img src=`"https://github.com/$safeLogin.png?size=64`" width=`"48`" height=`"48`" alt=`"$safeLogin`" /></a>"
 }
 
 function New-ReleaseBody($PullRequests) {
@@ -300,9 +392,11 @@ function New-ReleaseBody($PullRequests) {
         $category = Get-ChangeCategory $pr
         $categories[$category].Add((New-ChangeLine $pr))
 
-        $authorLower = $pr.Author.ToLowerInvariant()
-        if ($authorLower -ne $ownerLower -and -not (Test-BotLogin $pr.Author) -and -not $contributors.Contains($authorLower)) {
-            $contributors.Add($authorLower, $pr.Author)
+        foreach ($login in @($pr.Contributors)) {
+            $loginLower = $login.ToLowerInvariant()
+            if ($loginLower -ne $ownerLower -and -not (Test-BotLogin $login) -and -not $contributors.Contains($loginLower)) {
+                $contributors.Add($loginLower, $login)
+            }
         }
     }
 
