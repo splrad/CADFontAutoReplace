@@ -18,14 +18,6 @@ const releaseLabelDefinitions = [
   { name: 'build', color: 'fef2c0', description: 'Release notes: installer, packaging, or runtime build changes.' },
   { name: 'plugin', color: 'cfd3d7', description: 'Release notes: runtime plugin changes.' },
 ];
-const kindLabelDefinitions = [
-  { name: 'kind:feature', color: '1d76db', description: 'PR type: feature or enhancement.' },
-  { name: 'kind:fix', color: 'd73a4a', description: 'PR type: bug fix or regression fix.' },
-  { name: 'kind:performance', color: 'fbca04', description: 'PR type: performance improvement.' },
-  { name: 'kind:refactor', color: 'c5def5', description: 'PR type: internal refactor without intended behavior change.' },
-  { name: 'kind:docs', color: '0075ca', description: 'PR type: documentation-only change.' },
-  { name: 'kind:chore', color: 'ededed', description: 'PR type: maintenance, build, workflow, or repository housekeeping.' },
-];
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -323,26 +315,8 @@ function inferReleaseLabels(context, summary) {
   return [...labels];
 }
 
-function inferKindLabels(context, summary) {
-  const files = changedFilePaths(context);
-  const normalizedFiles = files.map(normalizeRepoPath);
-  const docsOnly = normalizedFiles.length > 0 && normalizedFiles.every((file) => {
-    return file.startsWith('docs/')
-      || file === 'readme.md'
-      || (!file.startsWith('.github/') && file.endsWith('.md'));
-  });
-  const titleType = String(summary.title || '').match(/^(feat|fix|refactor|perf|docs|test|build|ci|chore|style|revert)(?:\([a-z0-9-]+\))?!?:/i)?.[1]?.toLowerCase();
-
-  if (titleType === 'feat') return ['kind:feature'];
-  if (titleType === 'fix') return ['kind:fix'];
-  if (titleType === 'perf') return ['kind:performance'];
-  if (titleType === 'refactor') return ['kind:refactor'];
-  if (titleType === 'docs' || docsOnly) return ['kind:docs'];
-  return ['kind:chore'];
-}
-
 function labelDefinition(labelName) {
-  return [...releaseLabelDefinitions, ...kindLabelDefinitions].find((item) => item.name === labelName);
+  return releaseLabelDefinitions.find((item) => item.name === labelName);
 }
 
 function ensureLabel(labelName) {
@@ -387,11 +361,6 @@ function applyLabels(prNumber, labels, groupName) {
 function applyReleaseLabels(prNumber, labels) {
   const releaseLabels = labels.filter((label) => releaseLabelDefinitions.some((item) => item.name === label));
   applyLabels(prNumber, releaseLabels, 'release note');
-}
-
-function applyKindLabels(prNumber, labels) {
-  const kindLabels = labels.filter((label) => kindLabelDefinitions.some((item) => item.name === label));
-  applyLabels(prNumber, kindLabels, 'PR type');
 }
 
 function formatLabels(labels) {
@@ -492,8 +461,7 @@ function upsertSuccessComment(prNumber, title, labelInfo = {}, options = {}) {
     `- 提交人：**${actor}**`,
     `- 分支流向：**${sourceBranch} -> ${targetBranch}**`,
     `- PR 链接：https://github.com/${repo}/pull/${prNumber}`,
-    `- 区域标签：由 **PR Labeler** workflow 根据 \`.github/labeler.yml\` 维护`,
-    `- PR 类型标签：${formatLabels(labelInfo.kindLabels || [])}`,
+    `- 可见 PR 标签：由 **PR Classification** workflow 维护`,
     `- Release Notes 标签：${formatLabels(labelInfo.releaseLabels || [])}`,
     `- 通知对象：${mentionText()}`,
     '',
@@ -592,7 +560,6 @@ function applySummary() {
   }
 
   const summary = sanitizeGenerated(generated, fallback);
-  const kindLabels = inferKindLabels(context, summary);
   const releaseLabels = inferReleaseLabels(context, summary);
   context.generationMode = generationMode;
   const current = findOpenPullRequest();
@@ -622,16 +589,14 @@ function applySummary() {
     createdPullRequest = true;
   }
 
-  applyKindLabels(prNumber, kindLabels);
   applyReleaseLabels(prNumber, releaseLabels);
-  upsertSuccessComment(prNumber, summary.title, { kindLabels, releaseLabels }, {
+  upsertSuccessComment(prNumber, summary.title, { releaseLabels }, {
     createIfMissing: createdPullRequest,
   });
   writeOutput({
     pr_number: prNumber,
     pr_title: summary.title,
     generation_mode: generationMode,
-    kind_labels: kindLabels.join(','),
     release_labels: releaseLabels.join(','),
   });
 }

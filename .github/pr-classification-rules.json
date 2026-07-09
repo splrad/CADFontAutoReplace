@@ -1,0 +1,62 @@
+{
+  "areas": [
+    {
+      "name": "area:runtime",
+      "patterns": [
+        "src/**",
+        "tools/Publish-ReleaseAssets.ps1",
+        "Directory.Build.props",
+        "Directory.Packages.props",
+        "global.json",
+        "chore/Fonts.zip"
+      ]
+    },
+    {
+      "name": "area:release",
+      "patterns": [
+        "Version.props",
+        "tools/Publish-ReleaseAssets.ps1",
+        ".github/release.yml",
+        ".github/workflows/release-build.yml",
+        ".github/scripts/generate-release-notes.ps1",
+        "chore/Fonts.zip"
+      ]
+    },
+    {
+      "name": "area:workflow",
+      "patterns": [
+        ".github/workflows/**"
+      ]
+    },
+    {
+      "name": "area:automation",
+      "patterns": [
+        ".github/scripts/**",
+        ".github/actions/**",
+        ".github/pr-classification-rules.json",
+        ".github/dependabot.yml",
+        ".github/copilot-instructions.md",
+        ".github/instructions/**",
+        ".github/pull_request_template.md"
+      ]
+    },
+    {
+      "name": "area:docs",
+      "patterns": [
+        "README.md",
+        "docs/**"
+      ]
+    },
+    {
+      "name": "area:config",
+      "patterns": [
+        ".editorconfig",
+        ".gitattributes",
+        ".gitignore",
+        "*.slnx",
+        "*.props",
+        "global.json"
+      ]
+    }
+  ]
+}

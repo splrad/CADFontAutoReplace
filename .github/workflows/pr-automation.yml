@@ -17,10 +17,10 @@
 #      并同步修改 PR Governance、PR Cleanup 和分支保护 required checks。
 #   5) 保留 .github/pull_request_template.md 中的 workflow:auto-summary 标记。
 #      workflow 只覆盖该自动区块，人工补充内容会保留。
-#   6) 保留 .github/labeler.yml 中的 area:* 管理标签配置。
-#      PR Labeler workflow 使用官方 actions/labeler 维护区域标签。
+#   6) 保留 PR Classification workflow。
+#      它维护无前缀可见 PR 标签，并把 area:* / kind:* 写入隐藏分类元数据。
 #   7) 保留 .github/release.yml 中的软件发布分类配置。
-#      PR Automation 只补 kind:* 标签和运行代码变化的 release notes label。
+#      PR Automation 只补运行代码变化的 release notes label。
 #   8) Copilot CLI 只用于生成中文 PR 标题和摘要；失败时使用确定性中文兜底。
 #   9) 合并本次 main-only 分支模型迁移后，更新远端 ruleset：
 #      从 main-protection 移除 Source Branch Gate required check；
