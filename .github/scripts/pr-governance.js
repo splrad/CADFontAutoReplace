@@ -221,7 +221,7 @@ function blockingFailureBody(state) {
   const failures = orderedBlockingFailures(state.failures);
   const sections = [];
   for (const failure of failures) {
-    sections.push(`### ${failure.title}`);
+    sections.push(`#### ${failure.title}`);
     for (const detail of failure.details) {
       sections.push(`- ${detail}`);
     }
@@ -231,14 +231,17 @@ function blockingFailureBody(state) {
   return [
     blockingFailuresMarker,
     `<!-- workflow:pr-blocking-failures-state:${encodeBlockingState(state)} -->`,
-    '## PR 暂不能合并',
+    `## PR 暂不能合并（${failures.length} 项阻断）`,
     '',
+    mentionText(),
+    '',
+    '### 当前上下文',
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- 当前提交：${headSha}`,
     `- 提交人：${effectivePrAuthorDisplay()}`,
-    `- 通知对象：${mentionText()}`,
+    `- 阻断项：${failures.map((failure) => failure.title).join('；')}`,
     '',
-    '### 阻断原因',
+    '### 需要处理',
     ...sections,
     '> 本通知由 GitHub Actions 自动发布；相关问题全部恢复后会自动删除。',
   ].join('\n').trimEnd();
@@ -402,9 +405,8 @@ function mainAuthorizationGate() {
     failed,
     details: [
       `状态：${status}`,
-      `分支流向：${headRef} -> ${baseRef}`,
-      `PR 提交人：${effectiveAuthorDisplay}`,
-      detail,
+      '问题：缺少核心开发者有效审批。',
+      '处理：请核心开发者审核并提交 approval，或由核心开发者重新推送。',
     ],
   });
 
@@ -890,13 +892,14 @@ function copilotReviewGate() {
     failed: checkStatus === 'completed' && checkConclusion === 'failure',
     details: [
       `Request Copilot Review job：${requestResult || '未提供'}`,
-      `分支流向：${headRef} -> ${baseRef}`,
-      `当前提交：${headSha}`,
       `Copilot 审查数量：${reviews.length}`,
-      detail,
+      `问题：${detail}`,
       ...blocking.map((item) => item.url
         ? `未解决重大问题：[${item.body || 'Copilot 评论'}](${item.url})`
         : `未解决重大问题：${item.body || 'Copilot 评论'}`),
+      blocking.length
+        ? '处理：请修复或回复并 resolve 上述 Copilot 阻断评论。'
+        : '处理：请检查 Request Copilot Review job 日志，修复后重新触发工作流。',
     ],
   });
 }
