@@ -17,7 +17,7 @@
 
 `结论：未发现需要阻断合并的问题。`
 
-如果 GitHub Copilot 官方流程在无新增评论时自动输出 `Copilot reviewed X out of X changed files in this pull request and generated no new comments.`，该英文模板同样是仓库 workflow 接受的无阻断信号；这个官方模板不受本说明强制改写。
+如果 GitHub Copilot 官方流程在无问题时自动输出 `Copilot reviewed X out of Y changed files in this pull request and generated no comments.` 或 `Copilot reviewed X out of Y changed files in this pull request and generated no new comments.`，这些英文模板同样是仓库 workflow 接受的无阻断信号；官方模板不受本说明强制改写。
 
 CodeQL 使用 GitHub Advanced Security default setup，并由 main ruleset 的 `Require code scanning results` 管理；本仓库不再维护自定义 CodeQL workflow，也不把 CodeQL job name 作为 required status check。
 

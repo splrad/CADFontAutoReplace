@@ -22,7 +22,7 @@ const eventName = process.env.GITHUB_EVENT_NAME || '';
 const copilotReviewerLogin = 'copilot-pull-request-reviewer[bot]';
 const copilotCheckName = process.env.COPILOT_REVIEW_CHECK_NAME || 'Copilot Code Review Gate';
 const copilotNoBlockingConclusion = '结论：未发现需要阻断合并的问题。';
-const copilotNoNewCommentsPattern = /Copilot reviewed \d+ out of \d+ changed files in this pull request and generated no new comments\./i;
+const copilotNoCommentsPattern = /Copilot reviewed \d+ out of \d+ changed files in this pull request and generated no (?:new )?comments\./i;
 let prDetailsCache = null;
 let effectiveAuthorCache = null;
 
@@ -573,7 +573,7 @@ function hasCopilotNoBlockingConclusion(reviews) {
 
 function copilotPassingConclusionSource(reviews) {
   if (hasCopilotNoBlockingConclusion(reviews)) return 'fixed-conclusion';
-  if (reviews.some((review) => copilotNoNewCommentsPattern.test(String(review?.body || '')))) return 'no-new-comments';
+  if (reviews.some((review) => copilotNoCommentsPattern.test(String(review?.body || '')))) return 'no-new-comments';
   return '';
 }
 
