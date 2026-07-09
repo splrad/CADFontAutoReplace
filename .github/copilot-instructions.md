@@ -13,4 +13,8 @@
 
 普通重构、命名偏好、格式问题或主观可读性建议不得标记为阻断。
 
+CodeQL workflow 在 `pull_request` 事件上执行 `github/codeql-action/analyze` 是本仓库 required check 的一部分；GitHub 官方允许该场景上传 code scanning 结果，不要建议为 fork PR 跳过 analyze。
+
+Copilot Review Gate 只解析当前 head 的未解决当前线程；`isOutdated` 线程属于旧 head 上下文，由最新 Copilot review 和 ruleset 的 review-thread-resolution 规则共同兜底。
+
 严重程度是本仓库自定义约定，不是 GitHub Copilot 官方结构化字段，也不依赖 GitHub 页面上的 Low/Medium 等 UI 徽标；请按上述文本输出，供仓库 workflow 解析。

@@ -31,7 +31,7 @@
 name: PR Governance
 
 on:
-  # pull_request_target 允许在受保护的默认分支上下文中读取治理脚本和提交审批/评论。
+  # pull_request_target 允许在受保护的默认分支上下文中读取治理脚本、提交审批和失败通知。
   # 脚本 checkout 固定到 base.sha，避免执行来自 PR head 的不可信 workflow 脚本。
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -49,7 +49,7 @@ concurrency:
 permissions:
   # contents: read 用于检出治理脚本；
   # pull-requests: write 用于 Auto Approve 和读取/提交 review；
-  # issues: write 用于 gate 状态评论。
+  # issues: write 用于 gate 失败通知，以及通过后清理旧 gate marker 评论。
   contents: read
   pull-requests: write
   issues: write

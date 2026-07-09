@@ -97,6 +97,11 @@ function notifyClose() {
     throw new Error('Closed PR without a closer comment; reopened.');
   }
 
+  if (!merged) {
+    console.log('PR was closed with a human-provided reason; automated close comment skipped.');
+    return;
+  }
+
   const title = process.env.PR_TITLE || 'unknown';
   const source = process.env.PR_HEAD_REF || 'unknown';
   const target = process.env.PR_BASE_REF || 'unknown';

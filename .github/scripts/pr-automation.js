@@ -503,8 +503,9 @@ function mentionText() {
   return mentions.length ? mentions.join('；') : '（未配置通知对象）';
 }
 
-function upsertSuccessComment(prNumber, title, labelInfo = {}) {
+function upsertSuccessComment(prNumber, title, labelInfo = {}, options = {}) {
   const commentToken = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
+  const createIfMissing = options.createIfMissing !== false;
   const marker = '<!-- workflow:pr-success-notice -->';
   const comments = ghJson([
     '--method', 'GET',
@@ -534,12 +535,14 @@ function upsertSuccessComment(prNumber, title, labelInfo = {}) {
       `repos/${repo}/issues/comments/${existing.id}`,
       '--input', '-',
     ], JSON.stringify({ body }), commentToken);
-  } else {
+  } else if (createIfMissing) {
     gh([
       '--method', 'POST',
       `repos/${repo}/issues/${prNumber}/comments`,
       '--input', '-',
     ], JSON.stringify({ body }), commentToken);
+  } else {
+    console.log('PR success notice does not exist; skipped creating one for an existing PR update.');
   }
 }
 
@@ -632,6 +635,7 @@ function applySummary() {
   const currentBody = current?.body || '';
   const body = buildBody(currentBody, summary, context);
   let prNumber = current?.number;
+  let createdPullRequest = false;
 
   if (prNumber) {
     gh([
@@ -651,11 +655,14 @@ function applySummary() {
       body,
     }));
     prNumber = created.number;
+    createdPullRequest = true;
   }
 
   applyKindLabels(prNumber, kindLabels);
   applyReleaseLabels(prNumber, releaseLabels);
-  upsertSuccessComment(prNumber, summary.title, { kindLabels, releaseLabels });
+  upsertSuccessComment(prNumber, summary.title, { kindLabels, releaseLabels }, {
+    createIfMissing: createdPullRequest,
+  });
   writeOutput({
     pr_number: prNumber,
     pr_title: summary.title,

@@ -1,4 +1,5 @@
 const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
 
 const repo = process.env.GITHUB_REPOSITORY || '';
 const [owner, repoName] = repo.split('/');
@@ -126,14 +127,18 @@ function mentionText() {
   return mentions.length ? mentions.join('；') : '（未配置通知对象）';
 }
 
-function upsertComment(marker, body) {
-  const token = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
+function findMarkerComment(marker, token) {
   const comments = ghJson([
     '--method', 'GET',
     `repos/${repo}/issues/${prNumber}/comments`,
     '-f', 'per_page=100',
   ], undefined, token) || [];
-  const existing = comments.find((comment) => String(comment.body || '').includes(marker));
+  return comments.find((comment) => String(comment.body || '').includes(marker));
+}
+
+function upsertComment(marker, body) {
+  const token = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
+  const existing = findMarkerComment(marker, token);
   if (existing) {
     gh([
       '--method', 'PATCH',
@@ -147,6 +152,41 @@ function upsertComment(marker, body) {
       '--input', '-',
     ], JSON.stringify({ body }), token);
   }
+}
+
+function deleteComment(marker) {
+  const token = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
+  const existing = findMarkerComment(marker, token);
+  if (!existing) return;
+
+  gh([
+    '--method', 'DELETE',
+    `repos/${repo}/issues/comments/${existing.id}`,
+  ], undefined, token);
+}
+
+function writeStepSummary(title, lines) {
+  const summaryLines = [
+    `## ${title}`,
+    '',
+    ...lines,
+    '',
+  ];
+  const summary = summaryLines.join('\n');
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary, 'utf8');
+  }
+  console.log(summary);
+}
+
+function finishGate({ marker, failed, body, summaryTitle, summaryLines }) {
+  writeStepSummary(summaryTitle, summaryLines);
+  if (failed) {
+    upsertComment(marker, body);
+    process.exit(1);
+  }
+
+  deleteComment(marker);
 }
 
 function formatFiles(files) {
@@ -167,21 +207,14 @@ function autoApprove() {
     return;
   }
 
-  const body = [
-    '## 自动审批已完成',
-    '',
-    '- 动作类型：APPROVE',
-    `- 分支流向：${headRef} -> ${baseRef}`,
-    `- PR 提交人：${effectiveAuthor}`,
-    '',
-    '> 本审批由 GitHub Actions 自动完成。',
-  ].join('\n');
-
   gh([
     '--method', 'POST',
     `repos/${repo}/pulls/${prNumber}/reviews`,
     '-f', 'event=APPROVE',
-    '-f', `body=${body}`,
+  ]);
+  writeStepSummary('自动审批已完成', [
+    `- 分支流向：${headRef} -> ${baseRef}`,
+    `- PR 提交人：${effectiveAuthor}`,
   ]);
 }
 
@@ -228,8 +261,22 @@ function protectedConfigGate() {
     '',
     '> 本通知由 GitHub Actions 自动发布。',
   ].join('\n');
-  upsertComment(marker, body);
-  if (failed) process.exit(1);
+  finishGate({
+    marker,
+    failed,
+    body,
+    summaryTitle: failed ? '受保护配置门禁未通过' : '受保护配置门禁已通过',
+    summaryLines: [
+      `- 状态：${status}`,
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- PR 提交人：${effectiveAuthor}`,
+      '',
+      detail,
+      '',
+      '### 受保护文件',
+      formatFiles(protectedFiles),
+    ],
+  });
 }
 
 function mainAuthorizationGate() {
@@ -266,8 +313,19 @@ function mainAuthorizationGate() {
     '',
     '> 本通知由 GitHub Actions 自动发布。',
   ].join('\n');
-  upsertComment(marker, body);
-  if (failed) process.exit(1);
+  finishGate({
+    marker,
+    failed,
+    body,
+    summaryTitle: failed ? '主分支授权门禁未通过' : '主分支授权门禁已通过',
+    summaryLines: [
+      `- 状态：${status}`,
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- PR 提交人：${effectiveAuthor}`,
+      '',
+      detail,
+    ],
+  });
 }
 
 function sourceBranchGate() {
@@ -293,8 +351,21 @@ function sourceBranchGate() {
     '',
     '> 本通知由 GitHub Actions 自动发布。',
   ].join('\n');
-  upsertComment(marker, body);
-  if (!allowed) process.exit(1);
+  finishGate({
+    marker,
+    failed: !allowed,
+    body,
+    summaryTitle: allowed ? '来源分支门禁已通过' : '来源分支门禁未通过',
+    summaryLines: [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- 来源仓库：${headRepo || 'unknown'}`,
+      `- PR 提交人：${effectiveAuthor}`,
+      '',
+      allowed
+        ? (trustedAuthor && headRef !== 'test' ? '核心开发者快速通道允许非 test 分支合入 main。' : '来源分支符合 test -> main 规则。')
+        : 'main 仅允许 test 分支发起 PR；核心开发者可走快速通道；外部 fork 禁止直达 main。',
+    ],
+  });
 }
 
 function copilotReviewsForHead() {
@@ -365,6 +436,8 @@ function unresolvedCopilotThreadFindings() {
     const payload = ghJson(args);
     const threads = payload?.data?.repository?.pullRequest?.reviewThreads;
     for (const thread of threads?.nodes || []) {
+      // Outdated 线程属于旧 head 的代码上下文。当前 head 是否可合并由最新 Copilot review、
+      // 未解决的当前线程，以及 ruleset 的 required review thread resolution 共同约束。
       if (thread.isResolved || thread.isOutdated) continue;
       const comments = thread.comments?.nodes || [];
       const copilotComments = comments.filter((comment) => isCopilotCodeReviewComment(comment));
@@ -451,8 +524,27 @@ function copilotReviewGate() {
     '',
     '> 本通知由 GitHub Actions 自动发布。',
   ].join('\n');
-  upsertComment(marker, body);
-  if (failed) process.exit(1);
+  finishGate({
+    marker,
+    failed,
+    body,
+    summaryTitle: failed ? 'Copilot 审查门禁未通过' : 'Copilot 审查门禁已通过',
+    summaryLines: [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- 当前提交：${headSha}`,
+      `- Copilot 审查数量：${reviews.length}`,
+      `- 未解决重大问题：${blocking.length}`,
+      `- 未识别严重程度评论：${unclassified.length}`,
+      '',
+      detail,
+      '',
+      '### 未解决重大问题',
+      blockingList,
+      '',
+      '### 未识别严重程度评论',
+      unclassifiedList,
+    ],
+  });
 }
 
 const command = process.argv[2];

@@ -35,7 +35,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  # 内置 github.token 只用于最小只读权限；PR 创建/评论使用 GitHub App token。
+  # 内置 github.token 只用于最小只读权限；PR 创建和新建成功通知使用 GitHub App token。
   contents: read
 
 jobs:
@@ -62,7 +62,7 @@ jobs:
           # 这里不要填写 App ID，也不要填写 client secret。
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
-          # PR 创建/更新需要 pull-requests: write；通知评论和 release notes label 需要 issues: write；
+          # PR 创建/更新需要 pull-requests: write；新建成功通知和 release notes label 需要 issues: write；
           # checkout 和 diff 分析需要 contents: read。
           permission-contents: read
           permission-pull-requests: write
@@ -130,7 +130,7 @@ jobs:
         if: env.SKIP_PR_AUTOMATION != 'true'
         id: apply
         env:
-          # 该步骤会创建或更新 PR、写入自动摘要区块，并更新成功通知评论。
+          # 该步骤会创建或更新 PR、写入自动摘要区块；只有新建 PR 时写成功通知评论。
           GH_TOKEN: ${{ steps.automation-token.outputs.token }}
           GH_COMMENT_TOKEN: ${{ steps.automation-token.outputs.token }}
           TRUSTED_DEVELOPERS: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}

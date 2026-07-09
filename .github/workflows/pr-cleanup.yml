@@ -4,7 +4,7 @@
 #      - WORKFLOW_AUTOMATION_APP_PRIVATE_KEY
 #      该 App 需要 Contents 读写、Pull requests 读写、Issues 读写。
 #   2) 本 workflow 做两件事：
-#      - main 目标 PR 关闭时，写入关闭/合并结果通知；未合并关闭必须先由关闭人写明原因。
+#      - main 目标 PR 合并时写入合并结果通知；未合并关闭必须先由关闭人写明原因。
 #      - main push 后，将 test 分支强制同步到 main。
 #   3) 如果新项目测试分支不是 test，修改 sync-test job env.TEST_BRANCH，
 #      并同步修改 PR Automation 的目标分支逻辑和 PR Governance 的 required checks。
@@ -15,7 +15,7 @@
 name: PR Cleanup
 
 on:
-  # 关闭 main 目标 PR 时写结果通知；push main 时同步 test 分支。
+  # 合并 main 目标 PR 时写结果通知；push main 时同步 test 分支。
   pull_request_target:
     branches:
       - main
@@ -29,7 +29,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  # 内置 github.token 只保留只读；写 PR 评论和同步 test 使用 GitHub App token。
+  # 内置 github.token 只保留只读；写合并/失败原因评论和同步 test 使用 GitHub App token。
   contents: read
 
 jobs:
@@ -55,7 +55,7 @@ jobs:
         id: automation-token
         uses: actions/create-github-app-token@v3
         with:
-          # 用于读取 PR、写评论、必要时重新打开未说明原因的 PR。
+          # 用于读取 PR、写合并/失败原因评论、必要时重新打开未说明原因的 PR。
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
           permission-contents: read
