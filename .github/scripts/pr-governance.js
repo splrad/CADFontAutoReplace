@@ -21,7 +21,7 @@ const headSha = process.env.PR_HEAD_SHA || '';
 const eventName = process.env.GITHUB_EVENT_NAME || '';
 const copilotReviewerLogin = 'copilot-pull-request-reviewer[bot]';
 const copilotCheckName = process.env.COPILOT_REVIEW_CHECK_NAME || 'Copilot Code Review Gate';
-const copilotNoBlockingConclusion = '结论：未发现需要阻断合并的问题。';
+const copilotNoBlockingConclusionPattern = /(?:^|\r?\n)\s*(?:#{1,6}\s*)?结论\s*(?::|：)?\s*(?:\r?\n\s*)*未发现需要阻断合并的问题。/;
 const copilotNoCommentsPattern = /Copilot reviewed \d+ out of \d+ changed files in this pull request and generated no (?:new )?comments\./i;
 const autoApprovalMarker = '<!-- workflow:auto-approval -->';
 let prDetailsCache = null;
@@ -657,7 +657,7 @@ function copilotReviewsForHead() {
 }
 
 function hasCopilotNoBlockingConclusion(reviews) {
-  return reviews.some((review) => String(review?.body || '').includes(copilotNoBlockingConclusion));
+  return reviews.some((review) => copilotNoBlockingConclusionPattern.test(String(review?.body || '')));
 }
 
 function copilotPassingConclusionSource(reviews) {
