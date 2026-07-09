@@ -545,6 +545,7 @@ dotnet build src/AFR.Deployer/AFR.Deployer.csproj
 - Debug-only 命令：确认 Release 中不可见。
 - Hook 改动：确认真实 `HookHandler` hit/redirect，不能只看安装成功。
 - 部署器改动：检查安装、卸载、字体释放、AWS 回滚和状态刷新。
+- 建议提交带 `Signed-off-by`，可用 `git commit -s` 创建；当前 DCO 检查只提示，不作为合并门禁。
 
 PR 标题和说明通常会自动生成。提交前检查生成内容是否准确，必要时补充：
 
