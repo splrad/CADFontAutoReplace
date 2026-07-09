@@ -13,9 +13,11 @@
 
 普通重构、命名偏好、格式问题或主观可读性建议不得标记为阻断。
 
-当没有发现需要阻断合并的问题时，review 正文必须包含以下固定结论句，供仓库 workflow 判定：
+当没有发现需要阻断合并的问题时，优先在 review 正文包含以下固定结论句，供仓库 workflow 判定：
 
 `结论：未发现需要阻断合并的问题。`
+
+如果 GitHub Copilot 官方流程在无问题时自动输出 `Copilot reviewed X out of Y changed files in this pull request and generated no comments.` 或 `Copilot reviewed X out of Y changed files in this pull request and generated no new comments.`，这些英文模板同样是仓库 workflow 接受的无阻断信号；官方模板不受本说明强制改写。
 
 CodeQL 使用 GitHub Advanced Security default setup，并由 main ruleset 的 `Require code scanning results` 管理；本仓库不再维护自定义 CodeQL workflow，也不把 CodeQL job name 作为 required status check。
 

@@ -43,9 +43,6 @@ on:
   # 审批或 Copilot review 正文变化后重新计算 main 授权门禁和 Copilot Code Review Gate。
   pull_request_review:
     types: [submitted, edited, dismissed]
-  # Copilot inline comment 变化后重新计算 Copilot Code Review Gate。
-  pull_request_review_comment:
-    types: [created, edited, deleted]
 
 concurrency:
   group: pr-governance-${{ github.event.pull_request.number || github.run_id }}
@@ -199,7 +196,6 @@ jobs:
     # 等 Copilot 提交 review 后，由下面的 review 事件重新触发并完成同名 required check。
     # 会自动重跑的场景：
     # - Copilot 延迟提交 review: pull_request_review submitted
-    # - Copilot 新增/编辑 inline comment: pull_request_review_comment
     # - 用户接受建议并推送修正: pull_request_target synchronize
     # 仅点击 Resolve/Unresolve conversation 不会触发 GitHub Actions；下次有其他事件触发时会读取最新 isResolved。
     # 缺少“严重程度：阻断/建议”或 “Severity: blocking/suggestion” 的 Copilot 评论只会警告，不直接阻断。
