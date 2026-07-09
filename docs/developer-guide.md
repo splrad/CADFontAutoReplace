@@ -10,6 +10,8 @@
 
 本文只覆盖开发和验证流程，不覆盖发布流程。用户安装和命令说明请看 [README](../README.md)；分支命名和 PR 规则请看 [Git 分支与 PR 规则](git-branch-guidelines.md)。
 
+你不必把所有步骤都手敲进命令行。后文保留 PowerShell 命令，是为了让路径、参数和构建目标足够明确；如果你习惯使用 Visual Studio、GitHub Desktop 或 GitHub 网页操作，只要结果一致，也可以按图形界面完成克隆、建分支、构建、提交和打开 PR。
+
 ## 开发路线
 
 先判断你要做哪类改动，再按对应路线走。
@@ -36,6 +38,23 @@
 
 - 目标版本 AutoCAD：修改插件运行时、字体检测、Hook 或 CAD 命令时需要。
 - 管理员权限：验证部署器安装、卸载、写入 AutoCAD 配置和释放字体时需要。
+- GitHub Desktop：如果你不熟悉 Git 命令，可用它完成 clone、branch、commit、push 和打开 PR。
+
+### 命令行和图形界面怎么选
+
+本指南里的命令块都是“可复制的基准流程”，不是强制要求。你可以按下表选择自己熟悉的入口：
+
+| 要做的事 | 图形界面做法 | 等价命令 |
+| --- | --- | --- |
+| 克隆仓库 | GitHub Desktop 选择 `File` > `Clone repository`，或 Visual Studio 选择 `Clone a repository` | `git clone ...` |
+| 新建分支 | GitHub Desktop 或 Visual Studio 的 branch 下拉菜单中新建分支 | `git checkout -b ...` |
+| 查看改动 | GitHub Desktop 的 `Changes` 页，或 Visual Studio 的 `Git Changes` 窗口 | `git status`、`git diff` |
+| 构建项目 | Visual Studio 右键目标项目选择 `Build`，或菜单 `Build` > `Build Solution` | `dotnet build ...` |
+| 调试插件 | Visual Studio 设置启动项目后按 F5 | 后文“路线 C” |
+| 提交并推送 | GitHub Desktop 或 Visual Studio 填写提交信息后 `Commit` / `Push` | `git add`、`git commit`、`git push` |
+| 打开 PR | GitHub Desktop 点击 `Create Pull Request`，或到 GitHub 网页打开 PR | GitHub 网页或 `gh pr create` |
+
+无论用哪种入口，PR 里都要说明实际做过的验证，例如构建了哪个项目、用哪个 AutoCAD 版本 `NETLOAD`、是否没有运行时环境。
 
 ### 检查环境
 
@@ -53,6 +72,17 @@ dotnet --info
 
 没有主仓库写权限时，先在 GitHub 上 Fork，然后克隆自己的 Fork。
 
+图形界面路径：
+
+1. 在 GitHub 网页打开项目，点击 `Fork`。
+2. 打开 GitHub Desktop，选择 `File` > `Clone repository`。
+3. 选择自己的 Fork，克隆到本机。
+4. 在 GitHub Desktop 的分支下拉菜单中新建任务分支，例如 `docs/developer-guide`。
+
+如果你使用 Visual Studio，也可以在启动页选择 `Clone a repository`，粘贴 Fork 地址后克隆；打开解决方案后，在右下角或 Git 菜单中新建分支。
+
+命令行路径：
+
 ```powershell
 git clone https://github.com/<your-name>/CADFontAutoReplace.git
 cd CADFontAutoReplace
@@ -62,12 +92,14 @@ git fetch upstream
 
 如果你已经有主仓库写权限，也可以直接克隆主仓库：
 
+图形界面路径同样适用，只是仓库地址换成 `https://github.com/splrad/CADFontAutoReplace.git`。
+
 ```powershell
 git clone https://github.com/splrad/CADFontAutoReplace.git
 cd CADFontAutoReplace
 ```
 
-开始改动前，先确认工作区状态：
+开始改动前，先确认工作区状态。图形界面用户可以看 GitHub Desktop 的 `Changes` 页或 Visual Studio 的 `Git Changes` 窗口；如果显示没有改动，就等价于命令行的 clean 状态。
 
 ```powershell
 git status
@@ -91,6 +123,15 @@ git checkout -b docs/developer-guide origin/main
 
 项目为不同 AutoCAD 年份提供不同版本壳。命令里的 `20XX` 要替换成你的目标版本，例如 `2026`。
 
+如果使用 Visual Studio：
+
+1. 打开根目录 [CADFontAutoReplace.slnx](../CADFontAutoReplace.slnx)。
+2. 在 Solution Explorer 中找到目标项目，例如 `AFR-ACAD2026` 或 `AFR.Deployer`。
+3. 右键项目选择 `Build`；需要全量检查时，使用菜单 `Build` > `Build Solution`。
+4. 构建失败时先看 `Error List` 和 `Output` 窗口，确认缺少的是 SDK、工作负载、NuGet 还原，还是代码编译错误。
+
+命令行构建：
+
 ```powershell
 # 构建一个 AutoCAD 版本插件
 dotnet build src/AutoCAD/AFR-ACAD20XX/AFR-ACAD20XX.csproj
@@ -103,6 +144,8 @@ dotnet build CADFontAutoReplace.slnx
 ```
 
 如果你只改文档，不需要构建整个解决方案，运行下面命令即可：
+
+图形界面用户也应在 GitHub Desktop 或 Visual Studio 中检查改动列表，确认没有误提交构建产物、个人路径或临时文件。下面的命令只用于检查 Markdown 和路径里是否有空白错误：
 
 ```powershell
 git diff --check
@@ -165,17 +208,20 @@ artifacts\bin\AFR-ACAD2026\debug\AFR-ACAD2026.dll
 
 1. 修改对应 Markdown 文件。
 2. 检查链接、命令和路径是否仍然准确。
-3. 运行：
+3. 在 GitHub Desktop 或 Visual Studio 中查看 changed files，确认没有带入无关文件。
+4. 运行：
 
 ```powershell
 git diff --check
 ```
 
-4. 查看改动：
+5. 查看改动：
 
 ```powershell
 git diff
 ```
+
+如果你使用 GitHub Desktop，可以在 `Changes` 页逐个文件查看差异；如果使用 Visual Studio，可以在 `Git Changes` 窗口打开文件 diff。命令行 `git diff` 只是同一件事的文本形式。
 
 文档 PR 不需要编造构建结果；没有运行构建就直接说明“文档改动，未运行构建”。
 
@@ -216,6 +262,8 @@ artifacts\bin\AFR-ACAD2026\debug\AFR-ACAD2026.dll
 
 如果你的 AutoCAD 安装路径不同，只改本机调试配置。提交前运行 `git diff`，确认没有把个人安装路径带进 PR。
 
+如果你主要使用图形界面，也要在提交前检查 `launchSettings.json`、`.csproj.user`、`.suo` 等个人配置没有进入 changed files。只要这些文件没有显示在 GitHub Desktop 或 Visual Studio 的改动列表中，就不需要额外处理。
+
 ### 路线 D：开发部署器
 
 部署器是独立 WPF 程序，负责一键安装、卸载和状态展示。它不引用 AutoCAD SDK，也不直接引用某个插件项目；真实安装时会把内嵌的插件 DLL 提取到用户选择的部署目录，并写入 AutoCAD 自动加载注册表项。
@@ -249,6 +297,8 @@ artifacts\bin\AFR-ACAD2026\debug\AFR-ACAD2026.dll
 
 只检查 UI 或普通编译时，直接构建部署器：
 
+Visual Studio 用户可以右键 `AFR.Deployer` 项目选择 `Build`。需要验证真实安装包输入时，先把对应 `AFR-ACAD20XX` 项目切到 `Release` 构建，再构建部署器。
+
 ```powershell
 dotnet build src/AFR.Deployer/AFR.Deployer.csproj
 ```
@@ -272,6 +322,8 @@ artifacts\bin\AFR-ACAD2026\release\AFR-ACAD2026.cad.json
 #### 运行部署器
 
 部署器 manifest 要求管理员权限。调试界面时可以从 Visual Studio 启动；验证安装/卸载时，建议直接运行开发构建产物：
+
+如果从文件资源管理器运行，右键 `AFR-Deployer.exe` 选择“以管理员身份运行”。如果从 Visual Studio 调试真实安装/卸载流程，也要用管理员权限启动 Visual Studio。
 
 ```powershell
 artifacts\bin\AFR.Deployer\debug_win-x64\AFR-Deployer.exe
@@ -546,6 +598,14 @@ dotnet build src/AFR.Deployer/AFR.Deployer.csproj
 - Hook 改动：确认真实 `HookHandler` hit/redirect，不能只看安装成功。
 - 部署器改动：检查安装、卸载、字体释放、AWS 回滚和状态刷新。
 - 建议提交带 `Signed-off-by`，可用 `git commit -s` 创建；当前 DCO 检查只提示，不作为合并门禁。
+
+如果使用 GitHub Desktop 或 Visual Studio 提交，提交前至少做三件事：
+
+1. 在 changed files 列表里逐个确认文件范围。
+2. 提交信息写清楚改动目的，例如 `docs: improve developer guide`。
+3. 推送后在 GitHub 网页打开 PR，并检查自动生成的 PR 标题和说明是否准确。
+
+当前 DCO 检查只提示，不阻断合并。如果你的图形界面工具没有启用 sign-off，可以在提交信息正文手动加入 `Signed-off-by: Your Name <your-email@example.com>`，或用命令行执行 `git commit -s` / `git commit --amend -s`。
 
 PR 标题和说明通常会自动生成。提交前检查生成内容是否准确，必要时补充：
 
