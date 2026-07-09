@@ -9,9 +9,8 @@ updates:
       timezone: "Asia/Bangkok"
     open-pull-requests-limit: 5
     labels:
-      - "area:workflow"
-      - "area:automation"
-      - "kind:chore"
+      - "workflow"
+      - "chore"
     commit-message:
       prefix: "chore(actions)"
 
@@ -35,9 +34,8 @@ updates:
       timezone: "Asia/Bangkok"
     open-pull-requests-limit: 5
     labels:
-      - "area:runtime"
-      - "area:config"
-      - "kind:chore"
+      - "plugin"
+      - "chore"
     commit-message:
       prefix: "chore(nuget)"
     ignore:

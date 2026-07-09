@@ -8,6 +8,7 @@ const prAuthor = process.env.PR_AUTHOR || 'unknown';
 const headRef = process.env.PR_HEAD_REF || '';
 const baseRef = process.env.PR_BASE_REF || '';
 const headSha = process.env.PR_HEAD_SHA || '';
+const copilotReviewerLogin = 'copilot-pull-request-reviewer[bot]';
 let prDetailsCache = null;
 let effectiveAuthorCache = null;
 
@@ -90,6 +91,21 @@ function latestApproversForHead() {
     .map((review) => review.user.login);
 }
 
+function requestedReviewerLogins() {
+  const payload = ghJson([
+    '--method', 'GET',
+    `repos/${repo}/pulls/${prNumber}/requested_reviewers`,
+  ]) || {};
+  return Array.isArray(payload.users)
+    ? payload.users.map((user) => user?.login || '').filter(Boolean)
+    : [];
+}
+
+function isCopilotReviewRequestLogin(login) {
+  const normalized = normalizeGitHubLogin(login);
+  return normalized === 'copilot-pull-request-reviewer' || normalized === 'copilot';
+}
+
 function mentionText() {
   const trusted = parseTrustedDevelopers();
   const mentions = [...new Set(trusted)].map((user) => `@${user}`);
@@ -127,6 +143,15 @@ function upsertComment(marker, body) {
   }
 }
 
+function createComment(body) {
+  const token = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
+  gh([
+    '--method', 'POST',
+    `repos/${repo}/issues/${prNumber}/comments`,
+    '--input', '-',
+  ], JSON.stringify({ body }), token);
+}
+
 function deleteComment(marker) {
   const token = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
   const existing = findMarkerComment(marker, token);
@@ -152,10 +177,17 @@ function writeStepSummary(title, lines) {
   console.log(summary);
 }
 
-function finishGate({ marker, failed, body, summaryTitle, summaryLines }) {
+function finishGate({ marker, failed, body, summaryTitle, summaryLines, commentPolicy = 'upsert' }) {
   writeStepSummary(summaryTitle, summaryLines);
   if (failed) {
-    upsertComment(marker, body);
+    if (commentPolicy === 'none') {
+      deleteComment(marker);
+    } else if (commentPolicy === 'replace') {
+      deleteComment(marker);
+      createComment(body);
+    } else {
+      upsertComment(marker, body);
+    }
     process.exit(1);
   }
 
@@ -176,14 +208,31 @@ function autoApprove() {
     return;
   }
 
+  const approvalBody = [
+    '## 自动审批说明',
+    '',
+    '本审批由 PR Governance 自动提交，用于满足 main ruleset 的 required approval 要求。',
+    '',
+    '### 判定依据',
+    `- 有效提交者：\`${effectiveAuthor}\``,
+    `- 分支流向：\`${headRef} -> ${baseRef}\``,
+    `- 当前提交：\`${headSha.slice(0, 12) || 'unknown'}\``,
+    '- 授权依据：有效提交者属于 `TRUSTED_DEVELOPERS`。',
+    '',
+    '### 注意',
+    '- 这不是人工代码审查结论。',
+    '- 合并仍需通过 `Main Authorization Gate`、`Copilot Review Gate` 和 CodeQL。',
+  ].join('\n');
+
   gh([
     '--method', 'POST',
     `repos/${repo}/pulls/${prNumber}/reviews`,
-    '-f', 'event=APPROVE',
-  ]);
+    '--input', '-',
+  ], JSON.stringify({ event: 'APPROVE', body: approvalBody }));
   writeStepSummary('自动审批已完成', [
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- PR 提交人：${effectiveAuthor}`,
+    `- 当前提交：${headSha.slice(0, 12) || 'unknown'}`,
   ]);
 }
 
@@ -234,6 +283,62 @@ function mainAuthorizationGate() {
       detail,
     ],
   });
+}
+
+function requestCopilotReview() {
+  ensurePrContext();
+  const reviews = copilotReviewsForHead();
+  if (reviews.length > 0) {
+    writeStepSummary('Copilot 审查请求已跳过', [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- 当前提交：${headSha}`,
+      `- 原因：当前提交已有 Copilot 代码审查。`,
+    ]);
+    return;
+  }
+
+  const requestedReviewers = requestedReviewerLogins();
+  if (requestedReviewers.some(isCopilotReviewRequestLogin)) {
+    writeStepSummary('Copilot 审查请求已跳过', [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- 当前提交：${headSha}`,
+      `- 原因：Copilot 已在待审查人列表中。`,
+    ]);
+    return;
+  }
+
+  try {
+    gh([
+      '--method', 'POST',
+      `repos/${repo}/pulls/${prNumber}/requested_reviewers`,
+      '--input', '-',
+    ], JSON.stringify({ reviewers: [copilotReviewerLogin] }));
+  } catch (error) {
+    if (copilotReviewsForHead().length > 0 || requestedReviewerLogins().some(isCopilotReviewRequestLogin)) {
+      writeStepSummary('Copilot 审查请求已跳过', [
+        `- 分支流向：${headRef} -> ${baseRef}`,
+        `- 当前提交：${headSha}`,
+        `- 原因：Copilot 已由并发流程请求或完成审查。`,
+      ]);
+      return;
+    }
+
+    const detail = String(error.stderr || error.message || error).trim().slice(0, 800);
+    writeStepSummary('Copilot 审查请求失败', [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- 当前提交：${headSha}`,
+      `- 请求 reviewer：${copilotReviewerLogin}`,
+      '',
+      detail || 'GitHub API request failed.',
+    ]);
+    process.exit(1);
+  }
+
+  writeStepSummary('Copilot 审查请求已提交', [
+    `- 分支流向：${headRef} -> ${baseRef}`,
+    `- 当前提交：${headSha}`,
+    `- 请求 reviewer：${copilotReviewerLogin}`,
+  ]);
 }
 
 function copilotReviewsForHead() {
@@ -341,6 +446,7 @@ function copilotReviewGate() {
   const reviews = copilotReviewsForHead();
   const marker = '<!-- workflow:copilot-review-gate -->';
   let failed = false;
+  let commentPolicy = 'upsert';
   let title = '## Copilot 审查门禁已通过';
   let detail = '当前提交已完成 Copilot 代码审查，且未发现未解决的重大问题。';
   let blocking = [];
@@ -348,14 +454,16 @@ function copilotReviewGate() {
 
   if (reviews.length === 0) {
     failed = true;
+    commentPolicy = 'none';
     title = '## Copilot 审查门禁未通过';
-    detail = '当前提交尚未检测到 Copilot 代码审查。请等待规则集自动审查完成，或重新推送触发审查。';
+    detail = '当前提交尚未检测到 Copilot 代码审查。请等待自动审查请求完成，或重新推送触发审查。';
   } else {
     const findings = unresolvedCopilotThreadFindings();
     blocking = findings.blocking;
     unclassified = findings.unclassified;
     if (blocking.length > 0) {
       failed = true;
+      commentPolicy = 'replace';
       title = '## Copilot 审查门禁未通过';
       detail = '检测到 Copilot 留下的未解决重大问题。';
     }
@@ -396,6 +504,7 @@ function copilotReviewGate() {
     marker,
     failed,
     body,
+    commentPolicy,
     summaryTitle: failed ? 'Copilot 审查门禁未通过' : 'Copilot 审查门禁已通过',
     summaryLines: [
       `- 分支流向：${headRef} -> ${baseRef}`,
@@ -420,6 +529,8 @@ if (command === 'auto-approve') {
   autoApprove();
 } else if (command === 'main-authorization') {
   mainAuthorizationGate();
+} else if (command === 'request-copilot-review') {
+  requestCopilotReview();
 } else if (command === 'copilot-review') {
   copilotReviewGate();
 } else {

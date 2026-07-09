@@ -13,7 +13,7 @@
 
 普通重构、命名偏好、格式问题或主观可读性建议不得标记为阻断。
 
-CodeQL workflow 在 `pull_request` 事件上执行 `github/codeql-action/analyze` 是本仓库 required check 的一部分；GitHub 官方允许该场景上传 code scanning 结果，不要建议为 fork PR 跳过 analyze。
+CodeQL 使用 GitHub Advanced Security default setup，并由 main ruleset 的 `Require code scanning results` 管理；本仓库不再维护自定义 CodeQL workflow，也不把 CodeQL job name 作为 required status check。
 
 Copilot Review Gate 只解析当前 head 的未解决当前线程；`isOutdated` 线程属于旧 head 上下文，由最新 Copilot review 和 ruleset 的 review-thread-resolution 规则共同兜底。
 

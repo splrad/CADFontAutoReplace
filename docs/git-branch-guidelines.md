@@ -42,7 +42,7 @@ git checkout -b docs/developer-guide upstream/main
 git status
 git diff
 git add <changed-files>
-git commit -m "docs: improve developer guide"
+git commit -s -m "docs: improve developer guide"
 git push -u origin docs/developer-guide
 ```
 
@@ -86,6 +86,22 @@ refactor: isolate shx availability lookup
 ```
 
 仓库会自动生成 PR 标题，但提交信息仍应保持可读。一个 PR 可以包含多个提交，每个提交都应保持可解释。
+
+推荐使用 DCO 风格的 `Signed-off-by` 提交，例如 `git commit -s -m "docs: improve developer guide"`。这会在提交信息末尾加入：
+
+```text
+Signed-off-by: Your Name <your-email@example.com>
+```
+
+仓库会运行非阻断的 `DCO Sign-off Advisory` 检查，提示缺少或邮箱不匹配的 `Signed-off-by`。它当前不会阻止合并，但有助于未来接收更多外部贡献，或把本项目流程复用到其它仓库。
+
+如果已经提交后需要补签：
+
+```powershell
+git fetch upstream
+git commit --amend -s
+git rebase --signoff upstream/main
+```
 
 ## 不应提交的内容
 

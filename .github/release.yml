@@ -4,8 +4,9 @@
 #   - GitHub releases/generate-notes 会按 PR label 归类到下面的 categories。
 #   - 同一个 PR 命中多个分类时，通常按 categories 顺序进入最先匹配的分类。
 #   - 只保留运行代码、安装器、发布包相关分类；纯 workflow/docs/chore 不进入发布说明。
-#   - PR Labeler 的 area:* 和 PR Automation 的 kind:* 是管理标签，不作为发布说明分类依据。
-#   - PR Automation 只会为运行代码变化自动补充下面这些 release labels。
+#   - PR Classification 的 area:* / kind:* 是隐藏分类元数据，不作为可见标签或发布说明分类依据。
+#   - PR Classification 是唯一的 release label 写入者。
+#   - 自动化脚本的路径和分类判定统一维护在 .github/pr-classification-rules.json。
 changelog:
   exclude:
     labels:

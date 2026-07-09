@@ -1,6 +1,12 @@
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+  isInstallOrPackagePath,
+  isRuntimeReleasePath,
+  loadPolicyOrDefault,
+  normalizeRepoPath,
+} = require('./pr-classification-policy');
 
 const repo = process.env.GITHUB_REPOSITORY || '';
 const [owner, repoName] = repo.split('/');
@@ -9,23 +15,8 @@ let targetBranch = process.env.TARGET_BRANCH || '';
 const actor = process.env.GITHUB_ACTOR || 'unknown';
 const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
 const runnerTemp = process.env.RUNNER_TEMP || workspace;
-const releaseLabelDefinitions = [
-  { name: 'breaking-change', color: 'b60205', description: 'Release notes: breaking or incompatible changes.' },
-  { name: 'security', color: 'd73a4a', description: 'Release notes: security fixes or vulnerability hardening.' },
-  { name: 'feature', color: '1d76db', description: 'Release notes: new user-facing features or enhancements.' },
-  { name: 'bug', color: 'd73a4a', description: 'Release notes: bug fixes or regressions.' },
-  { name: 'performance', color: 'fbca04', description: 'Release notes: performance improvements.' },
-  { name: 'build', color: 'fef2c0', description: 'Release notes: installer, packaging, or runtime build changes.' },
-  { name: 'plugin', color: 'cfd3d7', description: 'Release notes: runtime plugin changes.' },
-];
-const kindLabelDefinitions = [
-  { name: 'kind:feature', color: '1d76db', description: 'PR type: feature or enhancement.' },
-  { name: 'kind:fix', color: 'd73a4a', description: 'PR type: bug fix or regression fix.' },
-  { name: 'kind:performance', color: 'fbca04', description: 'PR type: performance improvement.' },
-  { name: 'kind:refactor', color: 'c5def5', description: 'PR type: internal refactor without intended behavior change.' },
-  { name: 'kind:docs', color: '0075ca', description: 'PR type: documentation-only change.' },
-  { name: 'kind:chore', color: 'ededed', description: 'PR type: maintenance, build, workflow, or repository housekeeping.' },
-];
+const policy = loadPolicyOrDefault(process.env.PR_CLASSIFICATION_RULES
+  || path.join(workspace, '.github', 'pr-classification-rules.json'));
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -89,10 +80,12 @@ function cleanLines(text, limit = 40) {
 }
 
 function fileCategory(file) {
-  const normalized = file.replace(/\\/g, '/');
+  const normalized = normalizeRepoPath(file);
   if (normalized.startsWith('.github/')) return 'github';
-  if (/^(version\.props|package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|.*\.csproj|.*\.slnx?)$/i.test(normalized)) return 'version';
-  if (normalized.startsWith('src/') || normalized.startsWith('app/') || normalized.startsWith('lib/')) return 'source';
+  if (/^(version\.props|package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|.*\.csproj|.*\.slnx?)$/i.test(normalized)
+    || isInstallOrPackagePath(normalized, policy)) return 'version';
+  if (normalized.startsWith('src/') || normalized.startsWith('app/') || normalized.startsWith('lib/')
+    || isRuntimeReleasePath(normalized, policy)) return 'source';
   if (normalized.startsWith('test/') || normalized.startsWith('tests/') || normalized.includes('/tests/')) return 'tests';
   if (normalized.startsWith('tools/') || normalized.startsWith('scripts/')) return 'tools';
   if (normalized.startsWith('docs/') || normalized.toLowerCase().includes('readme')) return 'docs';
@@ -266,138 +259,6 @@ function htmlCommentValue(value) {
     .replace(/\r?\n/g, ' ');
 }
 
-function changedFilePaths(context) {
-  return cleanLines(context.changedFiles, 200).map((line) => {
-    const parts = line.split(/\t+/);
-    return (parts[parts.length - 1] || line).replace(/\\/g, '/');
-  });
-}
-
-function normalizeRepoPath(file) {
-  return String(file || '').replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
-}
-
-function isRuntimeReleasePath(file) {
-  const normalized = normalizeRepoPath(file);
-  if (normalized.startsWith('src/')) return true;
-  if (normalized === 'tools/publish-releaseassets.ps1') return true;
-  if (['directory.build.props', 'directory.build.targets', 'directory.packages.props', 'global.json'].includes(normalized)) return true;
-  if (normalized === 'chore/fonts.zip') return true;
-  return false;
-}
-
-function isInstallOrPackagePath(file) {
-  const normalized = normalizeRepoPath(file);
-  return normalized === 'tools/publish-releaseassets.ps1'
-    || normalized === 'chore/fonts.zip'
-    || ['directory.build.props', 'directory.build.targets', 'directory.packages.props', 'global.json'].includes(normalized);
-}
-
-function hasConventionalType(text, types) {
-  return new RegExp(`(^|\\s|\\n)(${types})(\\([a-z0-9-]+\\))?!?:`, 'i').test(text);
-}
-
-function inferReleaseLabels(context, summary) {
-  const files = changedFilePaths(context);
-  const runtimeFiles = files.filter(isRuntimeReleasePath);
-  if (!runtimeFiles.length) return [];
-
-  const text = [
-    summary.title,
-    summary.summary,
-    ...(summary.changes || []),
-    context.commits,
-  ].join('\n').toLowerCase();
-  const labels = new Set();
-
-  if (/(breaking|破坏性|不兼容|semver-major)/i.test(text)) labels.add('breaking-change');
-  if (/(security|安全|漏洞|vulnerab|cve)/i.test(text)) labels.add('security');
-  if (hasConventionalType(text, 'fix|bug|bugfix|regression') || /(修复|缺陷|问题)/i.test(text)) labels.add('bug');
-  if (hasConventionalType(text, 'feat|feature|enhancement') || /(新增|添加|功能)/i.test(text)) labels.add('feature');
-  if (hasConventionalType(text, 'perf|performance') || /性能/i.test(text)) labels.add('performance');
-  if (runtimeFiles.some(isInstallOrPackagePath)
-    || hasConventionalType(text, 'build')
-    || /(packag|package|installer|打包|构建|安装|发布包)/i.test(text)) labels.add('build');
-  if (!labels.size) labels.add('plugin');
-
-  return [...labels];
-}
-
-function inferKindLabels(context, summary) {
-  const files = changedFilePaths(context);
-  const normalizedFiles = files.map(normalizeRepoPath);
-  const docsOnly = normalizedFiles.length > 0 && normalizedFiles.every((file) => {
-    return file.startsWith('docs/')
-      || file === 'readme.md'
-      || (!file.startsWith('.github/') && file.endsWith('.md'));
-  });
-  const titleType = String(summary.title || '').match(/^(feat|fix|refactor|perf|docs|test|build|ci|chore|style|revert)(?:\([a-z0-9-]+\))?!?:/i)?.[1]?.toLowerCase();
-
-  if (titleType === 'feat') return ['kind:feature'];
-  if (titleType === 'fix') return ['kind:fix'];
-  if (titleType === 'perf') return ['kind:performance'];
-  if (titleType === 'refactor') return ['kind:refactor'];
-  if (titleType === 'docs' || docsOnly) return ['kind:docs'];
-  return ['kind:chore'];
-}
-
-function labelDefinition(labelName) {
-  return [...releaseLabelDefinitions, ...kindLabelDefinitions].find((item) => item.name === labelName);
-}
-
-function ensureLabel(labelName) {
-  const definition = labelDefinition(labelName);
-  if (!definition) return;
-
-  const encoded = encodeURIComponent(definition.name);
-  const existing = runAllowFail('gh', [
-    'api',
-    '--method', 'GET',
-    `repos/${repo}/labels/${encoded}`,
-  ], {
-    env: { ...process.env, GH_TOKEN: process.env.GH_TOKEN || '' },
-  });
-  if (existing) return;
-
-  gh([
-    '--method', 'POST',
-    `repos/${repo}/labels`,
-    '--input', '-',
-  ], JSON.stringify(definition));
-}
-
-function applyLabels(prNumber, labels, groupName) {
-  const knownLabels = labels.filter((label) => labelDefinition(label));
-  if (!knownLabels.length) return;
-
-  try {
-    for (const label of knownLabels) {
-      ensureLabel(label);
-    }
-    gh([
-      '--method', 'POST',
-      `repos/${repo}/issues/${prNumber}/labels`,
-      '--input', '-',
-    ], JSON.stringify({ labels: knownLabels }));
-  } catch (error) {
-    console.warn(`::warning::Failed to apply ${groupName} labels: ${error.message}`);
-  }
-}
-
-function applyReleaseLabels(prNumber, labels) {
-  const releaseLabels = labels.filter((label) => releaseLabelDefinitions.some((item) => item.name === label));
-  applyLabels(prNumber, releaseLabels, 'release note');
-}
-
-function applyKindLabels(prNumber, labels) {
-  const kindLabels = labels.filter((label) => kindLabelDefinitions.some((item) => item.name === label));
-  applyLabels(prNumber, kindLabels, 'PR type');
-}
-
-function formatLabels(labels) {
-  return labels.length ? labels.map((label) => `\`${label}\``).join('、') : '无';
-}
-
 function buildAutoBlock(summary, context) {
   const bulletList = (items) => items.map((item) => `- ${item}`).join('\n');
   const changedFileCount = cleanLines(context.changedFiles, 10000).length;
@@ -458,63 +319,6 @@ function findOpenPullRequest() {
     '-f', 'per_page=20',
   ]);
   return Array.isArray(result) ? result[0] || null : null;
-}
-
-function mentionText() {
-  let trusted = [];
-  try {
-    const parsed = JSON.parse(process.env.TRUSTED_DEVELOPERS || '[]');
-    if (Array.isArray(parsed)) trusted = parsed.filter((item) => typeof item === 'string' && item.trim());
-  } catch {
-    trusted = [];
-  }
-  const unique = [...new Set(trusted.map((item) => item.trim()))];
-  const mentions = unique.map((item) => `@${item}`);
-  if (actor && actor !== 'unknown' && !unique.includes(actor)) mentions.push(`@${actor}`);
-  return mentions.length ? mentions.join('；') : '（未配置通知对象）';
-}
-
-function upsertSuccessComment(prNumber, title, labelInfo = {}, options = {}) {
-  const commentToken = process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
-  const createIfMissing = options.createIfMissing !== false;
-  const marker = '<!-- workflow:pr-success-notice -->';
-  const comments = ghJson([
-    '--method', 'GET',
-    `repos/${repo}/issues/${prNumber}/comments`,
-    '-f', 'per_page=100',
-  ], undefined, commentToken) || [];
-  const existing = comments.find((comment) => String(comment.body || '').includes(marker));
-  const body = [
-    marker,
-    '## PR 自动化已完成',
-    '',
-    `- PR 标题：**${title}**`,
-    `- 提交人：**${actor}**`,
-    `- 分支流向：**${sourceBranch} -> ${targetBranch}**`,
-    `- PR 链接：https://github.com/${repo}/pull/${prNumber}`,
-    `- 区域标签：由 **PR Labeler** workflow 根据 \`.github/labeler.yml\` 维护`,
-    `- PR 类型标签：${formatLabels(labelInfo.kindLabels || [])}`,
-    `- Release Notes 标签：${formatLabels(labelInfo.releaseLabels || [])}`,
-    `- 通知对象：${mentionText()}`,
-    '',
-    '> 本通知由 GitHub Actions 自动发布。',
-  ].join('\n');
-
-  if (existing) {
-    gh([
-      '--method', 'PATCH',
-      `repos/${repo}/issues/comments/${existing.id}`,
-      '--input', '-',
-    ], JSON.stringify({ body }), commentToken);
-  } else if (createIfMissing) {
-    gh([
-      '--method', 'POST',
-      `repos/${repo}/issues/${prNumber}/comments`,
-      '--input', '-',
-    ], JSON.stringify({ body }), commentToken);
-  } else {
-    console.log('PR success notice does not exist; skipped creating one for an existing PR update.');
-  }
 }
 
 function generate() {
@@ -592,14 +396,11 @@ function applySummary() {
   }
 
   const summary = sanitizeGenerated(generated, fallback);
-  const kindLabels = inferKindLabels(context, summary);
-  const releaseLabels = inferReleaseLabels(context, summary);
   context.generationMode = generationMode;
   const current = findOpenPullRequest();
   const currentBody = current?.body || '';
   const body = buildBody(currentBody, summary, context);
   let prNumber = current?.number;
-  let createdPullRequest = false;
 
   if (prNumber) {
     gh([
@@ -619,20 +420,12 @@ function applySummary() {
       body,
     }));
     prNumber = created.number;
-    createdPullRequest = true;
   }
 
-  applyKindLabels(prNumber, kindLabels);
-  applyReleaseLabels(prNumber, releaseLabels);
-  upsertSuccessComment(prNumber, summary.title, { kindLabels, releaseLabels }, {
-    createIfMissing: createdPullRequest,
-  });
   writeOutput({
     pr_number: prNumber,
     pr_title: summary.title,
     generation_mode: generationMode,
-    kind_labels: kindLabels.join(','),
-    release_labels: releaseLabels.join(','),
   });
 }
 

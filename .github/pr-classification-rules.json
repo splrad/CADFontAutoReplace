@@ -1,0 +1,287 @@
+{
+  "areas": [
+    {
+      "name": "area:runtime",
+      "patterns": [
+        "src/**",
+        "tools/Publish-ReleaseAssets.ps1",
+        "Directory.Build.props",
+        "Directory.Build.targets",
+        "Directory.Packages.props",
+        "global.json",
+        "chore/Fonts.zip"
+      ]
+    },
+    {
+      "name": "area:release",
+      "patterns": [
+        "Version.props",
+        "tools/Publish-ReleaseAssets.ps1",
+        ".github/release.yml",
+        ".github/workflows/release-build.yml",
+        ".github/scripts/generate-release-notes.ps1",
+        "chore/Fonts.zip"
+      ]
+    },
+    {
+      "name": "area:workflow",
+      "patterns": [
+        ".github/workflows/**"
+      ]
+    },
+    {
+      "name": "area:automation",
+      "patterns": [
+        ".github/scripts/**",
+        ".github/actions/**",
+        ".github/pr-classification-rules.json",
+        ".github/dependabot.yml",
+        ".github/copilot-instructions.md",
+        ".github/instructions/**",
+        ".github/pull_request_template.md"
+      ]
+    },
+    {
+      "name": "area:docs",
+      "patterns": [
+        "README.md",
+        "docs/**"
+      ]
+    },
+    {
+      "name": "area:config",
+      "patterns": [
+        ".editorconfig",
+        ".gitattributes",
+        ".gitignore",
+        "*.slnx",
+        "*.props",
+        "global.json"
+      ]
+    }
+  ],
+  "runtimeRelease": {
+    "includePrefixes": [
+      "src/"
+    ],
+    "includeFiles": [
+      "tools/Publish-ReleaseAssets.ps1",
+      "Directory.Build.props",
+      "Directory.Build.targets",
+      "Directory.Packages.props",
+      "global.json",
+      "chore/Fonts.zip"
+    ],
+    "excludePrefixes": [
+      ".github/",
+      ".local/",
+      ".agents/",
+      ".codex/",
+      ".claude/",
+      ".vscode/",
+      "docs/"
+    ],
+    "excludeFiles": [
+      "README.md",
+      "LICENSE.txt",
+      "Version.props",
+      "CADFontAutoReplace.slnx",
+      ".editorconfig",
+      ".gitattributes",
+      ".gitignore"
+    ]
+  },
+  "installOrPackage": {
+    "includeFiles": [
+      "tools/Publish-ReleaseAssets.ps1",
+      "chore/Fonts.zip",
+      "Directory.Build.props",
+      "Directory.Build.targets",
+      "Directory.Packages.props",
+      "global.json"
+    ]
+  },
+  "labels": {
+    "public": [
+      {
+        "name": "breaking-change",
+        "color": "b60205",
+        "description": "Release notes: breaking or incompatible changes."
+      },
+      {
+        "name": "security",
+        "color": "d73a4a",
+        "description": "Release notes: security fixes or vulnerability hardening."
+      },
+      {
+        "name": "feature",
+        "color": "1d76db",
+        "description": "Release notes: new user-facing features or enhancements."
+      },
+      {
+        "name": "bug",
+        "color": "d73a4a",
+        "description": "Release notes: bug fixes or regressions."
+      },
+      {
+        "name": "performance",
+        "color": "fbca04",
+        "description": "Release notes: performance improvements."
+      },
+      {
+        "name": "build",
+        "color": "fef2c0",
+        "description": "Release notes: installer, packaging, or runtime build changes."
+      },
+      {
+        "name": "plugin",
+        "color": "cfd3d7",
+        "description": "Release notes: runtime plugin changes."
+      },
+      {
+        "name": "documentation",
+        "color": "0075ca",
+        "description": "PR label: documentation changes."
+      },
+      {
+        "name": "workflow",
+        "color": "5319e7",
+        "description": "PR label: GitHub Actions or repository automation changes."
+      },
+      {
+        "name": "chore",
+        "color": "ededed",
+        "description": "PR label: maintenance, dependency, or repository housekeeping."
+      }
+    ],
+    "release": [
+      "breaking-change",
+      "security",
+      "feature",
+      "bug",
+      "performance",
+      "build",
+      "plugin"
+    ],
+    "internalPrefixes": [
+      "area:",
+      "kind:"
+    ]
+  },
+  "releaseCategories": [
+    {
+      "title": "破坏性变更",
+      "releaseLabel": "breaking-change",
+      "labels": [
+        "breaking-change",
+        "breaking",
+        "semver-major"
+      ],
+      "textPatterns": [
+        "(^|\\s|\\n)(feat|fix|refactor|perf|docs|test|build|ci|chore|style|revert)(\\([a-z0-9-]+\\))?!:",
+        "breaking",
+        "破坏性",
+        "不兼容",
+        "semver-major"
+      ],
+      "installOrPackage": false,
+      "fallback": false
+    },
+    {
+      "title": "安全修复",
+      "releaseLabel": "security",
+      "labels": [
+        "security",
+        "vulnerability"
+      ],
+      "textPatterns": [
+        "security",
+        "安全",
+        "漏洞",
+        "cve"
+      ],
+      "installOrPackage": false,
+      "fallback": false
+    },
+    {
+      "title": "新增功能",
+      "releaseLabel": "feature",
+      "labels": [
+        "feature",
+        "feat",
+        "enhancement",
+        "semver-minor"
+      ],
+      "textPatterns": [
+        "(^|\\s|\\n)(feat|feature|enhancement)(\\([a-z0-9-]+\\))?!?:",
+        "新增",
+        "添加",
+        "功能"
+      ],
+      "installOrPackage": false,
+      "fallback": false
+    },
+    {
+      "title": "问题修复",
+      "releaseLabel": "bug",
+      "labels": [
+        "bug",
+        "fix",
+        "bugfix",
+        "regression"
+      ],
+      "textPatterns": [
+        "(^|\\s|\\n)(fix|bug|bugfix|regression)(\\([a-z0-9-]+\\))?!?:",
+        "修复",
+        "缺陷",
+        "问题"
+      ],
+      "installOrPackage": false,
+      "fallback": false
+    },
+    {
+      "title": "性能优化",
+      "releaseLabel": "performance",
+      "labels": [
+        "performance",
+        "perf"
+      ],
+      "textPatterns": [
+        "(^|\\s|\\n)(perf|performance)(\\([a-z0-9-]+\\))?!?:",
+        "性能"
+      ],
+      "installOrPackage": false,
+      "fallback": false
+    },
+    {
+      "title": "安装与发布包",
+      "releaseLabel": "build",
+      "labels": [
+        "build"
+      ],
+      "textPatterns": [
+        "(^|\\s|\\n)build(\\([a-z0-9-]+\\))?!?:",
+        "packag",
+        "package",
+        "installer",
+        "打包",
+        "构建",
+        "安装",
+        "发布包"
+      ],
+      "installOrPackage": true,
+      "fallback": false
+    },
+    {
+      "title": "其他插件变更",
+      "releaseLabel": "plugin",
+      "labels": [
+        "plugin",
+        "runtime"
+      ],
+      "textPatterns": [],
+      "installOrPackage": false,
+      "fallback": true
+    }
+  ]
+}

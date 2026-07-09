@@ -143,54 +143,77 @@ function Get-AssociatedPullRequestNumbers {
 }
 
 function Normalize-RepoPath([string]$Path) {
-    return ($Path.Replace('\', '/') -replace '^\./', '')
+    return (($Path.Replace('\', '/') -replace '^\./', '').ToLowerInvariant())
 }
 
-function Test-RuntimeReleasePath([string]$Path) {
-    $normalized = Normalize-RepoPath $Path
-    $lower = $normalized.ToLowerInvariant()
+$script:ClassificationPolicy = $null
 
-    if ($lower.StartsWith('.github/') -or
-        $lower.StartsWith('.local/') -or
-        $lower.StartsWith('.agents/') -or
-        $lower.StartsWith('.codex/') -or
-        $lower.StartsWith('.claude/') -or
-        $lower.StartsWith('.vscode/') -or
-        $lower.StartsWith('docs/') -or
-        $lower -eq 'readme.md' -or
-        $lower -eq 'license.txt' -or
-        $lower -eq 'version.props' -or
-        $lower -eq 'cadfontautoreplace.slnx' -or
-        $lower -eq '.editorconfig' -or
-        $lower -eq '.gitattributes' -or
-        $lower -eq '.gitignore') {
+function Get-PolicyArray($Value) {
+    if ($null -eq $Value) {
+        return @()
+    }
+
+    return @($Value)
+}
+
+function Get-ClassificationPolicy {
+    if ($null -ne $script:ClassificationPolicy) {
+        return $script:ClassificationPolicy
+    }
+
+    $rulesPath = $env:PR_CLASSIFICATION_RULES
+    if ([string]::IsNullOrWhiteSpace($rulesPath)) {
+        $rulesPath = Join-Path $PSScriptRoot '..\pr-classification-rules.json'
+    }
+
+    $script:ClassificationPolicy = Get-Content -Raw -LiteralPath $rulesPath | ConvertFrom-Json -Depth 100
+    return $script:ClassificationPolicy
+}
+
+function Test-PolicyPathRule([string]$Path, $Rule) {
+    if ($null -eq $Rule) {
         return $false
     }
 
-    if ($lower.StartsWith('src/')) {
-        return $true
+    $lower = Normalize-RepoPath $Path
+    $excludePrefixes = @(Get-PolicyArray $Rule.excludePrefixes | ForEach-Object { Normalize-RepoPath ([string]$_) })
+    $excludeFiles = @(Get-PolicyArray $Rule.excludeFiles | ForEach-Object { Normalize-RepoPath ([string]$_) })
+
+    foreach ($prefix in $excludePrefixes) {
+        if ($lower.StartsWith($prefix)) {
+            return $false
+        }
     }
 
-    if ($lower -eq 'tools/publish-releaseassets.ps1') {
-        return $true
+    if ($excludeFiles -contains $lower) {
+        return $false
     }
 
-    if ($lower -in @('directory.build.props', 'directory.build.targets', 'directory.packages.props', 'global.json')) {
-        return $true
+    $includePrefixes = @(Get-PolicyArray $Rule.includePrefixes | ForEach-Object { Normalize-RepoPath ([string]$_) })
+    $includeFiles = @(Get-PolicyArray $Rule.includeFiles | ForEach-Object { Normalize-RepoPath ([string]$_) })
+
+    foreach ($prefix in $includePrefixes) {
+        if ($lower.StartsWith($prefix)) {
+            return $true
+        }
     }
 
-    if ($lower -eq 'chore/fonts.zip') {
-        return $true
-    }
+    return $includeFiles -contains $lower
+}
 
-    return $false
+function Test-RuntimeReleasePath([string]$Path) {
+    $policy = Get-ClassificationPolicy
+    return Test-PolicyPathRule -Path $Path -Rule $policy.runtimeRelease
 }
 
 function Test-InstallOrPackagePath([string]$Path) {
-    $lower = (Normalize-RepoPath $Path).ToLowerInvariant()
-    return $lower -eq 'tools/publish-releaseassets.ps1' -or
-        $lower -eq 'chore/fonts.zip' -or
-        $lower -in @('directory.build.props', 'directory.build.targets', 'directory.packages.props', 'global.json')
+    $policy = Get-ClassificationPolicy
+    return Test-PolicyPathRule -Path $Path -Rule $policy.installOrPackage
+}
+
+function Get-ReleaseCategories {
+    $policy = Get-ClassificationPolicy
+    return @(Get-PolicyArray $policy.releaseCategories)
 }
 
 function Test-ReleaseNotesExcluded($PullRequest) {
@@ -220,37 +243,30 @@ function Get-ChangeCategory($PullRequest) {
     $labels = @($PullRequest.Labels | ForEach-Object { $_.ToLowerInvariant() })
     $text = (@($PullRequest.Title) + $labels) -join "`n"
 
-    if ($labels -contains 'breaking-change' -or $labels -contains 'breaking' -or $labels -contains 'semver-major' -or
-        $text -match '(breaking|破坏性|不兼容)') {
-        return '破坏性变更'
+    foreach ($category in Get-ReleaseCategories) {
+        if ($category.fallback) {
+            continue
+        }
+
+        $categoryLabels = @(Get-PolicyArray $category.labels | ForEach-Object { $_.ToLowerInvariant() })
+        if (@($labels | Where-Object { $categoryLabels -contains $_ }).Count -gt 0) {
+            return [string]$category.title
+        }
+
+        foreach ($pattern in Get-PolicyArray $category.textPatterns) {
+            if ($text -match [string]$pattern) {
+                return [string]$category.title
+            }
+        }
+
+        if ($category.installOrPackage -and @($PullRequest.Files | Where-Object { Test-InstallOrPackagePath $_ }).Count -gt 0) {
+            return [string]$category.title
+        }
     }
 
-    if ($labels -contains 'security' -or $labels -contains 'vulnerability' -or $text -match '(security|安全|漏洞|cve)') {
-        return '安全修复'
-    }
-
-    if ($labels -contains 'feature' -or $labels -contains 'feat' -or $labels -contains 'enhancement' -or $labels -contains 'semver-minor' -or
-        $text -match '(^|\s|\n)(feat|feature|enhancement)(\([a-z0-9-]+\))?!?:' -or
-        $text -match '(新增|添加|功能)') {
-        return '新增功能'
-    }
-
-    if ($labels -contains 'bug' -or $labels -contains 'fix' -or $labels -contains 'bugfix' -or $labels -contains 'regression' -or
-        $text -match '(^|\s|\n)(fix|bug|bugfix|regression)(\([a-z0-9-]+\))?!?:' -or
-        $text -match '(修复|缺陷|问题)') {
-        return '问题修复'
-    }
-
-    if ($labels -contains 'performance' -or $labels -contains 'perf' -or
-        $text -match '(^|\s|\n)(perf|performance)(\([a-z0-9-]+\))?!?:' -or
-        $text -match '性能') {
-        return '性能优化'
-    }
-
-    if ($labels -contains 'build' -or
-        $text -match '(^|\s|\n)build(\([a-z0-9-]+\))?!?:' -or
-        @($PullRequest.Files | Where-Object { Test-InstallOrPackagePath $_ }).Count -gt 0) {
-        return '安装与发布包'
+    $fallback = @(Get-ReleaseCategories | Where-Object { $_.fallback } | Select-Object -First 1)
+    if ($fallback.Count -gt 0) {
+        return [string]$fallback[0].title
     }
 
     return '其他插件变更'
@@ -271,15 +287,7 @@ function New-ContributorAvatar([string]$Login) {
 }
 
 function New-ReleaseBody($PullRequests) {
-    $categoryOrder = @(
-        '破坏性变更',
-        '安全修复',
-        '新增功能',
-        '问题修复',
-        '性能优化',
-        '安装与发布包',
-        '其他插件变更'
-    )
+    $categoryOrder = @(Get-ReleaseCategories | ForEach-Object { [string]$_.title })
     $categories = [ordered]@{}
     foreach ($category in $categoryOrder) {
         $categories[$category] = New-Object System.Collections.Generic.List[string]
