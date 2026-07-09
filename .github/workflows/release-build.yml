@@ -52,28 +52,28 @@ jobs:
       should_release: ${{ steps.version.outputs.should_release }}
 
     steps:
-      - name: Create release app token
-        id: release-token
+      - name: Create release read app token
+        id: release-read-token
         uses: actions/create-github-app-token@v3
         with:
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
-          permission-contents: write
+          # 前置校验和发布说明只需要读取源码、Release 状态和 PR 元数据。
+          permission-contents: read
           permission-pull-requests: read
-          permission-issues: write
 
       - name: Checkout source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
-          token: ${{ steps.release-token.outputs.token }}
+          token: ${{ steps.release-read-token.outputs.token }}
           persist-credentials: false
 
       - name: Verify commit came from a merged PR
         id: merged-pr-guard
         shell: pwsh
         env:
-          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          GH_TOKEN: ${{ steps.release-read-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           # 发布只允许由“已合并到 main 的 PR”触发。
@@ -120,7 +120,7 @@ jobs:
         id: version
         shell: pwsh
         env:
-          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          GH_TOKEN: ${{ steps.release-read-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           # 当前项目从 Version.props 读取 PluginDisplayVersion 与 PluginBuildId。
@@ -199,7 +199,7 @@ jobs:
         id: notes
         shell: pwsh
         env:
-          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          GH_TOKEN: ${{ steps.release-read-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           TAG_NAME: ${{ steps.version.outputs.tag_name }}
           LATEST_TAG: ${{ steps.version.outputs.latest_tag }}
@@ -232,11 +232,21 @@ jobs:
 
           "notes_path=$notesPath" >> $env:GITHUB_OUTPUT
 
+      - name: Create release publish app token
+        if: steps.version.outputs.should_release == 'true'
+        id: release-publish-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
+          # 仅发布步骤需要写 Contents 来创建 Release 和上传资产。
+          permission-contents: write
+
       - name: Create GitHub Release
         if: steps.version.outputs.should_release == 'true'
         shell: pwsh
         env:
-          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          GH_TOKEN: ${{ steps.release-publish-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           # 将上一步检查过的资产全部上传到同一个 GitHub Release。
