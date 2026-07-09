@@ -2,7 +2,7 @@
 #   1) 复用 PR Automation 中同一个 GitHub App：
 #      - WORKFLOW_AUTOMATION_APP_CLIENT_ID
 #      - WORKFLOW_AUTOMATION_APP_PRIVATE_KEY
-#      该 App 需要 Contents 读写、Pull requests 读写、Issues 读写。
+#      建议该 App 统一授予 Contents 读写、Pull requests 读写、Issues 读写、Checks 读写。
 #   2) 本 workflow 在 main 目标 PR 合并时写入合并结果通知；
 #      未合并关闭必须先由关闭人写明原因。
 #   3) 不要把本 workflow 的 job 设置为 required check；
@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  # 内置 github.token 只保留只读；写合并/失败原因评论使用 GitHub App token。
+  # 内置 GITHUB_TOKEN 只保留只读；写合并/失败原因评论使用 GitHub App token。
   contents: read
 
 jobs:
@@ -60,6 +60,7 @@ jobs:
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: false
           token: ${{ steps.automation-token.outputs.token }}
+          persist-credentials: false
 
       - name: Notify PR close status
         env:

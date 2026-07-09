@@ -12,8 +12,6 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: read
-  issues: write
 
 jobs:
   dco-signoff-advisory:
@@ -21,16 +19,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Create advisory app token
+        id: advisory-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: read
+          permission-issues: write
+
       - name: Checkout trusted advisory script
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: false
+          token: ${{ steps.advisory-token.outputs.token }}
           persist-credentials: false
 
       - name: Check commit sign-offs
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.advisory-token.outputs.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: node .github/scripts/dco-check.js

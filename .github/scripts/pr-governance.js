@@ -349,7 +349,8 @@ function requestCopilotReview() {
     writeStepSummary('Copilot 审查请求失败', [
       `- 分支流向：${headRef} -> ${baseRef}`,
       `- 当前提交：${headSha}`,
-      '- 原因：未配置 `COPILOT_REVIEW_TOKEN`，无法代表固定维护者请求 Copilot 审查。',
+      '- 原因：未提供请求 Copilot 审查的 GitHub App installation token。',
+      '- 请确认 `Create Copilot review app token` 步骤成功，且 GitHub App 已安装到本仓库并具有 `Pull requests: Read and write`。',
     ]);
     process.exit(1);
   }
@@ -422,7 +423,7 @@ function requestCopilotReview() {
       `- 当前 head Copilot review 数量：${confirmation.reviews.length}`,
       '',
       'GitHub API 调用返回成功，但 timeline 中没有检测到本次 Copilot review request，且当前 head 也没有 Copilot review。',
-      '请确认 `COPILOT_REVIEW_TOKEN` 属于有 Copilot Code Review 权限的固定维护者账号。',
+      '请确认 GitHub App 已安装到本仓库、拥有 `Pull requests: Read and write`，且仓库已启用 Copilot Code Review。',
     ]);
     process.exit(1);
   }
@@ -663,7 +664,6 @@ function unresolvedCopilotThreadFindings() {
 function checkCopilotReviewForHead() {
   return {
     reviews: copilotReviewsForHead(),
-    waitedSeconds: 0,
   };
 }
 
@@ -693,7 +693,7 @@ function yesNo(value) {
   return value ? '是' : '否';
 }
 
-function copilotDiagnosticLines(diagnostics, waitResult) {
+function copilotDiagnosticLines(diagnostics) {
   return [
     `- 请求账号：${diagnostics.latestRequest?.actor?.login || '未检测到'}`,
     `- 请求时间：${diagnostics.latestRequest?.created_at || '未检测到'}`,
@@ -703,14 +703,14 @@ function copilotDiagnosticLines(diagnostics, waitResult) {
     `- 旧 head Copilot review：${diagnostics.oldHeadReviews.length}`,
     `- 最近旧 head review：${diagnostics.latestOldHeadReview ? `${diagnostics.latestOldHeadReview.commit_id?.slice(0, 12) || 'unknown'} @ ${diagnostics.latestOldHeadReview.submitted_at}` : '无'}`,
     '- Gate 模式：事件驱动（等待 pull_request_review / pull_request_review_comment 重新触发）',
-    `- 本次 Gate 等待时间：${waitResult.waitedSeconds} 秒`,
+    '- 本次检查：即时检查，无长轮询',
   ];
 }
 
 function copilotReviewGate() {
   ensurePrContext();
-  const waitResult = checkCopilotReviewForHead();
-  const reviews = waitResult.reviews;
+  const checkResult = checkCopilotReviewForHead();
+  const reviews = checkResult.reviews;
   const diagnostics = copilotReviewDiagnostics(reviews);
   const requestResult = process.env.REQUEST_COPILOT_RESULT || '';
   const requestFailed = eventName === 'pull_request_target'
@@ -732,7 +732,7 @@ function copilotReviewGate() {
       checkConclusion = 'failure';
       title = '## Copilot 审查请求失败';
       checkTitle = 'Copilot 审查请求失败';
-      detail = '当前提交尚未检测到 Copilot 代码审查，且 Request Copilot Review job 未成功。请检查该 job 日志和 `COPILOT_REVIEW_TOKEN` 配置。';
+      detail = '当前提交尚未检测到 Copilot 代码审查，且 Request Copilot Review job 未成功。请检查该 job 日志、GitHub App 安装范围和 `Pull requests: Read and write` 权限。';
     } else {
       checkStatus = 'in_progress';
       checkConclusion = undefined;
@@ -760,7 +760,7 @@ function copilotReviewGate() {
   const unclassifiedList = unclassified.length
     ? unclassified.map((item) => `- ${item.url ? `[${item.body || 'Copilot 评论'}](${item.url})` : item.body}`).join('\n')
     : '- 无';
-  const diagnosticList = copilotDiagnosticLines(diagnostics, waitResult).join('\n');
+  const diagnosticList = copilotDiagnosticLines(diagnostics).join('\n');
 
   const body = [
     marker,

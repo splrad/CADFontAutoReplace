@@ -11,9 +11,10 @@
 #      - tag 已存在时跳过发布
 #      - Release notes 由 .github/scripts/generate-release-notes.ps1 生成
 #      - 发布失败时会回写到触发发布的 merged PR
-#   3) 如果新项目不是 Version.props 版本源，需要修改 Read version and release state 步骤。
-#   4) 如果新项目没有发布资产打包脚本，需要替换 Build deployer / Package release assets / Create GitHub Release。
-#   5) 不要把 Release job 设置为 required check；
+#   3) 复用 PR Automation 中同一个 GitHub App；Release 创建和失败评论使用 App token。
+#   4) 如果新项目不是 Version.props 版本源，需要修改 Read version and release state 步骤。
+#   5) 如果新项目没有发布资产打包脚本，需要替换 Build deployer / Package release assets / Create GitHub Release。
+#   6) 不要把 Release job 设置为 required check；
 #      它是合并后的发布流程，不是 PR 合并门禁。
 name: Release
 
@@ -33,11 +34,8 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  # contents: write 用于创建 Release；
-  # pull-requests/issues: write 用于发布失败时评论回 merged PR。
-  contents: write
-  pull-requests: write
-  issues: write
+  # 内置 GITHUB_TOKEN 只保留只读；Release 创建和失败评论使用 GitHub App token。
+  contents: read
 
 jobs:
   release:
@@ -54,16 +52,28 @@ jobs:
       should_release: ${{ steps.version.outputs.should_release }}
 
     steps:
+      - name: Create release app token
+        id: release-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: read
+          permission-issues: write
+
       - name: Checkout source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          token: ${{ steps.release-token.outputs.token }}
+          persist-credentials: false
 
       - name: Verify commit came from a merged PR
         id: merged-pr-guard
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           # 发布只允许由“已合并到 main 的 PR”触发。
@@ -110,7 +120,7 @@ jobs:
         id: version
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           # 当前项目从 Version.props 读取 PluginDisplayVersion 与 PluginBuildId。
@@ -189,7 +199,7 @@ jobs:
         id: notes
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           TAG_NAME: ${{ steps.version.outputs.tag_name }}
           LATEST_TAG: ${{ steps.version.outputs.latest_tag }}
@@ -226,7 +236,7 @@ jobs:
         if: steps.version.outputs.should_release == 'true'
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           # 将上一步检查过的资产全部上传到同一个 GitHub Release。
@@ -253,9 +263,17 @@ jobs:
       needs.release.outputs.merged_pr_number != '' &&
       needs.release.result != 'success'
     steps:
+      - name: Create notification app token
+        id: notification-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
+          permission-issues: write
+
       - name: Comment failed release result on merged PR
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.notification-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.release.outputs.merged_pr_number }}
           PR_TITLE: ${{ needs.release.outputs.merged_pr_title }}
