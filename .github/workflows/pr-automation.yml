@@ -96,7 +96,7 @@ jobs:
 
       - name: Set up Node.js for Copilot CLI
         if: env.SKIP_PR_AUTOMATION != 'true' && env.COPILOT_CLI_TOKEN != ''
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
