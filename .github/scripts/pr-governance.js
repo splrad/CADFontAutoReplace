@@ -127,14 +127,6 @@ function requestedReviewerLogins() {
     : [];
 }
 
-function authenticatedLogin() {
-  try {
-    return ghJson(['--method', 'GET', 'user'])?.login || '';
-  } catch {
-    return '';
-  }
-}
-
 function issueTimelineEvents() {
   return flattenReviews(ghJson([
     '--method', 'GET',
@@ -355,9 +347,9 @@ function requestCopilotReview() {
     process.exit(1);
   }
 
-  const requestActor = authenticatedLogin() || 'unknown';
   const reviews = copilotReviewsForHead();
   if (reviews.length > 0) {
+    const requestActor = requestActorLabel();
     writeStepSummary('Copilot 审查请求已跳过', [
       `- 分支流向：${headRef} -> ${baseRef}`,
       `- 当前提交：${headSha}`,
@@ -370,6 +362,7 @@ function requestCopilotReview() {
   const requestedReviewers = requestedReviewerLogins();
   if (requestedReviewers.some(isCopilotReviewRequestLogin)) {
     const latestRequest = latestCopilotReviewRequestEvent();
+    const requestActor = requestActorLabel({ requestEvents: latestRequest ? [latestRequest] : [] });
     writeStepSummary('Copilot 审查请求已跳过', [
       `- 分支流向：${headRef} -> ${baseRef}`,
       `- 当前提交：${headSha}`,
@@ -410,6 +403,7 @@ function requestCopilotReview() {
   }
 
   const confirmation = waitForCopilotRequestConfirmation(requestStartedAt);
+  const requestActor = requestActorLabel(confirmation);
   if (!confirmation.confirmed) {
     writeStepSummary('Copilot 审查请求未确认', [
       `- 分支流向：${headRef} -> ${baseRef}`,
@@ -464,6 +458,16 @@ function latestCopilotReviewRequestEvent() {
   return copilotReviewRequestEvents()
     .sort((a, b) => String(a?.created_at || '').localeCompare(String(b?.created_at || '')))
     .pop();
+}
+
+function requestActorLabel(confirmation) {
+  const configured = String(process.env.REQUEST_ACTOR || '').trim();
+  if (configured) return configured;
+
+  const confirmedActor = confirmation?.requestEvents?.at(-1)?.actor?.login || '';
+  if (confirmedActor) return confirmedActor;
+
+  return latestCopilotReviewRequestEvent()?.actor?.login || 'unknown';
 }
 
 function copilotRequestConfirmation(requestStartedAt) {
