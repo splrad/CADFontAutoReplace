@@ -35,6 +35,7 @@ concurrency:
   group: >-
     pr-validation-matrix-${{
       (github.event_name == 'check_run'
+        && github.event.action == 'completed'
         && contains(fromJSON('["PR Validation Matrix Gate", "Evaluate PR Validation Matrix"]'), github.event.check_run.name)
         && format('Ignored Matrix Check {0}', github.run_id))
       || (github.event.pull_request.number && format('PR Validation Target #{0} / {1}', github.event.pull_request.number, github.event.pull_request.head.sha))

@@ -65,7 +65,7 @@ assert.match(matrixWorkflowSource, /github\.event\.workflow_run\.pull_requests\[
 assert.match(matrixWorkflowSource, /github\.event\.workflow_run\.display_title/);
 assert.match(matrixWorkflowSource, /Untrusted Review Signal/);
 assert.match(matrixWorkflowSource, /Ignored Matrix Check \{0\}/);
-assert.match(matrixWorkflowSource, /github\.event_name == 'check_run'[\s\S]*github\.run_id/);
+assert.match(matrixWorkflowSource, /github\.event_name == 'check_run'[\s\S]*github\.event\.action == 'completed'[\s\S]*github\.run_id/);
 assert.doesNotMatch(matrixWorkflowSource, /workflow_run\.head_branch\s*&&/);
 
 for (const file of ['pr-classification.yml', 'dco-check.yml', 'pr-governance.yml']) {
