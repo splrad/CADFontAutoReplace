@@ -96,4 +96,12 @@ assert.deepEqual(relayPackage.devDependencies, {
   wrangler: '4.110.0',
 });
 
+const relayWrangler = fs.readFileSync(
+  path.join(root, '.github', 'webhook-relay', 'wrangler.toml'),
+  'utf8',
+);
+assert.match(relayWrangler, /\[\[durable_objects\.bindings\]\]/);
+assert.match(relayWrangler, /new_sqlite_classes\s*=\s*\["DeliveryCoordinator"\]/);
+assert.doesNotMatch(relayWrangler, /\[\[kv_namespaces\]\]/);
+
 console.log('workflow event policy tests passed');

@@ -1,6 +1,7 @@
 # 📋 复用到新项目时的配置步骤：
 #   1) 这条 Release workflow 包含当前项目专用发布逻辑。
 #      跨仓库复用时，必须重点修改：
+#      - on.pull_request_target.branches：目标仓库的默认发布分支
 #      - on.pull_request_target.paths：哪个版本源变化代表“准备发布”
 #      - Version.props：版本号读取来源；本项目只在它变化时自动发布
 #      - tools/Publish-ReleaseAssets.ps1：构建/打包命令

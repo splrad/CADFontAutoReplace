@@ -4,15 +4,29 @@ import { handleRequest, verifySignature, type Env } from '../src/index';
 const secret = "It's a Secret to Everybody";
 const headSha = 'a'.repeat(40);
 
-class MemoryKv {
+class MemoryCoordinatorNamespace {
   values = new Map<string, string>();
 
-  async get(key: string): Promise<string | null> {
-    return this.values.get(key) || null;
-  }
-
-  async put(key: string, value: string): Promise<void> {
-    this.values.set(key, value);
+  getByName(name: string) {
+    return {
+      fetch: async (input: RequestInfo | URL) => {
+        const action = new URL(String(input)).pathname;
+        if (action === '/claim') {
+          if (this.values.has(name)) return new Response('Duplicate delivery', { status: 409 });
+          this.values.set(name, 'claimed');
+          return new Response('Claimed', { status: 201 });
+        }
+        if (action === '/complete') {
+          this.values.set(name, 'dispatched');
+          return new Response('Completed');
+        }
+        if (action === '/release') {
+          this.values.delete(name);
+          return new Response('Released');
+        }
+        return new Response('Not found', { status: 404 });
+      },
+    };
   }
 }
 
@@ -32,7 +46,7 @@ function payload(overrides: Record<string, unknown> = {}) {
   return {
     action: 'resolved',
     installation: { id: 7 },
-    repository: { id: 42, full_name: 'splrad/CADFontAutoReplace' },
+    repository: { id: 42, full_name: 'splrad/CADFontAutoReplace', default_branch: 'main' },
     pull_request: {
       number: 121,
       state: 'open',
@@ -56,13 +70,13 @@ async function requestFor(event: string, body: string, delivery = 'delivery-1', 
   });
 }
 
-function environment(kv = new MemoryKv()): Env {
+function environment(coordinator = new MemoryCoordinatorNamespace()): Env {
   return {
     GITHUB_WEBHOOK_SECRET: secret,
     GITHUB_APP_ID: '1',
     GITHUB_APP_PRIVATE_KEY: 'private-key',
     TARGET_REPOSITORY: 'splrad/CADFontAutoReplace',
-    WEBHOOK_DELIVERIES: kv as unknown as KVNamespace,
+    DELIVERY_COORDINATOR: coordinator as unknown as DurableObjectNamespace,
   };
 }
 
@@ -119,15 +133,15 @@ describe('webhook relay', () => {
   });
 
   it('dispatches a resolved thread once with the fixed payload', async () => {
-    const kv = new MemoryKv();
+    const coordinator = new MemoryCoordinatorNamespace();
     const body = JSON.stringify(payload());
     const githubFetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     const dependencies = {
       fetch: githubFetch as typeof fetch,
       installationToken: vi.fn().mockResolvedValue('installation-token'),
     };
-    const first = await handleRequest(await requestFor('pull_request_review_thread', body), environment(kv), dependencies);
-    const second = await handleRequest(await requestFor('pull_request_review_thread', body), environment(kv), dependencies);
+    const first = await handleRequest(await requestFor('pull_request_review_thread', body), environment(coordinator), dependencies);
+    const second = await handleRequest(await requestFor('pull_request_review_thread', body), environment(coordinator), dependencies);
     expect(first.status).toBe(202);
     expect(second.status).toBe(200);
     expect(githubFetch).toHaveBeenCalledTimes(1);
@@ -145,14 +159,64 @@ describe('webhook relay', () => {
     });
   });
 
-  it('does not deduplicate a failed GitHub dispatch', async () => {
-    const kv = new MemoryKv();
+  it.each([
+    ['repository name casing', payload({
+      repository: { id: 42, full_name: 'Splrad/CADFontAutoReplace', default_branch: 'main' },
+    })],
+    ['non-main default branch', payload({
+      repository: { id: 42, full_name: 'splrad/CADFontAutoReplace', default_branch: 'trunk' },
+      pull_request: { number: 121, state: 'open', base: { ref: 'trunk' }, head: { sha: headSha } },
+    })],
+  ])('accepts %s from repository metadata', async (_name, value) => {
+    const body = JSON.stringify(value);
+    const githubFetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const result = await handleRequest(await requestFor('pull_request_review_thread', body), environment(), {
+      fetch: githubFetch as typeof fetch,
+      installationToken: vi.fn().mockResolvedValue('installation-token'),
+    });
+    expect(result.status).toBe(202);
+    expect(githubFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('serializes concurrent retries before dispatch', async () => {
+    const coordinator = new MemoryCoordinatorNamespace();
     const body = JSON.stringify(payload());
-    const result = await handleRequest(await requestFor('pull_request_review_thread', body), environment(kv), {
+    let completeDispatch!: (response: Response) => void;
+    const githubFetch = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => {
+      completeDispatch = resolve;
+    }));
+    const dependencies = {
+      fetch: githubFetch as typeof fetch,
+      installationToken: vi.fn().mockResolvedValue('installation-token'),
+    };
+
+    const firstPromise = handleRequest(
+      await requestFor('pull_request_review_thread', body),
+      environment(coordinator),
+      dependencies,
+    );
+    await vi.waitFor(() => expect(githubFetch).toHaveBeenCalledTimes(1));
+    const second = await handleRequest(
+      await requestFor('pull_request_review_thread', body),
+      environment(coordinator),
+      dependencies,
+    );
+    completeDispatch(new Response(null, { status: 204 }));
+    const first = await firstPromise;
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(200);
+    expect(githubFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not deduplicate a failed GitHub dispatch', async () => {
+    const coordinator = new MemoryCoordinatorNamespace();
+    const body = JSON.stringify(payload());
+    const result = await handleRequest(await requestFor('pull_request_review_thread', body), environment(coordinator), {
       fetch: vi.fn().mockResolvedValue(new Response('failure', { status: 500 })) as typeof fetch,
       installationToken: vi.fn().mockResolvedValue('installation-token'),
     });
     expect(result.status).toBe(502);
-    expect(await kv.get('delivery-1')).toBeNull();
+    expect(coordinator.values.has('42:delivery-1')).toBe(false);
   });
 });

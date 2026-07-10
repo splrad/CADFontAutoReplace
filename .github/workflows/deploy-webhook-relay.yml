@@ -45,17 +45,6 @@ jobs:
       - name: Type-check relay
         run: npm run typecheck
 
-      - name: Configure KV namespace
-        shell: bash
-        env:
-          KV_NAMESPACE_ID: ${{ vars.CLOUDFLARE_WEBHOOK_DELIVERIES_KV_ID }}
-        run: |
-          if [[ ! "$KV_NAMESPACE_ID" =~ ^[a-f0-9]{32}$ ]]; then
-            echo "Repository variable CLOUDFLARE_WEBHOOK_DELIVERIES_KV_ID must be a 32-character Cloudflare KV namespace ID." >&2
-            exit 1
-          fi
-          sed -i "s/REPLACE_WITH_CLOUDFLARE_KV_NAMESPACE_ID/$KV_NAMESPACE_ID/" wrangler.toml
-
       - name: Deploy relay
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
