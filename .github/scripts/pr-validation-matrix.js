@@ -222,6 +222,13 @@ function workflowRunPath(run) {
   return String(run?.path || '').split('@')[0].replace(/\\/g, '/').toLowerCase();
 }
 
+function workflowRunMatchesTarget(run, target) {
+  const trustedEvents = target.trustedEvents || ['pull_request_target', 'workflow_dispatch'];
+  return run?.name === target.workflowName
+    && workflowRunPath(run) === `.github/workflows/${String(target.workflowFile || '').toLowerCase()}`
+    && trustedEvents.includes(String(run?.event || ''));
+}
+
 function trustedDirectExternalId(target, pull, fingerprint) {
   if (target.id === 'pr-classification') {
     return `classification:pr:${pull.number}:fingerprint:${fingerprint.value}`;
@@ -236,7 +243,7 @@ function isTrustedCheckRun({ run, target, pull, fingerprint, workflowRuns = [], 
   if (!run || !target || !pull?.number || !pull?.head?.sha) return false;
   const externalId = String(run.external_id || '');
   if (isValidationAppCheck(run, appSlug)) {
-    if (externalId === proxyExternalId(target, pull)) return true;
+    if (externalId === proxyExternalId(target, pull, fingerprint)) return true;
     const directExternalId = trustedDirectExternalId(target, pull, fingerprint || {});
     return Boolean(directExternalId) && externalId === directExternalId;
   }
@@ -244,12 +251,8 @@ function isTrustedCheckRun({ run, target, pull, fingerprint, workflowRuns = [], 
 
   const workflowRunId = checkRunWorkflowRunId(run);
   const workflowRun = (workflowRuns || []).find((candidate) => Number(candidate?.id) === workflowRunId);
-  if (!workflowRun || workflowRun.name !== target.workflowName) return false;
-  const workflowPath = workflowRunPath(workflowRun);
-  if (workflowPath !== `.github/workflows/${String(target.workflowFile || '').toLowerCase()}`) return false;
-  const trustedEvents = target.trustedEvents || ['pull_request_target', 'workflow_dispatch'];
-  return trustedEvents.includes(String(workflowRun.event || ''))
-    && workflowRunMatchesPull({ run: workflowRun, pull, fingerprint });
+  if (!workflowRunMatchesTarget(workflowRun, target)) return false;
+  return workflowRunMatchesPull({ run: workflowRun, pull, fingerprint });
 }
 
 function matchingCheckRun(checkRuns, target, trust) {
@@ -392,7 +395,7 @@ function planRepairs({ targets, workflowRuns, mode, pull, fingerprint, event = e
       });
       continue;
     }
-    const job = findLatestWorkflowJob({ workflowRuns, workflowName: target.workflowName, jobName: target.jobName });
+    const job = findLatestWorkflowJob({ workflowRuns, target, pull, fingerprint });
     if (job) {
       plans.push({ target: target.id, action: 'rerun-job', job_id: job.id, reason: target.state });
     } else {
@@ -426,51 +429,17 @@ function workflowRunMatchesPull({ run, pull, fingerprint }) {
   return resolvedPrNumber === pullNumber && (!headSha || runHeadSha === headSha);
 }
 
-function planWorkflowRunRecovery({ event = eventName, eventPayload, pull, fingerprint, mode, jobs = [] }) {
-  if (!['repair', 'enforce'].includes(mode)) return [];
-  if (event !== 'workflow_run') return [];
-
-  const run = eventPayload?.workflow_run || {};
-  const conclusion = String(run?.conclusion || '');
-  if (run?.name !== 'PR Governance'
-    || workflowRunPath(run) !== '.github/workflows/pr-governance.yml'
-    || String(run?.event || '') !== 'pull_request_review'
-    || !isCopilotActor(run?.actor?.login)
-    || !workflowRunMatchesPull({ run, pull, fingerprint })) {
-    return [];
-  }
-
-  if (conclusion === 'action_required') {
-    return [{
-      target: 'pr-governance-copilot-review-run',
-      action: 'approve-run',
-      run_id: run.id,
-      reason: 'action_required',
-    }];
-  }
-
-  if (conclusion !== 'failure' || Number(run?.run_attempt || 0) > 1) return [];
-  const failedJobs = jobs
-    .filter((job) => ['failure', 'cancelled', 'timed_out'].includes(String(job?.conclusion || '')));
-  const updateJob = failedJobs.find((job) => job?.name === 'Update Copilot Review Check');
-  if (failedJobs.length !== 1 || !updateJob) return [];
-
-  return [{
-    target: 'copilot-review-gate',
-    action: 'rerun-job',
-    job_id: updateJob.id,
-    reason: 'copilot-review-check-failure',
-  }];
-}
-
-function findLatestWorkflowJob({ workflowRuns, workflowName, jobName }) {
-  if (!workflowName || !jobName) return null;
+function findLatestWorkflowJob({ workflowRuns, target, pull, fingerprint }) {
+  if (!target?.workflowName || !target?.jobName) return null;
   const runs = (workflowRuns || [])
-    .filter((run) => run.name === workflowName)
+    .filter((run) => (
+      workflowRunMatchesTarget(run, target)
+        && workflowRunMatchesPull({ run, pull, fingerprint })
+    ))
     .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
   for (const run of runs.reverse()) {
     const jobs = Array.isArray(run.jobs) ? run.jobs : fetchWorkflowJobs(run.id);
-    const job = jobs.find((candidate) => candidate.name === jobName);
+    const job = jobs.find((candidate) => candidate.name === target.jobName);
     if (job) return job;
   }
   return null;
@@ -571,8 +540,8 @@ function dispatchWorkflow(plan) {
   }), actionsToken());
 }
 
-function proxyExternalId(target, pull) {
-  return `matrix-proxy:${target.id}:pr:${pull.number}:head:${pull.head.sha}`;
+function proxyExternalId(target, pull, fingerprint) {
+  return `matrix-proxy:${target.id}:pr:${pull.number}:head:${pull.head.sha}:fingerprint:${fingerprint?.value || ''}`;
 }
 
 function currentWorkflowRunUrl() {
@@ -581,8 +550,8 @@ function currentWorkflowRunUrl() {
   return repo && runId ? `${serverUrl}/${repo}/actions/runs/${runId}` : undefined;
 }
 
-function activeProxyCheck(checkRuns, target, pull) {
-  const externalId = proxyExternalId(target, pull);
+function activeProxyCheck(checkRuns, target, pull, fingerprint) {
+  const externalId = proxyExternalId(target, pull, fingerprint);
   return latestByStartedAt((checkRuns || []).filter((run) => (
     run.external_id === externalId
       && isValidationAppCheck(run)
@@ -590,15 +559,15 @@ function activeProxyCheck(checkRuns, target, pull) {
   )));
 }
 
-function createProxyCheck({ target, pull, checkRuns }) {
-  const existing = activeProxyCheck(checkRuns, target, pull);
+function createProxyCheck({ target, pull, fingerprint, checkRuns }) {
+  const existing = activeProxyCheck(checkRuns, target, pull, fingerprint);
   if (existing) return existing;
   const name = target.checkNames?.[0] || target.name;
   const payload = {
     name,
     head_sha: pull.head.sha,
     status: 'in_progress',
-    external_id: proxyExternalId(target, pull),
+    external_id: proxyExternalId(target, pull, fingerprint),
     details_url: currentWorkflowRunUrl(),
     output: {
       title: '等待一次性补跑结果',
@@ -629,13 +598,14 @@ function completeProxyCheck({ proxy, state, conclusion, url }) {
   }), checkToken());
 }
 
-function reconcileWorkflowRunCompletion({ config, eventPayload, pull, checkRuns, jobs, apply, event = eventName }) {
+function reconcileWorkflowRunCompletion({ config, eventPayload, pull, fingerprint, checkRuns, jobs, apply, event = eventName }) {
   if (event !== 'workflow_run' || eventPayload?.workflow_run?.status !== 'completed') return [];
   const run = eventPayload.workflow_run;
-  if (!workflowRunMatchesPull({ run, pull, fingerprint: { head_sha: pull.head.sha } })) return [];
+  if (!workflowRunMatchesPull({ run, pull, fingerprint })) return [];
   const overrides = [];
   for (const target of (config.targets || []).filter((item) => item.workflowName === run.name)) {
-    const proxy = activeProxyCheck(checkRuns, target, pull);
+    if (!workflowRunMatchesTarget(run, target)) continue;
+    const proxy = activeProxyCheck(checkRuns, target, pull, fingerprint);
     if (!proxy) continue;
     const job = (jobs || []).find((candidate) => candidate.name === target.jobName);
     const state = target.customCheck ? 'failed' : checkRunState(job, target);
@@ -667,8 +637,16 @@ function targetOverrideMap(overrides) {
   return map;
 }
 
+function fingerprintInvalidationOverrides(config, previousFingerprint, currentFingerprint) {
+  if (!previousFingerprint || previousFingerprint === currentFingerprint?.value) return [];
+  return (config.targets || [])
+    .filter((target) => target.fingerprintBound)
+    .map((target) => ({ id: target.id, state: 'missing', status: '', conclusion: '' }));
+}
+
 function applyRepairPlans(plans, apply, {
   pull,
+  fingerprint,
   checkRuns,
   dispatch = dispatchWorkflow,
   api = gh,
@@ -677,13 +655,7 @@ function applyRepairPlans(plans, apply, {
   if (!apply || !actionsToken()) return [];
   const overrides = [];
   for (const plan of plans) {
-    if (plan.action === 'approve-run') {
-      api([
-        '--method', 'POST',
-        `repos/${repo}/actions/runs/${plan.run_id}/approve`,
-      ], undefined, actionsToken());
-      overrides.push({ id: plan.target, state: 'pending', status: 'in_progress', conclusion: '' });
-    } else if (plan.action === 'rerun-job') {
+    if (plan.action === 'rerun-job') {
       api([
         '--method', 'POST',
         `repos/${repo}/actions/jobs/${plan.job_id}/rerun`,
@@ -693,7 +665,7 @@ function applyRepairPlans(plans, apply, {
       dispatch(plan);
       for (const target of plan.targets || []) {
         const configTarget = { ...target, checkNames: [target.checkName], workflowName: target.workflowName };
-        if (pull && checkToken()) createProxy({ target: configTarget, pull, checkRuns });
+        if (pull && checkToken()) createProxy({ target: configTarget, pull, fingerprint, checkRuns });
         overrides.push({ id: target.id, state: 'pending', status: 'in_progress', conclusion: '' });
       }
     }
@@ -813,10 +785,16 @@ function main(argv = process.argv.slice(2)) {
     fingerprint: context.fingerprint,
     appSlug: validationAppSlug,
   };
+  const fingerprintOverrides = fingerprintInvalidationOverrides(
+    config,
+    context.previousFingerprint,
+    context.fingerprint,
+  );
   const completionOverrides = reconcileWorkflowRunCompletion({
     config,
     eventPayload,
     pull: context.pull,
+    fingerprint: context.fingerprint,
     checkRuns: context.checkRuns,
     jobs: currentRunJobs,
     apply: args.apply,
@@ -826,28 +804,18 @@ function main(argv = process.argv.slice(2)) {
     checkRuns: context.checkRuns,
     scope: 'full',
     pull: context.pull,
-    targetOverrides: targetOverrideMap(completionOverrides),
+    targetOverrides: targetOverrideMap([...fingerprintOverrides, ...completionOverrides]),
     trust,
   });
-  const workflowRunRecoveryPlans = planWorkflowRunRecovery({
-    event: eventName,
-    eventPayload,
+  const plans = planRepairs({
+    targets: matrix.targets.filter((target) => targetApplies(target, context.scope, context.pull)),
+    workflowRuns,
+    mode: matrixMode,
     pull: context.pull,
     fingerprint: context.fingerprint,
-    mode: matrixMode,
-    jobs: currentRunJobs,
+    event: eventName,
+    eventPayload,
   });
-  const plans = workflowRunRecoveryPlans.length
-    ? workflowRunRecoveryPlans
-    : planRepairs({
-      targets: matrix.targets.filter((target) => targetApplies(target, context.scope, context.pull)),
-      workflowRuns,
-      mode: matrixMode,
-      pull: context.pull,
-      fingerprint: context.fingerprint,
-      event: eventName,
-      eventPayload,
-    });
   const activeRepairApplied = args.apply && ['repair', 'enforce'].includes(matrixMode);
   const actionablePlans = plans.filter((plan) => plan.action !== 'manual');
   if (activeRepairApplied && actionablePlans.length > 0) {
@@ -868,6 +836,7 @@ function main(argv = process.argv.slice(2)) {
   try {
     repairOverrides = applyRepairPlans(plans, activeRepairApplied, {
       pull: context.pull,
+      fingerprint: context.fingerprint,
       checkRuns: context.checkRuns,
     });
   } catch (error) {
@@ -888,7 +857,11 @@ function main(argv = process.argv.slice(2)) {
       checkRuns: context.checkRuns,
       scope: 'full',
       pull: context.pull,
-      targetOverrides: targetOverrideMap([...completionOverrides, ...repairOverrides]),
+      targetOverrides: targetOverrideMap([
+        ...fingerprintOverrides,
+        ...completionOverrides,
+        ...repairOverrides,
+      ]),
       trust,
     });
   }
@@ -928,11 +901,11 @@ if (require.main === module) {
     eventScope,
     evaluateMatrix,
     fingerprintForPull,
+    fingerprintInvalidationOverrides,
     isTrustedCheckRun,
     matrixConclusion,
     parseTrustedWorkflowRunContext,
     planRepairs,
-    planWorkflowRunRecovery,
     previousMatrixFingerprint,
     proxyExternalId,
     reconcileWorkflowRunCompletion,

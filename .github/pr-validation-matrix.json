@@ -11,6 +11,7 @@
       "group": "full",
       "acceptableConclusions": ["success"],
       "repairable": true,
+      "fingerprintBound": true,
       "customCheck": true
     },
     {
@@ -34,7 +35,8 @@
       "jobName": "Main Authorization Gate",
       "group": "gate",
       "acceptableConclusions": ["success"],
-      "repairable": true
+      "repairable": true,
+      "fingerprintBound": true
     },
     {
       "id": "copilot-review-gate",

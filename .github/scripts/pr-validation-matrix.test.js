@@ -6,10 +6,10 @@ const {
   eventScope,
   evaluateMatrix,
   fingerprintForPull,
+  fingerprintInvalidationOverrides,
   isTrustedCheckRun,
   matrixConclusion,
   planRepairs,
-  planWorkflowRunRecovery,
   previousMatrixFingerprint,
   proxyExternalId,
   reconcileWorkflowRunCompletion,
@@ -33,6 +33,7 @@ const config = {
       group: 'full',
       acceptableConclusions: ['success'],
       repairable: true,
+      fingerprintBound: true,
       customCheck: true,
     },
     {
@@ -45,6 +46,7 @@ const config = {
       group: 'gate',
       acceptableConclusions: ['success'],
       repairable: true,
+      fingerprintBound: true,
     },
     {
       id: 'copilot-review-gate',
@@ -104,6 +106,14 @@ const fingerprint = fingerprintForPull({
 assert.equal(fingerprint.head_sha, 'head1');
 assert.deepEqual(fingerprint.contributors, ['external-dev', 'splrad', 'splrad-workflow-automation']);
 assert.equal(fingerprint.value.length, 64);
+
+assert.deepEqual(
+  fingerprintInvalidationOverrides(config, 'previous-fingerprint', fingerprint)
+    .map((override) => override.id),
+  ['pr-classification', 'main-gate'],
+);
+assert.deepEqual(fingerprintInvalidationOverrides(config, fingerprint.value, fingerprint), []);
+assert.deepEqual(fingerprintInvalidationOverrides(config, '', fingerprint), []);
 
 const requestedPages = [];
 const maximumFiles = fetchPullRequestPages((page, pageSize) => {
@@ -225,7 +235,7 @@ assert.equal(isTrustedCheckRun({
 
 const trustedProxy = run('Main Authorization Gate', 'in_progress', '', {
   app: { slug: 'splrad-workflow-automation' },
-  external_id: 'matrix-proxy:main-gate:pr:1:head:head1',
+  external_id: `matrix-proxy:main-gate:pr:1:head:head1:fingerprint:${fingerprint.value}`,
 });
 assert.equal(isTrustedCheckRun({
   run: trustedProxy,
@@ -291,7 +301,7 @@ const activeProxyWins = evaluateMatrix({
   checkRuns: [
     run('Main Authorization Gate', 'completed', 'success'),
     run('Copilot Code Review Gate', 'in_progress', '', {
-      external_id: 'matrix-proxy:copilot-review-gate:pr:1:head:head1',
+      external_id: `matrix-proxy:copilot-review-gate:pr:1:head:head1:fingerprint:${fingerprint.value}`,
       started_at: '2026-07-10T00:00:00Z',
     }),
     run('Copilot Code Review Gate', 'completed', 'success', {
@@ -454,18 +464,46 @@ const repairPlans = planRepairs({
   targets: cancelledClassification.targets,
   workflowRuns: [
     {
+      id: 99,
       name: 'PR Classification',
+      path: '.github/workflows/pr-classification.yml@refs/heads/main',
+      event: 'pull_request_target',
+      head_sha: 'head1',
+      pull_requests: [{ number: 1 }],
       created_at: '2026-07-10T00:00:00Z',
       jobs: [{ name: 'Classify Pull Request', id: 42 }],
     },
   ],
   mode: 'repair',
+  pull: { number: 1, head: { sha: 'head1' } },
+  fingerprint,
 });
 assert.deepEqual(repairPlans, [{
   target: 'pr-classification',
   action: 'rerun-job',
   job_id: 42,
   reason: 'recoverable',
+}]);
+
+assert.deepEqual(planRepairs({
+  targets: cancelledClassification.targets,
+  workflowRuns: [{
+    id: 100,
+    name: 'PR Classification',
+    path: '.github/workflows/untrusted.yml',
+    event: 'pull_request_target',
+    head_sha: 'head1',
+    pull_requests: [{ number: 1 }],
+    created_at: '2026-07-10T00:01:00Z',
+    jobs: [{ name: 'Classify Pull Request', id: 43 }],
+  }],
+  mode: 'repair',
+  pull: { number: 1, head: { sha: 'head1' } },
+  fingerprint,
+}), [{
+  target: 'pr-classification',
+  action: 'manual',
+  reason: '未找到可重跑的 workflow job',
 }]);
 
 const pendingCopilotGate = evaluateMatrix({
@@ -557,103 +595,6 @@ assert.equal(workflowRunPullRequestNumber({ pull_requests: [{ number: 121 }] }),
 assert.equal(workflowRunPullRequestNumber({ pull_requests: [] }), 0);
 assert.equal(workflowRunPullRequestNumber({}), 0);
 
-assert.deepEqual(planWorkflowRunRecovery({
-  event: 'workflow_run',
-  mode: 'enforce',
-  pull: { number: 1, head: { sha: 'head1' } },
-  fingerprint,
-  eventPayload: {
-    workflow_run: {
-      id: 123,
-      name: 'PR Governance',
-      path: '.github/workflows/pr-governance.yml@refs/heads/main',
-      event: 'pull_request_review',
-      conclusion: 'action_required',
-      actor: { login: 'copilot-pull-request-reviewer[bot]' },
-      head_sha: 'head1',
-      pull_requests: [{ number: 1 }],
-    },
-  },
-}), [{
-  target: 'pr-governance-copilot-review-run',
-  action: 'approve-run',
-  run_id: 123,
-  reason: 'action_required',
-}]);
-
-assert.deepEqual(planWorkflowRunRecovery({
-  event: 'workflow_run',
-  mode: 'observe',
-  pull: { number: 1, head: { sha: 'head1' } },
-  fingerprint,
-  eventPayload: {
-    workflow_run: {
-      id: 123,
-      name: 'PR Governance',
-      path: '.github/workflows/pr-governance.yml@refs/heads/main',
-      event: 'pull_request_review',
-      conclusion: 'action_required',
-      actor: { login: 'copilot-pull-request-reviewer[bot]' },
-      head_sha: 'head1',
-      pull_requests: [{ number: 1 }],
-    },
-  },
-}), []);
-
-assert.deepEqual(planWorkflowRunRecovery({
-  event: 'workflow_run',
-  mode: 'enforce',
-  pull: { number: 1, head: { sha: 'head1' } },
-  fingerprint,
-  eventPayload: {
-    workflow_run: {
-      id: 123,
-      name: 'PR Governance',
-      path: '.github/workflows/untrusted.yml',
-      event: 'pull_request_review',
-      conclusion: 'action_required',
-      actor: { login: 'copilot-pull-request-reviewer[bot]' },
-      head_sha: 'head1',
-      pull_requests: [{ number: 1 }],
-    },
-  },
-}), []);
-
-const failedGovernanceRecovery = {
-  id: 124,
-  name: 'PR Governance',
-  path: '.github/workflows/pr-governance.yml',
-  event: 'pull_request_review',
-  conclusion: 'failure',
-  run_attempt: 1,
-  actor: { login: 'copilot-pull-request-reviewer[bot]' },
-  head_sha: 'head1',
-  pull_requests: [{ number: 1 }],
-};
-assert.deepEqual(planWorkflowRunRecovery({
-  event: 'workflow_run',
-  mode: 'enforce',
-  pull: { number: 1, head: { sha: 'head1' } },
-  fingerprint,
-  eventPayload: { workflow_run: failedGovernanceRecovery },
-  jobs: [{ id: 456, name: 'Update Copilot Review Check', conclusion: 'failure' }],
-}), [{
-  target: 'copilot-review-gate',
-  action: 'rerun-job',
-  job_id: 456,
-  reason: 'copilot-review-check-failure',
-}]);
-assert.deepEqual(planWorkflowRunRecovery({
-  event: 'workflow_run',
-  mode: 'enforce',
-  pull: { number: 1, head: { sha: 'head1' } },
-  fingerprint,
-  eventPayload: {
-    workflow_run: { ...failedGovernanceRecovery, path: '.github/workflows/untrusted.yml' },
-  },
-  jobs: [{ id: 456, name: 'Update Copilot Review Check', conclusion: 'failure' }],
-}), []);
-
 const eventHeadSha = 'a'.repeat(40);
 assert.deepEqual(resolveEventPullRequestContext({
   payload: {
@@ -712,6 +653,7 @@ assert.equal(validateEventPullRequestContext({
   pull: { number: 121, state: 'open', base: { ref: 'trunk' }, head: { sha: eventHeadSha } },
 }), '');
 
+const proxyFingerprint = { value: 'f'.repeat(64), head_sha: eventHeadSha };
 const resolvedRefreshPlans = planRepairs({
   targets: [{
     ...config.targets.find((target) => target.id === 'copilot-review-gate'),
@@ -722,7 +664,7 @@ const resolvedRefreshPlans = planRepairs({
   workflowRuns: [],
   mode: 'enforce',
   pull: { number: 121, base: { ref: 'main' }, head: { sha: eventHeadSha } },
-  fingerprint: { head_sha: eventHeadSha },
+  fingerprint: proxyFingerprint,
   event: 'repository_dispatch',
   eventPayload: dispatchPayload,
 });
@@ -739,6 +681,7 @@ try {
   const proxies = [];
   assert.deepEqual(applyRepairPlans(resolvedRefreshPlans, true, {
     pull: { number: 121, head: { sha: eventHeadSha } },
+    fingerprint: proxyFingerprint,
     checkRuns: [],
     dispatch: (plan) => dispatched.push(plan),
     createProxy: (value) => proxies.push(value),
@@ -764,32 +707,62 @@ assert.equal(planRepairs({
     state: 'pending',
     checkRun: {
       status: 'in_progress',
-      external_id: `matrix-proxy:copilot-review-gate:pr:121:head:${eventHeadSha}`,
+      external_id: `matrix-proxy:copilot-review-gate:pr:121:head:${eventHeadSha}:fingerprint:${proxyFingerprint.value}`,
     },
   }],
   workflowRuns: [],
   mode: 'enforce',
   pull: { number: 121, base: { ref: 'main' }, head: { sha: eventHeadSha } },
-  fingerprint: { head_sha: eventHeadSha },
+  fingerprint: proxyFingerprint,
   event: 'repository_dispatch',
   eventPayload: dispatchPayload,
 }).length, 0);
 
 const proxyPull = { number: 121, head: { sha: eventHeadSha } };
+assert.notEqual(
+  proxyExternalId(config.targets[0], proxyPull, proxyFingerprint),
+  proxyExternalId(config.targets[0], proxyPull, { ...proxyFingerprint, value: 'e'.repeat(64) }),
+);
 const classificationTarget = config.targets.find((target) => target.id === 'pr-classification');
 const classificationProxy = {
   id: 9001,
   name: 'PR Classification Gate',
   status: 'in_progress',
-  external_id: proxyExternalId(classificationTarget, proxyPull),
+  external_id: proxyExternalId(classificationTarget, proxyPull, proxyFingerprint),
   started_at: '2026-07-10T00:00:00Z',
 };
+for (const runOverride of [
+  { path: '.github/workflows/untrusted.yml', event: 'workflow_dispatch' },
+  { path: '.github/workflows/pr-classification.yml', event: 'pull_request_review' },
+]) {
+  assert.deepEqual(reconcileWorkflowRunCompletion({
+    event: 'workflow_run',
+    config,
+    eventPayload: {
+      workflow_run: {
+        name: 'PR Classification',
+        display_title: `PR Classification #121 / ${eventHeadSha}`,
+        status: 'completed',
+        conclusion: 'success',
+        pull_requests: [],
+        ...runOverride,
+      },
+    },
+    pull: proxyPull,
+    fingerprint: proxyFingerprint,
+    checkRuns: [{ ...classificationProxy }],
+    jobs: [{ name: 'Classify Pull Request', status: 'completed', conclusion: 'success' }],
+    apply: false,
+  }), []);
+}
 assert.deepEqual(reconcileWorkflowRunCompletion({
   event: 'workflow_run',
   config,
   eventPayload: {
     workflow_run: {
       name: 'PR Classification',
+      path: '.github/workflows/pr-classification.yml@refs/heads/main',
+      event: 'workflow_dispatch',
       display_title: `PR Classification #121 / ${eventHeadSha}`,
       status: 'completed',
       conclusion: 'success',
@@ -797,6 +770,7 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
     },
   },
   pull: proxyPull,
+  fingerprint: proxyFingerprint,
   checkRuns: [classificationProxy],
   jobs: [{ name: 'Classify Pull Request', status: 'completed', conclusion: 'success' }],
   apply: false,
@@ -813,7 +787,7 @@ const copilotProxy = {
   id: 9002,
   name: 'Copilot Code Review Gate',
   status: 'in_progress',
-  external_id: proxyExternalId(copilotTarget, proxyPull),
+  external_id: proxyExternalId(copilotTarget, proxyPull, proxyFingerprint),
   started_at: '2026-07-10T00:00:00Z',
 };
 assert.deepEqual(reconcileWorkflowRunCompletion({
@@ -822,6 +796,8 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
   eventPayload: {
     workflow_run: {
       name: 'PR Governance',
+      path: '.github/workflows/pr-governance.yml@refs/heads/main',
+      event: 'workflow_dispatch',
       display_title: `PR Governance #121 / ${eventHeadSha}`,
       status: 'completed',
       conclusion: 'failure',
@@ -829,6 +805,7 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
     },
   },
   pull: proxyPull,
+  fingerprint: proxyFingerprint,
   checkRuns: [copilotProxy],
   jobs: [{ name: 'Update Copilot Review Check', status: 'completed', conclusion: 'failure' }],
   apply: false,
@@ -847,6 +824,8 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
   eventPayload: {
     workflow_run: {
       name: 'PR Governance',
+      path: '.github/workflows/pr-governance.yml@refs/heads/main',
+      event: 'workflow_dispatch',
       display_title: `PR Governance #121 / ${eventHeadSha}`,
       status: 'completed',
       conclusion: 'success',
@@ -854,6 +833,7 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
     },
   },
   pull: proxyPull,
+  fingerprint: proxyFingerprint,
   checkRuns: [untouchedCopilotProxy],
   jobs: [{ name: 'Update Copilot Review Check', status: 'completed', conclusion: 'success' }],
   apply: false,

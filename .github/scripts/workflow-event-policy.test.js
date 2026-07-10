@@ -45,6 +45,8 @@ const classificationTarget = matrixConfig.targets.find((target) => target.id ===
 assert.ok(classificationTarget, 'matrix must include the PR classification gate');
 assert.equal(classificationTarget.customCheck, true);
 assert.deepEqual(classificationTarget.checkNames, ['PR Classification Gate']);
+assert.equal(classificationTarget.fingerprintBound, true);
+assert.equal(matrixConfig.targets.find((target) => target.id === 'main-authorization').fingerprintBound, true);
 assert.equal(matrixConfig.targets.some((target) => Array.isArray(target.baseBranches)), false);
 
 const matrixSource = fs.readFileSync(
@@ -53,6 +55,14 @@ const matrixSource = fs.readFileSync(
 );
 assert.match(matrixSource, /repository\?\.default_branch/);
 assert.doesNotMatch(matrixSource, /pull\.base\?\.ref\s*\|\|[^\n]*['"]main['"]/);
+assert.doesNotMatch(matrixSource, /\/actions\/runs\/\$\{plan\.run_id\}\/approve/);
+
+const matrixWorkflowSource = fs.readFileSync(
+  path.join(root, '.github', 'workflows', 'pr-validation-matrix.yml'),
+  'utf8',
+);
+assert.match(matrixWorkflowSource, /github\.event\.workflow_run\.id\s*\|\|\s*github\.run_id/);
+assert.doesNotMatch(matrixWorkflowSource, /workflow_run\.head_branch\s*&&/);
 
 const releaseSource = fs.readFileSync(
   path.join(root, '.github', 'workflows', 'release-build.yml'),
