@@ -2,12 +2,22 @@
 # area:* / kind:* 只写入 PR body 的 HTML 注释，不作为 GitHub 可见标签展示。
 name: PR Classification
 
+run-name: "PR Classification #${{ github.event.pull_request.number || inputs.pr_number }} / ${{ github.event.pull_request.head.sha || inputs.head_sha || github.sha }}"
+
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review, edited]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to classify.
+        required: true
+      head_sha:
+        description: Pull request head SHA expected by the matrix.
+        required: false
 
 concurrency:
-  group: pr-classification-${{ github.event.pull_request.number }}
+  group: pr-classification-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -32,12 +42,12 @@ jobs:
       - name: Checkout trusted base
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
           token: ${{ steps.classification-token.outputs.token }}
           persist-credentials: false
 
       - name: Apply visible labels and hidden metadata
         env:
           GH_TOKEN: ${{ steps.classification-token.outputs.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
         run: node .github/scripts/pr-classification.js

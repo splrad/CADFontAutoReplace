@@ -1,0 +1,94 @@
+# 检查当前 PR head 的合并前验证矩阵是否完整、新鲜、可信。
+# ruleset required check 应配置为 `PR Validation Matrix Gate`。
+# 本 workflow 是唯一允许用 Actions: write 重新运行/批准其它 workflow 的仓库自动化入口。
+name: PR Validation Matrix
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+  workflow_run:
+    workflows: ["PR Classification", "DCO Sign-off Advisory", "PR Governance"]
+    types: [completed]
+  check_run:
+    types: [completed, rerequested]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to inspect.
+        required: true
+      scope:
+        description: auto, full, or gate-only.
+        required: false
+        default: auto
+      mode:
+        description: observe, repair, or enforce.
+        required: false
+        default: enforce
+
+concurrency:
+  group: pr-validation-matrix-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.check_run.pull_requests[0].number || inputs.pr_number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate-matrix:
+    name: Evaluate PR Validation Matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: >-
+      (
+        github.event_name != 'workflow_run' ||
+        github.event.workflow_run.pull_requests[0].number
+      ) &&
+      (
+        github.event_name != 'check_run' ||
+        (
+          github.event.check_run.pull_requests[0].number &&
+          (
+            github.event.action == 'rerequested' ||
+            !contains(fromJSON('["PR Validation Matrix Gate", "Evaluate PR Validation Matrix"]'), github.event.check_run.name)
+          )
+        )
+      )
+    permissions:
+      contents: read
+    steps:
+      - name: Create validation app token
+        id: validation-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: write
+          permission-issues: write
+          permission-checks: write
+          permission-actions: write
+
+      - name: Checkout trusted validation scripts
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: |
+            .github/scripts
+            .github/pr-validation-matrix.json
+          sparse-checkout-cone-mode: false
+          token: ${{ steps.validation-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Evaluate PR validation matrix
+        env:
+          GH_TOKEN: ${{ steps.validation-token.outputs.token }}
+          GH_CHECKS_TOKEN: ${{ steps.validation-token.outputs.token }}
+          GH_ACTIONS_TOKEN: ${{ steps.validation-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.check_run.pull_requests[0].number || inputs.pr_number }}
+          GITHUB_EVENT_ACTION: ${{ github.event.action }}
+          VALIDATION_MATRIX_MODE: ${{ inputs.mode || 'enforce' }}
+          VALIDATION_MATRIX_SCOPE: ${{ inputs.scope || 'auto' }}
+        run: node .github/scripts/pr-validation-matrix.js --apply

@@ -12,13 +12,13 @@
 #      Contents: Read and write；Pull requests: Read and write；
 #      Issues: Read and write；Checks: Read and write；Actions: Read and write。
 #      本 workflow 用该 App 的短期 installation token 请求 GitHub Copilot Code Review，
-#      并维护 Copilot Code Review Gate 自定义 check run。Actions: write 由
-#      Copilot Review Recovery workflow 用于恢复 Copilot review 触发后被 GitHub
-#      标记为 action_required 的治理 workflow run。
-#   4) 分支保护 / ruleset 的 required checks 建议配置为：
-#      - main: PR Governance / Main Authorization Gate，source 保持 GitHub Actions。
-#      - main: Copilot Code Review Gate，source 必须选本 GitHub App 或 Any source；
-#        该 check run 由 GitHub App installation token 通过 Checks API 创建，不属于 GitHub Actions job。
+#      并维护 Copilot Code Review Gate 自定义 check run。Actions: write 只应由
+#      PR Validation Matrix workflow 使用，用于集中批准/重跑需要恢复的 workflow run。
+#   4) 分支保护 / ruleset 的集中 required check 建议配置为：
+#      - main: PR Validation Matrix Gate，source 必须选本 GitHub App 或 Any source；
+#        该 check 确认当前 head 的 PR 验证矩阵完整、新鲜、可信，并集中处理必要重跑/主动触发。
+#      Main Authorization Gate / Copilot Code Review Gate 可以保留为可见目标检查；
+#      若依赖矩阵主动 workflow_dispatch 兜底，最终合并判断应以 PR Validation Matrix Gate 为准。
 #      CodeQL 使用 GitHub Advanced Security default setup 和 ruleset 的
 #      Require code scanning results 管理，不再维护本仓库自定义 CodeQL workflow。
 #      不要把 Auto Approve 或 Update Copilot Review Check 设置为 required check。
@@ -43,17 +43,28 @@
 #      PR commits 中关联到 GitHub 账号的 author login，再按真实贡献者集合判断 TRUSTED_DEVELOPERS。
 name: PR Governance
 
+run-name: "PR Governance #${{ github.event.pull_request.number || inputs.pr_number }} / ${{ github.event.pull_request.head.sha || inputs.head_sha || github.sha }}"
+
 on:
   # pull_request_target 允许在受保护的默认分支上下文中读取治理脚本、提交审批和失败通知。
   # 脚本 checkout 固定到 base.sha，避免执行来自 PR head 的不可信 workflow 脚本。
+  # opened/synchronize/reopened/ready_for_review 属于当前 head 的完整治理验证入口。
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
-  # 审批或 Copilot review 正文变化后重新计算 main 授权门禁和 Copilot Code Review Gate。
+  # 审批或 Copilot review 正文变化属于非代码状态刷新，只重新计算门禁。
   pull_request_review:
     types: [submitted, edited, dismissed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to inspect.
+        required: true
+      head_sha:
+        description: Pull request head SHA expected by the matrix.
+        required: false
 
 concurrency:
-  group: pr-governance-${{ github.event.pull_request.number || github.run_id }}
+  group: pr-governance-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
   cancel-in-progress: false
 
 permissions:
@@ -61,11 +72,11 @@ permissions:
 
 env:
   # 以下 PR 上下文供 .github/scripts/pr-governance.js 使用。
-  PR_NUMBER: ${{ github.event.pull_request.number }}
-  PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-  PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
-  PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-  PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+  PR_AUTHOR: ${{ github.event.pull_request.user.login || '' }}
+  PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
+  PR_BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
+  PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.head_sha || '' }}
   TRUSTED_DEVELOPERS: ${{ vars.TRUSTED_DEVELOPERS || '[]' }}
 
 jobs:
@@ -78,8 +89,11 @@ jobs:
     # ruleset 自动审查对 GitHub App / bot 作者不可靠；这里显式请求官方 Copilot reviewer。
     # 该 job 不作为 required check；Copilot Code Review Gate 自定义 check run 负责最终阻断。
     if: >-
-      github.event_name == 'pull_request_target' &&
-      github.event.pull_request.base.ref == 'main'
+      (
+        github.event_name == 'pull_request_target' &&
+        github.event.pull_request.base.ref == 'main'
+      ) ||
+      github.event_name == 'workflow_dispatch'
     steps:
       - name: Create Copilot review app token
         id: copilot-review-token
@@ -94,7 +108,7 @@ jobs:
       - name: Checkout governance scripts
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: false
           token: ${{ steps.copilot-review-token.outputs.token }}
@@ -120,7 +134,7 @@ jobs:
       contents: read
     # 该 job 不能作为 required check；它只负责在全部真实贡献者均为核心开发者时，
     # 用 CORE_AUTO_APPROVAL_TOKEN 提交 GitHub 原生 approval。
-    if: github.event_name == 'pull_request_target'
+    if: github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Create governance app token
         id: governance-token
@@ -134,7 +148,7 @@ jobs:
       - name: Checkout governance scripts
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: false
           token: ${{ steps.governance-token.outputs.token }}
@@ -158,7 +172,13 @@ jobs:
     # 若存在任一非核心贡献者，则当前 head 必须有核心开发者手动 approval。
     if: >-
       always() &&
-      github.event.pull_request.base.ref == 'main'
+      (
+        (
+          github.event_name == 'pull_request_target' &&
+          github.event.pull_request.base.ref == 'main'
+        ) ||
+        github.event_name == 'workflow_dispatch'
+      )
     steps:
       - name: Create governance app token
         id: governance-token
@@ -174,7 +194,7 @@ jobs:
       - name: Checkout governance scripts
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: false
           token: ${{ steps.governance-token.outputs.token }}
@@ -196,7 +216,7 @@ jobs:
     permissions:
       contents: read
     concurrency:
-      group: copilot-review-check-${{ github.event.pull_request.number || github.run_id }}
+      group: copilot-review-check-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
       cancel-in-progress: true
     # Copilot Code Review 本身只会 comment，不会作为 approval/request-changes 阻断合并。
     # 因此这里通过 Checks API 维护自定义 required check: Copilot Code Review Gate。
@@ -208,10 +228,17 @@ jobs:
     # - Copilot 延迟提交 review: pull_request_review submitted
     # - 用户接受建议并推送修正: pull_request_target synchronize
     # 仅点击 Resolve/Unresolve conversation 不会触发 GitHub Actions；下次有其他事件触发时会读取最新 isResolved。
-    # 缺少“严重程度：阻断/建议”或 “Severity: blocking/suggestion” 的 Copilot 评论只会警告，不直接阻断。
+    # 缺少“严重程度：阻断/建议”或 “Severity: blocking/suggestion” 的当前 Copilot 评论
+    # 视为审查协议不完整并阻断，避免未知模板被误放行。
     if: >-
       always() &&
-      github.event.pull_request.base.ref == 'main'
+      (
+        (
+          github.event_name == 'pull_request_target' &&
+          github.event.pull_request.base.ref == 'main'
+        ) ||
+        github.event_name == 'workflow_dispatch'
+      )
     steps:
       - name: Create governance app token
         id: governance-token
@@ -228,7 +255,7 @@ jobs:
       - name: Checkout governance scripts
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: false
           token: ${{ steps.governance-token.outputs.token }}

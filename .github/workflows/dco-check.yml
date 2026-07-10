@@ -2,12 +2,22 @@
 # 该 workflow 只帮助贡献者按 DCO 习惯补充 commit trailer，不应加入 required checks。
 name: DCO Sign-off Advisory
 
+run-name: "DCO Sign-off Advisory #${{ github.event.pull_request.number || inputs.pr_number }} / ${{ github.event.pull_request.head.sha || inputs.head_sha || github.sha }}"
+
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to inspect.
+        required: true
+      head_sha:
+        description: Pull request head SHA expected by the matrix.
+        required: false
 
 concurrency:
-  group: dco-signoff-${{ github.event.pull_request.number }}
+  group: dco-signoff-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -32,7 +42,7 @@ jobs:
       - name: Checkout trusted advisory script
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
           sparse-checkout: .github/scripts
           sparse-checkout-cone-mode: false
           token: ${{ steps.advisory-token.outputs.token }}
@@ -41,5 +51,5 @@ jobs:
       - name: Check commit sign-offs
         env:
           GH_TOKEN: ${{ steps.advisory-token.outputs.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
         run: node .github/scripts/dco-check.js
