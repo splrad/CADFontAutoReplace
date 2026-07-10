@@ -50,7 +50,7 @@ function payload(overrides: Record<string, unknown> = {}) {
   return {
     action: 'resolved',
     installation: { id: 7 },
-    repository: { id: 42, full_name: 'splrad/CADFontAutoReplace', default_branch: 'main' },
+    repository: { id: 42, full_name: 'axiomoth/CADFontAutoReplace', default_branch: 'main' },
     pull_request: {
       number: 121,
       state: 'open',
@@ -79,7 +79,7 @@ function environment(coordinator = new MemoryCoordinatorNamespace()): Env {
     GITHUB_WEBHOOK_SECRET: secret,
     GITHUB_APP_ID: '1',
     GITHUB_APP_PRIVATE_KEY: 'private-key',
-    TARGET_REPOSITORY: 'splrad/CADFontAutoReplace',
+    TARGET_REPOSITORY: 'axiomoth/CADFontAutoReplace',
     DELIVERY_COORDINATOR: coordinator as unknown as DurableObjectNamespace,
   };
 }
@@ -165,10 +165,10 @@ describe('webhook relay', () => {
 
   it.each([
     ['repository name casing', payload({
-      repository: { id: 42, full_name: 'Splrad/CADFontAutoReplace', default_branch: 'main' },
+      repository: { id: 42, full_name: 'Axiomoth/CADFontAutoReplace', default_branch: 'main' },
     })],
     ['non-main default branch', payload({
-      repository: { id: 42, full_name: 'splrad/CADFontAutoReplace', default_branch: 'trunk' },
+      repository: { id: 42, full_name: 'axiomoth/CADFontAutoReplace', default_branch: 'trunk' },
       pull_request: { number: 121, state: 'open', base: { ref: 'trunk' }, head: { sha: headSha } },
     })],
   ])('accepts %s from repository metadata', async (_name, value) => {

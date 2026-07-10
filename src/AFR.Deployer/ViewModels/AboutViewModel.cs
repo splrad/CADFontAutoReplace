@@ -38,7 +38,7 @@ internal sealed partial class AboutViewModel : ObservableObject
 
     public static string LicenseName => "Apache License 2.0";
 
-    public static string GitHubUrl => "https://github.com/splrad/CADFontAutoReplace";
+    public static string GitHubUrl => "https://github.com/axiomoth/CADFontAutoReplace";
 
     public static string GiteeUrl => "https://gitee.com/splrad/CADFontAutoReplace";
 

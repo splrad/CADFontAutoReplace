@@ -14,9 +14,9 @@ namespace AFR.Deployer.Services;
 /// </summary>
 internal static class UpdateCheckService
 {
-    private const string GitHubLatestReleaseApiUrl = "https://api.github.com/repos/splrad/CADFontAutoReplace/releases/latest";
+    private const string GitHubLatestReleaseApiUrl = "https://api.github.com/repos/axiomoth/CADFontAutoReplace/releases/latest";
     private const string GiteeLatestReleaseApiUrl = "https://gitee.com/api/v5/repos/splrad/CADFontAutoReplace/releases/latest";
-    internal const string ReleasesPageUrl = "https://github.com/splrad/CADFontAutoReplace/releases";
+    internal const string ReleasesPageUrl = "https://github.com/axiomoth/CADFontAutoReplace/releases";
     internal const string GiteeReleasesPageUrl = "https://gitee.com/splrad/CADFontAutoReplace/releases";
 
     internal static readonly TimeSpan PerAttemptTimeout = TimeSpan.FromSeconds(4);

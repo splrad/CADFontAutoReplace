@@ -97,13 +97,13 @@ function run(name, status, conclusion, extra = {}) {
 const fingerprint = fingerprintForPull({
   pull: {
     number: 1,
-    body: '<!-- workflow:source-contributors:splrad -->',
+    body: '<!-- workflow:source-contributors:axiomoth -->',
     user: { login: 'splrad-workflow-automation' },
     head: { sha: 'head1' },
     base: { ref: 'main', sha: 'base1' },
   },
   commits: [
-    { sha: 'a', author: { login: 'splrad' } },
+    { sha: 'a', author: { login: 'axiomoth' } },
     { sha: 'b', author: { login: 'external-dev' } },
   ],
   files: [
@@ -111,7 +111,7 @@ const fingerprint = fingerprintForPull({
   ],
 });
 assert.equal(fingerprint.head_sha, 'head1');
-assert.deepEqual(fingerprint.contributors, ['external-dev', 'splrad', 'splrad-workflow-automation']);
+assert.deepEqual(fingerprint.contributors, ['axiomoth', 'external-dev', 'splrad-workflow-automation']);
 assert.equal(fingerprint.value.length, 64);
 
 assert.deepEqual(
@@ -142,7 +142,7 @@ const classificationFingerprint = (overrides = {}) => fingerprintForPull({
     number: 1,
     title: overrides.title || 'fix: correct gate',
     body: overrides.body || `Contributor context${classificationMetadata}`,
-    user: { login: 'splrad' },
+    user: { login: 'axiomoth' },
     head: { sha: 'head1' },
     base: { ref: 'main', sha: 'base1' },
   },
@@ -187,7 +187,7 @@ assert.equal(isTrustedCheckRun({
 const mainGateTarget = config.targets.find((target) => target.id === 'main-gate');
 const mainGateCheck = run('Main Authorization Gate', 'completed', 'success', {
   app: { slug: 'github-actions' },
-  details_url: 'https://github.com/splrad/CADFontAutoReplace/actions/runs/123/job/456',
+  details_url: 'https://github.com/axiomoth/CADFontAutoReplace/actions/runs/123/job/456',
 });
 const trustedMainWorkflow = {
   id: 123,
@@ -556,7 +556,7 @@ assert.equal(planRepairs({
   fingerprint,
   event: 'pull_request_review_comment',
   eventPayload: {
-    comment: { user: { login: 'splrad' } },
+    comment: { user: { login: 'axiomoth' } },
   },
 }).length, 0);
 
@@ -642,7 +642,7 @@ const reviewSignalPull = {
   number: 121,
   state: 'open',
   head: { sha: eventHeadSha },
-  base: { ref: 'main', repo: { full_name: 'splrad/CADFontAutoReplace' } },
+  base: { ref: 'main', repo: { full_name: 'axiomoth/CADFontAutoReplace' } },
 };
 assert.deepEqual(resolveEventPullRequestContext({
   payload: {
@@ -670,11 +670,11 @@ assert.equal(selectPullRequestByHead([
   reviewSignalPull,
   { ...reviewSignalPull, number: 122, state: 'closed' },
   { ...reviewSignalPull, number: 123, base: { ...reviewSignalPull.base, ref: 'develop' } },
-], eventHeadSha, 'main', 'splrad/CADFontAutoReplace'), reviewSignalPull);
+], eventHeadSha, 'main', 'axiomoth/CADFontAutoReplace'), reviewSignalPull);
 assert.equal(selectPullRequestByHead([
   reviewSignalPull,
   { ...reviewSignalPull, number: 124 },
-], eventHeadSha, 'main', 'splrad/CADFontAutoReplace'), null);
+], eventHeadSha, 'main', 'axiomoth/CADFontAutoReplace'), null);
 
 assert.deepEqual(resolveEventPullRequestContext({
   payload: {
@@ -695,7 +695,7 @@ assert.deepEqual(resolveEventPullRequestContext({
 });
 
 const dispatchPayload = {
-  repository: { id: 42, full_name: 'splrad/CADFontAutoReplace', default_branch: 'main' },
+  repository: { id: 42, full_name: 'axiomoth/CADFontAutoReplace', default_branch: 'main' },
   client_payload: {
     repository_id: 42,
     pr_number: 121,
@@ -711,19 +711,19 @@ const dispatchContext = resolveEventPullRequestContext({
 assert.equal(validateEventPullRequestContext({
   context: dispatchContext,
   payload: dispatchPayload,
-  repository: 'splrad/CADFontAutoReplace',
+  repository: 'axiomoth/CADFontAutoReplace',
   pull: { number: 121, state: 'open', base: { ref: 'main' }, head: { sha: eventHeadSha } },
 }), '');
 assert.match(validateEventPullRequestContext({
   context: dispatchContext,
   payload: dispatchPayload,
-  repository: 'splrad/CADFontAutoReplace',
+  repository: 'axiomoth/CADFontAutoReplace',
   pull: { number: 121, state: 'open', base: { ref: 'main' }, head: { sha: 'b'.repeat(40) } },
 }), /head 已过期/);
 assert.match(validateEventPullRequestContext({
   context: { ...dispatchContext, repositoryId: 99 },
   payload: dispatchPayload,
-  repository: 'splrad/CADFontAutoReplace',
+  repository: 'axiomoth/CADFontAutoReplace',
   pull: { number: 121, state: 'open', base: { ref: 'main' }, head: { sha: eventHeadSha } },
 }), /仓库 ID 不匹配/);
 assert.equal(validateEventPullRequestContext({
@@ -732,7 +732,7 @@ assert.equal(validateEventPullRequestContext({
     ...dispatchPayload,
     repository: { ...dispatchPayload.repository, default_branch: 'trunk' },
   },
-  repository: 'splrad/CADFontAutoReplace',
+  repository: 'axiomoth/CADFontAutoReplace',
   pull: { number: 121, state: 'open', base: { ref: 'trunk' }, head: { sha: eventHeadSha } },
 }), '');
 
