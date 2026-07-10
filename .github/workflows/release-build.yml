@@ -1,7 +1,7 @@
 # 📋 复用到新项目时的配置步骤：
 #   1) 这条 Release workflow 包含当前项目专用发布逻辑。
 #      跨仓库复用时，必须重点修改：
-#      - on.push.paths：哪个版本源变化代表“准备发布”
+#      - on.pull_request_target.paths：哪个版本源变化代表“准备发布”
 #      - Version.props：版本号读取来源；本项目只在它变化时自动发布
 #      - tools/Publish-ReleaseAssets.ps1：构建/打包命令
 #      - artifacts/ReleaseAssets 下的资产文件名检查
@@ -19,7 +19,8 @@
 name: Release
 
 on:
-  push:
+  pull_request_target:
+    types: [closed]
     branches:
       - main
     # 自动发布只由版本源变化触发。
@@ -28,9 +29,13 @@ on:
     paths:
       - Version.props
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Merged pull request number to release.
+        required: true
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-main
   cancel-in-progress: false
 
 permissions:
@@ -40,11 +45,11 @@ permissions:
 jobs:
   release:
     name: Build Assets and Publish Release
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: windows-latest
     timeout-minutes: 45
     outputs:
-      merged_pr_number: ${{ steps.merged-pr-guard.outputs.pr_number }}
-      merged_pr_title: ${{ steps.merged-pr-guard.outputs.pr_title }}
+      merged_pr_number: ${{ steps.release-context.outputs.pr_number }}
       display_version: ${{ steps.version.outputs.display_version }}
       build_id: ${{ steps.version.outputs.build_id }}
       tag_name: ${{ steps.version.outputs.tag_name }}
@@ -62,36 +67,51 @@ jobs:
           permission-contents: read
           permission-pull-requests: read
 
-      - name: Checkout source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-          token: ${{ steps.release-read-token.outputs.token }}
-          persist-credentials: false
-
-      - name: Verify commit came from a merged PR
-        id: merged-pr-guard
+      - name: Resolve merged PR release context
+        id: release-context
         shell: pwsh
         env:
           GH_TOKEN: ${{ steps.release-read-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_PR_MERGED: ${{ github.event.pull_request.merged }}
+          EVENT_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EVENT_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
         run: |
-          # 发布只允许由“已合并到 main 的 PR”触发。
-          # 这样可以阻止直接推送或非 PR 来源提交绕过治理流程后发版。
-          $associatedPulls = @(gh api "repos/$env:GH_REPO/commits/${{ github.sha }}/pulls" | ConvertFrom-Json)
-          $mergedPullRequest = $associatedPulls | Where-Object {
-              $_.state -eq 'closed' -and
-              $null -ne $_.merged_at -and
-              $_.base.ref -eq $env:GITHUB_REF_NAME
-          } | Select-Object -First 1
-
-          if ($null -eq $mergedPullRequest) {
-              throw "Current commit $env:GITHUB_SHA is not associated with a merged PR targeting $env:GITHUB_REF_NAME yet. Rerun this workflow manually after GitHub finishes associating the merge commit."
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request_target') {
+              if ($env:EVENT_PR_MERGED -ne 'true' -or $env:EVENT_PR_BASE_REF -ne 'main') {
+                  throw 'Automatic release requires a merged pull request targeting main.'
+              }
+              $prNumber = $env:EVENT_PR_NUMBER
+              $targetSha = $env:EVENT_MERGE_SHA
+          } else {
+              if ($env:INPUT_PR_NUMBER -notmatch '^[1-9][0-9]*$') {
+                  throw 'workflow_dispatch requires a valid merged pull request number.'
+              }
+              $pull = gh api "repos/$env:GH_REPO/pulls/$env:INPUT_PR_NUMBER" | ConvertFrom-Json
+              if ($null -eq $pull.merged_at -or $pull.base.ref -ne 'main') {
+                  throw "PR #$env:INPUT_PR_NUMBER is not merged into main."
+              }
+              $prNumber = [string]$pull.number
+              $targetSha = [string]$pull.merge_commit_sha
           }
 
-          "pr_number=$($mergedPullRequest.number)" >> $env:GITHUB_OUTPUT
-          "pr_title=$([string]$mergedPullRequest.title)" >> $env:GITHUB_OUTPUT
-          "Verified merged PR #$($mergedPullRequest.number)." | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          if ($targetSha -notmatch '^[a-f0-9]{40}$') {
+              throw "Merged PR #$prNumber does not expose a valid merge commit SHA."
+          }
+
+          "pr_number=$prNumber" >> $env:GITHUB_OUTPUT
+          "target_sha=$targetSha" >> $env:GITHUB_OUTPUT
+          "Resolved merged PR #$prNumber at $targetSha." | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      - name: Checkout merged source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ steps.release-context.outputs.target_sha }}
+          fetch-depth: 0
+          token: ${{ steps.release-read-token.outputs.token }}
+          persist-credentials: false
 
       - name: Set up .NET SDK
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
@@ -200,8 +220,8 @@ jobs:
                   -Repo $env:GH_REPO `
                   -TagName $env:TAG_NAME `
                   -PreviousTag $env:LATEST_TAG `
-                  -TargetSha '${{ github.sha }}' `
-                  -TriggerPrNumber '${{ steps.merged-pr-guard.outputs.pr_number }}' `
+                  -TargetSha '${{ steps.release-context.outputs.target_sha }}' `
+                  -TriggerPrNumber '${{ steps.release-context.outputs.pr_number }}' `
                   -OutputPath $notesPath `
                   -OwnerLogin '${{ github.repository_owner }}'
           } catch {
@@ -243,7 +263,7 @@ jobs:
               '${{ steps.package.outputs.dll_zip_path }}' `
               '${{ steps.package.outputs.fonts_path }}' `
               --repo $env:GH_REPO `
-              --target '${{ github.sha }}' `
+              --target '${{ steps.release-context.outputs.target_sha }}' `
               --title '${{ steps.version.outputs.release_title }}' `
               --notes-file '${{ steps.notes.outputs.notes_path }}' `
               --latest

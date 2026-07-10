@@ -6,6 +6,7 @@ const {
   eventScope,
   evaluateMatrix,
   fingerprintForPull,
+  isTrustedCheckRun,
   matrixConclusion,
   planRepairs,
   planWorkflowRunRecovery,
@@ -16,20 +17,22 @@ const {
   validateEventPullRequestContext,
   workflowRunPullRequestNumber,
 } = require('./pr-validation-matrix');
+const { classificationInputBody } = require('./pr-validation-fingerprint');
 
 const config = {
   gateName: 'PR Validation Matrix Gate',
   targets: [
     {
-      id: 'classification',
-      name: 'PR Classification / Classify Pull Request',
-      checkNames: ['Classify Pull Request'],
+      id: 'pr-classification',
+      name: 'PR Classification Gate',
+      checkNames: ['PR Classification Gate'],
       workflowName: 'PR Classification',
       workflowFile: 'pr-classification.yml',
       jobName: 'Classify Pull Request',
       group: 'full',
       acceptableConclusions: ['success'],
       repairable: true,
+      customCheck: true,
     },
     {
       id: 'main-gate',
@@ -65,14 +68,6 @@ const config = {
       required: false,
       repairable: true,
     },
-    {
-      id: 'codeql',
-      name: 'CodeQL',
-      checkNames: ['CodeQL'],
-      group: 'full',
-      acceptableConclusions: ['success'],
-      repairable: false,
-    },
   ],
 };
 
@@ -84,6 +79,8 @@ function run(name, status, conclusion, extra = {}) {
     started_at: extra.started_at || '2026-07-10T00:00:00Z',
     external_id: extra.external_id || '',
     id: extra.id || 1,
+    app: extra.app,
+    details_url: extra.details_url || '',
   };
 }
 
@@ -106,6 +103,122 @@ const fingerprint = fingerprintForPull({
 assert.equal(fingerprint.head_sha, 'head1');
 assert.deepEqual(fingerprint.contributors, ['external-dev', 'splrad', 'splrad-workflow-automation']);
 assert.equal(fingerprint.value.length, 64);
+
+const classificationMetadata = `\n<!-- workflow:pr-classification:start\nlabels: bug\nworkflow:pr-classification:end -->`;
+const classificationFingerprint = (overrides = {}) => fingerprintForPull({
+  pull: {
+    number: 1,
+    title: overrides.title || 'fix: correct gate',
+    body: overrides.body || `Contributor context${classificationMetadata}`,
+    user: { login: 'splrad' },
+    head: { sha: 'head1' },
+    base: { ref: 'main', sha: 'base1' },
+  },
+  commits: [],
+  files: [],
+});
+assert.equal(classificationInputBody(`Contributor context${classificationMetadata}`), 'Contributor context');
+assert.equal(
+  classificationFingerprint().value,
+  classificationFingerprint({ body: `Contributor context\n<!-- workflow:pr-classification:start\nlabels: docs\nworkflow:pr-classification:end -->` }).value,
+);
+assert.notEqual(classificationFingerprint().value, classificationFingerprint({ title: 'docs: correct gate' }).value);
+assert.notEqual(classificationFingerprint().value, classificationFingerprint({ body: 'Different contributor context' }).value);
+
+const trustedPull = { number: 1, head: { sha: 'head1' } };
+const classificationCheck = run('PR Classification Gate', 'completed', 'success', {
+  app: { slug: 'splrad-workflow-automation' },
+  external_id: `classification:pr:1:fingerprint:${fingerprint.value}`,
+});
+assert.equal(isTrustedCheckRun({
+  run: classificationCheck,
+  target: config.targets.find((target) => target.id === 'pr-classification'),
+  pull: trustedPull,
+  fingerprint,
+  appSlug: 'splrad-workflow-automation',
+}), true);
+assert.equal(isTrustedCheckRun({
+  run: { ...classificationCheck, app: { slug: 'github-actions' } },
+  target: config.targets.find((target) => target.id === 'pr-classification'),
+  pull: trustedPull,
+  fingerprint,
+  appSlug: 'splrad-workflow-automation',
+}), false);
+assert.equal(isTrustedCheckRun({
+  run: { ...classificationCheck, external_id: 'classification:pr:1:fingerprint:stale' },
+  target: config.targets.find((target) => target.id === 'pr-classification'),
+  pull: trustedPull,
+  fingerprint,
+  appSlug: 'splrad-workflow-automation',
+}), false);
+
+const mainGateTarget = config.targets.find((target) => target.id === 'main-gate');
+const mainGateCheck = run('Main Authorization Gate', 'completed', 'success', {
+  app: { slug: 'github-actions' },
+  details_url: 'https://github.com/splrad/CADFontAutoReplace/actions/runs/123/job/456',
+});
+const trustedMainWorkflow = {
+  id: 123,
+  name: 'PR Governance',
+  path: '.github/workflows/pr-governance.yml@refs/heads/main',
+  event: 'pull_request_target',
+  head_sha: 'head1',
+  pull_requests: [{ number: 1 }],
+};
+assert.equal(isTrustedCheckRun({
+  run: mainGateCheck,
+  target: mainGateTarget,
+  pull: trustedPull,
+  fingerprint,
+  workflowRuns: [trustedMainWorkflow],
+  appSlug: 'splrad-workflow-automation',
+}), true);
+for (const workflowOverride of [
+  { path: '.github/workflows/untrusted.yml@refs/heads/main' },
+  { event: 'push' },
+  { head_sha: 'stale-head' },
+]) {
+  assert.equal(isTrustedCheckRun({
+    run: mainGateCheck,
+    target: mainGateTarget,
+    pull: trustedPull,
+    fingerprint,
+    workflowRuns: [{ ...trustedMainWorkflow, ...workflowOverride }],
+    appSlug: 'splrad-workflow-automation',
+  }), false);
+}
+
+const copilotTargetForTrust = config.targets.find((target) => target.id === 'copilot-review-gate');
+const copilotCheck = run('Copilot Code Review Gate', 'completed', 'success', {
+  app: { slug: 'splrad-workflow-automation' },
+  external_id: 'pr-1-head1',
+});
+assert.equal(isTrustedCheckRun({
+  run: copilotCheck,
+  target: copilotTargetForTrust,
+  pull: trustedPull,
+  fingerprint,
+  appSlug: 'splrad-workflow-automation',
+}), true);
+assert.equal(isTrustedCheckRun({
+  run: { ...copilotCheck, app: { slug: 'github-actions' } },
+  target: copilotTargetForTrust,
+  pull: trustedPull,
+  fingerprint,
+  appSlug: 'splrad-workflow-automation',
+}), false);
+
+const trustedProxy = run('Main Authorization Gate', 'in_progress', '', {
+  app: { slug: 'splrad-workflow-automation' },
+  external_id: 'matrix-proxy:main-gate:pr:1:head:head1',
+});
+assert.equal(isTrustedCheckRun({
+  run: trustedProxy,
+  target: mainGateTarget,
+  pull: trustedPull,
+  fingerprint,
+  appSlug: 'splrad-workflow-automation',
+}), true);
 
 assert.equal(eventScope({
   event: 'pull_request_target',
@@ -178,10 +291,9 @@ const pendingMatrix = evaluateMatrix({
   config,
   scope: 'full',
   checkRuns: [
-    run('Classify Pull Request', 'queued', ''),
+    run('PR Classification Gate', 'queued', ''),
     run('Main Authorization Gate', 'completed', 'success'),
     run('Copilot Code Review Gate', 'completed', 'success'),
-    run('CodeQL', 'completed', 'success'),
   ],
 });
 assert.equal(matrixConclusion(pendingMatrix, 'observe').status, 'in_progress');
@@ -192,10 +304,9 @@ const fullPassed = evaluateMatrix({
   config,
   scope: 'full',
   checkRuns: [
-    run('Classify Pull Request', 'completed', 'success'),
+    run('PR Classification Gate', 'completed', 'success'),
     run('Main Authorization Gate', 'completed', 'success'),
     run('Copilot Code Review Gate', 'completed', 'success'),
-    run('CodeQL', 'completed', 'success'),
   ],
 });
 assert.equal(fullPassed.passed, true);
@@ -282,30 +393,12 @@ const missingBothPlans = planRepairs({
 assert.equal(missingBothPlans.length, 1);
 assert.equal(missingBothPlans[0].inputs.governance_scope, 'all');
 
-const missingCodeql = evaluateMatrix({
-  config,
-  scope: 'full',
-  checkRuns: [
-    run('Classify Pull Request', 'completed', 'success'),
-    run('Main Authorization Gate', 'completed', 'success'),
-    run('Copilot Code Review Gate', 'completed', 'success'),
-  ],
-});
-assert.equal(missingCodeql.passed, false);
-assert.equal(missingCodeql.blocking.find((target) => target.id === 'codeql').state, 'missing');
-assert.equal(planRepairs({
-  targets: missingCodeql.targets,
-  workflowRuns: [],
-  mode: 'repair',
-}).some((plan) => plan.target === 'codeql'), false);
-
 const missingClassification = evaluateMatrix({
   config,
   scope: 'full',
   checkRuns: [
     run('Main Authorization Gate', 'completed', 'success'),
     run('Copilot Code Review Gate', 'completed', 'success'),
-    run('CodeQL', 'completed', 'success'),
   ],
 });
 const dispatchPlans = planRepairs({
@@ -316,14 +409,14 @@ const dispatchPlans = planRepairs({
   fingerprint,
 });
 assert.deepEqual(dispatchPlans, [{
-  target: 'classification',
+  target: 'pr-classification',
   targets: [{
-    id: 'classification',
-    name: 'PR Classification / Classify Pull Request',
-    checkName: 'Classify Pull Request',
+    id: 'pr-classification',
+    name: 'PR Classification Gate',
+    checkName: 'PR Classification Gate',
     workflowName: 'PR Classification',
     jobName: 'Classify Pull Request',
-    customCheck: false,
+    customCheck: true,
     acceptableConclusions: ['success'],
   }],
   action: 'dispatch-workflow',
@@ -337,10 +430,9 @@ const cancelledClassification = evaluateMatrix({
   config,
   scope: 'full',
   checkRuns: [
-    run('Classify Pull Request', 'completed', 'cancelled'),
+    run('PR Classification Gate', 'completed', 'cancelled'),
     run('Main Authorization Gate', 'completed', 'success'),
     run('Copilot Code Review Gate', 'completed', 'success'),
-    run('CodeQL', 'completed', 'success'),
   ],
 });
 const repairPlans = planRepairs({
@@ -355,24 +447,11 @@ const repairPlans = planRepairs({
   mode: 'repair',
 });
 assert.deepEqual(repairPlans, [{
-  target: 'classification',
+  target: 'pr-classification',
   action: 'rerun-job',
   job_id: 42,
   reason: 'recoverable',
 }]);
-
-const failedCodeCheck = evaluateMatrix({
-  config,
-  scope: 'full',
-  checkRuns: [
-    run('Classify Pull Request', 'completed', 'success'),
-    run('Main Authorization Gate', 'completed', 'success'),
-    run('Copilot Code Review Gate', 'completed', 'success'),
-    run('CodeQL', 'completed', 'failure'),
-  ],
-});
-assert.equal(planRepairs({ targets: failedCodeCheck.targets, workflowRuns: [], mode: 'repair' }).length, 0);
-assert.equal(matrixConclusion(failedCodeCheck).conclusion, 'failure');
 
 const pendingCopilotGate = evaluateMatrix({
   config,
@@ -446,6 +525,18 @@ assert.equal(previousMatrixFingerprint([
     external_id: `pr-1-${fingerprint.value}`,
   }),
 ], 'PR Validation Matrix Gate'), fingerprint.value);
+assert.equal(previousMatrixFingerprint([
+  run('PR Validation Matrix Gate', 'completed', 'success', {
+    external_id: `pr-1-${fingerprint.value}`,
+    app: { slug: 'untrusted-app' },
+  }),
+], 'PR Validation Matrix Gate', 'splrad-workflow-automation'), '');
+assert.equal(previousMatrixFingerprint([
+  run('PR Validation Matrix Gate', 'completed', 'success', {
+    external_id: `pr-1-${fingerprint.value}`,
+    app: { slug: 'splrad-workflow-automation' },
+  }),
+], 'PR Validation Matrix Gate', 'splrad-workflow-automation'), fingerprint.value);
 
 assert.equal(workflowRunPullRequestNumber({ pull_requests: [{ number: 121 }] }), 121);
 assert.equal(workflowRunPullRequestNumber({ pull_requests: [] }), 0);
@@ -605,10 +696,10 @@ assert.equal(planRepairs({
 }).length, 0);
 
 const proxyPull = { number: 121, head: { sha: eventHeadSha } };
-const classificationTarget = config.targets.find((target) => target.id === 'classification');
+const classificationTarget = config.targets.find((target) => target.id === 'pr-classification');
 const classificationProxy = {
   id: 9001,
-  name: 'Classify Pull Request',
+  name: 'PR Classification Gate',
   status: 'in_progress',
   external_id: proxyExternalId(classificationTarget, proxyPull),
   started_at: '2026-07-10T00:00:00Z',
@@ -630,10 +721,10 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
   jobs: [{ name: 'Classify Pull Request', status: 'completed', conclusion: 'success' }],
   apply: false,
 }), [{
-  id: 'classification',
-  state: 'passed',
+  id: 'pr-classification',
+  state: 'failed',
   status: 'completed',
-  conclusion: 'success',
+  conclusion: 'failure',
   url: '',
 }]);
 

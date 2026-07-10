@@ -3,14 +3,15 @@
   "targets": [
     {
       "id": "pr-classification",
-      "name": "PR Classification / Classify Pull Request",
-      "checkNames": ["Classify Pull Request"],
+      "name": "PR Classification Gate",
+      "checkNames": ["PR Classification Gate"],
       "workflowName": "PR Classification",
       "workflowFile": "pr-classification.yml",
       "jobName": "Classify Pull Request",
       "group": "full",
       "acceptableConclusions": ["success"],
-      "repairable": true
+      "repairable": true,
+      "customCheck": true
     },
     {
       "id": "dco-signoff",
@@ -48,15 +49,6 @@
       "acceptableConclusions": ["success"],
       "repairable": true,
       "customCheck": true
-    },
-    {
-      "id": "codeql",
-      "name": "CodeQL",
-      "checkNames": ["CodeQL"],
-      "group": "full",
-      "acceptableConclusions": ["success"],
-      "repairable": false,
-      "external": true
     }
   ]
 }

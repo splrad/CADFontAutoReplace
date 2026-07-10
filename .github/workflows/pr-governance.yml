@@ -274,6 +274,7 @@ jobs:
           GH_TOKEN: ${{ steps.governance-token.outputs.token }}
           GH_COMMENT_TOKEN: ${{ steps.governance-token.outputs.token }}
           GH_CHECKS_TOKEN: ${{ steps.governance-token.outputs.token }}
+          CHECK_RUN_APP_SLUG: ${{ steps.governance-token.outputs.app-slug }}
           COPILOT_REVIEW_CHECK_NAME: Copilot Code Review Gate
           REQUEST_COPILOT_RESULT: ${{ needs.request-copilot-review.result }}
         run: node .github/scripts/pr-governance.js copilot-review

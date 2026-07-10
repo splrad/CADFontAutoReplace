@@ -36,6 +36,26 @@ for (const file of temporalPollingFiles) {
   }
 }
 
+const matrixConfig = JSON.parse(fs.readFileSync(
+  path.join(root, '.github', 'pr-validation-matrix.json'),
+  'utf8',
+));
+assert.equal(matrixConfig.targets.some((target) => target.id === 'codeql'), false);
+const classificationTarget = matrixConfig.targets.find((target) => target.id === 'pr-classification');
+assert.ok(classificationTarget, 'matrix must include the PR classification gate');
+assert.equal(classificationTarget.customCheck, true);
+assert.deepEqual(classificationTarget.checkNames, ['PR Classification Gate']);
+
+const releaseSource = fs.readFileSync(
+  path.join(root, '.github', 'workflows', 'release-build.yml'),
+  'utf8',
+);
+assert.match(releaseSource, /^\s{2}pull_request_target:\s*$/m);
+assert.match(releaseSource, /^\s{4}types:\s*\[closed\]\s*$/m);
+assert.match(releaseSource, /github\.event\.pull_request\.merged\s*==\s*true/);
+assert.doesNotMatch(releaseSource, /^\s{2}push:\s*$/m);
+assert.doesNotMatch(releaseSource, /commits\/[^\s]*\/pulls/);
+
 const relayPackage = JSON.parse(fs.readFileSync(
   path.join(root, '.github', 'webhook-relay', 'package.json'),
   'utf8',

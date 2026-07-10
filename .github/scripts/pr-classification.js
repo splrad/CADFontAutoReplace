@@ -10,6 +10,7 @@ const {
   loadPolicy,
   publicLabelDefinitions,
 } = require('./pr-classification-policy');
+const { fingerprintForPull } = require('./pr-validation-fingerprint');
 
 const repo = process.env.GITHUB_REPOSITORY || '';
 const prNumber = process.env.PR_NUMBER || '';
@@ -18,6 +19,8 @@ const rulesPath = process.env.PR_CLASSIFICATION_RULES
   || path.join(workspace, '.github', 'pr-classification-rules.json');
 const policy = loadPolicy(rulesPath);
 const labelDefinitions = publicLabelDefinitions(policy);
+const classificationCheckName = process.env.PR_CLASSIFICATION_CHECK_NAME || 'PR Classification Gate';
+const checkRunAppSlug = process.env.CHECK_RUN_APP_SLUG || '';
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -194,6 +197,59 @@ function appendStepSummary(areas, kind, publicLabels, releaseLabels) {
   fs.appendFileSync(summaryPath, `${lines.join('\n')}\n`, 'utf8');
 }
 
+function workflowRunUrl() {
+  const serverUrl = process.env.GITHUB_SERVER_URL || 'https://github.com';
+  const runId = process.env.GITHUB_RUN_ID || '';
+  return repo && runId ? `${serverUrl}/${repo}/actions/runs/${runId}` : undefined;
+}
+
+function latestClassificationCheckRun(headSha) {
+  if (!process.env.GH_CHECKS_TOKEN || !checkRunAppSlug) {
+    throw new Error('Missing GH_CHECKS_TOKEN or CHECK_RUN_APP_SLUG for classification Check updates.');
+  }
+  const payload = ghJson([
+    '--method', 'GET',
+    `repos/${repo}/commits/${headSha}/check-runs`,
+    '-f', `check_name=${classificationCheckName}`,
+    '-f', 'per_page=100',
+  ]) || {};
+  return (payload.check_runs || [])
+    .filter((run) => run?.name === classificationCheckName && run?.app?.slug === checkRunAppSlug)
+    .sort((left, right) => String(left?.started_at || left?.created_at || '')
+      .localeCompare(String(right?.started_at || right?.created_at || '')))
+    .pop();
+}
+
+function upsertClassificationCheck(pull, fingerprint) {
+  const headSha = pull?.head?.sha || '';
+  const existing = latestClassificationCheckRun(headSha);
+  const payload = {
+    name: classificationCheckName,
+    status: 'completed',
+    conclusion: 'success',
+    completed_at: new Date().toISOString(),
+    details_url: workflowRunUrl(),
+    external_id: `classification:pr:${prNumber}:fingerprint:${fingerprint.value}`,
+    output: {
+      title: 'PR 分类已更新',
+      summary: '标题、正文、提交、贡献者和文件输入均与当前分类结果一致。',
+    },
+  };
+  if (!existing) {
+    gh([
+      '--method', 'POST',
+      `repos/${repo}/check-runs`,
+      '--input', '-',
+    ], JSON.stringify({ ...payload, head_sha: headSha }));
+    return;
+  }
+  gh([
+    '--method', 'PATCH',
+    `repos/${repo}/check-runs/${existing.id}`,
+    '--input', '-',
+  ], JSON.stringify(payload));
+}
+
 function main() {
   if (!repo || !prNumber) {
     throw new Error('Missing repository or pull request number.');
@@ -203,7 +259,9 @@ function main() {
     '--method', 'GET',
     `repos/${repo}/pulls/${prNumber}`,
   ]);
+  const commits = fetchAll(`repos/${repo}/pulls/${prNumber}/commits`);
   const files = fetchAll(`repos/${repo}/pulls/${prNumber}/files`);
+  const fingerprint = fingerprintForPull({ pull, commits, files });
   const areas = inferAreas(files, policy);
   const kind = inferKind(pull, files);
   const releaseLabels = inferReleaseLabelsForPull(pull, files, policy);
@@ -212,6 +270,7 @@ function main() {
   applyPublicLabels(publicLabels);
   removeVisibleInternalLabels();
   upsertHiddenMetadata(pull, areas, kind, publicLabels, releaseLabels);
+  upsertClassificationCheck(pull, fingerprint);
   appendStepSummary(areas, kind, publicLabels, releaseLabels);
 }
 

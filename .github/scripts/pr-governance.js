@@ -21,6 +21,7 @@ let headSha = process.env.PR_HEAD_SHA || '';
 const eventName = process.env.GITHUB_EVENT_NAME || '';
 const copilotReviewerLogin = 'copilot-pull-request-reviewer[bot]';
 const copilotCheckName = process.env.COPILOT_REVIEW_CHECK_NAME || 'Copilot Code Review Gate';
+const checkRunAppSlug = process.env.CHECK_RUN_APP_SLUG || '';
 const copilotNoBlockingConclusionPattern = /(?:^|\r?\n)\s*(?:#{1,6}\s*)?结论\s*(?::|：)?\s*(?:\r?\n\s*)*未发现需要阻断合并的问题。/;
 const copilotNoCommentsPattern = /Copilot reviewed \d+ out of \d+ changed files in this pull request and generated no (?:new )?comments\./i;
 const copilotGeneratedCommentsPattern = /Copilot reviewed \d+ out of \d+ changed files in this pull request and generated (\d+) (?:new )?comments\./i;
@@ -953,8 +954,8 @@ function truncateCheckText(value) {
 
 function latestCopilotCheckRun() {
   const token = ghChecksToken();
-  if (!token) {
-    throw new Error('Missing GH_CHECKS_TOKEN for Checks API updates.');
+  if (!token || !checkRunAppSlug) {
+    throw new Error('Missing GH_CHECKS_TOKEN or CHECK_RUN_APP_SLUG for Checks API updates.');
   }
 
   const payload = ghJson([
@@ -965,7 +966,11 @@ function latestCopilotCheckRun() {
   ], undefined, token) || {};
   const checkRuns = Array.isArray(payload.check_runs) ? payload.check_runs : [];
   return checkRuns
-    .filter((checkRun) => checkRun?.name === copilotCheckName && checkRun?.head_sha === headSha)
+    .filter((checkRun) => (
+      checkRun?.name === copilotCheckName
+        && checkRun?.head_sha === headSha
+        && checkRun?.app?.slug === checkRunAppSlug
+    ))
     .sort((a, b) => String(a?.started_at || a?.created_at || '').localeCompare(String(b?.started_at || b?.created_at || '')))
     .pop();
 }

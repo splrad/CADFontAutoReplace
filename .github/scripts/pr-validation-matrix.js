@@ -1,11 +1,9 @@
 const { execFileSync } = require('node:child_process');
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  realContributorLoginsFromBody,
-  uniqueLogins,
-} = require('./pr-notifications');
+  fingerprintForPull,
+} = require('./pr-validation-fingerprint');
 
 const repo = process.env.GITHUB_REPOSITORY || '';
 const [owner, repoName] = repo.split('/');
@@ -15,6 +13,7 @@ const eventName = process.env.GITHUB_EVENT_NAME || '';
 const eventAction = process.env.GITHUB_EVENT_ACTION || '';
 const matrixMode = process.env.VALIDATION_MATRIX_MODE || 'enforce';
 const requestedScope = process.env.VALIDATION_MATRIX_SCOPE || 'auto';
+const validationAppSlug = process.env.VALIDATION_MATRIX_APP_SLUG || '';
 const configPath = process.env.PR_VALIDATION_MATRIX_CONFIG
   || path.join(workspace, '.github', 'pr-validation-matrix.json');
 
@@ -44,16 +43,6 @@ function ghJson(args, input, token) {
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
-}
-
-function hashJson(value) {
-  return crypto.createHash('sha256')
-    .update(JSON.stringify(value))
-    .digest('hex');
-}
-
-function normalizeRepoPath(file) {
-  return String(file || '').replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
 }
 
 function checkToken() {
@@ -170,39 +159,6 @@ function validateEventPullRequestContext({ context, payload = {}, pull, reposito
   return '';
 }
 
-function pullRequestCommitAuthorLogins(commits) {
-  return uniqueLogins((commits || []).map((commit) => commit?.author?.login || ''));
-}
-
-function fingerprintForPull({ pull, commits, files }) {
-  const commitShas = (commits || []).map((commit) => commit?.sha || '').filter(Boolean).sort();
-  const fileParts = (files || []).map((file) => [
-    normalizeRepoPath(file?.filename),
-    file?.status || '',
-    file?.sha || '',
-    file?.additions || 0,
-    file?.deletions || 0,
-  ]).sort();
-  const contributors = uniqueLogins([
-    ...realContributorLoginsFromBody({ body: pull?.body || '', prAuthor: pull?.user?.login || '' }),
-    ...pullRequestCommitAuthorLogins(commits),
-  ]).sort((a, b) => a.localeCompare(b));
-
-  const source = {
-    head_sha: pull?.head?.sha || '',
-    base_ref: pull?.base?.ref || '',
-    base_sha: pull?.base?.sha || '',
-    commits: commitShas,
-    contributors,
-    files_digest: hashJson(fileParts),
-  };
-
-  return {
-    ...source,
-    value: hashJson(source),
-  };
-}
-
 function eventScope({
   event,
   action,
@@ -250,9 +206,50 @@ function latestByStartedAt(checkRuns) {
   }).at(-1);
 }
 
-function matchingCheckRun(checkRuns, target) {
+function isValidationAppCheck(run, appSlug = validationAppSlug) {
+  return !appSlug || String(run?.app?.slug || '') === appSlug;
+}
+
+function checkRunWorkflowRunId(run) {
+  const match = String(run?.details_url || '').match(/\/actions\/runs\/(\d+)(?:\/job\/\d+)?(?:\?.*)?$/);
+  return Number(match?.[1] || '0');
+}
+
+function trustedDirectExternalId(target, pull, fingerprint) {
+  if (target.id === 'pr-classification') {
+    return `classification:pr:${pull.number}:fingerprint:${fingerprint.value}`;
+  }
+  if (target.id === 'copilot-review-gate') {
+    return `pr-${pull.number}-${pull.head.sha}`;
+  }
+  return '';
+}
+
+function isTrustedCheckRun({ run, target, pull, fingerprint, workflowRuns = [], appSlug = validationAppSlug }) {
+  if (!run || !target || !pull?.number || !pull?.head?.sha) return false;
+  const externalId = String(run.external_id || '');
+  if (isValidationAppCheck(run, appSlug)) {
+    if (externalId === proxyExternalId(target, pull)) return true;
+    const directExternalId = trustedDirectExternalId(target, pull, fingerprint || {});
+    return Boolean(directExternalId) && externalId === directExternalId;
+  }
+  if (String(run?.app?.slug || '') !== 'github-actions' || target.customCheck) return false;
+
+  const workflowRunId = checkRunWorkflowRunId(run);
+  const workflowRun = (workflowRuns || []).find((candidate) => Number(candidate?.id) === workflowRunId);
+  if (!workflowRun || workflowRun.name !== target.workflowName) return false;
+  const workflowPath = String(workflowRun.path || '').split('@')[0].replace(/\\/g, '/').toLowerCase();
+  if (workflowPath !== `.github/workflows/${String(target.workflowFile || '').toLowerCase()}`) return false;
+  const trustedEvents = target.trustedEvents || ['pull_request_target', 'workflow_dispatch'];
+  return trustedEvents.includes(String(workflowRun.event || ''))
+    && workflowRunMatchesPull({ run: workflowRun, pull, fingerprint });
+}
+
+function matchingCheckRun(checkRuns, target, trust) {
   const names = new Set(target.checkNames || []);
-  const matches = (checkRuns || []).filter((run) => names.has(run.name));
+  const matches = (checkRuns || []).filter((run) => (
+    names.has(run.name) && (!trust || isTrustedCheckRun({ run, target, ...trust }))
+  ));
   const activeProxies = matches.filter((run) => (
     String(run.external_id || '').startsWith('matrix-proxy:')
       && ['queued', 'in_progress'].includes(String(run.status || ''))
@@ -275,11 +272,11 @@ function targetIsRequired(target) {
   return target.required !== false;
 }
 
-function evaluateMatrix({ config, checkRuns, scope, pull, targetOverrides = {} }) {
+function evaluateMatrix({ config, checkRuns, scope, pull, targetOverrides = {}, trust }) {
   const targets = (config.targets || [])
     .filter((target) => targetApplies(target, scope, pull))
     .map((target) => {
-      const run = matchingCheckRun(checkRuns, target);
+      const run = matchingCheckRun(checkRuns, target, trust);
       const override = targetOverrides[target.id] || {};
       const state = override.state || checkRunState(run, target);
       return {
@@ -521,7 +518,9 @@ function upsertMatrixCheck({ config, pull, fingerprint, conclusion, lines, apply
   if (!apply || !checkToken()) return null;
   const name = config.gateName || 'PR Validation Matrix Gate';
   const headSha = fingerprint.head_sha || pull?.head?.sha || '';
-  const existing = latestByStartedAt(((checkRuns || fetchCheckRuns(headSha)) || []).filter((run) => run.name === name));
+  const existing = latestByStartedAt(((checkRuns || fetchCheckRuns(headSha)) || []).filter((run) => (
+    run.name === name && isValidationAppCheck(run)
+  )));
   const payload = {
     name,
     status: conclusion.status,
@@ -577,7 +576,9 @@ function currentWorkflowRunUrl() {
 function activeProxyCheck(checkRuns, target, pull) {
   const externalId = proxyExternalId(target, pull);
   return latestByStartedAt((checkRuns || []).filter((run) => (
-    run.external_id === externalId && ['queued', 'in_progress'].includes(String(run.status || ''))
+    run.external_id === externalId
+      && isValidationAppCheck(run)
+      && ['queued', 'in_progress'].includes(String(run.status || ''))
   )));
 }
 
@@ -746,8 +747,10 @@ function fetchWorkflowJobs(runId) {
   return Array.isArray(payload.jobs) ? payload.jobs : [];
 }
 
-function previousMatrixFingerprint(checkRuns, gateName) {
-  const previous = latestByStartedAt((checkRuns || []).filter((run) => run.name === gateName));
+function previousMatrixFingerprint(checkRuns, gateName, appSlug = validationAppSlug) {
+  const previous = latestByStartedAt((checkRuns || []).filter((run) => (
+    run.name === gateName && isValidationAppCheck(run, appSlug)
+  )));
   const match = String(previous?.external_id || '').match(/pr-\d+-([a-f0-9]{64})$/i);
   return match?.[1] || '';
 }
@@ -763,7 +766,10 @@ function loadContext(config, eventPayload = {}, eventContext = resolveEventPullR
   const files = fetchAll(`repos/${repo}/pulls/${prNumber}/files`);
   const fingerprint = fingerprintForPull({ pull, commits, files });
   const checkRuns = fetchCheckRuns(fingerprint.head_sha);
-  const previousFingerprint = previousMatrixFingerprint(checkRuns, config.gateName || 'PR Validation Matrix Gate');
+  const previousFingerprint = previousMatrixFingerprint(
+    checkRuns,
+    config.gateName || 'PR Validation Matrix Gate',
+  );
   const scope = eventScope({
     event: eventName,
     action: eventAction,
@@ -785,15 +791,27 @@ function main(argv = process.argv.slice(2)) {
     writeStepSummary('PR 验证矩阵已忽略事件', [`- 原因：${eventContext.source === 'unresolved' ? '无法从受信任事件解析 PR' : 'PR 编号无效'}`]);
     return;
   }
+  if (!validationAppSlug) {
+    throw new Error('Missing VALIDATION_MATRIX_APP_SLUG for trusted Check validation.');
+  }
   const context = loadContext(config, eventPayload, eventContext);
   if (context.ignoredReason) {
     writeStepSummary('PR 验证矩阵已忽略事件', [`- PR：#${prNumber}`, `- 原因：${context.ignoredReason}`]);
     return;
   }
   const currentRunJobs = eventName === 'workflow_run' ? fetchWorkflowJobs(eventPayload.workflow_run?.id) : [];
-  const workflowRuns = eventName === 'workflow_run'
-    ? [{ ...eventPayload.workflow_run, jobs: currentRunJobs }]
-    : fetchWorkflowRuns(context.fingerprint.head_sha);
+  const workflowRuns = fetchWorkflowRuns(context.fingerprint.head_sha);
+  if (eventName === 'workflow_run'
+    && eventPayload.workflow_run?.id
+    && !workflowRuns.some((run) => Number(run.id) === Number(eventPayload.workflow_run.id))) {
+    workflowRuns.push({ ...eventPayload.workflow_run, jobs: currentRunJobs });
+  }
+  const trust = {
+    workflowRuns,
+    pull: context.pull,
+    fingerprint: context.fingerprint,
+    appSlug: validationAppSlug,
+  };
   const completionOverrides = reconcileWorkflowRunCompletion({
     config,
     eventPayload,
@@ -808,6 +826,7 @@ function main(argv = process.argv.slice(2)) {
     scope: 'full',
     pull: context.pull,
     targetOverrides: targetOverrideMap(completionOverrides),
+    trust,
   });
   const workflowRunRecoveryPlans = planWorkflowRunRecovery({
     event: eventName,
@@ -869,6 +888,7 @@ function main(argv = process.argv.slice(2)) {
       scope: 'full',
       pull: context.pull,
       targetOverrides: targetOverrideMap([...completionOverrides, ...repairOverrides]),
+      trust,
     });
   }
   const conclusion = matrixConclusion(matrix, matrixMode);
@@ -907,6 +927,7 @@ if (require.main === module) {
     eventScope,
     evaluateMatrix,
     fingerprintForPull,
+    isTrustedCheckRun,
     matrixConclusion,
     parseTrustedWorkflowRunContext,
     planRepairs,
