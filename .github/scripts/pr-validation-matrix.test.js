@@ -1,8 +1,8 @@
 const assert = require('node:assert/strict');
 
 const {
+  applyRepairPlans,
   checkRunState,
-  dispatchOpenPullRefreshes,
   eventScope,
   evaluateMatrix,
   fingerprintForPull,
@@ -10,7 +10,10 @@ const {
   planRepairs,
   planWorkflowRunRecovery,
   previousMatrixFingerprint,
-  pullNeedsCopilotRefresh,
+  proxyExternalId,
+  reconcileWorkflowRunCompletion,
+  resolveEventPullRequestContext,
+  validateEventPullRequestContext,
   workflowRunPullRequestNumber,
 } = require('./pr-validation-matrix');
 
@@ -154,6 +157,23 @@ assert.equal(checkRunState(run('x', 'completed', 'success'), config.targets[0]),
 assert.equal(checkRunState(run('x', 'completed', 'cancelled'), config.targets[0]), 'recoverable');
 assert.equal(checkRunState(run('x', 'completed', 'failure'), config.targets[0]), 'failed');
 
+const activeProxyWins = evaluateMatrix({
+  config,
+  scope: 'gate-only',
+  checkRuns: [
+    run('Main Authorization Gate', 'completed', 'success'),
+    run('Copilot Code Review Gate', 'in_progress', '', {
+      external_id: 'matrix-proxy:copilot-review-gate:pr:1:head:head1',
+      started_at: '2026-07-10T00:00:00Z',
+    }),
+    run('Copilot Code Review Gate', 'completed', 'success', {
+      started_at: '2026-07-10T00:01:00Z',
+      id: 2,
+    }),
+  ],
+});
+assert.equal(activeProxyWins.targets.find((target) => target.id === 'copilot-review-gate').state, 'pending');
+
 const pendingMatrix = evaluateMatrix({
   config,
   scope: 'full',
@@ -165,7 +185,8 @@ const pendingMatrix = evaluateMatrix({
   ],
 });
 assert.equal(matrixConclusion(pendingMatrix, 'observe').status, 'in_progress');
-assert.equal(matrixConclusion(pendingMatrix, 'enforce').conclusion, 'failure');
+assert.equal(matrixConclusion(pendingMatrix, 'enforce').status, 'in_progress');
+assert.equal(matrixConclusion(pendingMatrix, 'enforce').conclusion, undefined);
 
 const fullPassed = evaluateMatrix({
   config,
@@ -221,6 +242,20 @@ const reviewCommentSignalPlans = planRepairs({
 });
 assert.equal(reviewCommentSignalPlans.length, 1);
 assert.equal(reviewCommentSignalPlans[0].inputs.governance_scope, 'copilot-review');
+
+const reviewRequestedSignalPlans = planRepairs({
+  targets: gateOnly.targets,
+  workflowRuns: [],
+  mode: 'enforce',
+  pull: { number: 1, base: { ref: 'main' }, head: { sha: 'head1' } },
+  fingerprint,
+  event: 'workflow_run',
+  eventPayload: {
+    workflow_run: { name: 'PR Review Signal', event: 'pull_request' },
+  },
+});
+assert.equal(reviewRequestedSignalPlans.length, 1);
+assert.equal(reviewRequestedSignalPlans[0].inputs.governance_scope, 'copilot-review');
 
 const missingMainGate = evaluateMatrix({
   config,
@@ -285,6 +320,8 @@ assert.deepEqual(dispatchPlans, [{
   targets: [{
     id: 'classification',
     name: 'PR Classification / Classify Pull Request',
+    checkName: 'Classify Pull Request',
+    workflowName: 'PR Classification',
     jobName: 'Classify Pull Request',
     customCheck: false,
     acceptableConclusions: ['success'],
@@ -360,6 +397,8 @@ assert.deepEqual(planRepairs({
   targets: [{
     id: 'copilot-review-gate',
     name: 'Copilot Code Review Gate',
+    checkName: 'Copilot Code Review Gate',
+    workflowName: 'PR Governance',
     jobName: 'Update Copilot Review Check',
     customCheck: true,
     acceptableConclusions: ['success'],
@@ -401,37 +440,6 @@ const failedRefreshPlans = planRepairs({
 assert.equal(failedRefreshPlans.length, 1);
 assert.equal(failedRefreshPlans[0].reason, 'copilot-state-refresh');
 assert.equal(failedRefreshPlans[0].inputs.governance_scope, 'copilot-review');
-
-assert.equal(pullNeedsCopilotRefresh(
-  { number: 1, head: { sha: 'head1' } },
-  [run('Copilot Code Review Gate', 'completed', 'failure')],
-), true);
-assert.equal(pullNeedsCopilotRefresh(
-  { number: 1, head: { sha: 'head1' } },
-  [run('Copilot Code Review Gate', 'completed', 'success')],
-), false);
-
-const scheduledDispatches = [];
-const refreshedPulls = dispatchOpenPullRefreshes({
-  pulls: [
-    { number: 1, head: { sha: 'failed-head' } },
-    { number: 2, head: { sha: 'passed-head' } },
-  ],
-  fetchChecks: (sha) => [run(
-    'Copilot Code Review Gate',
-    'completed',
-    sha === 'failed-head' ? 'failure' : 'success',
-  )],
-  dispatch: (plan) => scheduledDispatches.push(plan),
-  ref: 'main',
-  workflowFile: 'pr-validation-matrix.yml',
-});
-assert.deepEqual(refreshedPulls, [1]);
-assert.deepEqual(scheduledDispatches, [{
-  workflow_file: 'pr-validation-matrix.yml',
-  ref: 'main',
-  inputs: { pr_number: '1', scope: 'gate-only', mode: 'enforce' },
-}]);
 
 assert.equal(previousMatrixFingerprint([
   run('PR Validation Matrix Gate', 'completed', 'success', {
@@ -483,5 +491,207 @@ assert.deepEqual(planWorkflowRunRecovery({
     },
   },
 }), []);
+
+const eventHeadSha = 'a'.repeat(40);
+assert.deepEqual(resolveEventPullRequestContext({
+  payload: {
+    workflow_run: {
+      name: 'PR Governance',
+      display_title: `PR Governance #121 / ${eventHeadSha}`,
+      pull_requests: [],
+    },
+  },
+  env: { GITHUB_EVENT_NAME: 'workflow_run' },
+}), {
+  prNumber: 121,
+  expectedHeadSha: eventHeadSha,
+  source: 'workflow-run-title',
+});
+
+const dispatchPayload = {
+  repository: { id: 42, full_name: 'splrad/CADFontAutoReplace' },
+  client_payload: {
+    repository_id: 42,
+    pr_number: 121,
+    head_sha: eventHeadSha,
+    action: 'resolved',
+    delivery_id: 'delivery-1',
+  },
+};
+const dispatchContext = resolveEventPullRequestContext({
+  payload: dispatchPayload,
+  env: { GITHUB_EVENT_NAME: 'repository_dispatch' },
+});
+assert.equal(validateEventPullRequestContext({
+  context: dispatchContext,
+  payload: dispatchPayload,
+  repository: 'splrad/CADFontAutoReplace',
+  pull: { number: 121, state: 'open', base: { ref: 'main' }, head: { sha: eventHeadSha } },
+}), '');
+assert.match(validateEventPullRequestContext({
+  context: dispatchContext,
+  payload: dispatchPayload,
+  repository: 'splrad/CADFontAutoReplace',
+  pull: { number: 121, state: 'open', base: { ref: 'main' }, head: { sha: 'b'.repeat(40) } },
+}), /head 已过期/);
+assert.match(validateEventPullRequestContext({
+  context: { ...dispatchContext, repositoryId: 99 },
+  payload: dispatchPayload,
+  repository: 'splrad/CADFontAutoReplace',
+  pull: { number: 121, state: 'open', base: { ref: 'main' }, head: { sha: eventHeadSha } },
+}), /仓库 ID 不匹配/);
+
+const resolvedRefreshPlans = planRepairs({
+  targets: [{
+    ...config.targets.find((target) => target.id === 'copilot-review-gate'),
+    required: true,
+    state: 'failed',
+    checkRun: run('Copilot Code Review Gate', 'completed', 'failure'),
+  }],
+  workflowRuns: [],
+  mode: 'enforce',
+  pull: { number: 121, base: { ref: 'main' }, head: { sha: eventHeadSha } },
+  fingerprint: { head_sha: eventHeadSha },
+  event: 'repository_dispatch',
+  eventPayload: dispatchPayload,
+});
+assert.equal(resolvedRefreshPlans.length, 1);
+assert.equal(resolvedRefreshPlans[0].reason, 'review-thread-refresh');
+assert.equal(resolvedRefreshPlans[0].inputs.governance_scope, 'copilot-review');
+
+const previousActionsToken = process.env.GH_ACTIONS_TOKEN;
+const previousChecksToken = process.env.GH_CHECKS_TOKEN;
+process.env.GH_ACTIONS_TOKEN = 'test-actions-token';
+process.env.GH_CHECKS_TOKEN = 'test-checks-token';
+try {
+  const dispatched = [];
+  const proxies = [];
+  assert.deepEqual(applyRepairPlans(resolvedRefreshPlans, true, {
+    pull: { number: 121, head: { sha: eventHeadSha } },
+    checkRuns: [],
+    dispatch: (plan) => dispatched.push(plan),
+    createProxy: (value) => proxies.push(value),
+  }), [{
+    id: 'copilot-review-gate',
+    state: 'pending',
+    status: 'in_progress',
+    conclusion: '',
+  }]);
+  assert.equal(dispatched.length, 1);
+  assert.equal(proxies.length, 1);
+} finally {
+  if (previousActionsToken === undefined) delete process.env.GH_ACTIONS_TOKEN;
+  else process.env.GH_ACTIONS_TOKEN = previousActionsToken;
+  if (previousChecksToken === undefined) delete process.env.GH_CHECKS_TOKEN;
+  else process.env.GH_CHECKS_TOKEN = previousChecksToken;
+}
+
+assert.equal(planRepairs({
+  targets: [{
+    ...config.targets.find((target) => target.id === 'copilot-review-gate'),
+    required: true,
+    state: 'pending',
+    checkRun: {
+      status: 'in_progress',
+      external_id: `matrix-proxy:copilot-review-gate:pr:121:head:${eventHeadSha}`,
+    },
+  }],
+  workflowRuns: [],
+  mode: 'enforce',
+  pull: { number: 121, base: { ref: 'main' }, head: { sha: eventHeadSha } },
+  fingerprint: { head_sha: eventHeadSha },
+  event: 'repository_dispatch',
+  eventPayload: dispatchPayload,
+}).length, 0);
+
+const proxyPull = { number: 121, head: { sha: eventHeadSha } };
+const classificationTarget = config.targets.find((target) => target.id === 'classification');
+const classificationProxy = {
+  id: 9001,
+  name: 'Classify Pull Request',
+  status: 'in_progress',
+  external_id: proxyExternalId(classificationTarget, proxyPull),
+  started_at: '2026-07-10T00:00:00Z',
+};
+assert.deepEqual(reconcileWorkflowRunCompletion({
+  event: 'workflow_run',
+  config,
+  eventPayload: {
+    workflow_run: {
+      name: 'PR Classification',
+      display_title: `PR Classification #121 / ${eventHeadSha}`,
+      status: 'completed',
+      conclusion: 'success',
+      pull_requests: [],
+    },
+  },
+  pull: proxyPull,
+  checkRuns: [classificationProxy],
+  jobs: [{ name: 'Classify Pull Request', status: 'completed', conclusion: 'success' }],
+  apply: false,
+}), [{
+  id: 'classification',
+  state: 'passed',
+  status: 'completed',
+  conclusion: 'success',
+  url: '',
+}]);
+
+const copilotTarget = config.targets.find((target) => target.id === 'copilot-review-gate');
+const copilotProxy = {
+  id: 9002,
+  name: 'Copilot Code Review Gate',
+  status: 'in_progress',
+  external_id: proxyExternalId(copilotTarget, proxyPull),
+  started_at: '2026-07-10T00:00:00Z',
+};
+assert.deepEqual(reconcileWorkflowRunCompletion({
+  event: 'workflow_run',
+  config,
+  eventPayload: {
+    workflow_run: {
+      name: 'PR Governance',
+      display_title: `PR Governance #121 / ${eventHeadSha}`,
+      status: 'completed',
+      conclusion: 'failure',
+      pull_requests: [],
+    },
+  },
+  pull: proxyPull,
+  checkRuns: [copilotProxy],
+  jobs: [{ name: 'Update Copilot Review Check', status: 'completed', conclusion: 'failure' }],
+  apply: false,
+}), [{
+  id: 'copilot-review-gate',
+  state: 'failed',
+  status: 'completed',
+  conclusion: 'failure',
+  url: '',
+}]);
+
+const untouchedCopilotProxy = { ...copilotProxy, status: 'in_progress', conclusion: '' };
+assert.deepEqual(reconcileWorkflowRunCompletion({
+  event: 'workflow_run',
+  config,
+  eventPayload: {
+    workflow_run: {
+      name: 'PR Governance',
+      display_title: `PR Governance #121 / ${eventHeadSha}`,
+      status: 'completed',
+      conclusion: 'success',
+      pull_requests: [],
+    },
+  },
+  pull: proxyPull,
+  checkRuns: [untouchedCopilotProxy],
+  jobs: [{ name: 'Update Copilot Review Check', status: 'completed', conclusion: 'success' }],
+  apply: false,
+}), [{
+  id: 'copilot-review-gate',
+  state: 'failed',
+  status: 'completed',
+  conclusion: 'failure',
+  url: '',
+}]);
 
 console.log('pr-validation-matrix local tests passed');

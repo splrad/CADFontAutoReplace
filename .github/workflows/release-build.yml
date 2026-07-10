@@ -78,27 +78,15 @@ jobs:
         run: |
           # 发布只允许由“已合并到 main 的 PR”触发。
           # 这样可以阻止直接推送或非 PR 来源提交绕过治理流程后发版。
-          $maxAttempts = 10
-          $retrySeconds = 6
-          $mergedPullRequest = $null
-
-          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-              $associatedPulls = @(gh api "repos/$env:GH_REPO/commits/${{ github.sha }}/pulls" | ConvertFrom-Json)
-              $mergedPullRequest = $associatedPulls | Where-Object {
-                  $_.state -eq 'closed' -and
-                  $null -ne $_.merged_at -and
-                  $_.base.ref -eq $env:GITHUB_REF_NAME
-              } | Select-Object -First 1
-
-              if ($null -ne $mergedPullRequest) { break }
-              if ($attempt -lt $maxAttempts) {
-                  Write-Host "Commit is not associated with a merged $env:GITHUB_REF_NAME PR yet; retrying in $retrySeconds seconds."
-                  Start-Sleep -Seconds $retrySeconds
-              }
-          }
+          $associatedPulls = @(gh api "repos/$env:GH_REPO/commits/${{ github.sha }}/pulls" | ConvertFrom-Json)
+          $mergedPullRequest = $associatedPulls | Where-Object {
+              $_.state -eq 'closed' -and
+              $null -ne $_.merged_at -and
+              $_.base.ref -eq $env:GITHUB_REF_NAME
+          } | Select-Object -First 1
 
           if ($null -eq $mergedPullRequest) {
-              throw "Current commit $env:GITHUB_SHA is not associated with a merged PR targeting $env:GITHUB_REF_NAME."
+              throw "Current commit $env:GITHUB_SHA is not associated with a merged PR targeting $env:GITHUB_REF_NAME yet. Rerun this workflow manually after GitHub finishes associating the merge commit."
           }
 
           "pr_number=$($mergedPullRequest.number)" >> $env:GITHUB_OUTPUT

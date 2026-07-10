@@ -1,0 +1,11 @@
+name = "cadfontautoreplace-webhook-relay"
+main = "src/index.ts"
+compatibility_date = "2026-07-10"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+TARGET_REPOSITORY = "splrad/CADFontAutoReplace"
+
+[[kv_namespaces]]
+binding = "WEBHOOK_DELIVERIES"
+id = "REPLACE_WITH_CLOUDFLARE_KV_NAMESPACE_ID"

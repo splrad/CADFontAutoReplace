@@ -28,7 +28,7 @@
 #      （API 返回成功但不产生 review_requested 事件），且 ruleset 自动审查不覆盖 bot 创建的 PR。
 #      因此必须配置仓库 secret COPILOT_REVIEW_REQUEST_TOKEN：
 #      一个拥有 Copilot 订阅的用户的 fine-grained PAT，仓库权限 Pull requests: Read and write。
-#      未配置该 secret 时会回退 App token，请求大概率被静默忽略并导致该 job 失败提示。
+#      未配置该 secret 时请求 job 会立即失败，不回退到会被静默忽略的 App token。
 #      它依赖 .github/copilot-instructions.md
 #      要求 Copilot 审查正文主体使用简体中文，并在 inline comment 前两行标注：
 #      - 严重程度：阻断 / Severity: blocking
@@ -122,14 +122,11 @@ jobs:
 
       - name: Request Copilot code review
         env:
-          # GitHub 会静默忽略 App token 的 Copilot review request；
-          # 优先使用有 Copilot 订阅的用户 PAT（COPILOT_REVIEW_REQUEST_TOKEN），无则回退 App token。
-          GH_TOKEN: ${{ secrets.COPILOT_REVIEW_REQUEST_TOKEN || steps.copilot-review-token.outputs.token }}
+          # GitHub 会静默忽略 App token 的 Copilot review request；必须使用有 Copilot 订阅的用户 PAT。
+          GH_TOKEN: ${{ secrets.COPILOT_REVIEW_REQUEST_TOKEN }}
           GH_READ_TOKEN: ${{ steps.copilot-review-token.outputs.token }}
-          # 使用 PAT 时留空，由脚本通过 gh api user 解析实际请求账号。
-          EXPECTED_REQUEST_ACTOR: ${{ secrets.COPILOT_REVIEW_REQUEST_TOKEN == '' && format('{0}[bot]', steps.copilot-review-token.outputs.app-slug) || '' }}
-          COPILOT_REVIEW_REQUEST_CONFIRM_SECONDS: '60'
-          COPILOT_REVIEW_REQUEST_POLL_SECONDS: '5'
+          # 由脚本通过 gh api user 解析 PAT 对应的实际请求账号。
+          EXPECTED_REQUEST_ACTOR: ''
         run: node .github/scripts/pr-governance.js request-copilot-review
 
   auto-approve:
@@ -237,7 +234,7 @@ jobs:
     # 会自动重跑的场景：
     # - Copilot 延迟提交 review: pull_request_review submitted
     # - 用户接受建议并推送修正: pull_request_target synchronize
-    # Resolve/Unresolve conversation 不会直接触发 GitHub Actions；PR Validation Matrix 会定时刷新失败门禁。
+    # Resolve conversation 由 GitHub App webhook relay 转为 repository_dispatch 并触发验证矩阵。
     # 缺少“严重程度：阻断/建议”或 “Severity: blocking/suggestion” 的当前 Copilot 评论
     # 视为审查协议不完整并阻断，避免未知模板被误放行。
     if: >-

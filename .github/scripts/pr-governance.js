@@ -85,16 +85,6 @@ function ghChecksToken() {
   return process.env.GH_CHECKS_TOKEN || process.env.GH_TOKEN || '';
 }
 
-function parsePositiveInteger(value, fallback) {
-  const parsed = Number.parseInt(String(value || ''), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function sleepMilliseconds(milliseconds) {
-  if (milliseconds <= 0) return;
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
-}
-
 function isAtOrAfter(timestamp, threshold) {
   const time = Date.parse(timestamp || '');
   const thresholdTime = Date.parse(threshold || '');
@@ -839,25 +829,22 @@ function requestCopilotReview() {
     process.exit(1);
   }
 
-  const confirmation = waitForCopilotRequestConfirmation(requestStartedAt);
+  const confirmation = copilotRequestConfirmation(requestStartedAt);
   if (!confirmation.confirmed) {
-    writeStepSummary('Copilot 审查请求未确认', [
+    writeStepSummary('Copilot 审查请求已提交，等待事件确认', [
       `- 分支流向：${headRef} -> ${baseRef}`,
       `- 当前提交：${headSha}`,
       `- 请求 reviewer：${copilotReviewerLogin}`,
       ...requestActorDiagnosticLines(confirmation),
       `- 请求发起时间：${requestStartedAt}`,
-      `- 确认等待：${confirmation.waitedSeconds} 秒`,
       `- 检测到本次 review_requested：${confirmation.requestEvents.length > 0 ? '是' : '否'}`,
       `- Copilot 是否仍在待审查人列表：${confirmation.pendingReviewer ? '是' : '否'}`,
       `- 当前 head Copilot review 数量：${confirmation.reviews.length}`,
       '',
-      'GitHub API 调用返回成功，但 timeline 中没有检测到本次 Copilot review request，且当前 head 也没有 Copilot review。',
-      'GitHub 会静默忽略 GitHub App installation token 发起的 Copilot review request。',
-      '请配置仓库 secret `COPILOT_REVIEW_REQUEST_TOKEN`：拥有 Copilot 订阅的用户的 fine-grained PAT，仓库权限 `Pull requests: Read and write`。',
-      '同时确认仓库已启用 Copilot Code Review。',
+      'GitHub API 已接受请求；当前事件不等待异步 review_requested 或 review 结果。',
+      '后续 review 事件会继续刷新 Copilot 门禁。',
     ]);
-    process.exit(1);
+    return;
   }
 
   writeStepSummary('Copilot 审查请求已提交', [
@@ -866,7 +853,6 @@ function requestCopilotReview() {
     `- 请求 reviewer：${copilotReviewerLogin}`,
     ...requestActorDiagnosticLines(confirmation),
     `- 请求发起时间：${requestStartedAt}`,
-    `- 确认等待：${confirmation.waitedSeconds} 秒`,
     `- 检测到本次 review_requested：${confirmation.requestEvents.length > 0 ? '是' : '否'}`,
     `- 当前 head Copilot review 数量：${confirmation.reviews.length}`,
   ]);
@@ -951,25 +937,6 @@ function copilotRequestConfirmation(requestStartedAt) {
     reviews,
     requestEvents,
     pendingReviewer,
-  };
-}
-
-function waitForCopilotRequestConfirmation(requestStartedAt) {
-  const maxSeconds = parsePositiveInteger(process.env.COPILOT_REVIEW_REQUEST_CONFIRM_SECONDS, 60);
-  const pollSeconds = parsePositiveInteger(process.env.COPILOT_REVIEW_REQUEST_POLL_SECONDS, 5);
-  const started = Date.now();
-  const deadline = started + maxSeconds * 1000;
-  let confirmation = copilotRequestConfirmation(requestStartedAt);
-
-  while (!confirmation.confirmed && Date.now() < deadline) {
-    const remainingMilliseconds = deadline - Date.now();
-    sleepMilliseconds(Math.min(pollSeconds * 1000, remainingMilliseconds));
-    confirmation = copilotRequestConfirmation(requestStartedAt);
-  }
-
-  return {
-    ...confirmation,
-    waitedSeconds: Math.round((Date.now() - started) / 1000),
   };
 }
 

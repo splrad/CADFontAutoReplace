@@ -10,8 +10,8 @@ applyTo: ".github/workflows/**"
 - `permissions` 是否最小化，是否把 `contents: write`、`pull-requests: write`、`issues: write`、`security-events: write` 限定在真正需要的 job。
 - CodeQL 使用 GitHub Advanced Security default setup，并由 main ruleset 的 `Require code scanning results` 管理；本仓库不再维护自定义 CodeQL workflow，也不把 CodeQL job name 作为 required status check。
 - main ruleset 只应把 `PR Validation Matrix Gate` 配置为集中 required status check，source 必须匹配创建 check run 的 GitHub App 或 Any source；`Main Authorization Gate` 和 `Copilot Code Review Gate` 保留为矩阵目标，不应再单独设为 required status check。
-- `PR Validation Matrix` 是唯一拥有 `Actions: write` 的编排入口；conversation resolved 没有 Actions 事件，失败的 Copilot 门禁由该 workflow 定时定向刷新。
-- `pull_request_review` / `pull_request_review_comment` 必须先经过无密钥 `PR Review Signal`，再由验证矩阵通过 `workflow_run` 调度治理，避免 fork PR 的 review 事件直接读取仓库 secrets。
+- `PR Validation Matrix` 是唯一拥有 `Actions: write` 的编排入口；conversation resolved 由 GitHub App webhook relay 转为 `repository_dispatch`，不得使用 cron、sleep、截止时间循环或状态轮询刷新门禁。
+- `review_requested`、`pull_request_review` / `pull_request_review_comment` 必须先经过无密钥 `PR Review Signal`，再由验证矩阵通过 `workflow_run` 调度治理，避免 fork PR 的 review 事件直接读取仓库 secrets。
 - `DCO Sign-off Advisory` 是非阻断提示 workflow，不应加入 required checks，也不应因缺少 Signed-off-by 失败。
 - GitHub App token、`GITHUB_TOKEN`、secrets 和 artifact 是否跨信任边界使用。
 - 自动建 PR、门禁、Release workflow 的触发链是否会造成循环触发、重复 PR 或绕过审批。

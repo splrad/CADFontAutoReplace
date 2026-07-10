@@ -16,6 +16,7 @@ applyTo: ".github/scripts/**,.github/actions/**,.github/pr-classification-rules.
 - DCO Sign-off Advisory 是非阻断提示；脚本可以 upsert/delete marker comment，但不得因缺少 Signed-off-by 让 job 失败。
 - 评论 upsert marker 不得改变，避免重复评论或覆盖人工内容。
 - GitHub API 分页、`--paginate --slurp`、空响应和 bot login 归一化是否正确。
+- 治理脚本不得用 sleep、截止时间循环、定时重试或轮询等待异步状态；一次事件最多执行一次补跑并立即结束。
 - Copilot CLI prompt 和兜底摘要主体必须输出简体中文，但不要翻译代码符号、路径、label 和 API 名称。
 
 只有会造成门禁误通过、误阻断、错误创建 PR、错误发布、错误标签污染发布说明或破坏评论 marker 的问题，才标记为 `严重程度：阻断`。
