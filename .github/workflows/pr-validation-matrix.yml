@@ -1,20 +1,20 @@
 # 检查当前 PR head 的合并前验证矩阵是否完整、新鲜、可信。
 # ruleset required check 应配置为 `PR Validation Matrix Gate`。
 # 本 workflow 是唯一允许用 Actions: write 重新运行/批准其它 workflow 的仓库自动化入口。
+# review 状态变化由无密钥 PR Review Signal 转换为 workflow_run，兼容 fork PR。
 name: PR Validation Matrix
 
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review, edited, labeled, unlabeled]
-  pull_request_review:
-    types: [submitted, edited, dismissed]
-  pull_request_review_comment:
-    types: [created, edited, deleted]
   workflow_run:
-    workflows: ["PR Classification", "DCO Sign-off Advisory", "PR Governance"]
+    workflows: ["PR Classification", "DCO Sign-off Advisory", "PR Governance", "PR Review Signal"]
     types: [completed]
   check_run:
     types: [completed, rerequested]
+  schedule:
+    # GitHub Actions 没有 review conversation resolved 触发器；定时刷新失败的 Copilot 门禁。
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       pr_number:
@@ -30,21 +30,59 @@ on:
         default: enforce
 
 concurrency:
-  group: pr-validation-matrix-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.check_run.pull_requests[0].number || inputs.pr_number || github.run_id }}
+  group: pr-validation-matrix-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.check_run.pull_requests[0].number || inputs.pr_number || (github.event.workflow_run.head_branch && format('{0}-{1}', github.event.workflow_run.head_repository.id, github.event.workflow_run.head_branch)) || github.run_id }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  refresh-failed-copilot-gates:
+    name: Refresh Failed Copilot Gates
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Create validation refresh app token
+        id: validation-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: read
+          permission-checks: read
+          permission-actions: write
+
+      - name: Checkout trusted validation scripts
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+          token: ${{ steps.validation-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Dispatch refresh for failed Copilot gates
+        env:
+          GH_TOKEN: ${{ steps.validation-token.outputs.token }}
+          GH_ACTIONS_TOKEN: ${{ steps.validation-token.outputs.token }}
+          VALIDATION_MATRIX_BASE_REF: main
+          VALIDATION_MATRIX_WORKFLOW_FILE: pr-validation-matrix.yml
+        run: node .github/scripts/pr-validation-matrix.js --dispatch-open-pulls
+
   validate-matrix:
     name: Evaluate PR Validation Matrix
     runs-on: ubuntu-latest
     timeout-minutes: 15
     if: >-
+      github.event_name != 'schedule' &&
       (
         github.event_name != 'workflow_run' ||
-        github.event.workflow_run.pull_requests[0].number
+        github.event.workflow_run.pull_requests[0].number ||
+        github.event.workflow_run.name == 'PR Review Signal'
       ) &&
       (
         github.event_name != 'check_run' ||
@@ -61,7 +99,7 @@ jobs:
     steps:
       - name: Create validation app token
         id: validation-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
@@ -70,6 +108,27 @@ jobs:
           permission-issues: write
           permission-checks: write
           permission-actions: write
+
+      - name: Download review signal context
+        if: github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR Review Signal'
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: pr-review-signal-${{ github.event.workflow_run.id }}
+          path: ${{ runner.temp }}/pr-review-signal
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ steps.validation-token.outputs.token }}
+
+      - name: Resolve review signal PR
+        id: review-signal-context
+        if: github.event_name == 'workflow_run' && github.event.workflow_run.name == 'PR Review Signal'
+        shell: bash
+        run: |
+          pr_number="$(tr -d '\r\n' < "$RUNNER_TEMP/pr-review-signal/pr_number")"
+          if [[ ! "$pr_number" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Invalid PR number in review signal artifact: $pr_number" >&2
+            exit 1
+          fi
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
 
       - name: Checkout trusted validation scripts
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -87,7 +146,7 @@ jobs:
           GH_TOKEN: ${{ steps.validation-token.outputs.token }}
           GH_CHECKS_TOKEN: ${{ steps.validation-token.outputs.token }}
           GH_ACTIONS_TOKEN: ${{ steps.validation-token.outputs.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.check_run.pull_requests[0].number || inputs.pr_number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.check_run.pull_requests[0].number || inputs.pr_number || steps.review-signal-context.outputs.pr_number }}
           GITHUB_EVENT_ACTION: ${{ github.event.action }}
           VALIDATION_MATRIX_MODE: ${{ inputs.mode || 'enforce' }}
           VALIDATION_MATRIX_SCOPE: ${{ inputs.scope || 'auto' }}

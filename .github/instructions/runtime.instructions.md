@@ -2,9 +2,7 @@
 applyTo: "src/**,tools/Publish-ReleaseAssets.ps1,Directory.Build.props,Directory.Packages.props,global.json,Version.props,chore/Fonts.zip"
 ---
 
-GitHub Copilot Code Review 输出的主体语言必须是简体中文。为了保留技术含义，可以使用英文代码标识符、AutoCAD/.NET API 名称、文件路径、命令、包名和难以准确翻译的专有名词。
-
-每条 review comment 第一行必须提供严重程度标记，优先使用 `严重程度：阻断` 或 `严重程度：建议`，也兼容 `Severity: blocking` 或 `Severity: suggestion`。
+输出语言、严重程度和标题格式统一遵循 `.github/copilot-instructions.md`；本文件只补充运行时代码和发布资产路径的审查重点。
 
 审查插件运行时代码、部署器和发布包内容时，优先检查：
 

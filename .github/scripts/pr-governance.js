@@ -23,11 +23,15 @@ const copilotReviewerLogin = 'copilot-pull-request-reviewer[bot]';
 const copilotCheckName = process.env.COPILOT_REVIEW_CHECK_NAME || 'Copilot Code Review Gate';
 const copilotNoBlockingConclusionPattern = /(?:^|\r?\n)\s*(?:#{1,6}\s*)?结论\s*(?::|：)?\s*(?:\r?\n\s*)*未发现需要阻断合并的问题。/;
 const copilotNoCommentsPattern = /Copilot reviewed \d+ out of \d+ changed files in this pull request and generated no (?:new )?comments\./i;
-const copilotBlockingSeverityPattern = /^\s*(severity\s*[:：]\s*blocking|严重程度\s*[:：]\s*阻断)(?:\s|$)/im;
-const copilotSuggestionSeverityPattern = /^\s*(severity\s*[:：]\s*suggestion|严重程度\s*[:：]\s*建议)(?:\s|$)/im;
+const copilotGeneratedCommentsPattern = /Copilot reviewed \d+ out of \d+ changed files in this pull request and generated (\d+) (?:new )?comments\./i;
+const copilotBlockingSeverityPattern = /^\s*(severity\s*[:：]\s*blocking|严重程度\s*[:：]\s*阻断)(?:\s|$)/i;
+const copilotSuggestionSeverityPattern = /^\s*(severity\s*[:：]\s*suggestion|严重程度\s*[:：]\s*建议)(?:\s|$)/i;
+const copilotTitlePattern = /^\s*(?:#{1,6}\s*)?(?:标题|title)\s*[:：]\s*(.+?)\s*$/i;
 const autoApprovalMarker = '<!-- workflow:auto-approval -->';
 let prDetailsCache = null;
 let realContributorsCache = null;
+let pullRequestCommitsCache = null;
+let commitContributorSummaryCache = null;
 
 function gh(args, input, token) {
   const executable = process.env.GH_EXECUTABLE || 'gh';
@@ -125,16 +129,67 @@ function hydratePrContext() {
   headSha ||= details?.head?.sha || '';
 }
 
-function pullRequestCommitAuthorLogins() {
-  const commits = flattenReviews(ghJson([
+function pullRequestCommits() {
+  if (pullRequestCommitsCache) return pullRequestCommitsCache;
+  pullRequestCommitsCache = flattenReviews(ghJson([
     '--method', 'GET',
     `repos/${repo}/pulls/${prNumber}/commits`,
     '-f', 'per_page=100',
     '--paginate',
     '--slurp',
   ], undefined, ghReadToken()) || []);
+  return pullRequestCommitsCache;
+}
 
-  return uniqueLogins(commits.map((commit) => commit?.author?.login || ''));
+function isBotCommit(commit) {
+  const login = String(commit?.author?.login || commit?.committer?.login || '').toLowerCase();
+  const type = String(commit?.author?.type || commit?.committer?.type || '').toLowerCase();
+  const name = String(commit?.commit?.author?.name || commit?.commit?.committer?.name || '').toLowerCase();
+  const email = String(commit?.commit?.author?.email || commit?.commit?.committer?.email || '').toLowerCase();
+  return type === 'bot'
+    || [login, name, email].some((value) => value.endsWith('[bot]') || value.includes('[bot]@'))
+    || [login, name].some((value) => value === 'github-actions' || value === 'dependabot');
+}
+
+function pullRequestCommitContributorSummary(commits) {
+  const logins = [];
+  const unidentified = [];
+  for (const commit of commits || []) {
+    const login = normalizeLogin(commit?.author?.login || '');
+    if (login) {
+      logins.push(login);
+      continue;
+    }
+    if (isBotCommit(commit)) continue;
+    unidentified.push({
+      sha: String(commit?.sha || ''),
+      name: String(commit?.commit?.author?.name || '').trim(),
+      email: String(commit?.commit?.author?.email || '').trim(),
+    });
+  }
+  return { logins: uniqueLogins(logins), unidentified };
+}
+
+function commitContributorSummary() {
+  if (!commitContributorSummaryCache) {
+    commitContributorSummaryCache = pullRequestCommitContributorSummary(pullRequestCommits());
+  }
+  return commitContributorSummaryCache;
+}
+
+function pullRequestCommitAuthorLogins() {
+  return commitContributorSummary().logins;
+}
+
+function unidentifiedCommitAuthors() {
+  return commitContributorSummary().unidentified;
+}
+
+function unidentifiedCommitAuthorDisplay() {
+  return unidentifiedCommitAuthors().map((author) => {
+    const identity = author.name || author.email || 'unknown';
+    return `${String(author.sha || '').slice(0, 7) || 'unknown'} (${identity})`;
+  }).join(', ');
 }
 
 function realContributorLogins() {
@@ -154,10 +209,6 @@ function realContributorDisplay() {
 
 function untrustedContributorLogins() {
   return realContributorLogins().filter((login) => !isTrusted(login));
-}
-
-function failureMentionText() {
-  return notificationMentionText([...trustedDeveloperLogins(), ...realContributorLogins()]);
 }
 
 function flattenReviews(payload) {
@@ -257,6 +308,63 @@ function commentToken() {
   return process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN;
 }
 
+function coreReviewersToRequest({ trusted, author, requested, reviewed = [] }) {
+  const authorLogin = normalizeGitHubLogin(author);
+  const alreadyHandled = new Set(uniqueLogins([...requested, ...reviewed]).map(normalizeGitHubLogin));
+  const eligible = uniqueLogins(trusted)
+    .filter((login) => normalizeGitHubLogin(login) !== authorLogin);
+  return {
+    eligible,
+    reviewed: uniqueLogins(reviewed),
+    missing: eligible.filter((login) => !alreadyHandled.has(normalizeGitHubLogin(login))),
+  };
+}
+
+function commandErrorSummary(error) {
+  const text = [error?.stderr, error?.stdout, error?.message]
+    .map((value) => String(value || '').trim())
+    .find(Boolean) || 'unknown error';
+  return text.split(/\r?\n/)[0].slice(0, 500);
+}
+
+function requestCoreDeveloperReviews({
+  trusted = trustedDeveloperLogins(),
+  author = prAuthor,
+  requested = requestedReviewerLogins(),
+  reviewed = latestReviewsForHeadByUser().map((review) => review?.user?.login || ''),
+  confirm = requestedReviewerLogins,
+  request = (reviewers) => gh([
+    '--method', 'POST',
+    `repos/${repo}/pulls/${prNumber}/requested_reviewers`,
+    '--input', '-',
+  ], JSON.stringify({ reviewers })),
+} = {}) {
+  const plan = coreReviewersToRequest({ trusted, author, requested, reviewed });
+  if (plan.eligible.length === 0) {
+    return { ok: false, ...plan, requested: [], error: '未配置可请求的核心开发者。' };
+  }
+  if (plan.missing.length === 0) {
+    return { ok: true, ...plan, requested: [], error: '' };
+  }
+  try {
+    request(plan.missing);
+    const confirmedSet = new Set(uniqueLogins(confirm()).map(normalizeGitHubLogin));
+    const unconfirmed = plan.missing
+      .filter((login) => !confirmedSet.has(normalizeGitHubLogin(login)));
+    if (unconfirmed.length > 0) {
+      return {
+        ok: false,
+        ...plan,
+        requested: plan.missing.filter((login) => !unconfirmed.includes(login)),
+        error: `GitHub 未确认 Review Request：${unconfirmed.join(', ')}`,
+      };
+    }
+    return { ok: true, ...plan, requested: plan.missing, error: '' };
+  } catch (error) {
+    return { ok: false, ...plan, requested: [], error: commandErrorSummary(error) };
+  }
+}
+
 function deleteComment(marker) {
   const token = commentToken();
   deleteMarkerComments({ gh, ghJson, repo, prNumber, marker, token });
@@ -264,7 +372,14 @@ function deleteComment(marker) {
 
 const blockingFailuresMarker = '<!-- workflow:pr-blocking-failures -->';
 const blockingFailuresStatePattern = /<!--\s*workflow:pr-blocking-failures-state:([A-Za-z0-9+/=_-]+)\s*-->/;
-const blockingSourceOrder = ['main-authorization', 'copilot-review'];
+const blockingSourceOrder = [
+  'main-authorization',
+  'copilot-review:blocking-comments',
+  'copilot-review:comment-protocol',
+  'copilot-review:request-failed',
+  'copilot-review:passing-conclusion',
+  'copilot-review',
+];
 
 function encodeBlockingState(state) {
   return Buffer.from(JSON.stringify(state), 'utf8').toString('base64');
@@ -291,34 +406,65 @@ function orderedBlockingFailures(failures) {
   });
 }
 
+function normalizeBlockingFailure(failure) {
+  return {
+    source: String(failure?.source || ''),
+    title: String(failure?.title || '待处理事项'),
+    handlers: uniqueLogins(failure?.handlers || []),
+    details: Array.isArray(failure?.details)
+      ? failure.details.map((detail) => String(detail || '').trim()).filter(Boolean)
+      : [],
+  };
+}
+
 function blockingFailureBody(state) {
   const failures = orderedBlockingFailures(state.failures);
   const sections = [];
-  for (const failure of failures) {
-    sections.push(`#### ${failure.title}`);
+  for (const [index, rawFailure] of failures.entries()) {
+    const failure = normalizeBlockingFailure(rawFailure);
+    if (index > 0) sections.push('---', '');
+    sections.push(`### ${failure.title}`, '');
+    sections.push(`**处理人：** ${notificationMentionText(failure.handlers)}`, '');
     for (const detail of failure.details) {
-      sections.push(`- ${detail}`);
+      sections.push(detail, '');
     }
-    sections.push('');
   }
 
   return [
     blockingFailuresMarker,
     `<!-- workflow:pr-blocking-failures-state:${encodeBlockingState(state)} -->`,
-    `## PR 暂不能合并（${failures.length} 项阻断）`,
+    '## 🚧 PR 合并前有待处理事项',
     '',
-    failureMentionText(),
-    '',
-    '### 当前上下文',
-    `- 分支流向：${headRef} -> ${baseRef}`,
-    `- 当前提交：${headSha}`,
-    `- 真实贡献者：${realContributorDisplay()}`,
-    `- 阻断项：${failures.map((failure) => failure.title).join('；')}`,
-    '',
-    '### 需要处理',
     ...sections,
-    '> 本通知由 GitHub Actions 自动发布；相关问题全部恢复后会自动删除。',
+    '> 🤖 本评论由 GitHub Actions 自动维护，全部阻断解除后将自动删除。',
   ].join('\n').trimEnd();
+}
+
+function nextBlockingFailureState(existingState, currentHead, {
+  source,
+  title,
+  handlers,
+  failed,
+  details,
+}) {
+  return nextBlockingFailuresState(existingState, currentHead, {
+    sourcePrefix: source,
+    failures: failed ? [{ source, title, handlers, details }] : [],
+  });
+}
+
+function nextBlockingFailuresState(existingState, currentHead, { sourcePrefix, failures }) {
+  const state = existingState?.head === currentHead && Array.isArray(existingState.failures)
+    ? { head: currentHead, failures: existingState.failures }
+    : { head: currentHead, failures: [] };
+
+  state.failures = state.failures.filter((failure) => {
+    const source = String(failure?.source || '');
+    return source !== sourcePrefix && !source.startsWith(`${sourcePrefix}:`);
+  });
+  state.failures.push(...(failures || []).map(normalizeBlockingFailure));
+
+  return state;
 }
 
 function writeBlockingFailureState(state, repost) {
@@ -358,7 +504,14 @@ function writeBlockingFailureState(state, repost) {
   }
 }
 
-function updateBlockingFailure({ source, title, failed, details }) {
+function updateBlockingFailure({ source, title, handlers, failed, details }) {
+  updateBlockingFailures({
+    sourcePrefix: source,
+    failures: failed ? [{ source, title, handlers, details }] : [],
+  });
+}
+
+function updateBlockingFailures({ sourcePrefix, failures }) {
   const token = commentToken();
   const comments = listMarkerComments({
     ghJson,
@@ -370,20 +523,7 @@ function updateBlockingFailure({ source, title, failed, details }) {
   const existing = comments[comments.length - 1];
   const existingState = decodeBlockingState(existing?.body);
   const headChanged = Boolean(existing && existingState?.head && existingState.head !== headSha);
-  const state = headChanged || !existingState
-    ? { head: headSha, failures: [] }
-    : { head: headSha, failures: existingState.failures };
-
-  state.failures = state.failures.filter((failure) => failure.source !== source);
-  if (failed) {
-    state.failures.push({
-      source,
-      title,
-      details: Array.isArray(details)
-        ? details.map((detail) => String(detail || '').trim()).filter(Boolean)
-        : [],
-    });
-  }
+  const state = nextBlockingFailuresState(existingState, headSha, { sourcePrefix, failures });
 
   writeBlockingFailureState(state, headChanged);
 }
@@ -420,8 +560,17 @@ function autoApprove() {
   ensurePrContext();
   const contributors = realContributorLogins();
   const contributorDisplay = realContributorDisplay();
+  const unidentifiedAuthors = unidentifiedCommitAuthors();
   const untrusted = untrustedContributorLogins();
   const reviewer = process.env.AUTO_APPROVE_REVIEWER || '';
+  if (unidentifiedAuthors.length > 0) {
+    writeStepSummary('自动审批已跳过', [
+      `- 分支流向：${headRef} -> ${baseRef}`,
+      `- 无法识别的提交作者：${unidentifiedCommitAuthorDisplay()}`,
+      '- 原因：存在无法关联 GitHub 账号的非机器人提交作者，必须由核心开发者人工确认。',
+    ]);
+    return;
+  }
   if (contributors.length === 0) {
     writeStepSummary('自动审批已跳过', [
       `- 分支流向：${headRef} -> ${baseRef}`,
@@ -500,18 +649,66 @@ function autoApprove() {
   ]);
 }
 
+function mainAuthorizationFailurePresentation({ status, coreHandlers, reviewRequest }) {
+  if (status === 'failed_unidentified_commit_authors') {
+    const requestLine = reviewRequest?.ok
+      ? '已向核心开发者发送 Review Request，请核对提交作者并提交 **Approve**。'
+      : 'Review Request 自动发送失败，请核对提交作者并检查 Main Authorization Gate 日志。';
+    return {
+      title: '⚠️ 贡献者信息识别异常',
+      handlers: reviewRequest?.eligible || coreHandlers,
+      details: [
+        '部分提交作者未关联到可识别的 GitHub 账号。',
+        requestLine,
+      ],
+    };
+  }
+  if (status === 'failed_missing_real_contributors') {
+    return {
+      title: '⚠️ 贡献者信息识别异常',
+      handlers: coreHandlers,
+      details: [
+        '门禁未识别到当前 PR 的真实贡献者。',
+        '请检查 PR contributor metadata 和 commit author 关联，并重新运行门禁。',
+      ],
+    };
+  }
+
+  const requestLine = reviewRequest?.ok
+    ? '已向所有可请求的核心开发者发送 Review Request，请完成审查并提交 **Approve**。'
+    : 'Review Request 自动发送失败，请完成审查并检查 Main Authorization Gate 日志。';
+  return {
+    title: '🔒 核心开发者审批',
+    handlers: reviewRequest?.eligible || coreHandlers,
+    details: [
+      '当前 PR 尚未获得所需审批。',
+      requestLine,
+    ],
+  };
+}
+
 function mainAuthorizationGate() {
   ensurePrContext();
   let status = 'passed';
   const contributors = realContributorLogins();
   const contributorDisplay = realContributorDisplay();
+  const unidentifiedAuthors = unidentifiedCommitAuthors();
   const untrusted = untrustedContributorLogins();
   const trustedApprovers = latestTrustedApproversForHead();
   const trustedManualApprovers = latestTrustedApproversForHead({ includeAutomation: false });
   let detail = '';
   let failed = false;
 
-  if (contributors.length === 0) {
+  if (unidentifiedAuthors.length > 0) {
+    if (trustedManualApprovers.length > 0) {
+      status = 'passed_manual_core_approval_for_unidentified_authors';
+      detail = `存在无法关联 GitHub 账号的提交作者，但已获得核心开发者 ${trustedManualApprovers.join(', ')} 对当前提交的手动审批。`;
+    } else {
+      status = 'failed_unidentified_commit_authors';
+      detail = `存在无法关联 GitHub 账号的非机器人提交作者：${unidentifiedCommitAuthorDisplay()}。`;
+      failed = true;
+    }
+  } else if (contributors.length === 0) {
     status = 'failed_missing_real_contributors';
     detail = 'main 目标 PR 未识别真实贡献者，不能自动或人工放行。';
     failed = true;
@@ -533,28 +730,43 @@ function mainAuthorizationGate() {
     failed = true;
   }
 
+  const coreHandlers = trustedDeveloperLogins();
+  const needsReviewRequest = [
+    'failed_unidentified_commit_authors',
+    'failed_untrusted_contributor_missing_manual_approval',
+    'failed_trusted_contributors_missing_approval',
+  ].includes(status);
+  const reviewRequest = needsReviewRequest
+    ? requestCoreDeveloperReviews()
+    : null;
+  const presentation = mainAuthorizationFailurePresentation({
+    status,
+    coreHandlers,
+    reviewRequest,
+  });
+
   cleanupLegacyGateComment('<!-- workflow:main-authorization-gate -->');
   writeStepSummary(failed ? '主分支授权门禁未通过' : '主分支授权门禁已通过', [
     `- 状态：${status}`,
     `- 分支流向：${headRef} -> ${baseRef}`,
     `- 真实贡献者：${contributorDisplay}`,
+    `- 无法识别的提交作者：${unidentifiedAuthors.length ? unidentifiedCommitAuthorDisplay() : '无'}`,
     `- 非核心贡献者：${untrusted.length ? untrusted.join(', ') : '无'}`,
     `- 核心开发者 approval：${trustedApprovers.length ? trustedApprovers.join(', ') : '无'}`,
     `- 核心开发者手动 approval：${trustedManualApprovers.length ? trustedManualApprovers.join(', ') : '无'}`,
+    `- Review Request 可请求对象：${reviewRequest?.eligible?.join(', ') || '不适用'}`,
+    `- Review Request 本次新增：${reviewRequest?.requested?.join(', ') || '无'}`,
+    `- 当前 head 已完成 review：${reviewRequest?.reviewed?.join(', ') || '无'}`,
+    `- Review Request 状态：${reviewRequest ? (reviewRequest.ok ? '成功' : `失败：${reviewRequest.error}`) : '不适用'}`,
     '',
     detail,
   ]);
   updateBlockingFailure({
     source: 'main-authorization',
-    title: '主分支授权门禁未通过',
+    title: presentation.title,
+    handlers: presentation.handlers,
     failed,
-    details: [
-      `状态：${status}`,
-      `真实贡献者：${contributorDisplay}`,
-      `非核心贡献者：${untrusted.length ? untrusted.join(', ') : '无'}`,
-      `问题：${detail}`,
-      '处理：请核心开发者审核并提交 approval；如果全部贡献者都是核心开发者，也可以配置 CORE_AUTO_APPROVAL_TOKEN 自动审批。',
-    ],
+    details: presentation.details,
   });
 
   if (failed) {
@@ -687,6 +899,10 @@ function hasCopilotNoBlockingConclusion(reviews) {
 function copilotPassingConclusionSource(reviews) {
   if (hasCopilotNoBlockingConclusion(reviews)) return 'fixed-conclusion';
   if (reviews.some((review) => copilotNoCommentsPattern.test(String(review?.body || '')))) return 'no-new-comments';
+  if (reviews.some((review) => {
+    const match = String(review?.body || '').match(copilotGeneratedCommentsPattern);
+    return Number.parseInt(match?.[1] || '0', 10) > 0;
+  })) return 'resolved-review-comments';
   return '';
 }
 
@@ -846,10 +1062,103 @@ function isCopilotCodeReviewComment(comment) {
 }
 
 function copilotCommentSeverity(body) {
-  const text = String(body || '');
-  if (copilotBlockingSeverityPattern.test(text)) return 'blocking';
-  if (copilotSuggestionSeverityPattern.test(text)) return 'suggestion';
+  const firstLine = String(body || '').split(/\r?\n/, 1)[0];
+  if (copilotBlockingSeverityPattern.test(firstLine)) return 'blocking';
+  if (copilotSuggestionSeverityPattern.test(firstLine)) return 'suggestion';
   return '';
+}
+
+function sanitizeCopilotCommentTitle(value, maxLength = 60) {
+  const normalized = String(value || '')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^\s*(?:#{1,6}|[-+*>]|\d+[.)])\s*/, '')
+    .replace(/[`*~]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[。！？；;，,：:]\s*$/, '')
+    .trim();
+  if (!normalized) return '';
+  const characters = Array.from(normalized);
+  return characters.length <= maxLength
+    ? normalized
+    : `${characters.slice(0, maxLength - 1).join('')}…`;
+}
+
+function copilotCommentTitle(body) {
+  const text = String(body || '');
+  const lines = text.split(/\r?\n/);
+  const explicit = lines[1]?.match(copilotTitlePattern)?.[1] || '';
+  const explicitTitle = sanitizeCopilotCommentTitle(explicit);
+  if (explicitTitle) return explicitTitle;
+
+  for (const line of lines) {
+    const candidate = String(line || '').trim();
+    if (!candidate || /^```/.test(candidate)) continue;
+    if (copilotBlockingSeverityPattern.test(candidate)
+      || copilotSuggestionSeverityPattern.test(candidate)
+      || copilotTitlePattern.test(candidate)) continue;
+    const firstClause = candidate.split(/[。！？；;]/, 1)[0];
+    const fallback = sanitizeCopilotCommentTitle(firstClause);
+    if (fallback) return fallback;
+  }
+  return 'Copilot 评论';
+}
+
+function copilotThreadFindings(threads) {
+  const blocking = [];
+  const suggestions = [];
+  const unclassified = [];
+  for (const thread of threads || []) {
+    if (thread?.isResolved || thread?.isOutdated) continue;
+    const comments = Array.isArray(thread?.comments) ? thread.comments : thread?.comments?.nodes || [];
+    const copilotComments = comments.filter((comment) => isCopilotCodeReviewComment(comment));
+    for (const comment of copilotComments) {
+      const body = String(comment?.body || '');
+      const item = {
+        url: comment.url || '',
+        title: copilotCommentTitle(body),
+      };
+      const severity = copilotCommentSeverity(body);
+      if (severity === 'blocking') {
+        blocking.push(item);
+      } else if (severity === 'suggestion') {
+        suggestions.push(item);
+      } else {
+        unclassified.push(item);
+      }
+    }
+  }
+  return { blocking, suggestions, unclassified };
+}
+
+function reviewThreadComments(threadId) {
+  const query = `
+    query($id: ID!, $cursor: String) {
+      node(id: $id) {
+        ... on PullRequestReviewThread {
+          comments(first: 100, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              author { login }
+              pullRequestReview { author { login } }
+              body
+              url
+            }
+          }
+        }
+      }
+    }
+  `;
+  const comments = [];
+  let cursor = null;
+  do {
+    const args = ['graphql', '-f', `query=${query}`, '-f', `id=${threadId}`];
+    if (cursor) args.push('-f', `cursor=${cursor}`);
+    const connection = ghJson(args)?.data?.node?.comments;
+    comments.push(...(connection?.nodes || []));
+    cursor = connection?.pageInfo?.hasNextPage ? connection.pageInfo.endCursor : null;
+  } while (cursor);
+  return comments;
 }
 
 function unresolvedCopilotThreadFindings() {
@@ -860,27 +1169,16 @@ function unresolvedCopilotThreadFindings() {
           reviewThreads(first: 100, after: $cursor) {
             pageInfo { hasNextPage endCursor }
             nodes {
+              id
               isResolved
               isOutdated
-              comments(first: 20) {
-                nodes {
-                  author { login }
-                  pullRequestReview {
-                    author { login }
-                  }
-                  body
-                  url
-                }
-              }
             }
           }
         }
       }
     }
   `;
-  const blocking = [];
-  const suggestions = [];
-  const unclassified = [];
+  const activeThreads = [];
   let cursor = null;
 
   do {
@@ -895,31 +1193,13 @@ function unresolvedCopilotThreadFindings() {
     const payload = ghJson(args);
     const threads = payload?.data?.repository?.pullRequest?.reviewThreads;
     for (const thread of threads?.nodes || []) {
-      // Outdated 线程属于旧 head 的代码上下文。当前 head 是否可合并由最新 Copilot review、
-      // 未解决的当前线程，以及 ruleset 的 required review thread resolution 共同约束。
       if (thread.isResolved || thread.isOutdated) continue;
-      const comments = thread.comments?.nodes || [];
-      const copilotComments = comments.filter((comment) => isCopilotCodeReviewComment(comment));
-      for (const comment of copilotComments) {
-        const body = String(comment?.body || '');
-        const item = {
-          url: comment.url || '',
-          body: body.split(/\r?\n/)[0].slice(0, 140) || 'Copilot 评论',
-        };
-        const severity = copilotCommentSeverity(body);
-        if (severity === 'blocking') {
-          blocking.push(item);
-        } else if (severity === 'suggestion') {
-          suggestions.push(item);
-        } else {
-          unclassified.push(item);
-        }
-      }
+      activeThreads.push({ ...thread, comments: reviewThreadComments(thread.id) });
     }
     cursor = threads?.pageInfo?.hasNextPage ? threads.pageInfo.endCursor : null;
   } while (cursor);
 
-  return { blocking, suggestions, unclassified };
+  return copilotThreadFindings(activeThreads);
 }
 
 function checkCopilotReviewForHead() {
@@ -976,8 +1256,8 @@ function evaluateCopilotGate({ reviews, findings, requestFailed }) {
     checkStatus: 'completed',
     checkConclusion: 'success',
     checkTitle: 'Copilot 审查门禁已通过',
+    failureKind: '',
     detail: '当前提交已完成 Copilot 代码审查，且未发现未解决的重大问题。',
-    handling: '',
     passingSignal: '',
     passingConclusionSource: '',
     blocking,
@@ -989,14 +1269,13 @@ function evaluateCopilotGate({ reviews, findings, requestFailed }) {
     if (requestFailed) {
       result.checkConclusion = 'failure';
       result.checkTitle = 'Copilot 审查请求失败';
+      result.failureKind = 'request-failed';
       result.detail = '当前提交尚未检测到 Copilot 代码审查，且 Request Copilot Review job 未成功。请检查该 job 日志、GitHub App 安装范围和 `Pull requests: Read and write` 权限。';
-      result.handling = '处理：请检查 Request Copilot Review job 日志，修复后重新触发工作流。';
     } else {
       result.checkStatus = 'in_progress';
       result.checkConclusion = undefined;
       result.checkTitle = '等待 Copilot 代码审查';
       result.detail = '当前提交尚未检测到 Copilot 代码审查；自定义 Checks API 门禁会保持 in_progress，等 Copilot 提交 review 后由 pull_request_review 事件重新触发并完成。';
-      result.handling = '处理：等待 Copilot 提交 review。';
     }
     return result;
   }
@@ -1004,16 +1283,16 @@ function evaluateCopilotGate({ reviews, findings, requestFailed }) {
   if (blocking.length > 0) {
     result.checkConclusion = 'failure';
     result.checkTitle = 'Copilot 审查门禁未通过';
+    result.failureKind = 'blocking-comments';
     result.detail = '检测到 Copilot 留下的未解决重大问题。';
-    result.handling = '处理：请修复或回复并 resolve 上述 Copilot 阻断评论。';
     return result;
   }
 
   if (unclassified.length > 0) {
     result.checkConclusion = 'failure';
     result.checkTitle = 'Copilot 审查协议不完整';
+    result.failureKind = 'comment-protocol';
     result.detail = '检测到未解决 Copilot 评论缺少可解析严重程度标记。';
-    result.handling = '处理：请重新触发 Copilot 审查，或让 Copilot 按仓库协议输出 `严重程度：阻断` / `严重程度：建议`。';
     return result;
   }
 
@@ -1027,16 +1306,78 @@ function evaluateCopilotGate({ reviews, findings, requestFailed }) {
   if (!result.passingConclusionSource) {
     result.checkConclusion = 'failure';
     result.checkTitle = 'Copilot 审查通过信号缺失';
+    result.failureKind = 'passing-conclusion';
     result.detail = '当前 head 没有未解决 Copilot 评论，但 review 正文未包含固定无阻断结论或官方无评论模板。';
-    result.handling = '处理：请重新触发 Copilot 审查，确保 Copilot 输出仓库已知的通过模板。';
     return result;
   }
 
   result.passingSignal = 'no-current-comments-with-known-conclusion';
-  result.detail = result.passingConclusionSource === 'no-new-comments'
-    ? '当前提交已完成 Copilot 代码审查，review 正文为官方无新增评论模板，且未发现未解决的重大问题。'
-    : '当前提交已完成 Copilot 代码审查，review 正文包含固定无阻断结论句，且未发现未解决的重大问题。';
+  if (result.passingConclusionSource === 'no-new-comments') {
+    result.detail = '当前提交已完成 Copilot 代码审查，review 正文为官方无新增评论模板，且未发现未解决的重大问题。';
+  } else if (result.passingConclusionSource === 'resolved-review-comments') {
+    result.detail = '当前提交的 Copilot review 曾生成评论，相关 conversation 已全部解决。';
+  } else {
+    result.detail = '当前提交已完成 Copilot 代码审查，review 正文包含固定无阻断结论句，且未发现未解决的重大问题。';
+  }
   return result;
+}
+
+function copilotFailurePresentations({ decision, coreHandlers, contributorHandlers }) {
+  const presentations = [];
+  if (decision.blocking.length > 0) {
+    const titles = decision.blocking.map((item) => `- ${item.title || 'Copilot 评论'}`).join('\n');
+    presentations.push({
+      source: 'copilot-review:blocking-comments',
+      title: '🚫 Copilot 阻断评论',
+      handlers: contributorHandlers.length ? contributorHandlers : coreHandlers,
+      details: [
+        '请处理或回复以下评论，并将对应 Conversation 标记为 **Resolved**：',
+        titles,
+      ],
+    });
+  }
+  if (decision.unclassified.length > 0) {
+    presentations.push({
+      source: 'copilot-review:comment-protocol',
+      title: '⚠️ Copilot Review 评论格式异常',
+      handlers: coreHandlers,
+      details: [
+        'Copilot 评论缺少可识别的严重程度标记，门禁暂无法完成判定。',
+        '请检查评论内容和审查协议，必要时重新触发 Copilot 审查。',
+      ],
+    });
+  }
+  if (presentations.length > 0) return presentations;
+
+  if (decision.failureKind === 'request-failed') {
+    return [{
+      source: 'copilot-review:request-failed',
+      title: '⚠️ Copilot Review 请求失败',
+      handlers: coreHandlers,
+      details: [
+        '当前提交未能完成 Copilot Review 请求。',
+        '请检查 Request Copilot Review job，修正后重新触发审查。',
+      ],
+    }];
+  }
+  if (decision.failureKind !== 'passing-conclusion') return [];
+  return [{
+    source: 'copilot-review:passing-conclusion',
+    title: '⚠️ Copilot Review 状态异常',
+    handlers: coreHandlers,
+    details: [
+      '门禁未识别到 Copilot 的有效通过结论。',
+      '请检查 Copilot Review 结果及门禁识别规则；如 Review 已完成但仍未识别，请重新触发 Copilot 审查。',
+    ],
+  }];
+}
+
+function copilotFailurePresentation(context) {
+  return copilotFailurePresentations(context)[0] || {
+    title: '',
+    handlers: [],
+    details: [],
+  };
 }
 
 function copilotReviewGate() {
@@ -1057,7 +1398,6 @@ function copilotReviewGate() {
     checkConclusion,
     checkTitle,
     detail,
-    handling,
     passingSignal,
     passingConclusionSource,
     blocking,
@@ -1066,13 +1406,13 @@ function copilotReviewGate() {
   } = decision;
 
   const blockingList = blocking.length
-    ? blocking.map((item) => `- ${item.url ? `[${item.body || 'Copilot 评论'}](${item.url})` : item.body}`).join('\n')
+    ? blocking.map((item) => `- ${item.url ? `[${item.title || 'Copilot 评论'}](${item.url})` : item.title}`).join('\n')
     : '- 无';
   const suggestionList = suggestions.length
-    ? suggestions.map((item) => `- ${item.url ? `[${item.body || 'Copilot 评论'}](${item.url})` : item.body}`).join('\n')
+    ? suggestions.map((item) => `- ${item.url ? `[${item.title || 'Copilot 评论'}](${item.url})` : item.title}`).join('\n')
     : '- 无';
   const unclassifiedList = unclassified.length
-    ? unclassified.map((item) => `- ${item.url ? `[${item.body || 'Copilot 评论'}](${item.url})` : item.body}`).join('\n')
+    ? unclassified.map((item) => `- ${item.url ? `[${item.title || 'Copilot 评论'}](${item.url})` : item.title}`).join('\n')
     : '- 无';
   const diagnosticList = copilotDiagnosticLines(diagnostics).join('\n');
   const requestResultDisplay = eventName === 'pull_request_target'
@@ -1126,24 +1466,17 @@ function copilotReviewGate() {
   writeStepSummary(summaryTitle, summaryLines);
 
   cleanupLegacyGateComment(legacyMarker);
-  updateBlockingFailure({
-    source: 'copilot-review',
-    title: checkTitle,
-    failed: checkStatus === 'completed' && checkConclusion === 'failure',
-    details: [
-      `Request Copilot Review job：${requestResultDisplay}`,
-      `Copilot 审查数量：${reviews.length}`,
-      `通过信号：${passingSignal || '未检测到'}`,
-      `通过型结论：${passingConclusionSource || '未检测到'}`,
-      `问题：${detail}`,
-      ...blocking.map((item) => item.url
-        ? `未解决重大问题：[${item.body || 'Copilot 评论'}](${item.url})`
-        : `未解决重大问题：${item.body || 'Copilot 评论'}`),
-      ...unclassified.map((item) => item.url
-        ? `未识别严重程度评论：[${item.body || 'Copilot 评论'}](${item.url})`
-        : `未识别严重程度评论：${item.body || 'Copilot 评论'}`),
-      handling,
-    ],
+  const coreHandlers = trustedDeveloperLogins();
+  const presentations = copilotFailurePresentations({
+    decision,
+    coreHandlers,
+    contributorHandlers: realContributorLogins(),
+  });
+  updateBlockingFailures({
+    sourcePrefix: 'copilot-review',
+    failures: checkStatus === 'completed' && checkConclusion === 'failure'
+      ? presentations
+      : [],
   });
 }
 
@@ -1165,9 +1498,23 @@ if (require.main === module) {
   runCommand(process.argv[2]);
 } else {
   module.exports = {
+    blockingFailureBody,
     copilotCommentSeverity,
+    copilotCommentTitle,
+    copilotFailurePresentation,
+    copilotFailurePresentations,
+    copilotThreadFindings,
+    coreReviewersToRequest,
+    decodeBlockingState,
+    encodeBlockingState,
     evaluateCopilotGate,
+    mainAuthorizationFailurePresentation,
+    nextBlockingFailureState,
+    nextBlockingFailuresState,
     parseGhExecutableArgs,
+    requestCoreDeveloperReviews,
+    pullRequestCommitContributorSummary,
     runCommand,
+    sanitizeCopilotCommentTitle,
   };
 }

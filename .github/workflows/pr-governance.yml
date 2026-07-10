@@ -30,9 +30,10 @@
 #      一个拥有 Copilot 订阅的用户的 fine-grained PAT，仓库权限 Pull requests: Read and write。
 #      未配置该 secret 时会回退 App token，请求大概率被静默忽略并导致该 job 失败提示。
 #      它依赖 .github/copilot-instructions.md
-#      要求 Copilot 审查正文主体使用简体中文，并在 comment 第一行标注：
+#      要求 Copilot 审查正文主体使用简体中文，并在 inline comment 前两行标注：
 #      - 严重程度：阻断 / Severity: blocking
 #      - 严重程度：建议 / Severity: suggestion
+#      - 标题：简短问题摘要 / Title: concise issue summary
 #      该严重程度是本仓库自定义协议，不是 Copilot 官方结构化字段，也不依赖 Low/Medium 等 UI 徽标。
 #   6) 配置 CORE_AUTO_APPROVAL_TOKEN：
 #      一个核心开发者的 fine-grained PAT，仓库权限 Pull requests: Read and write。
@@ -51,9 +52,7 @@ on:
   # opened/synchronize/reopened/ready_for_review 属于当前 head 的完整治理验证入口。
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
-  # 审批或 Copilot review 正文变化属于非代码状态刷新，只重新计算门禁。
-  pull_request_review:
-    types: [submitted, edited, dismissed]
+  # review / review comment 事件先经过无密钥 PR Review Signal，再由验证矩阵安全调度本 workflow。
   workflow_dispatch:
     inputs:
       pr_number:
@@ -62,6 +61,10 @@ on:
       head_sha:
         description: Pull request head SHA expected by the matrix.
         required: false
+      governance_scope:
+        description: all, main-authorization, or copilot-review.
+        required: false
+        default: all
 
 concurrency:
   group: pr-governance-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
@@ -90,14 +93,17 @@ jobs:
     # 该 job 不作为 required check；Copilot Code Review Gate 自定义 check run 负责最终阻断。
     if: >-
       (
-        github.event_name == 'pull_request_target' &&
-        github.event.pull_request.base.ref == 'main'
-      ) ||
-      github.event_name == 'workflow_dispatch'
+        (
+          github.event_name == 'pull_request_target' &&
+          github.event.pull_request.base.ref == 'main'
+        ) ||
+        github.event_name == 'workflow_dispatch'
+      ) &&
+      inputs.governance_scope != 'main-authorization'
     steps:
       - name: Create Copilot review app token
         id: copilot-review-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
@@ -134,11 +140,13 @@ jobs:
       contents: read
     # 该 job 不能作为 required check；它只负责在全部真实贡献者均为核心开发者时，
     # 用 CORE_AUTO_APPROVAL_TOKEN 提交 GitHub 原生 approval。
-    if: github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch'
+    if: >-
+      (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') &&
+      inputs.governance_scope != 'copilot-review'
     steps:
       - name: Create governance app token
         id: governance-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
@@ -170,6 +178,7 @@ jobs:
     # main 目标 PR 必须满足：真实贡献者可识别；若全部真实贡献者均为核心开发者，
     # 当前 head 需要核心开发者 approval（可由 CORE_AUTO_APPROVAL_TOKEN 自动提交）；
     # 若存在任一非核心贡献者，则当前 head 必须有核心开发者手动 approval。
+    # 缺少 approval 时，该 job 会向尚未被请求且可审批的核心开发者发送 Review Request。
     if: >-
       always() &&
       (
@@ -178,11 +187,12 @@ jobs:
           github.event.pull_request.base.ref == 'main'
         ) ||
         github.event_name == 'workflow_dispatch'
-      )
+      ) &&
+      inputs.governance_scope != 'copilot-review'
     steps:
       - name: Create governance app token
         id: governance-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
@@ -200,7 +210,7 @@ jobs:
           token: ${{ steps.governance-token.outputs.token }}
           persist-credentials: false
 
-      - name: Check trusted approval for main
+      - name: Check main authorization and request core reviews
         env:
           GH_TOKEN: ${{ steps.governance-token.outputs.token }}
           GH_COMMENT_TOKEN: ${{ steps.governance-token.outputs.token }}
@@ -227,7 +237,7 @@ jobs:
     # 会自动重跑的场景：
     # - Copilot 延迟提交 review: pull_request_review submitted
     # - 用户接受建议并推送修正: pull_request_target synchronize
-    # 仅点击 Resolve/Unresolve conversation 不会触发 GitHub Actions；下次有其他事件触发时会读取最新 isResolved。
+    # Resolve/Unresolve conversation 不会直接触发 GitHub Actions；PR Validation Matrix 会定时刷新失败门禁。
     # 缺少“严重程度：阻断/建议”或 “Severity: blocking/suggestion” 的当前 Copilot 评论
     # 视为审查协议不完整并阻断，避免未知模板被误放行。
     if: >-
@@ -238,11 +248,12 @@ jobs:
           github.event.pull_request.base.ref == 'main'
         ) ||
         github.event_name == 'workflow_dispatch'
-      )
+      ) &&
+      inputs.governance_scope != 'main-authorization'
     steps:
       - name: Create governance app token
         id: governance-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}

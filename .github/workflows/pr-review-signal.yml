@@ -1,0 +1,40 @@
+# 将 review 状态变化转换为不携带仓库 secret 的轻量信号。
+# PR Validation Matrix 通过 workflow_run 接收该信号，并在受信任默认分支上下文中刷新门禁。
+name: PR Review Signal
+
+run-name: "PR Review Signal #${{ github.event.pull_request.number }} / ${{ github.event_name }} / ${{ github.event.action }}"
+
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+
+concurrency:
+  group: pr-review-signal-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  signal:
+    name: Record Review State Change
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Record review signal
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/pr-review-signal"
+          printf '%s\n' "$PR_NUMBER" > "$RUNNER_TEMP/pr-review-signal/pr_number"
+
+      - name: Upload review signal
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr-review-signal-${{ github.run_id }}
+          path: ${{ runner.temp }}/pr-review-signal/pr_number
+          if-no-files-found: error
+          retention-days: 1

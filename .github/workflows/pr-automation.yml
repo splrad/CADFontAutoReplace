@@ -60,7 +60,7 @@ jobs:
     steps:
       - name: Create automation app token
         id: automation-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
           # 使用 Client ID + private key 换取短期 installation token。
           # 这里不要填写 App ID，也不要填写 client secret。
@@ -98,13 +98,13 @@ jobs:
 
       - name: Set up Node.js for Copilot CLI
         if: env.SKIP_PR_AUTOMATION != 'true' && env.COPILOT_CLI_TOKEN != ''
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: '22'
 
       - name: Install Copilot CLI
         if: env.SKIP_PR_AUTOMATION != 'true' && env.COPILOT_CLI_TOKEN != ''
-        run: npm install -g @github/copilot
+        run: npm install -g @github/copilot@1.0.70
 
       - name: Generate PR title and summary with Copilot CLI
         if: env.SKIP_PR_AUTOMATION != 'true' && env.COPILOT_CLI_TOKEN != ''

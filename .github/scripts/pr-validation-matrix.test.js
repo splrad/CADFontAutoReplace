@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 
 const {
   checkRunState,
+  dispatchOpenPullRefreshes,
   eventScope,
   evaluateMatrix,
   fingerprintForPull,
@@ -9,6 +10,7 @@ const {
   planRepairs,
   planWorkflowRunRecovery,
   previousMatrixFingerprint,
+  pullNeedsCopilotRefresh,
   workflowRunPullRequestNumber,
 } = require('./pr-validation-matrix');
 
@@ -124,6 +126,15 @@ assert.equal(eventScope({
 }), 'full');
 
 assert.equal(eventScope({
+  event: 'workflow_run',
+  previousFingerprint: fingerprint.value,
+  currentFingerprint: fingerprint,
+  eventPayload: {
+    workflow_run: { name: 'PR Review Signal', event: 'pull_request_review' },
+  },
+}), 'gate-only');
+
+assert.equal(eventScope({
   event: 'pull_request_target',
   action: 'labeled',
   previousFingerprint: fingerprint.value,
@@ -181,6 +192,60 @@ const gateOnly = evaluateMatrix({
 });
 assert.deepEqual(gateOnly.targets.map((target) => target.id), ['main-gate', 'copilot-review-gate']);
 assert.equal(gateOnly.passed, true);
+
+const reviewSignalPlans = planRepairs({
+  targets: gateOnly.targets,
+  workflowRuns: [],
+  mode: 'enforce',
+  pull: { number: 1, base: { ref: 'main' }, head: { sha: 'head1' } },
+  fingerprint,
+  event: 'workflow_run',
+  eventPayload: {
+    workflow_run: { name: 'PR Review Signal', event: 'pull_request_review' },
+  },
+});
+assert.equal(reviewSignalPlans.length, 1);
+assert.equal(reviewSignalPlans[0].reason, 'review-state-refresh');
+assert.equal(reviewSignalPlans[0].inputs.governance_scope, 'all');
+
+const reviewCommentSignalPlans = planRepairs({
+  targets: gateOnly.targets,
+  workflowRuns: [],
+  mode: 'enforce',
+  pull: { number: 1, base: { ref: 'main' }, head: { sha: 'head1' } },
+  fingerprint,
+  event: 'workflow_run',
+  eventPayload: {
+    workflow_run: { name: 'PR Review Signal', event: 'pull_request_review_comment' },
+  },
+});
+assert.equal(reviewCommentSignalPlans.length, 1);
+assert.equal(reviewCommentSignalPlans[0].inputs.governance_scope, 'copilot-review');
+
+const missingMainGate = evaluateMatrix({
+  config,
+  scope: 'gate-only',
+  checkRuns: [run('Copilot Code Review Gate', 'completed', 'success')],
+});
+const missingMainPlans = planRepairs({
+  targets: missingMainGate.targets,
+  workflowRuns: [],
+  mode: 'enforce',
+  pull: { number: 1, base: { ref: 'main' }, head: { sha: 'head1' } },
+  fingerprint,
+});
+assert.equal(missingMainPlans[0].inputs.governance_scope, 'main-authorization');
+
+const missingBothGates = evaluateMatrix({ config, scope: 'gate-only', checkRuns: [] });
+const missingBothPlans = planRepairs({
+  targets: missingBothGates.targets,
+  workflowRuns: [],
+  mode: 'enforce',
+  pull: { number: 1, base: { ref: 'main' }, head: { sha: 'head1' } },
+  fingerprint,
+});
+assert.equal(missingBothPlans.length, 1);
+assert.equal(missingBothPlans[0].inputs.governance_scope, 'all');
 
 const missingCodeql = evaluateMatrix({
   config,
@@ -302,7 +367,7 @@ assert.deepEqual(planRepairs({
   action: 'dispatch-workflow',
   workflow_file: 'pr-governance.yml',
   ref: 'main',
-  inputs: { pr_number: '1', head_sha: 'head1' },
+  inputs: { pr_number: '1', head_sha: 'head1', governance_scope: 'copilot-review' },
   reason: 'copilot-review-refresh',
 }]);
 assert.equal(planRepairs({
@@ -316,6 +381,57 @@ assert.equal(planRepairs({
     comment: { user: { login: 'splrad' } },
   },
 }).length, 0);
+
+const failedCopilotGate = evaluateMatrix({
+  config,
+  scope: 'gate-only',
+  checkRuns: [
+    run('Main Authorization Gate', 'completed', 'success'),
+    run('Copilot Code Review Gate', 'completed', 'failure'),
+  ],
+});
+const failedRefreshPlans = planRepairs({
+  targets: failedCopilotGate.targets,
+  workflowRuns: [],
+  mode: 'enforce',
+  pull: { number: 1, base: { ref: 'main' }, head: { sha: 'head1' } },
+  fingerprint,
+  event: 'workflow_dispatch',
+});
+assert.equal(failedRefreshPlans.length, 1);
+assert.equal(failedRefreshPlans[0].reason, 'copilot-state-refresh');
+assert.equal(failedRefreshPlans[0].inputs.governance_scope, 'copilot-review');
+
+assert.equal(pullNeedsCopilotRefresh(
+  { number: 1, head: { sha: 'head1' } },
+  [run('Copilot Code Review Gate', 'completed', 'failure')],
+), true);
+assert.equal(pullNeedsCopilotRefresh(
+  { number: 1, head: { sha: 'head1' } },
+  [run('Copilot Code Review Gate', 'completed', 'success')],
+), false);
+
+const scheduledDispatches = [];
+const refreshedPulls = dispatchOpenPullRefreshes({
+  pulls: [
+    { number: 1, head: { sha: 'failed-head' } },
+    { number: 2, head: { sha: 'passed-head' } },
+  ],
+  fetchChecks: (sha) => [run(
+    'Copilot Code Review Gate',
+    'completed',
+    sha === 'failed-head' ? 'failure' : 'success',
+  )],
+  dispatch: (plan) => scheduledDispatches.push(plan),
+  ref: 'main',
+  workflowFile: 'pr-validation-matrix.yml',
+});
+assert.deepEqual(refreshedPulls, [1]);
+assert.deepEqual(scheduledDispatches, [{
+  workflow_file: 'pr-validation-matrix.yml',
+  ref: 'main',
+  inputs: { pr_number: '1', scope: 'gate-only', mode: 'enforce' },
+}]);
 
 assert.equal(previousMatrixFingerprint([
   run('PR Validation Matrix Gate', 'completed', 'success', {

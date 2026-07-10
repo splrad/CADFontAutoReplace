@@ -22,6 +22,7 @@ function parseArgs(argv) {
   return {
     apply: argv.includes('--apply'),
     dryRun: argv.includes('--dry-run') || !argv.includes('--apply'),
+    dispatchOpenPulls: argv.includes('--dispatch-open-pulls'),
   };
 }
 
@@ -92,6 +93,12 @@ function isCopilotReviewSignal(event, eventPayload) {
   return false;
 }
 
+function reviewSignalWorkflowRun(event, eventPayload) {
+  if (event !== 'workflow_run') return null;
+  const run = eventPayload?.workflow_run || {};
+  return run?.name === 'PR Review Signal' ? run : null;
+}
+
 function pullRequestCommitAuthorLogins(commits) {
   return uniqueLogins((commits || []).map((commit) => commit?.author?.login || ''));
 }
@@ -125,7 +132,14 @@ function fingerprintForPull({ pull, commits, files }) {
   };
 }
 
-function eventScope({ event, action, requested = 'auto', previousFingerprint, currentFingerprint }) {
+function eventScope({
+  event,
+  action,
+  requested = 'auto',
+  previousFingerprint,
+  currentFingerprint,
+  eventPayload = {},
+}) {
   if (requested === 'full' || requested === 'gate-only') return requested;
   if (!currentFingerprint?.value) return 'full';
 
@@ -138,6 +152,7 @@ function eventScope({ event, action, requested = 'auto', previousFingerprint, cu
   if (event === 'pull_request_review' || event === 'pull_request_review_comment') {
     return sameFingerprint ? 'gate-only' : 'full';
   }
+  if (reviewSignalWorkflowRun(event, eventPayload)) return 'gate-only';
   if (event === 'workflow_run' || event === 'check_run' || event === 'workflow_dispatch') {
     return 'full';
   }
@@ -226,13 +241,35 @@ function planRepairs({ targets, workflowRuns, mode, pull, fingerprint, event = e
       && target.state === 'pending'
       && target.workflowFile
       && isCopilotReviewSignal(event, eventPayload);
-    if (!target.repairable || (!['missing', 'recoverable'].includes(target.state) && !shouldRefreshPendingCopilotGate)) continue;
+    const shouldRefreshFailedCopilotGate = target.id === 'copilot-review-gate'
+      && target.state === 'failed'
+      && target.workflowFile
+      && event === 'workflow_dispatch';
+    const reviewSignal = reviewSignalWorkflowRun(event, eventPayload);
+    const shouldRefreshReviewSignalTarget = Boolean(reviewSignal)
+      && target.workflowFile === 'pr-governance.yml'
+      && (
+        (String(reviewSignal.event || '') === 'pull_request_review'
+          && ['main-authorization', 'main-gate', 'copilot-review-gate'].includes(target.id))
+        || (String(reviewSignal.event || '') === 'pull_request_review_comment'
+          && target.id === 'copilot-review-gate')
+      );
+    if (!target.repairable
+      || (!['missing', 'recoverable'].includes(target.state)
+        && !shouldRefreshPendingCopilotGate
+        && !shouldRefreshFailedCopilotGate
+        && !shouldRefreshReviewSignalTarget)) continue;
     if (target.checkRun
       && ['queued', 'in_progress'].includes(String(target.checkRun.status || ''))
-      && !shouldRefreshPendingCopilotGate) {
+      && !shouldRefreshPendingCopilotGate
+      && !shouldRefreshReviewSignalTarget) {
       continue;
     }
-    if ((target.state === 'missing' || shouldRefreshPendingCopilotGate) && target.workflowFile) {
+    if ((target.state === 'missing'
+      || shouldRefreshPendingCopilotGate
+      || shouldRefreshFailedCopilotGate
+      || shouldRefreshReviewSignalTarget)
+      && target.workflowFile) {
       if (!dispatchPlans.has(target.workflowFile)) {
         dispatchPlans.set(target.workflowFile, {
           target: target.id,
@@ -240,8 +277,14 @@ function planRepairs({ targets, workflowRuns, mode, pull, fingerprint, event = e
           action: 'dispatch-workflow',
           workflow_file: target.workflowFile,
           ref,
-          inputs,
-          reason: shouldRefreshPendingCopilotGate ? 'copilot-review-refresh' : 'missing',
+          inputs: { ...inputs },
+          reason: shouldRefreshPendingCopilotGate
+            ? 'copilot-review-refresh'
+            : shouldRefreshFailedCopilotGate
+              ? 'copilot-state-refresh'
+              : shouldRefreshReviewSignalTarget
+                ? 'review-state-refresh'
+                : 'missing',
         });
       }
       dispatchPlans.get(target.workflowFile).targets.push({
@@ -259,6 +302,15 @@ function planRepairs({ targets, workflowRuns, mode, pull, fingerprint, event = e
     } else {
       plans.push({ target: target.id, action: 'manual', reason: '未找到可重跑的 workflow job' });
     }
+  }
+  for (const plan of dispatchPlans.values()) {
+    if (plan.workflow_file !== 'pr-governance.yml') continue;
+    const targetIds = new Set(plan.targets.map((target) => target.id));
+    plan.inputs.governance_scope = targetIds.size === 1 && targetIds.has('copilot-review-gate')
+      ? 'copilot-review'
+      : targetIds.size === 1 && (targetIds.has('main-authorization') || targetIds.has('main-gate'))
+        ? 'main-authorization'
+        : 'all';
   }
   return [...dispatchPlans.values(), ...plans];
 }
@@ -560,6 +612,58 @@ function fetchCheckRuns(headSha) {
   return Array.isArray(payload.check_runs) ? payload.check_runs : [];
 }
 
+function pullNeedsCopilotRefresh(pull, checkRuns, checkName = 'Copilot Code Review Gate') {
+  if (!pull?.number || !pull?.head?.sha) return false;
+  const latest = latestByStartedAt((checkRuns || []).filter((run) => run?.name === checkName));
+  return latest?.status === 'completed' && latest?.conclusion === 'failure';
+}
+
+function fetchOpenPullRequests(baseRef = process.env.VALIDATION_MATRIX_BASE_REF || 'main') {
+  const pulls = [];
+  for (let page = 1; page <= 10; page += 1) {
+    const items = ghJson([
+      '--method', 'GET',
+      `repos/${repo}/pulls`,
+      '-f', 'state=open',
+      '-f', `base=${baseRef}`,
+      '-f', 'per_page=100',
+      '-f', `page=${page}`,
+    ], undefined, actionsToken() || process.env.GH_TOKEN || '') || [];
+    if (!Array.isArray(items) || !items.length) break;
+    pulls.push(...items);
+    if (items.length < 100) break;
+  }
+  return pulls;
+}
+
+function dispatchOpenPullRefreshes({
+  pulls = fetchOpenPullRequests(),
+  fetchChecks = fetchCheckRuns,
+  dispatch = dispatchWorkflow,
+  ref = process.env.GITHUB_REF_NAME || process.env.VALIDATION_MATRIX_BASE_REF || 'main',
+  workflowFile = process.env.VALIDATION_MATRIX_WORKFLOW_FILE || 'pr-validation-matrix.yml',
+} = {}) {
+  const refreshed = [];
+  for (const pull of pulls) {
+    if (!pullNeedsCopilotRefresh(pull, fetchChecks(pull?.head?.sha || ''))) continue;
+    dispatch({
+      workflow_file: workflowFile,
+      ref,
+      inputs: {
+        pr_number: String(pull.number),
+        scope: 'gate-only',
+        mode: 'enforce',
+      },
+    });
+    refreshed.push(Number(pull.number));
+  }
+  writeStepSummary('Copilot 门禁定时刷新', [
+    `- 检查的开放 PR：${pulls.length}`,
+    `- 已请求刷新：${refreshed.length ? refreshed.map((number) => `#${number}`).join(', ') : '无'}`,
+  ]);
+  return refreshed;
+}
+
 function fetchWorkflowRuns(headSha) {
   if (!headSha) return [];
   const payload = ghJson([
@@ -591,7 +695,7 @@ function previousMatrixFingerprint(checkRuns, gateName) {
   return match?.[1] || '';
 }
 
-function loadContext(config) {
+function loadContext(config, eventPayload = {}) {
   if (!repo || !owner || !repoName || !prNumber) {
     throw new Error('Missing repository or pull request context.');
   }
@@ -607,15 +711,20 @@ function loadContext(config) {
     requested: requestedScope,
     previousFingerprint,
     currentFingerprint: fingerprint,
+    eventPayload,
   });
   return { pull, commits, files, fingerprint, checkRuns, previousFingerprint, scope };
 }
 
 function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
+  if (args.dispatchOpenPulls) {
+    dispatchOpenPullRefreshes();
+    return;
+  }
   const config = readJson(configPath);
   const eventPayload = readEventPayload();
-  const context = loadContext(config);
+  const context = loadContext(config, eventPayload);
   const workflowRuns = fetchWorkflowRuns(context.fingerprint.head_sha);
   let matrix = evaluateMatrix({
     config,
@@ -684,6 +793,7 @@ if (require.main === module) {
 } else {
   module.exports = {
     checkRunState,
+    dispatchOpenPullRefreshes,
     eventScope,
     evaluateMatrix,
     fingerprintForPull,
@@ -691,6 +801,7 @@ if (require.main === module) {
     planRepairs,
     planWorkflowRunRecovery,
     previousMatrixFingerprint,
+    pullNeedsCopilotRefresh,
     summaryLines,
     workflowRunPullRequestNumber,
   };
