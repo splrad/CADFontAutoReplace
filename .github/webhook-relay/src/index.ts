@@ -158,7 +158,9 @@ async function createInstallationToken(
 }
 
 const defaultDependencies: Dependencies = {
-  fetch,
+  // Cloudflare runtime functions depend on their invocation receiver. Wrapping
+  // fetch keeps `dependencies.fetch(...)` from rebinding the runtime function.
+  fetch: (input, init) => fetch(input, init),
   installationToken: createInstallationToken,
 };
 
