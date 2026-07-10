@@ -83,15 +83,17 @@ function reviewSignalWorkflowRun(event, eventPayload) {
   return run?.name === 'PR Review Signal' ? run : null;
 }
 
-const trustedWorkflowRunNames = new Set([
-  'PR Classification',
-  'DCO Sign-off Advisory',
-  'PR Governance',
-  'PR Review Signal',
+const trustedWorkflowRunTitleSources = new Map([
+  ['PR Classification', { workflowFile: 'pr-classification.yml', events: ['pull_request_target', 'workflow_dispatch'] }],
+  ['DCO Sign-off Advisory', { workflowFile: 'dco-check.yml', events: ['pull_request_target', 'workflow_dispatch'] }],
+  ['PR Governance', { workflowFile: 'pr-governance.yml', events: ['pull_request_target', 'workflow_dispatch'] }],
 ]);
 
 function parseTrustedWorkflowRunContext(run) {
-  if (!run || !trustedWorkflowRunNames.has(String(run.name || ''))) return null;
+  const source = trustedWorkflowRunTitleSources.get(String(run?.name || ''));
+  if (!source
+    || workflowRunPath(run) !== `.github/workflows/${source.workflowFile}`
+    || !source.events.includes(String(run?.event || ''))) return null;
   const match = String(run.display_title || '').match(/#[1-9][0-9]* \/ [a-f0-9]{40}(?: \/|$)/i);
   if (!match) return null;
   const parts = match[0].match(/#([1-9][0-9]*) \/ ([a-f0-9]{40})/i);

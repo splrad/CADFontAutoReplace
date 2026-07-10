@@ -606,6 +606,8 @@ assert.deepEqual(resolveEventPullRequestContext({
   payload: {
     workflow_run: {
       name: 'PR Governance',
+      path: '.github/workflows/pr-governance.yml',
+      event: 'workflow_dispatch',
       display_title: `PR Governance #121 / ${eventHeadSha}`,
       pull_requests: [],
     },
@@ -615,6 +617,42 @@ assert.deepEqual(resolveEventPullRequestContext({
   prNumber: 121,
   expectedHeadSha: eventHeadSha,
   source: 'workflow-run-title',
+});
+
+assert.deepEqual(resolveEventPullRequestContext({
+  payload: {
+    workflow_run: {
+      name: 'PR Review Signal',
+      path: '.github/workflows/pr-review-signal.yml',
+      event: 'pull_request_review',
+      display_title: `PR Review Signal #999 / ${eventHeadSha}`,
+      head_sha: eventHeadSha,
+      pull_requests: [],
+    },
+  },
+  env: { GITHUB_EVENT_NAME: 'workflow_run' },
+}), {
+  prNumber: 0,
+  expectedHeadSha: '',
+  source: 'unresolved',
+});
+
+assert.deepEqual(resolveEventPullRequestContext({
+  payload: {
+    workflow_run: {
+      name: 'PR Review Signal',
+      path: '.github/workflows/pr-review-signal.yml',
+      event: 'pull_request_review',
+      display_title: `PR Review Signal #999 / ${'b'.repeat(40)}`,
+      head_sha: eventHeadSha,
+      pull_requests: [{ number: 121 }],
+    },
+  },
+  env: { GITHUB_EVENT_NAME: 'workflow_run' },
+}), {
+  prNumber: 121,
+  expectedHeadSha: eventHeadSha,
+  source: 'native',
 });
 
 const dispatchPayload = {

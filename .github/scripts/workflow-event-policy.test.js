@@ -61,8 +61,15 @@ const matrixWorkflowSource = fs.readFileSync(
   path.join(root, '.github', 'workflows', 'pr-validation-matrix.yml'),
   'utf8',
 );
-assert.match(matrixWorkflowSource, /github\.event\.workflow_run\.id\s*\|\|\s*github\.run_id/);
+assert.match(matrixWorkflowSource, /github\.event\.workflow_run\.pull_requests\[0\]\.number/);
+assert.match(matrixWorkflowSource, /github\.event\.workflow_run\.display_title/);
+assert.match(matrixWorkflowSource, /Untrusted Review Signal/);
 assert.doesNotMatch(matrixWorkflowSource, /workflow_run\.head_branch\s*&&/);
+
+for (const file of ['pr-classification.yml', 'dco-check.yml', 'pr-governance.yml']) {
+  const source = fs.readFileSync(path.join(workflowsDirectory, file), 'utf8');
+  assert.match(source, /^run-name: "PR Validation Target #\$\{\{/m);
+}
 
 const releaseSource = fs.readFileSync(
   path.join(root, '.github', 'workflows', 'release-build.yml'),

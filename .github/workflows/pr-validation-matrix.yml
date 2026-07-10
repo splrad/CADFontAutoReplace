@@ -32,7 +32,17 @@ on:
         default: enforce
 
 concurrency:
-  group: pr-validation-matrix-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.check_run.pull_requests[0].number || github.event.client_payload.pr_number || inputs.pr_number || github.event.workflow_run.id || github.run_id }}
+  group: >-
+    pr-validation-matrix-${{
+      (github.event.pull_request.number && format('PR Validation Target #{0} / {1}', github.event.pull_request.number, github.event.pull_request.head.sha))
+      || (github.event.workflow_run.pull_requests[0].number && format('PR Validation Target #{0} / {1}', github.event.workflow_run.pull_requests[0].number, github.event.workflow_run.head_sha))
+      || (github.event.check_run.pull_requests[0].number && format('PR Validation Target #{0} / {1}', github.event.check_run.pull_requests[0].number, github.event.check_run.head_sha))
+      || (github.event.client_payload.pr_number && format('PR Validation Target #{0} / {1}', github.event.client_payload.pr_number, github.event.client_payload.head_sha))
+      || (inputs.pr_number && format('PR Validation Target #{0} / {1}', inputs.pr_number, inputs.head_sha))
+      || (github.event.workflow_run.name == 'PR Review Signal' && format('Untrusted Review Signal {0}', github.event.workflow_run.id))
+      || github.event.workflow_run.display_title
+      || github.run_id
+    }}
   cancel-in-progress: true
 
 permissions:

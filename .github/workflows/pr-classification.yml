@@ -2,7 +2,7 @@
 # area:* / kind:* 只写入 PR body 的 HTML 注释，不作为 GitHub 可见标签展示。
 name: PR Classification
 
-run-name: "PR Classification #${{ github.event.pull_request.number || inputs.pr_number }} / ${{ github.event.pull_request.head.sha || inputs.head_sha || github.sha }}"
+run-name: "PR Validation Target #${{ github.event.pull_request.number || inputs.pr_number }} / ${{ github.event.pull_request.head.sha || inputs.head_sha || github.sha }}"
 
 on:
   pull_request_target:

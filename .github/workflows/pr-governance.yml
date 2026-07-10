@@ -44,7 +44,7 @@
 #      PR commits 中关联到 GitHub 账号的 author login，再按真实贡献者集合判断 TRUSTED_DEVELOPERS。
 name: PR Governance
 
-run-name: "PR Governance #${{ github.event.pull_request.number || inputs.pr_number }} / ${{ github.event.pull_request.head.sha || inputs.head_sha || github.sha }}"
+run-name: "PR Validation Target #${{ github.event.pull_request.number || inputs.pr_number }} / ${{ github.event.pull_request.head.sha || inputs.head_sha || github.sha }}"
 
 on:
   # pull_request_target 允许在受保护的默认分支上下文中读取治理脚本、提交审批和失败通知。

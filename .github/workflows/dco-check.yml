@@ -2,7 +2,7 @@
 # 该 workflow 只帮助贡献者按 DCO 习惯补充 commit trailer，不应加入 required checks。
 name: DCO Sign-off Advisory
 
-run-name: "DCO Sign-off Advisory #${{ github.event.pull_request.number || inputs.pr_number }} / ${{ github.event.pull_request.head.sha || inputs.head_sha || github.sha }}"
+run-name: "PR Validation Target #${{ github.event.pull_request.number || inputs.pr_number }} / ${{ github.event.pull_request.head.sha || inputs.head_sha || github.sha }}"
 
 on:
   pull_request_target:
