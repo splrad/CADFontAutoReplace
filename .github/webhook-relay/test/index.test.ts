@@ -62,6 +62,26 @@ function payload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function workflowRunPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    action: 'completed',
+    installation: { id: 7 },
+    repository: { id: 42, full_name: 'axiomoth/CADFontAutoReplace', default_branch: 'main' },
+    workflow: { path: '.github/workflows/pr-validation-matrix.yml' },
+    workflow_run: {
+      id: 9001,
+      name: 'PR Validation Matrix',
+      path: '.github/workflows/pr-validation-matrix.yml@refs/heads/main',
+      event: 'workflow_run',
+      status: 'completed',
+      conclusion: 'action_required',
+      head_branch: 'main',
+      head_repository: { id: 42 },
+    },
+    ...overrides,
+  };
+}
+
 async function requestFor(event: string, body: string, delivery = 'delivery-1', signed = true) {
   return new Request('https://relay.example.test', {
     method: 'POST',
@@ -80,6 +100,7 @@ function environment(coordinator = new MemoryCoordinatorNamespace()): Env {
     GITHUB_APP_ID: '1',
     GITHUB_APP_PRIVATE_KEY: 'private-key',
     TARGET_REPOSITORY: 'axiomoth/CADFontAutoReplace',
+    APPROVABLE_WORKFLOW_PATHS: '.github/workflows/pr-validation-matrix.yml',
     DELIVERY_COORDINATOR: coordinator as unknown as DurableObjectNamespace,
   };
 }
@@ -149,6 +170,9 @@ describe('webhook relay', () => {
     expect(first.status).toBe(202);
     expect(second.status).toBe(200);
     expect(githubFetch).toHaveBeenCalledTimes(1);
+    expect(dependencies.installationToken).toHaveBeenCalledWith(
+      expect.anything(), 7, 42, { contents: 'write' },
+    );
     const init = githubFetch.mock.calls[0][1] as RequestInit;
     expect(JSON.parse(String(init.body))).toEqual({
       event_type: 'pr-review-thread-resolved',
@@ -161,6 +185,104 @@ describe('webhook relay', () => {
         delivery_id: 'delivery-1',
       },
     });
+  });
+
+  it('approves one verified action-required matrix run', async () => {
+    const coordinator = new MemoryCoordinatorNamespace();
+    const body = JSON.stringify(workflowRunPayload());
+    const currentRun = workflowRunPayload().workflow_run;
+    const githubFetch = vi.fn()
+      .mockResolvedValueOnce(Response.json(currentRun))
+      .mockResolvedValueOnce(new Response(null, { status: 201 }));
+    const installationToken = vi.fn().mockResolvedValue('installation-token');
+    const dependencies = { fetch: githubFetch as typeof fetch, installationToken };
+
+    const first = await handleRequest(await requestFor('workflow_run', body, 'workflow-delivery'), environment(coordinator), dependencies);
+    const duplicate = await handleRequest(await requestFor('workflow_run', body, 'workflow-delivery'), environment(coordinator), dependencies);
+
+    expect(first.status).toBe(202);
+    expect(await first.text()).toBe('Approved');
+    expect(duplicate.status).toBe(200);
+    expect(githubFetch).toHaveBeenCalledTimes(2);
+    expect(githubFetch.mock.calls[0][0]).toBe('https://api.github.com/repos/axiomoth/CADFontAutoReplace/actions/runs/9001');
+    expect(githubFetch.mock.calls[1][0]).toBe('https://api.github.com/repos/axiomoth/CADFontAutoReplace/actions/runs/9001/approve');
+    expect((githubFetch.mock.calls[1][1] as RequestInit).method).toBe('POST');
+    expect(installationToken).toHaveBeenCalledWith(expect.anything(), 7, 42, { actions: 'write' });
+  });
+
+  it.each([
+    ['wrong workflow', workflowRunPayload({
+      workflow_run: { ...workflowRunPayload().workflow_run, path: '.github/workflows/release-build.yml@refs/heads/main' },
+    })],
+    ['wrong workflow ref', workflowRunPayload({
+      workflow_run: { ...workflowRunPayload().workflow_run, path: '.github/workflows/pr-validation-matrix.yml@refs/heads/feature' },
+    })],
+    ['wrong source event', workflowRunPayload({
+      workflow_run: { ...workflowRunPayload().workflow_run, event: 'pull_request_target' },
+    })],
+    ['wrong branch', workflowRunPayload({
+      workflow_run: { ...workflowRunPayload().workflow_run, head_branch: 'feature' },
+    })],
+    ['wrong head repository', workflowRunPayload({
+      workflow_run: { ...workflowRunPayload().workflow_run, head_repository: { id: 99 } },
+    })],
+    ['successful run', workflowRunPayload({
+      workflow_run: { ...workflowRunPayload().workflow_run, conclusion: 'success' },
+    })],
+  ])('ignores an unapprovable workflow run: %s', async (_name, value) => {
+    const body = JSON.stringify(value);
+    const installationToken = vi.fn();
+    const githubFetch = vi.fn();
+    const result = await handleRequest(await requestFor('workflow_run', body, `ignored-${_name}`), environment(), {
+      fetch: githubFetch as typeof fetch,
+      installationToken,
+    });
+    expect(result.status).toBe(202);
+    expect(installationToken).not.toHaveBeenCalled();
+    expect(githubFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not approve when the authoritative run no longer requires approval', async () => {
+    const coordinator = new MemoryCoordinatorNamespace();
+    const body = JSON.stringify(workflowRunPayload());
+    const githubFetch = vi.fn().mockResolvedValue(Response.json({
+      ...workflowRunPayload().workflow_run,
+      status: 'queued',
+      conclusion: null,
+    }));
+    const result = await handleRequest(await requestFor('workflow_run', body, 'advanced-run'), environment(coordinator), {
+      fetch: githubFetch as typeof fetch,
+      installationToken: vi.fn().mockResolvedValue('installation-token'),
+    });
+    expect(result.status).toBe(202);
+    expect(await result.text()).toBe('Workflow run no longer requires approval');
+    expect(githubFetch).toHaveBeenCalledTimes(1);
+    expect(coordinator.values.has('42:advanced-run')).toBe(false);
+  });
+
+  it('releases the workflow claim when approval fails', async () => {
+    const coordinator = new MemoryCoordinatorNamespace();
+    const body = JSON.stringify(workflowRunPayload());
+    const githubFetch = vi.fn()
+      .mockResolvedValueOnce(Response.json(workflowRunPayload().workflow_run))
+      .mockResolvedValueOnce(new Response('forbidden', { status: 403 }));
+    const result = await handleRequest(await requestFor('workflow_run', body, 'failed-approval'), environment(coordinator), {
+      fetch: githubFetch as typeof fetch,
+      installationToken: vi.fn().mockResolvedValue('installation-token'),
+    });
+    expect(result.status).toBe(502);
+    expect(coordinator.values.has('42:failed-approval')).toBe(false);
+  });
+
+  it('releases the workflow claim when the lookup response is invalid', async () => {
+    const coordinator = new MemoryCoordinatorNamespace();
+    const body = JSON.stringify(workflowRunPayload());
+    const result = await handleRequest(await requestFor('workflow_run', body, 'invalid-lookup'), environment(coordinator), {
+      fetch: vi.fn().mockResolvedValue(new Response('not-json')) as typeof fetch,
+      installationToken: vi.fn().mockResolvedValue('installation-token'),
+    });
+    expect(result.status).toBe(502);
+    expect(coordinator.values.has('42:invalid-lookup')).toBe(false);
   });
 
   it.each([

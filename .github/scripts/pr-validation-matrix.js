@@ -89,7 +89,25 @@ const trustedWorkflowRunTitleSources = new Map([
   ['PR Governance', { workflowFile: 'pr-governance.yml', events: ['pull_request_target', 'workflow_dispatch'] }],
 ]);
 
+const reviewSignalActions = new Map([
+  ['pull_request', new Set(['review_requested', 'review_request_removed'])],
+  ['pull_request_review', new Set(['submitted', 'edited', 'dismissed'])],
+  ['pull_request_review_comment', new Set(['created', 'edited', 'deleted'])],
+]);
+
 function parseTrustedWorkflowRunContext(run) {
+  if (String(run?.name || '') === 'PR Review Signal') {
+    if (workflowRunPath(run) !== '.github/workflows/pr-review-signal.yml') return null;
+    const match = String(run.display_title || '').match(
+      /^PR Review Signal #([1-9][0-9]*) \/ ([a-f0-9]{40}) \/ ([a-z_]+) \/ ([a-z_]+)$/i,
+    );
+    if (!match) return null;
+    const [, number, headSha, signalEvent, signalAction] = match;
+    const allowedActions = reviewSignalActions.get(signalEvent);
+    if (String(run.event || '') !== signalEvent || !allowedActions?.has(signalAction)) return null;
+    return { prNumber: Number(number), headSha: headSha.toLowerCase() };
+  }
+
   const source = trustedWorkflowRunTitleSources.get(String(run?.name || ''));
   if (!source
     || workflowRunPath(run) !== `.github/workflows/${source.workflowFile}`
@@ -100,31 +118,16 @@ function parseTrustedWorkflowRunContext(run) {
   return parts ? { prNumber: Number(parts[1]), headSha: parts[2].toLowerCase() } : null;
 }
 
-function selectPullRequestByHead(pulls, headSha, defaultBranch, repository = repo) {
-  const normalizedHead = String(headSha || '').toLowerCase();
-  const normalizedRepository = String(repository || '').toLowerCase();
-  const matches = (pulls || []).filter((pull) => (
-    String(pull?.state || '') === 'open'
-    && String(pull?.head?.sha || '').toLowerCase() === normalizedHead
-    && String(pull?.base?.ref || '') === String(defaultBranch || '')
-    && String(pull?.base?.repo?.full_name || '').toLowerCase() === normalizedRepository
-  ));
-  return matches.length === 1 ? matches[0] : null;
-}
-
-function findPullRequestByHead(headSha, defaultBranch) {
-  if (!/^[a-f0-9]{40}$/i.test(String(headSha || '')) || !defaultBranch) return null;
-  const pulls = ghJson([`repos/${repo}/commits/${headSha}/pulls?per_page=100`]) || [];
-  return selectPullRequestByHead(pulls, headSha, defaultBranch);
-}
-
-function resolveEventPullRequestContext({ payload = {}, env = process.env, findPullByHead } = {}) {
+function resolveEventPullRequestContext({ payload = {}, env = process.env } = {}) {
   const nativePull = payload.pull_request
     || payload.workflow_run?.pull_requests?.[0]
     || payload.check_run?.pull_requests?.[0]
     || null;
   if (nativePull?.number) {
     const trustedRunContext = parseTrustedWorkflowRunContext(payload.workflow_run);
+    if (payload.workflow_run && !trustedRunContext) {
+      return { prNumber: 0, expectedHeadSha: '', source: 'unresolved' };
+    }
     return {
       prNumber: Number(nativePull.number),
       expectedHeadSha: String(
@@ -157,23 +160,6 @@ function resolveEventPullRequestContext({ payload = {}, env = process.env, findP
       action: String(clientPayload.action || ''),
       deliveryId: String(clientPayload.delivery_id || ''),
     };
-  }
-
-  const workflowRun = payload.workflow_run || {};
-  const workflowRunHeadSha = String(workflowRun.head_sha || '').toLowerCase();
-  const defaultBranch = String(payload.repository?.default_branch || '');
-  if (workflowRun.name === 'PR Review Signal'
-    && /^[a-f0-9]{40}$/.test(workflowRunHeadSha)
-    && defaultBranch
-    && typeof findPullByHead === 'function') {
-    const pull = findPullByHead(workflowRunHeadSha, defaultBranch);
-    if (pull?.number) {
-      return {
-        prNumber: Number(pull.number),
-        expectedHeadSha: workflowRunHeadSha,
-        source: 'workflow-run-head',
-      };
-    }
   }
 
   const parsedRun = parseTrustedWorkflowRunContext(payload.workflow_run);
@@ -649,7 +635,9 @@ function reconcileWorkflowRunCompletion({ config, eventPayload, pull, fingerprin
     const proxy = activeProxyCheck(checkRuns, target, pull, fingerprint);
     if (!proxy) continue;
     const job = (jobs || []).find((candidate) => candidate.name === target.jobName);
-    const state = target.customCheck ? 'failed' : checkRunState(job, target);
+    const jobState = checkRunState(job, target);
+    if (target.customCheck && jobState === 'passed') continue;
+    const state = target.customCheck ? 'failed' : jobState;
     const jobConclusion = String(job?.conclusion || run.conclusion || '');
     const conclusion = state === 'passed'
       ? 'success'
@@ -801,7 +789,6 @@ function main(argv = process.argv.slice(2)) {
   const eventPayload = readEventPayload();
   const eventContext = resolveEventPullRequestContext({
     payload: eventPayload,
-    findPullByHead: findPullRequestByHead,
   });
   prNumber = eventContext.prNumber;
   if (!prNumber) {
@@ -956,7 +943,6 @@ if (require.main === module) {
     proxyExternalId,
     reconcileWorkflowRunCompletion,
     resolveEventPullRequestContext,
-    selectPullRequestByHead,
     summaryLines,
     validateEventPullRequestContext,
     workflowRunPullRequestNumber,

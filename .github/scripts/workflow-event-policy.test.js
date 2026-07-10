@@ -110,6 +110,16 @@ const relayWrangler = fs.readFileSync(
 assert.match(relayWrangler, /\[\[durable_objects\.bindings\]\]/);
 assert.match(relayWrangler, /new_sqlite_classes\s*=\s*\["DeliveryCoordinator"\]/);
 assert.doesNotMatch(relayWrangler, /\[\[kv_namespaces\]\]/);
+assert.match(relayWrangler, /APPROVABLE_WORKFLOW_PATHS\s*=\s*"\.github\/workflows\/pr-validation-matrix\.yml"/);
+
+const relaySource = fs.readFileSync(
+  path.join(root, '.github', 'webhook-relay', 'src', 'index.ts'),
+  'utf8',
+);
+assert.match(relaySource, /event === 'workflow_run'/);
+assert.match(relaySource, /workflow_run\?\.conclusion !== 'action_required'/);
+assert.match(relaySource, /actions\/runs\/\$\{runId\}\/approve/);
+assert.doesNotMatch(relaySource, /setTimeout|Atomics\.wait|Start-Sleep/);
 
 const relayDeploySource = fs.readFileSync(
   path.join(root, '.github', 'workflows', 'deploy-webhook-relay.yml'),

@@ -1,7 +1,7 @@
 # 检查当前 PR head 的合并前验证矩阵是否完整、新鲜、可信。
 # ruleset required check 应配置为 `PR Validation Matrix Gate`。
 # 本 workflow 是唯一允许用 Actions: write 调度或重新运行其它 workflow 的仓库自动化入口。
-# review 状态变化由无密钥 PR Review Signal 转换为 workflow_run；conversation resolved 由 webhook relay 转换为 repository_dispatch。
+# review 状态变化由无密钥 PR Review Signal 转换为 workflow_run；Relay 负责 conversation 事件和严格白名单 run 的一次性启动审批。
 name: PR Validation Matrix
 
 on:
