@@ -9,6 +9,7 @@ const {
   fingerprintInvalidationOverrides,
   isTrustedCheckRun,
   matrixConclusion,
+  mutationsEnabled,
   planRepairs,
   previousMatrixFingerprint,
   proxyExternalId,
@@ -73,6 +74,11 @@ const config = {
     },
   ],
 };
+
+assert.equal(mutationsEnabled(true, 'observe'), false);
+assert.equal(mutationsEnabled(true, 'repair'), true);
+assert.equal(mutationsEnabled(true, 'enforce'), true);
+assert.equal(mutationsEnabled(false, 'enforce'), false);
 
 function run(name, status, conclusion, extra = {}) {
   return {

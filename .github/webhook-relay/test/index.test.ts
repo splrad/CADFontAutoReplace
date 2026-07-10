@@ -219,4 +219,32 @@ describe('webhook relay', () => {
     expect(result.status).toBe(502);
     expect(coordinator.values.has('42:delivery-1')).toBe(false);
   });
+
+  it('releases the claim when the dispatch outcome is unknown', async () => {
+    const coordinator = new MemoryCoordinatorNamespace();
+    const body = JSON.stringify(payload());
+    const githubFetch = vi.fn()
+      .mockRejectedValueOnce(new Error('network failure'))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const dependencies = {
+      fetch: githubFetch as typeof fetch,
+      installationToken: vi.fn().mockResolvedValue('installation-token'),
+    };
+
+    const first = await handleRequest(
+      await requestFor('pull_request_review_thread', body),
+      environment(coordinator),
+      dependencies,
+    );
+    const second = await handleRequest(
+      await requestFor('pull_request_review_thread', body),
+      environment(coordinator),
+      dependencies,
+    );
+
+    expect(first.status).toBe(502);
+    expect(second.status).toBe(202);
+    expect(githubFetch).toHaveBeenCalledTimes(2);
+    expect(coordinator.values.get('42:delivery-1')).toBe('dispatched');
+  });
 });

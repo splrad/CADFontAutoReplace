@@ -25,6 +25,10 @@ function parseArgs(argv) {
   };
 }
 
+function mutationsEnabled(apply, mode) {
+  return Boolean(apply) && mode !== 'observe';
+}
+
 function gh(args, input, token) {
   return execFileSync(process.env.GH_EXECUTABLE || 'gh', ['api', ...args], {
     encoding: 'utf8',
@@ -774,6 +778,7 @@ function main(argv = process.argv.slice(2)) {
   }
   const currentRunJobs = eventName === 'workflow_run' ? fetchWorkflowJobs(eventPayload.workflow_run?.id) : [];
   const workflowRuns = fetchWorkflowRuns(context.fingerprint.head_sha);
+  const applyMutations = mutationsEnabled(args.apply, matrixMode);
   if (eventName === 'workflow_run'
     && eventPayload.workflow_run?.id
     && !workflowRuns.some((run) => Number(run.id) === Number(eventPayload.workflow_run.id))) {
@@ -797,7 +802,7 @@ function main(argv = process.argv.slice(2)) {
     fingerprint: context.fingerprint,
     checkRuns: context.checkRuns,
     jobs: currentRunJobs,
-    apply: args.apply,
+    apply: applyMutations,
   });
   let matrix = evaluateMatrix({
     config,
@@ -816,7 +821,7 @@ function main(argv = process.argv.slice(2)) {
     event: eventName,
     eventPayload,
   });
-  const activeRepairApplied = args.apply && ['repair', 'enforce'].includes(matrixMode);
+  const activeRepairApplied = applyMutations && ['repair', 'enforce'].includes(matrixMode);
   const actionablePlans = plans.filter((plan) => plan.action !== 'manual');
   if (activeRepairApplied && actionablePlans.length > 0) {
     const pendingMatrixCheck = upsertMatrixCheck({
@@ -846,7 +851,7 @@ function main(argv = process.argv.slice(2)) {
       fingerprint: context.fingerprint,
       conclusion: { status: 'completed', conclusion: 'failure', title: 'PR 验证矩阵补跑失败' },
       lines: [`- ${String(error?.message || error).slice(0, 1000)}`],
-      apply: args.apply,
+      apply: applyMutations,
       checkRuns: context.checkRuns,
     });
     throw error;
@@ -881,7 +886,7 @@ function main(argv = process.argv.slice(2)) {
     fingerprint: context.fingerprint,
     conclusion,
     lines,
-    apply: args.apply,
+    apply: applyMutations,
     checkRuns: context.checkRuns,
   });
   writeStepSummary(conclusion.title, lines);
@@ -904,6 +909,7 @@ if (require.main === module) {
     fingerprintInvalidationOverrides,
     isTrustedCheckRun,
     matrixConclusion,
+    mutationsEnabled,
     parseTrustedWorkflowRunContext,
     planRepairs,
     previousMatrixFingerprint,

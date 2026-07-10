@@ -204,6 +204,7 @@ export async function handleRequest(
       }),
     });
   } catch {
+    await coordinator.fetch('https://delivery.internal/release', { method: 'POST' });
     return response(502, 'GitHub dispatch outcome is unknown');
   }
   if (!dispatchResponse.ok) {

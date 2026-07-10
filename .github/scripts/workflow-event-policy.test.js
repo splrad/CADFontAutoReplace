@@ -104,4 +104,17 @@ assert.match(relayWrangler, /\[\[durable_objects\.bindings\]\]/);
 assert.match(relayWrangler, /new_sqlite_classes\s*=\s*\["DeliveryCoordinator"\]/);
 assert.doesNotMatch(relayWrangler, /\[\[kv_namespaces\]\]/);
 
+const relayDeploySource = fs.readFileSync(
+  path.join(root, '.github', 'workflows', 'deploy-webhook-relay.yml'),
+  'utf8',
+);
+assert.match(
+  relayDeploySource,
+  /if:\s*\$\{\{\s*github\.event_name != 'workflow_dispatch' \|\| github\.ref_name == github\.event\.repository\.default_branch\s*\}\}/,
+);
+assert.match(
+  relayDeploySource,
+  /ref:\s*\$\{\{\s*github\.event\.repository\.default_branch\s*\}\}/,
+);
+
 console.log('workflow event policy tests passed');
