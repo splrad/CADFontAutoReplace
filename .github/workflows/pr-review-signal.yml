@@ -26,4 +26,5 @@ jobs:
     timeout-minutes: 2
     steps:
       - name: Record review signal
-        run: echo "Review state changed for PR #${{ github.event.pull_request.number }} at ${{ github.event.pull_request.head.sha }}" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "Review state changed for PR #${{ github.event.pull_request.number }} at ${{ github.event.pull_request.head.sha }}" >> "$GITHUB_STEP_SUMMARY"

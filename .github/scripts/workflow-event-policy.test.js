@@ -62,8 +62,16 @@ assert.match(releaseSource, /^\s{2}pull_request_target:\s*$/m);
 assert.match(releaseSource, /^\s{4}types:\s*\[closed\]\s*$/m);
 assert.match(releaseSource, /github\.event\.pull_request\.merged\s*==\s*true/);
 assert.match(releaseSource, /github\.event\.repository\.default_branch/);
+assert.match(releaseSource, /ref:\s*\$\{\{\s*github\.sha\s*\}\}/);
+assert.doesNotMatch(releaseSource, /github\.event\.pull_request\.merge_commit_sha/);
 assert.doesNotMatch(releaseSource, /^\s{2}push:\s*$/m);
 assert.doesNotMatch(releaseSource, /commits\/[^\s]*\/pulls/);
+
+const reviewSignalSource = fs.readFileSync(
+  path.join(root, '.github', 'workflows', 'pr-review-signal.yml'),
+  'utf8',
+);
+assert.match(reviewSignalSource, /run:\s*\|\r?\n\s+echo "Review state changed for PR #/);
 
 const relayPackage = JSON.parse(fs.readFileSync(
   path.join(root, '.github', 'webhook-relay', 'package.json'),
