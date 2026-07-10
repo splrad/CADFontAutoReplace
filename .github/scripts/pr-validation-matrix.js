@@ -80,13 +80,13 @@ function isCopilotReviewSignal(event, eventPayload) {
 function reviewSignalWorkflowRun(event, eventPayload) {
   if (event !== 'workflow_run') return null;
   const run = eventPayload?.workflow_run || {};
-  return run?.name === 'PR Review Signal' ? run : null;
+  return workflowRunPath(run) === '.github/workflows/pr-review-signal.yml' ? run : null;
 }
 
 const trustedWorkflowRunTitleSources = new Map([
-  ['PR Classification', { workflowFile: 'pr-classification.yml', events: ['pull_request_target', 'workflow_dispatch'] }],
-  ['DCO Sign-off Advisory', { workflowFile: 'dco-check.yml', events: ['pull_request_target', 'workflow_dispatch'] }],
-  ['PR Governance', { workflowFile: 'pr-governance.yml', events: ['pull_request_target', 'workflow_dispatch'] }],
+  ['.github/workflows/pr-classification.yml', { events: ['pull_request_target', 'workflow_dispatch'] }],
+  ['.github/workflows/dco-check.yml', { events: ['pull_request_target', 'workflow_dispatch'] }],
+  ['.github/workflows/pr-governance.yml', { events: ['pull_request_target', 'workflow_dispatch'] }],
 ]);
 
 const reviewSignalActions = new Map([
@@ -96,8 +96,8 @@ const reviewSignalActions = new Map([
 ]);
 
 function parseTrustedWorkflowRunContext(run) {
-  if (String(run?.name || '') === 'PR Review Signal') {
-    if (workflowRunPath(run) !== '.github/workflows/pr-review-signal.yml') return null;
+  const runPath = workflowRunPath(run);
+  if (runPath === '.github/workflows/pr-review-signal.yml') {
     const match = String(run.display_title || '').match(
       /^PR Review Signal #([1-9][0-9]*) \/ ([a-f0-9]{40}) \/ ([a-z_]+) \/ ([a-z_]+)$/i,
     );
@@ -108,9 +108,8 @@ function parseTrustedWorkflowRunContext(run) {
     return { prNumber: Number(number), headSha: headSha.toLowerCase() };
   }
 
-  const source = trustedWorkflowRunTitleSources.get(String(run?.name || ''));
+  const source = trustedWorkflowRunTitleSources.get(runPath);
   if (!source
-    || workflowRunPath(run) !== `.github/workflows/${source.workflowFile}`
     || !source.events.includes(String(run?.event || ''))) return null;
   const match = String(run.display_title || '').match(/#[1-9][0-9]* \/ [a-f0-9]{40}(?: \/|$)/i);
   if (!match) return null;
@@ -251,8 +250,7 @@ function workflowRunPath(run) {
 
 function workflowRunMatchesTarget(run, target) {
   const trustedEvents = target.trustedEvents || ['pull_request_target', 'workflow_dispatch'];
-  return run?.name === target.workflowName
-    && workflowRunPath(run) === `.github/workflows/${String(target.workflowFile || '').toLowerCase()}`
+  return workflowRunPath(run) === `.github/workflows/${String(target.workflowFile || '').toLowerCase()}`
     && trustedEvents.includes(String(run?.event || ''));
 }
 
@@ -630,8 +628,7 @@ function reconcileWorkflowRunCompletion({ config, eventPayload, pull, fingerprin
   const run = eventPayload.workflow_run;
   if (!workflowRunMatchesPull({ run, pull, fingerprint })) return [];
   const overrides = [];
-  for (const target of (config.targets || []).filter((item) => item.workflowName === run.name)) {
-    if (!workflowRunMatchesTarget(run, target)) continue;
+  for (const target of (config.targets || []).filter((item) => workflowRunMatchesTarget(run, item))) {
     const proxy = activeProxyCheck(checkRuns, target, pull, fingerprint);
     if (!proxy) continue;
     const job = (jobs || []).find((candidate) => candidate.name === target.jobName);

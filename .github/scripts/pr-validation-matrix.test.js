@@ -277,7 +277,7 @@ assert.equal(eventScope({
   previousFingerprint: fingerprint.value,
   currentFingerprint: fingerprint,
   eventPayload: {
-    workflow_run: { name: 'PR Review Signal', event: 'pull_request_review' },
+    workflow_run: { path: '.github/workflows/pr-review-signal.yml', event: 'pull_request_review' },
   },
 }), 'gate-only');
 
@@ -364,7 +364,7 @@ const reviewSignalPlans = planRepairs({
   fingerprint,
   event: 'workflow_run',
   eventPayload: {
-    workflow_run: { name: 'PR Review Signal', event: 'pull_request_review' },
+    workflow_run: { path: '.github/workflows/pr-review-signal.yml', event: 'pull_request_review' },
   },
 });
 assert.equal(reviewSignalPlans.length, 1);
@@ -379,7 +379,7 @@ const reviewCommentSignalPlans = planRepairs({
   fingerprint,
   event: 'workflow_run',
   eventPayload: {
-    workflow_run: { name: 'PR Review Signal', event: 'pull_request_review_comment' },
+    workflow_run: { path: '.github/workflows/pr-review-signal.yml', event: 'pull_request_review_comment' },
   },
 });
 assert.equal(reviewCommentSignalPlans.length, 1);
@@ -393,7 +393,7 @@ const reviewRequestedSignalPlans = planRepairs({
   fingerprint,
   event: 'workflow_run',
   eventPayload: {
-    workflow_run: { name: 'PR Review Signal', event: 'pull_request' },
+    workflow_run: { path: '.github/workflows/pr-review-signal.yml', event: 'pull_request' },
   },
 });
 assert.equal(reviewRequestedSignalPlans.length, 1);
@@ -605,7 +605,7 @@ const eventHeadSha = 'a'.repeat(40);
 assert.deepEqual(resolveEventPullRequestContext({
   payload: {
     workflow_run: {
-      name: 'PR Governance',
+      name: `PR Validation Target #121 / ${eventHeadSha}`,
       path: '.github/workflows/pr-governance.yml',
       event: 'workflow_dispatch',
       display_title: `PR Governance #121 / ${eventHeadSha}`,
@@ -622,7 +622,7 @@ assert.deepEqual(resolveEventPullRequestContext({
 assert.deepEqual(resolveEventPullRequestContext({
   payload: {
     workflow_run: {
-      name: 'PR Review Signal',
+      name: `PR Review Signal #999 / ${eventHeadSha} / pull_request_review / edited`,
       path: '.github/workflows/pr-review-signal.yml',
       event: 'pull_request_review',
       display_title: `PR Review Signal #999 / ${eventHeadSha} / pull_request_review / edited`,
@@ -640,7 +640,7 @@ assert.deepEqual(resolveEventPullRequestContext({
 assert.deepEqual(resolveEventPullRequestContext({
   payload: {
     workflow_run: {
-      name: 'PR Review Signal',
+      name: `PR Review Signal #121 / ${eventHeadSha} / pull_request_review / submitted`,
       path: '.github/workflows/pr-review-signal.yml',
       event: 'pull_request_review',
       display_title: `PR Review Signal #121 / ${eventHeadSha} / pull_request_review / submitted`,
@@ -664,7 +664,7 @@ for (const runOverride of [
   assert.deepEqual(resolveEventPullRequestContext({
     payload: {
       workflow_run: {
-        name: 'PR Review Signal',
+        name: `PR Review Signal #121 / ${eventHeadSha} / pull_request_review / edited`,
         path: '.github/workflows/pr-review-signal.yml',
         event: 'pull_request_review',
         display_title: `PR Review Signal #121 / ${eventHeadSha} / pull_request_review / edited`,
@@ -679,7 +679,7 @@ for (const runOverride of [
 assert.deepEqual(resolveEventPullRequestContext({
   payload: {
     workflow_run: {
-      name: 'PR Review Signal',
+      name: `PR Review Signal #121 / ${eventHeadSha} / pull_request_review / edited`,
       path: '.github/workflows/pr-review-signal.yml',
       event: 'pull_request_review',
       display_title: `PR Review Signal #121 / ${eventHeadSha} / pull_request_review / edited`,
@@ -823,7 +823,7 @@ for (const runOverride of [
     config,
     eventPayload: {
       workflow_run: {
-        name: 'PR Classification',
+        name: `PR Validation Target #121 / ${eventHeadSha}`,
         display_title: `PR Classification #121 / ${eventHeadSha}`,
         status: 'completed',
         conclusion: 'success',
@@ -843,7 +843,7 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
   config,
   eventPayload: {
     workflow_run: {
-      name: 'PR Classification',
+      name: `PR Validation Target #121 / ${eventHeadSha}`,
       path: '.github/workflows/pr-classification.yml@refs/heads/main',
       event: 'workflow_dispatch',
       display_title: `PR Classification #121 / ${eventHeadSha}`,
@@ -871,7 +871,7 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
   config,
   eventPayload: {
     workflow_run: {
-      name: 'PR Governance',
+      name: `PR Validation Target #121 / ${eventHeadSha}`,
       path: '.github/workflows/pr-governance.yml@refs/heads/main',
       event: 'workflow_dispatch',
       display_title: `PR Governance #121 / ${eventHeadSha}`,
@@ -906,7 +906,7 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
   config,
   eventPayload: {
     workflow_run: {
-      name: 'PR Governance',
+      name: `PR Validation Target #121 / ${eventHeadSha}`,
       path: '.github/workflows/pr-governance.yml@refs/heads/main',
       event: 'workflow_dispatch',
       display_title: `PR Governance #121 / ${eventHeadSha}`,
@@ -934,7 +934,7 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
   config,
   eventPayload: {
     workflow_run: {
-      name: 'PR Governance',
+      name: `PR Validation Target #121 / ${eventHeadSha}`,
       path: '.github/workflows/pr-governance.yml@refs/heads/main',
       event: 'workflow_dispatch',
       display_title: `PR Governance #121 / ${eventHeadSha}`,
