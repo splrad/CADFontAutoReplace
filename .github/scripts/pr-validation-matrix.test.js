@@ -383,7 +383,7 @@ const reviewCommentSignalPlans = planRepairs({
   },
 });
 assert.equal(reviewCommentSignalPlans.length, 1);
-assert.equal(reviewCommentSignalPlans[0].inputs.governance_scope, 'copilot-review');
+assert.equal(reviewCommentSignalPlans[0].inputs.governance_scope, 'all');
 
 const reviewRequestedSignalPlans = planRepairs({
   targets: gateOnly.targets,
@@ -397,7 +397,7 @@ const reviewRequestedSignalPlans = planRepairs({
   },
 });
 assert.equal(reviewRequestedSignalPlans.length, 1);
-assert.equal(reviewRequestedSignalPlans[0].inputs.governance_scope, 'copilot-review');
+assert.equal(reviewRequestedSignalPlans[0].inputs.governance_scope, 'all');
 
 const missingMainGate = evaluateMatrix({
   config,
@@ -739,12 +739,16 @@ assert.equal(validateEventPullRequestContext({
 
 const proxyFingerprint = { value: 'f'.repeat(64), head_sha: eventHeadSha };
 const resolvedRefreshPlans = planRepairs({
-  targets: [{
-    ...config.targets.find((target) => target.id === 'copilot-review-gate'),
+  targets: ['main-gate', 'copilot-review-gate'].map((id) => ({
+    ...config.targets.find((target) => target.id === id),
     required: true,
     state: 'failed',
-    checkRun: run('Copilot Code Review Gate', 'completed', 'failure'),
-  }],
+    checkRun: run(
+      id === 'main-gate' ? 'Main Authorization Gate' : 'Copilot Code Review Gate',
+      'completed',
+      'failure',
+    ),
+  })),
   workflowRuns: [],
   mode: 'enforce',
   pull: { number: 121, base: { ref: 'main' }, head: { sha: eventHeadSha } },
@@ -754,7 +758,11 @@ const resolvedRefreshPlans = planRepairs({
 });
 assert.equal(resolvedRefreshPlans.length, 1);
 assert.equal(resolvedRefreshPlans[0].reason, 'review-state-refresh');
-assert.equal(resolvedRefreshPlans[0].inputs.governance_scope, 'copilot-review');
+assert.deepEqual(resolvedRefreshPlans[0].targets.map((target) => target.id).sort(), [
+  'copilot-review-gate',
+  'main-gate',
+]);
+assert.equal(resolvedRefreshPlans[0].inputs.governance_scope, 'all');
 
 const reviewDispatchPayload = {
   ...dispatchPayload,
@@ -816,10 +824,11 @@ const reviewCommentRefreshPlans = planRepairs({
   eventPayload: reviewCommentDispatchPayload,
 });
 assert.equal(reviewCommentRefreshPlans.length, 1);
-assert.deepEqual(reviewCommentRefreshPlans[0].targets.map((target) => target.id), [
+assert.deepEqual(reviewCommentRefreshPlans[0].targets.map((target) => target.id).sort(), [
   'copilot-review-gate',
+  'main-gate',
 ]);
-assert.equal(reviewCommentRefreshPlans[0].inputs.governance_scope, 'copilot-review');
+assert.equal(reviewCommentRefreshPlans[0].inputs.governance_scope, 'all');
 
 assert.match(validateEventPullRequestContext({
   context: { ...dispatchContext, action: 'submitted', sourceEvent: 'pull_request_review_thread' },
@@ -848,14 +857,22 @@ try {
     checkRuns: [],
     dispatch: (plan) => dispatched.push(plan),
     createProxy: (value) => proxies.push(value),
-  }), [{
-    id: 'copilot-review-gate',
-    state: 'pending',
-    status: 'in_progress',
-    conclusion: '',
-  }]);
+  }), [
+    {
+      id: 'main-gate',
+      state: 'pending',
+      status: 'in_progress',
+      conclusion: '',
+    },
+    {
+      id: 'copilot-review-gate',
+      state: 'pending',
+      status: 'in_progress',
+      conclusion: '',
+    },
+  ]);
   assert.equal(dispatched.length, 1);
-  assert.equal(proxies.length, 1);
+  assert.equal(proxies.length, 2);
 } finally {
   if (previousActionsToken === undefined) delete process.env.GH_ACTIONS_TOKEN;
   else process.env.GH_ACTIONS_TOKEN = previousActionsToken;

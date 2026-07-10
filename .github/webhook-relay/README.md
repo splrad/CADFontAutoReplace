@@ -24,6 +24,19 @@ GitHub App 需要 Pull requests read 和 Contents write。Worker 根据 webhook 
 
 `TARGET_REPOSITORY` 限定当前单仓库部署。共享 Steward Relay 迁移后，该参数将由默认分支 Manifest 和共享协议替代。
 
+## 从旧 Relay 升级
+
+升级顺序不可颠倒：
+
+1. 先在 GitHub App 的 Permissions & events 中订阅 Pull request review、
+   Pull request review comment 和 Pull request review thread，并保留旧 Workflow run 订阅。
+2. 再合并包含新 Matrix、PR Review Signal 和 Worker 的提交；等待 main 上
+   `Deploy Webhook Relay` 完成。不能在订阅到位前移除旧 review workflow 触发器。
+3. 用测试 PR 分别产生 review、inline comment 和 resolved conversation，确认每次 delivery
+   都生成 `pr-review-state-changed`，且授权与 Copilot 两个治理目标均重新读取当前状态。
+4. 验证完成后取消 GitHub App 的 Workflow run 订阅，并确认 Cloudflare production
+   不再包含旧 `APPROVABLE_WORKFLOW_PATHS` plaintext variable。
+
 ## 本地验证
 
 ```text

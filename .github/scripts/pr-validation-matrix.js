@@ -372,22 +372,10 @@ function planRepairs({ targets, workflowRuns, mode, pull, fingerprint, event = e
     const relayedReviewSignal = repositoryDispatchReviewSignal(event, eventPayload);
     const shouldRefreshReviewSignalTarget = Boolean(reviewSignal)
       && target.workflowFile === 'pr-governance.yml'
-      && (
-        (String(reviewSignal.event || '') === 'pull_request_review'
-          && ['main-authorization', 'main-gate', 'copilot-review-gate'].includes(target.id))
-        || (String(reviewSignal.event || '') === 'pull_request_review_comment'
-          && target.id === 'copilot-review-gate')
-        || (String(reviewSignal.event || '') === 'pull_request'
-          && target.id === 'copilot-review-gate')
-      );
+      && ['main-authorization', 'main-gate', 'copilot-review-gate'].includes(target.id);
     const shouldRefreshRelayedReviewTarget = Boolean(relayedReviewSignal)
       && target.workflowFile === 'pr-governance.yml'
-      && (
-        (relayedReviewSignal.event === 'pull_request_review'
-          && ['main-authorization', 'main-gate', 'copilot-review-gate'].includes(target.id))
-        || (['pull_request_review_comment', 'pull_request_review_thread'].includes(relayedReviewSignal.event)
-          && target.id === 'copilot-review-gate')
-      );
+      && ['main-authorization', 'main-gate', 'copilot-review-gate'].includes(target.id);
     if (!target.repairable
       || (!['missing', 'recoverable'].includes(target.state)
         && !shouldRefreshPendingCopilotGate
