@@ -52,7 +52,8 @@ on:
   # opened/synchronize/reopened/ready_for_review 属于当前 head 的完整治理验证入口。
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
-  # review / review comment 事件先经过无密钥 PR Review Signal，再由验证矩阵安全调度本 workflow。
+  # review / review comment / conversation 事件由 GitHub App webhook relay
+  # 转为 Matrix repository_dispatch，再由验证矩阵安全调度本 workflow。
   workflow_dispatch:
     inputs:
       pr_number:
