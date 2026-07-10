@@ -600,7 +600,7 @@ assert.deepEqual(resolveEventPullRequestContext({
 });
 
 const dispatchPayload = {
-  repository: { id: 42, full_name: 'splrad/CADFontAutoReplace' },
+  repository: { id: 42, full_name: 'splrad/CADFontAutoReplace', default_branch: 'main' },
   client_payload: {
     repository_id: 42,
     pr_number: 121,
@@ -631,6 +631,15 @@ assert.match(validateEventPullRequestContext({
   repository: 'splrad/CADFontAutoReplace',
   pull: { number: 121, state: 'open', base: { ref: 'main' }, head: { sha: eventHeadSha } },
 }), /仓库 ID 不匹配/);
+assert.equal(validateEventPullRequestContext({
+  context: dispatchContext,
+  payload: {
+    ...dispatchPayload,
+    repository: { ...dispatchPayload.repository, default_branch: 'trunk' },
+  },
+  repository: 'splrad/CADFontAutoReplace',
+  pull: { number: 121, state: 'open', base: { ref: 'trunk' }, head: { sha: eventHeadSha } },
+}), '');
 
 const resolvedRefreshPlans = planRepairs({
   targets: [{

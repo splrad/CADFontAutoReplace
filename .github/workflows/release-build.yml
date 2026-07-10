@@ -7,7 +7,7 @@
 #      - artifacts/ReleaseAssets 下的资产文件名检查
 #      - release notes 中的固定下载说明
 #   2) 保留的通用规则：
-#      - 只允许来自已合并 PR 的 main 提交发布
+#      - 只允许来自已合并 PR 的默认分支提交发布
 #      - tag 已存在时跳过发布
 #      - Release notes 由 .github/scripts/generate-release-notes.ps1 生成
 #      - 发布失败只保留 Actions 运行失败通知，不向 PR 额外评论
@@ -35,7 +35,7 @@ on:
         required: true
 
 concurrency:
-  group: release-main
+  group: release-default-branch
   cancel-in-progress: false
 
 permissions:
@@ -78,10 +78,15 @@ jobs:
           EVENT_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           EVENT_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
           INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:REPOSITORY_DEFAULT_BRANCH)) {
+              throw 'The repository default branch is unavailable.'
+          }
+
           if ($env:GITHUB_EVENT_NAME -eq 'pull_request_target') {
-              if ($env:EVENT_PR_MERGED -ne 'true' -or $env:EVENT_PR_BASE_REF -ne 'main') {
-                  throw 'Automatic release requires a merged pull request targeting main.'
+              if ($env:EVENT_PR_MERGED -ne 'true' -or $env:EVENT_PR_BASE_REF -ne $env:REPOSITORY_DEFAULT_BRANCH) {
+                  throw "Automatic release requires a merged pull request targeting $env:REPOSITORY_DEFAULT_BRANCH."
               }
               $prNumber = $env:EVENT_PR_NUMBER
               $targetSha = $env:EVENT_MERGE_SHA
@@ -90,8 +95,8 @@ jobs:
                   throw 'workflow_dispatch requires a valid merged pull request number.'
               }
               $pull = gh api "repos/$env:GH_REPO/pulls/$env:INPUT_PR_NUMBER" | ConvertFrom-Json
-              if ($null -eq $pull.merged_at -or $pull.base.ref -ne 'main') {
-                  throw "PR #$env:INPUT_PR_NUMBER is not merged into main."
+              if ($null -eq $pull.merged_at -or $pull.base.ref -ne $env:REPOSITORY_DEFAULT_BRANCH) {
+                  throw "PR #$env:INPUT_PR_NUMBER is not merged into $env:REPOSITORY_DEFAULT_BRANCH."
               }
               $prNumber = [string]$pull.number
               $targetSha = [string]$pull.merge_commit_sha

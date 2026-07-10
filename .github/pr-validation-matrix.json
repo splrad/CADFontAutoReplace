@@ -33,7 +33,6 @@
       "workflowFile": "pr-governance.yml",
       "jobName": "Main Authorization Gate",
       "group": "gate",
-      "baseBranches": ["main"],
       "acceptableConclusions": ["success"],
       "repairable": true
     },
@@ -45,7 +44,6 @@
       "workflowFile": "pr-governance.yml",
       "jobName": "Update Copilot Review Check",
       "group": "gate",
-      "baseBranches": ["main"],
       "acceptableConclusions": ["success"],
       "repairable": true,
       "customCheck": true

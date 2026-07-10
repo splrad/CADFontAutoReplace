@@ -144,7 +144,9 @@ function validateEventPullRequestContext({ context, payload = {}, pull, reposito
   if (!context?.prNumber) return '无法解析 PR 编号';
   if (!pull?.number || Number(pull.number) !== Number(context.prNumber)) return 'PR 编号不匹配';
   if (String(pull.state || '') !== 'open') return 'PR 已关闭';
-  if (String(pull.base?.ref || '') !== 'main') return 'PR 目标分支不是 main';
+  const defaultBranch = String(payload.repository?.default_branch || pull.base?.repo?.default_branch || '');
+  if (!defaultBranch) return '无法确认仓库默认分支';
+  if (String(pull.base?.ref || '') !== defaultBranch) return `PR 目标分支不是默认分支 ${defaultBranch}`;
   if (context.expectedHeadSha && String(pull.head?.sha || '').toLowerCase() !== context.expectedHeadSha) {
     return '事件对应的 head 已过期';
   }
@@ -304,7 +306,7 @@ function planRepairs({ targets, workflowRuns, mode, pull, fingerprint, event = e
   if (!['repair', 'enforce'].includes(mode)) return [];
   const plans = [];
   const dispatchPlans = new Map();
-  const ref = pull?.base?.ref || process.env.GITHUB_REF_NAME || 'main';
+  const ref = pull?.base?.ref || process.env.REPOSITORY_DEFAULT_BRANCH || process.env.GITHUB_REF_NAME || '';
   const inputs = {
     pr_number: String(pull?.number || prNumber),
     head_sha: String(fingerprint?.head_sha || pull?.head?.sha || ''),
