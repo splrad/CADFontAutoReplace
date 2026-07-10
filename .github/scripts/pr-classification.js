@@ -11,6 +11,7 @@ const {
   publicLabelDefinitions,
 } = require('./pr-classification-policy');
 const { fingerprintForPull } = require('./pr-validation-fingerprint');
+const { fetchPullRequestPages } = require('./pr-api-pagination');
 
 const repo = process.env.GITHUB_REPOSITORY || '';
 const prNumber = process.env.PR_NUMBER || '';
@@ -56,19 +57,12 @@ function ghJson(args, input) {
 }
 
 function fetchAll(apiPath) {
-  const all = [];
-  for (let page = 1; page <= 20; page += 1) {
-    const items = ghJson([
-      '--method', 'GET',
-      apiPath,
-      '-f', 'per_page=100',
-      '-f', `page=${page}`,
-    ]) || [];
-    if (!Array.isArray(items) || !items.length) break;
-    all.push(...items);
-    if (items.length < 100) break;
-  }
-  return all;
+  return fetchPullRequestPages((page, pageSize) => ghJson([
+    '--method', 'GET',
+    apiPath,
+    '-f', `per_page=${pageSize}`,
+    '-f', `page=${page}`,
+  ]) || []);
 }
 
 function labelDefinition(labelName) {

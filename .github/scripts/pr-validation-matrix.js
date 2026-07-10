@@ -4,6 +4,7 @@ const path = require('node:path');
 const {
   fingerprintForPull,
 } = require('./pr-validation-fingerprint');
+const { fetchPullRequestPages } = require('./pr-api-pagination');
 
 const repo = process.env.GITHUB_REPOSITORY || '';
 const [owner, repoName] = repo.split('/');
@@ -217,6 +218,10 @@ function checkRunWorkflowRunId(run) {
   return Number(match?.[1] || '0');
 }
 
+function workflowRunPath(run) {
+  return String(run?.path || '').split('@')[0].replace(/\\/g, '/').toLowerCase();
+}
+
 function trustedDirectExternalId(target, pull, fingerprint) {
   if (target.id === 'pr-classification') {
     return `classification:pr:${pull.number}:fingerprint:${fingerprint.value}`;
@@ -240,7 +245,7 @@ function isTrustedCheckRun({ run, target, pull, fingerprint, workflowRuns = [], 
   const workflowRunId = checkRunWorkflowRunId(run);
   const workflowRun = (workflowRuns || []).find((candidate) => Number(candidate?.id) === workflowRunId);
   if (!workflowRun || workflowRun.name !== target.workflowName) return false;
-  const workflowPath = String(workflowRun.path || '').split('@')[0].replace(/\\/g, '/').toLowerCase();
+  const workflowPath = workflowRunPath(workflowRun);
   if (workflowPath !== `.github/workflows/${String(target.workflowFile || '').toLowerCase()}`) return false;
   const trustedEvents = target.trustedEvents || ['pull_request_target', 'workflow_dispatch'];
   return trustedEvents.includes(String(workflowRun.event || ''))
@@ -428,6 +433,7 @@ function planWorkflowRunRecovery({ event = eventName, eventPayload, pull, finger
   const run = eventPayload?.workflow_run || {};
   const conclusion = String(run?.conclusion || '');
   if (run?.name !== 'PR Governance'
+    || workflowRunPath(run) !== '.github/workflows/pr-governance.yml'
     || String(run?.event || '') !== 'pull_request_review'
     || !isCopilotActor(run?.actor?.login)
     || !workflowRunMatchesPull({ run, pull, fingerprint })) {
@@ -702,19 +708,12 @@ function readEventPayload() {
 }
 
 function fetchAll(apiPath) {
-  const all = [];
-  for (let page = 1; page <= 10; page += 1) {
-    const items = ghJson([
-      '--method', 'GET',
-      apiPath,
-      '-f', 'per_page=100',
-      '-f', `page=${page}`,
-    ]) || [];
-    if (!Array.isArray(items) || !items.length) break;
-    all.push(...items);
-    if (items.length < 100) break;
-  }
-  return all;
+  return fetchPullRequestPages((page, pageSize) => ghJson([
+    '--method', 'GET',
+    apiPath,
+    '-f', `per_page=${pageSize}`,
+    '-f', `page=${page}`,
+  ]) || []);
 }
 
 function fetchCheckRuns(headSha) {

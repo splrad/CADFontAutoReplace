@@ -64,6 +64,7 @@ assert.match(releaseSource, /github\.event\.pull_request\.merged\s*==\s*true/);
 assert.match(releaseSource, /github\.event\.repository\.default_branch/);
 assert.match(releaseSource, /ref:\s*\$\{\{\s*github\.sha\s*\}\}/);
 assert.doesNotMatch(releaseSource, /github\.event\.pull_request\.merge_commit_sha/);
+assert.doesNotMatch(releaseSource, /^\s{2}workflow_dispatch:\s*$/m);
 assert.doesNotMatch(releaseSource, /^\s{2}push:\s*$/m);
 assert.doesNotMatch(releaseSource, /commits\/[^\s]*\/pulls/);
 
