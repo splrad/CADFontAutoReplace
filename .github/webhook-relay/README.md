@@ -19,4 +19,4 @@ npm test
 npm run typecheck
 ```
 
-Durable Object 以 `repository_id:X-GitHub-Delivery` 做强一致 claim；明确的 dispatch 失败会释放 claim，成功记录保留 24 小时后由 alarm 清理。Worker 不记录 webhook 正文、签名、App 私钥或 installation token。
+Durable Object 以 `repository_id:X-GitHub-Delivery` 做强一致 claim。处理中的 claim 使用 60 秒短租约，租约内重试返回可重试错误，过期后允许接管；明确的 dispatch 失败会立即释放 claim，只有成功记录才返回幂等成功并保留 24 小时。Worker 不记录 webhook 正文、签名、App 私钥或 installation token。

@@ -100,7 +100,25 @@ function parseTrustedWorkflowRunContext(run) {
   return parts ? { prNumber: Number(parts[1]), headSha: parts[2].toLowerCase() } : null;
 }
 
-function resolveEventPullRequestContext({ payload = {}, env = process.env } = {}) {
+function selectPullRequestByHead(pulls, headSha, defaultBranch, repository = repo) {
+  const normalizedHead = String(headSha || '').toLowerCase();
+  const normalizedRepository = String(repository || '').toLowerCase();
+  const matches = (pulls || []).filter((pull) => (
+    String(pull?.state || '') === 'open'
+    && String(pull?.head?.sha || '').toLowerCase() === normalizedHead
+    && String(pull?.base?.ref || '') === String(defaultBranch || '')
+    && String(pull?.base?.repo?.full_name || '').toLowerCase() === normalizedRepository
+  ));
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function findPullRequestByHead(headSha, defaultBranch) {
+  if (!/^[a-f0-9]{40}$/i.test(String(headSha || '')) || !defaultBranch) return null;
+  const pulls = ghJson([`repos/${repo}/commits/${headSha}/pulls?per_page=100`]) || [];
+  return selectPullRequestByHead(pulls, headSha, defaultBranch);
+}
+
+function resolveEventPullRequestContext({ payload = {}, env = process.env, findPullByHead } = {}) {
   const nativePull = payload.pull_request
     || payload.workflow_run?.pull_requests?.[0]
     || payload.check_run?.pull_requests?.[0]
@@ -139,6 +157,23 @@ function resolveEventPullRequestContext({ payload = {}, env = process.env } = {}
       action: String(clientPayload.action || ''),
       deliveryId: String(clientPayload.delivery_id || ''),
     };
+  }
+
+  const workflowRun = payload.workflow_run || {};
+  const workflowRunHeadSha = String(workflowRun.head_sha || '').toLowerCase();
+  const defaultBranch = String(payload.repository?.default_branch || '');
+  if (workflowRun.name === 'PR Review Signal'
+    && /^[a-f0-9]{40}$/.test(workflowRunHeadSha)
+    && defaultBranch
+    && typeof findPullByHead === 'function') {
+    const pull = findPullByHead(workflowRunHeadSha, defaultBranch);
+    if (pull?.number) {
+      return {
+        prNumber: Number(pull.number),
+        expectedHeadSha: workflowRunHeadSha,
+        source: 'workflow-run-head',
+      };
+    }
   }
 
   const parsedRun = parseTrustedWorkflowRunContext(payload.workflow_run);
@@ -764,7 +799,10 @@ function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const config = readJson(configPath);
   const eventPayload = readEventPayload();
-  const eventContext = resolveEventPullRequestContext({ payload: eventPayload });
+  const eventContext = resolveEventPullRequestContext({
+    payload: eventPayload,
+    findPullByHead: findPullRequestByHead,
+  });
   prNumber = eventContext.prNumber;
   if (!prNumber) {
     writeStepSummary('PR 验证矩阵已忽略事件', [`- 原因：${eventContext.source === 'unresolved' ? '无法从受信任事件解析 PR' : 'PR 编号无效'}`]);
@@ -918,6 +956,7 @@ if (require.main === module) {
     proxyExternalId,
     reconcileWorkflowRunCompletion,
     resolveEventPullRequestContext,
+    selectPullRequestByHead,
     summaryLines,
     validateEventPullRequestContext,
     workflowRunPullRequestNumber,

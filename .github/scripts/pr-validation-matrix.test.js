@@ -15,6 +15,7 @@ const {
   proxyExternalId,
   reconcileWorkflowRunCompletion,
   resolveEventPullRequestContext,
+  selectPullRequestByHead,
   validateEventPullRequestContext,
   workflowRunPullRequestNumber,
 } = require('./pr-validation-matrix');
@@ -636,6 +637,44 @@ assert.deepEqual(resolveEventPullRequestContext({
   expectedHeadSha: '',
   source: 'unresolved',
 });
+
+const reviewSignalPull = {
+  number: 121,
+  state: 'open',
+  head: { sha: eventHeadSha },
+  base: { ref: 'main', repo: { full_name: 'splrad/CADFontAutoReplace' } },
+};
+assert.deepEqual(resolveEventPullRequestContext({
+  payload: {
+    repository: { default_branch: 'main' },
+    workflow_run: {
+      name: 'PR Review Signal',
+      path: '.github/workflows/pr-review-signal.yml',
+      event: 'pull_request_review',
+      display_title: `PR Review Signal #999 / ${'b'.repeat(40)}`,
+      head_sha: eventHeadSha,
+      pull_requests: [],
+    },
+  },
+  env: { GITHUB_EVENT_NAME: 'workflow_run' },
+  findPullByHead: (head, base) => (
+    head === eventHeadSha && base === 'main' ? reviewSignalPull : null
+  ),
+}), {
+  prNumber: 121,
+  expectedHeadSha: eventHeadSha,
+  source: 'workflow-run-head',
+});
+
+assert.equal(selectPullRequestByHead([
+  reviewSignalPull,
+  { ...reviewSignalPull, number: 122, state: 'closed' },
+  { ...reviewSignalPull, number: 123, base: { ...reviewSignalPull.base, ref: 'develop' } },
+], eventHeadSha, 'main', 'splrad/CADFontAutoReplace'), reviewSignalPull);
+assert.equal(selectPullRequestByHead([
+  reviewSignalPull,
+  { ...reviewSignalPull, number: 124 },
+], eventHeadSha, 'main', 'splrad/CADFontAutoReplace'), null);
 
 assert.deepEqual(resolveEventPullRequestContext({
   payload: {

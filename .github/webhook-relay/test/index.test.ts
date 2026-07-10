@@ -5,19 +5,23 @@ const secret = "It's a Secret to Everybody";
 const headSha = 'a'.repeat(40);
 
 class MemoryCoordinatorNamespace {
-  values = new Map<string, string>();
+  values = new Map<string, { state: 'claimed' | 'dispatched'; updatedAt: number }>();
 
   getByName(name: string) {
     return {
       fetch: async (input: RequestInfo | URL) => {
         const action = new URL(String(input)).pathname;
         if (action === '/claim') {
-          if (this.values.has(name)) return new Response('Duplicate delivery', { status: 409 });
-          this.values.set(name, 'claimed');
+          const existing = this.values.get(name);
+          if (existing?.state === 'dispatched') return new Response('Duplicate delivery');
+          if (existing?.state === 'claimed' && Date.now() - existing.updatedAt < 60_000) {
+            return new Response('Delivery is already processing', { status: 409 });
+          }
+          this.values.set(name, { state: 'claimed', updatedAt: Date.now() });
           return new Response('Claimed', { status: 201 });
         }
         if (action === '/complete') {
-          this.values.set(name, 'dispatched');
+          this.values.set(name, { state: 'dispatched', updatedAt: Date.now() });
           return new Response('Completed');
         }
         if (action === '/release') {
@@ -205,7 +209,7 @@ describe('webhook relay', () => {
     const first = await firstPromise;
 
     expect(first.status).toBe(202);
-    expect(second.status).toBe(200);
+    expect(second.status).toBe(503);
     expect(githubFetch).toHaveBeenCalledTimes(1);
   });
 
@@ -245,6 +249,34 @@ describe('webhook relay', () => {
     expect(first.status).toBe(502);
     expect(second.status).toBe(202);
     expect(githubFetch).toHaveBeenCalledTimes(2);
-    expect(coordinator.values.get('42:delivery-1')).toBe('dispatched');
+    expect(coordinator.values.get('42:delivery-1')?.state).toBe('dispatched');
+  });
+
+  it('retries an abandoned claim after its lease expires', async () => {
+    const coordinator = new MemoryCoordinatorNamespace();
+    const body = JSON.stringify(payload());
+    const githubFetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const dependencies = {
+      fetch: githubFetch as typeof fetch,
+      installationToken: vi.fn().mockResolvedValue('installation-token'),
+    };
+    coordinator.values.set('42:delivery-1', { state: 'claimed', updatedAt: Date.now() });
+
+    const processing = await handleRequest(
+      await requestFor('pull_request_review_thread', body),
+      environment(coordinator),
+      dependencies,
+    );
+    coordinator.values.set('42:delivery-1', { state: 'claimed', updatedAt: 0 });
+    const retried = await handleRequest(
+      await requestFor('pull_request_review_thread', body),
+      environment(coordinator),
+      dependencies,
+    );
+
+    expect(processing.status).toBe(503);
+    expect(retried.status).toBe(202);
+    expect(githubFetch).toHaveBeenCalledTimes(1);
+    expect(coordinator.values.get('42:delivery-1')?.state).toBe('dispatched');
   });
 });

@@ -29,6 +29,7 @@ interface Dependencies {
 
 const encoder = new TextEncoder();
 const deliveryRetentionMs = 24 * 60 * 60 * 1000;
+const deliveryClaimLeaseMs = 60 * 1000;
 
 type DeliveryState = 'claimed' | 'dispatched';
 
@@ -45,14 +46,23 @@ export class DeliveryCoordinator {
     if (request.method !== 'POST') return response(405, 'Method not allowed');
 
     if (action === '/claim') {
-      const claimed = await this.state.storage.transaction(async (transaction) => {
+      const now = Date.now();
+      const claimState = await this.state.storage.transaction(async (transaction) => {
         const existing = await transaction.get<DeliveryRecord>('delivery');
-        if (existing) return false;
-        await transaction.put<DeliveryRecord>('delivery', { state: 'claimed', updatedAt: Date.now() });
-        return true;
+        if (existing?.state === 'dispatched') return 'dispatched';
+        if (existing?.state === 'claimed' && now - existing.updatedAt < deliveryClaimLeaseMs) {
+          return 'processing';
+        }
+        await transaction.put<DeliveryRecord>('delivery', { state: 'claimed', updatedAt: now });
+        return 'claimed';
       });
-      if (claimed) await this.state.storage.setAlarm(Date.now() + deliveryRetentionMs);
-      return response(claimed ? 201 : 409, claimed ? 'Claimed' : 'Duplicate delivery');
+      if (claimState === 'claimed') {
+        await this.state.storage.setAlarm(now + deliveryRetentionMs);
+        return response(201, 'Claimed');
+      }
+      return claimState === 'dispatched'
+        ? response(200, 'Duplicate delivery')
+        : response(409, 'Delivery is already processing');
     }
 
     if (action === '/complete') {
@@ -169,7 +179,8 @@ export async function handleRequest(
   if (!deliveryId) return response(400, 'Missing delivery ID');
   const coordinator = env.DELIVERY_COORDINATOR.getByName(`${repositoryId}:${deliveryId}`);
   const claim = await coordinator.fetch('https://delivery.internal/claim', { method: 'POST' });
-  if (claim.status === 409) return response(200, 'Duplicate delivery');
+  if (claim.status === 200) return response(200, 'Duplicate delivery');
+  if (claim.status === 409) return response(503, 'Delivery is already processing');
   if (!claim.ok) return response(503, `Delivery claim failed (${claim.status})`);
 
   let token: string;
