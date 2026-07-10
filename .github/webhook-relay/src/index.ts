@@ -5,6 +5,7 @@ export interface Env {
   GITHUB_APP_ID: string;
   GITHUB_APP_PRIVATE_KEY: string;
   TARGET_REPOSITORY: string;
+  APPROVABLE_WORKFLOW_PATHS: string;
   DELIVERY_COORDINATOR: DurableObjectNamespace;
 }
 
@@ -22,9 +23,36 @@ interface PullRequestReviewThreadPayload {
   review_thread?: { node_id?: string };
 }
 
+interface WorkflowRunPayload {
+  action?: string;
+  installation?: { id?: number };
+  repository?: { id?: number; full_name?: string; default_branch?: string };
+  workflow?: { path?: string };
+  workflow_run?: {
+    id?: number;
+    name?: string;
+    path?: string;
+    event?: string;
+    status?: string;
+    conclusion?: string;
+    head_branch?: string;
+    head_repository?: { id?: number };
+  };
+}
+
+type InstallationPermissions = {
+  actions?: 'write';
+  contents?: 'write';
+};
+
 interface Dependencies {
   fetch: typeof fetch;
-  installationToken: (env: Env, installationId: number, repositoryId: number) => Promise<string>;
+  installationToken: (
+    env: Env,
+    installationId: number,
+    repositoryId: number,
+    permissions: InstallationPermissions,
+  ) => Promise<string>;
 }
 
 const encoder = new TextEncoder();
@@ -113,13 +141,18 @@ export async function verifySignature(rawBody: ArrayBuffer, signature: string, s
   return constantTimeEqual(`sha256=${hex(digest)}`, signature.toLowerCase());
 }
 
-async function createInstallationToken(env: Env, installationId: number, repositoryId: number): Promise<string> {
+async function createInstallationToken(
+  env: Env,
+  installationId: number,
+  repositoryId: number,
+  permissions: InstallationPermissions,
+): Promise<string> {
   const auth = createAppAuth({ appId: env.GITHUB_APP_ID, privateKey: env.GITHUB_APP_PRIVATE_KEY });
   const result = await auth({
     type: 'installation',
     installationId,
     repositoryIds: [repositoryId],
-    permissions: { contents: 'write' },
+    permissions,
   });
   return result.token;
 }
@@ -131,6 +164,138 @@ const defaultDependencies: Dependencies = {
 
 function response(status: number, message: string): Response {
   return new Response(message, { status, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+}
+
+function githubHeaders(token: string): HeadersInit {
+  return {
+    accept: 'application/vnd.github+json',
+    authorization: `Bearer ${token}`,
+    'content-type': 'application/json',
+    'user-agent': 'cadfontautoreplace-webhook-relay',
+    'x-github-api-version': '2026-03-10',
+  };
+}
+
+function isAllowedWorkflowPath(value: string, paths: Set<string>, defaultBranch: string): boolean {
+  const [path, ref = ''] = String(value || '').split('@');
+  if (!paths.has(path)) return false;
+  return !ref || ref === defaultBranch || ref === `refs/heads/${defaultBranch}`;
+}
+
+function approvableWorkflowPaths(env: Env): Set<string> {
+  return new Set(String(env.APPROVABLE_WORKFLOW_PATHS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean));
+}
+
+async function claimDelivery(env: Env, repositoryId: number, deliveryId: string) {
+  const coordinator = env.DELIVERY_COORDINATOR.getByName(`${repositoryId}:${deliveryId}`);
+  const claim = await coordinator.fetch('https://delivery.internal/claim', { method: 'POST' });
+  if (claim.status === 200) return { coordinator, result: response(200, 'Duplicate delivery') };
+  if (claim.status === 409) return { coordinator, result: response(503, 'Delivery is already processing') };
+  if (!claim.ok) return { coordinator, result: response(503, `Delivery claim failed (${claim.status})`) };
+  return { coordinator, result: null };
+}
+
+async function releaseDelivery(coordinator: DurableObjectStub): Promise<void> {
+  await coordinator.fetch('https://delivery.internal/release', { method: 'POST' });
+}
+
+async function completeDelivery(coordinator: DurableObjectStub): Promise<Response | null> {
+  const completed = await coordinator.fetch('https://delivery.internal/complete', { method: 'POST' });
+  return completed.ok ? null : response(503, `Delivery completion failed (${completed.status})`);
+}
+
+async function handleWorkflowRun(
+  request: Request,
+  env: Env,
+  payload: WorkflowRunPayload,
+  dependencies: Dependencies,
+): Promise<Response> {
+  const repositoryId = Number(payload.repository?.id || 0);
+  const repository = String(payload.repository?.full_name || '');
+  const defaultBranch = String(payload.repository?.default_branch || '');
+  const installationId = Number(payload.installation?.id || 0);
+  const runId = Number(payload.workflow_run?.id || 0);
+  const configuredPaths = approvableWorkflowPaths(env);
+  const payloadPath = payload.workflow_run?.path || payload.workflow?.path || '';
+  if (payload.action !== 'completed'
+    || payload.workflow_run?.status !== 'completed'
+    || payload.workflow_run?.conclusion !== 'action_required'
+    || payload.workflow_run?.event !== 'workflow_run'
+    || repository.toLowerCase() !== env.TARGET_REPOSITORY.trim().toLowerCase()
+    || !repositoryId
+    || !installationId
+    || !runId
+    || !defaultBranch
+    || payload.workflow_run?.head_branch !== defaultBranch
+    || Number(payload.workflow_run?.head_repository?.id || 0) !== repositoryId
+    || !isAllowedWorkflowPath(payloadPath, configuredPaths, defaultBranch)) {
+    return response(202, 'Ignored payload');
+  }
+
+  const deliveryId = request.headers.get('x-github-delivery') || '';
+  if (!deliveryId) return response(400, 'Missing delivery ID');
+  const { coordinator, result } = await claimDelivery(env, repositoryId, deliveryId);
+  if (result) return result;
+
+  let token: string;
+  try {
+    token = await dependencies.installationToken(env, installationId, repositoryId, { actions: 'write' });
+  } catch {
+    await releaseDelivery(coordinator);
+    return response(502, 'GitHub installation token creation failed');
+  }
+
+  let currentRun: Response;
+  try {
+    currentRun = await dependencies.fetch(`https://api.github.com/repos/${repository}/actions/runs/${runId}`, {
+      headers: githubHeaders(token),
+    });
+  } catch {
+    await releaseDelivery(coordinator);
+    return response(502, 'GitHub workflow lookup outcome is unknown');
+  }
+  if (!currentRun.ok) {
+    await releaseDelivery(coordinator);
+    return response(502, `GitHub workflow lookup failed (${currentRun.status})`);
+  }
+
+  let run: WorkflowRunPayload['workflow_run'];
+  try {
+    run = await currentRun.json() as WorkflowRunPayload['workflow_run'];
+  } catch {
+    await releaseDelivery(coordinator);
+    return response(502, 'GitHub workflow lookup returned invalid JSON');
+  }
+  if (run?.status !== 'completed'
+    || run?.conclusion !== 'action_required'
+    || run?.event !== 'workflow_run'
+    || run?.head_branch !== defaultBranch
+    || Number(run?.head_repository?.id || 0) !== repositoryId
+    || !isAllowedWorkflowPath(run?.path || '', configuredPaths, defaultBranch)) {
+    await releaseDelivery(coordinator);
+    return response(202, 'Workflow run no longer requires approval');
+  }
+
+  let approval: Response;
+  try {
+    approval = await dependencies.fetch(`https://api.github.com/repos/${repository}/actions/runs/${runId}/approve`, {
+      method: 'POST',
+      headers: githubHeaders(token),
+    });
+  } catch {
+    await releaseDelivery(coordinator);
+    return response(502, 'GitHub approval outcome is unknown');
+  }
+  if (!approval.ok) {
+    await releaseDelivery(coordinator);
+    return response(502, `GitHub approval failed (${approval.status})`);
+  }
+
+  const completionFailure = await completeDelivery(coordinator);
+  return completionFailure || response(202, 'Approved');
 }
 
 export async function handleRequest(
@@ -147,27 +312,33 @@ export async function handleRequest(
 
   const event = request.headers.get('x-github-event') || '';
   if (event === 'ping') return response(200, 'pong');
-  if (event !== 'pull_request_review_thread') return response(202, 'Ignored event');
+  if (!['pull_request_review_thread', 'workflow_run'].includes(event)) return response(202, 'Ignored event');
 
-  let payload: PullRequestReviewThreadPayload;
+  let payload: PullRequestReviewThreadPayload | WorkflowRunPayload;
   try {
     payload = JSON.parse(new TextDecoder().decode(rawBody)) as PullRequestReviewThreadPayload;
   } catch {
     return response(400, 'Invalid JSON');
   }
 
-  const action = String(payload.action || '');
-  const repositoryId = Number(payload.repository?.id || 0);
-  const repository = String(payload.repository?.full_name || '');
-  const defaultBranch = String(payload.repository?.default_branch || '');
-  const prNumber = Number(payload.pull_request?.number || 0);
-  const headSha = String(payload.pull_request?.head?.sha || '').toLowerCase();
-  const installationId = Number(payload.installation?.id || 0);
+  if (event === 'workflow_run') {
+    return handleWorkflowRun(request, env, payload as WorkflowRunPayload, dependencies);
+  }
+
+  const reviewThreadPayload = payload as PullRequestReviewThreadPayload;
+
+  const action = String(reviewThreadPayload.action || '');
+  const repositoryId = Number(reviewThreadPayload.repository?.id || 0);
+  const repository = String(reviewThreadPayload.repository?.full_name || '');
+  const defaultBranch = String(reviewThreadPayload.repository?.default_branch || '');
+  const prNumber = Number(reviewThreadPayload.pull_request?.number || 0);
+  const headSha = String(reviewThreadPayload.pull_request?.head?.sha || '').toLowerCase();
+  const installationId = Number(reviewThreadPayload.installation?.id || 0);
   if (!['resolved', 'unresolved'].includes(action)
     || repository.toLowerCase() !== env.TARGET_REPOSITORY.trim().toLowerCase()
-    || payload.pull_request?.state !== 'open'
+    || reviewThreadPayload.pull_request?.state !== 'open'
     || !defaultBranch
-    || payload.pull_request?.base?.ref !== defaultBranch
+    || reviewThreadPayload.pull_request?.base?.ref !== defaultBranch
     || !repositoryId
     || !prNumber
     || !/^[a-f0-9]{40}$/.test(headSha)
@@ -177,18 +348,15 @@ export async function handleRequest(
 
   const deliveryId = request.headers.get('x-github-delivery') || '';
   if (!deliveryId) return response(400, 'Missing delivery ID');
-  const coordinator = env.DELIVERY_COORDINATOR.getByName(`${repositoryId}:${deliveryId}`);
-  const claim = await coordinator.fetch('https://delivery.internal/claim', { method: 'POST' });
-  if (claim.status === 200) return response(200, 'Duplicate delivery');
-  if (claim.status === 409) return response(503, 'Delivery is already processing');
-  if (!claim.ok) return response(503, `Delivery claim failed (${claim.status})`);
+  const { coordinator, result } = await claimDelivery(env, repositoryId, deliveryId);
+  if (result) return result;
 
   let token: string;
   try {
-    token = await dependencies.installationToken(env, installationId, repositoryId);
-  } catch (error) {
-    await coordinator.fetch('https://delivery.internal/release', { method: 'POST' });
-    throw error;
+    token = await dependencies.installationToken(env, installationId, repositoryId, { contents: 'write' });
+  } catch {
+    await releaseDelivery(coordinator);
+    return response(502, 'GitHub installation token creation failed');
   }
 
   let dispatchResponse: Response;
@@ -196,11 +364,7 @@ export async function handleRequest(
     dispatchResponse = await dependencies.fetch(`https://api.github.com/repos/${repository}/dispatches`, {
       method: 'POST',
       headers: {
-        accept: 'application/vnd.github+json',
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-        'user-agent': 'cadfontautoreplace-webhook-relay',
-        'x-github-api-version': '2022-11-28',
+        ...githubHeaders(token),
       },
       body: JSON.stringify({
         event_type: 'pr-review-thread-resolved',
@@ -208,24 +372,23 @@ export async function handleRequest(
           repository_id: repositoryId,
           pr_number: prNumber,
           head_sha: headSha,
-          thread_node_id: payload.thread?.node_id || payload.review_thread?.node_id || '',
+          thread_node_id: reviewThreadPayload.thread?.node_id || reviewThreadPayload.review_thread?.node_id || '',
           action,
           delivery_id: deliveryId,
         },
       }),
     });
   } catch {
-    await coordinator.fetch('https://delivery.internal/release', { method: 'POST' });
+    await releaseDelivery(coordinator);
     return response(502, 'GitHub dispatch outcome is unknown');
   }
   if (!dispatchResponse.ok) {
-    await coordinator.fetch('https://delivery.internal/release', { method: 'POST' });
+    await releaseDelivery(coordinator);
     return response(502, `GitHub dispatch failed (${dispatchResponse.status})`);
   }
 
-  const completed = await coordinator.fetch('https://delivery.internal/complete', { method: 'POST' });
-  if (!completed.ok) return response(503, `Delivery completion failed (${completed.status})`);
-  return response(202, 'Dispatched');
+  const completionFailure = await completeDelivery(coordinator);
+  return completionFailure || response(202, 'Dispatched');
 }
 
 export default {

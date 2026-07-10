@@ -86,16 +86,16 @@ dotnet --info
 ```powershell
 git clone https://github.com/<your-name>/CADFontAutoReplace.git
 cd CADFontAutoReplace
-git remote add upstream https://github.com/splrad/CADFontAutoReplace.git
+git remote add upstream https://github.com/axiomoth/CADFontAutoReplace.git
 git fetch upstream
 ```
 
 如果你已经有主仓库写权限，也可以直接克隆主仓库：
 
-图形界面路径同样适用，只是仓库地址换成 `https://github.com/splrad/CADFontAutoReplace.git`。
+图形界面路径同样适用，只是仓库地址换成 `https://github.com/axiomoth/CADFontAutoReplace.git`。
 
 ```powershell
-git clone https://github.com/splrad/CADFontAutoReplace.git
+git clone https://github.com/axiomoth/CADFontAutoReplace.git
 cd CADFontAutoReplace
 ```
 

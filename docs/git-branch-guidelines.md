@@ -31,7 +31,7 @@
 ```powershell
 git clone https://github.com/<your-name>/CADFontAutoReplace.git
 cd CADFontAutoReplace
-git remote add upstream https://github.com/splrad/CADFontAutoReplace.git
+git remote add upstream https://github.com/axiomoth/CADFontAutoReplace.git
 git fetch upstream
 git checkout -b docs/developer-guide upstream/main
 ```

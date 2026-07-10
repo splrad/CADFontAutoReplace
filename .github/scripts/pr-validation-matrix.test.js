@@ -15,7 +15,6 @@ const {
   proxyExternalId,
   reconcileWorkflowRunCompletion,
   resolveEventPullRequestContext,
-  selectPullRequestByHead,
   validateEventPullRequestContext,
   workflowRunPullRequestNumber,
 } = require('./pr-validation-matrix');
@@ -97,13 +96,13 @@ function run(name, status, conclusion, extra = {}) {
 const fingerprint = fingerprintForPull({
   pull: {
     number: 1,
-    body: '<!-- workflow:source-contributors:splrad -->',
+    body: '<!-- workflow:source-contributors:axiomoth -->',
     user: { login: 'splrad-workflow-automation' },
     head: { sha: 'head1' },
     base: { ref: 'main', sha: 'base1' },
   },
   commits: [
-    { sha: 'a', author: { login: 'splrad' } },
+    { sha: 'a', author: { login: 'axiomoth' } },
     { sha: 'b', author: { login: 'external-dev' } },
   ],
   files: [
@@ -111,7 +110,7 @@ const fingerprint = fingerprintForPull({
   ],
 });
 assert.equal(fingerprint.head_sha, 'head1');
-assert.deepEqual(fingerprint.contributors, ['external-dev', 'splrad', 'splrad-workflow-automation']);
+assert.deepEqual(fingerprint.contributors, ['axiomoth', 'external-dev', 'splrad-workflow-automation']);
 assert.equal(fingerprint.value.length, 64);
 
 assert.deepEqual(
@@ -142,7 +141,7 @@ const classificationFingerprint = (overrides = {}) => fingerprintForPull({
     number: 1,
     title: overrides.title || 'fix: correct gate',
     body: overrides.body || `Contributor context${classificationMetadata}`,
-    user: { login: 'splrad' },
+    user: { login: 'axiomoth' },
     head: { sha: 'head1' },
     base: { ref: 'main', sha: 'base1' },
   },
@@ -187,7 +186,7 @@ assert.equal(isTrustedCheckRun({
 const mainGateTarget = config.targets.find((target) => target.id === 'main-gate');
 const mainGateCheck = run('Main Authorization Gate', 'completed', 'success', {
   app: { slug: 'github-actions' },
-  details_url: 'https://github.com/splrad/CADFontAutoReplace/actions/runs/123/job/456',
+  details_url: 'https://github.com/axiomoth/CADFontAutoReplace/actions/runs/123/job/456',
 });
 const trustedMainWorkflow = {
   id: 123,
@@ -278,7 +277,7 @@ assert.equal(eventScope({
   previousFingerprint: fingerprint.value,
   currentFingerprint: fingerprint,
   eventPayload: {
-    workflow_run: { name: 'PR Review Signal', event: 'pull_request_review' },
+    workflow_run: { path: '.github/workflows/pr-review-signal.yml', event: 'pull_request_review' },
   },
 }), 'gate-only');
 
@@ -365,7 +364,7 @@ const reviewSignalPlans = planRepairs({
   fingerprint,
   event: 'workflow_run',
   eventPayload: {
-    workflow_run: { name: 'PR Review Signal', event: 'pull_request_review' },
+    workflow_run: { path: '.github/workflows/pr-review-signal.yml', event: 'pull_request_review' },
   },
 });
 assert.equal(reviewSignalPlans.length, 1);
@@ -380,7 +379,7 @@ const reviewCommentSignalPlans = planRepairs({
   fingerprint,
   event: 'workflow_run',
   eventPayload: {
-    workflow_run: { name: 'PR Review Signal', event: 'pull_request_review_comment' },
+    workflow_run: { path: '.github/workflows/pr-review-signal.yml', event: 'pull_request_review_comment' },
   },
 });
 assert.equal(reviewCommentSignalPlans.length, 1);
@@ -394,7 +393,7 @@ const reviewRequestedSignalPlans = planRepairs({
   fingerprint,
   event: 'workflow_run',
   eventPayload: {
-    workflow_run: { name: 'PR Review Signal', event: 'pull_request' },
+    workflow_run: { path: '.github/workflows/pr-review-signal.yml', event: 'pull_request' },
   },
 });
 assert.equal(reviewRequestedSignalPlans.length, 1);
@@ -556,7 +555,7 @@ assert.equal(planRepairs({
   fingerprint,
   event: 'pull_request_review_comment',
   eventPayload: {
-    comment: { user: { login: 'splrad' } },
+    comment: { user: { login: 'axiomoth' } },
   },
 }).length, 0);
 
@@ -606,7 +605,7 @@ const eventHeadSha = 'a'.repeat(40);
 assert.deepEqual(resolveEventPullRequestContext({
   payload: {
     workflow_run: {
-      name: 'PR Governance',
+      name: `PR Validation Target #121 / ${eventHeadSha}`,
       path: '.github/workflows/pr-governance.yml',
       event: 'workflow_dispatch',
       display_title: `PR Governance #121 / ${eventHeadSha}`,
@@ -623,66 +622,67 @@ assert.deepEqual(resolveEventPullRequestContext({
 assert.deepEqual(resolveEventPullRequestContext({
   payload: {
     workflow_run: {
-      name: 'PR Review Signal',
+      name: `PR Review Signal #999 / ${eventHeadSha} / pull_request_review / edited`,
       path: '.github/workflows/pr-review-signal.yml',
       event: 'pull_request_review',
-      display_title: `PR Review Signal #999 / ${eventHeadSha}`,
+      display_title: `PR Review Signal #999 / ${eventHeadSha} / pull_request_review / edited`,
       head_sha: eventHeadSha,
       pull_requests: [],
     },
   },
   env: { GITHUB_EVENT_NAME: 'workflow_run' },
 }), {
-  prNumber: 0,
-  expectedHeadSha: '',
-  source: 'unresolved',
+  prNumber: 999,
+  expectedHeadSha: eventHeadSha,
+  source: 'workflow-run-title',
 });
 
-const reviewSignalPull = {
-  number: 121,
-  state: 'open',
-  head: { sha: eventHeadSha },
-  base: { ref: 'main', repo: { full_name: 'splrad/CADFontAutoReplace' } },
-};
 assert.deepEqual(resolveEventPullRequestContext({
   payload: {
-    repository: { default_branch: 'main' },
     workflow_run: {
-      name: 'PR Review Signal',
+      name: `PR Review Signal #121 / ${eventHeadSha} / pull_request_review / submitted`,
       path: '.github/workflows/pr-review-signal.yml',
       event: 'pull_request_review',
-      display_title: `PR Review Signal #999 / ${'b'.repeat(40)}`,
+      display_title: `PR Review Signal #121 / ${eventHeadSha} / pull_request_review / submitted`,
       head_sha: eventHeadSha,
       pull_requests: [],
     },
   },
   env: { GITHUB_EVENT_NAME: 'workflow_run' },
-  findPullByHead: (head, base) => (
-    head === eventHeadSha && base === 'main' ? reviewSignalPull : null
-  ),
 }), {
   prNumber: 121,
   expectedHeadSha: eventHeadSha,
-  source: 'workflow-run-head',
+  source: 'workflow-run-title',
 });
 
-assert.equal(selectPullRequestByHead([
-  reviewSignalPull,
-  { ...reviewSignalPull, number: 122, state: 'closed' },
-  { ...reviewSignalPull, number: 123, base: { ...reviewSignalPull.base, ref: 'develop' } },
-], eventHeadSha, 'main', 'splrad/CADFontAutoReplace'), reviewSignalPull);
-assert.equal(selectPullRequestByHead([
-  reviewSignalPull,
-  { ...reviewSignalPull, number: 124 },
-], eventHeadSha, 'main', 'splrad/CADFontAutoReplace'), null);
+for (const runOverride of [
+  { path: '.github/workflows/untrusted.yml' },
+  { event: 'pull_request' },
+  { display_title: `PR Review Signal #121 / ${eventHeadSha} / pull_request_review / created` },
+  { display_title: `PR Review Signal #121 / ${eventHeadSha}` },
+]) {
+  assert.deepEqual(resolveEventPullRequestContext({
+    payload: {
+      workflow_run: {
+        name: `PR Review Signal #121 / ${eventHeadSha} / pull_request_review / edited`,
+        path: '.github/workflows/pr-review-signal.yml',
+        event: 'pull_request_review',
+        display_title: `PR Review Signal #121 / ${eventHeadSha} / pull_request_review / edited`,
+        pull_requests: [],
+        ...runOverride,
+      },
+    },
+    env: { GITHUB_EVENT_NAME: 'workflow_run' },
+  }), { prNumber: 0, expectedHeadSha: '', source: 'unresolved' });
+}
 
 assert.deepEqual(resolveEventPullRequestContext({
   payload: {
     workflow_run: {
-      name: 'PR Review Signal',
+      name: `PR Review Signal #121 / ${eventHeadSha} / pull_request_review / edited`,
       path: '.github/workflows/pr-review-signal.yml',
       event: 'pull_request_review',
-      display_title: `PR Review Signal #999 / ${'b'.repeat(40)}`,
+      display_title: `PR Review Signal #121 / ${eventHeadSha} / pull_request_review / edited`,
       head_sha: eventHeadSha,
       pull_requests: [{ number: 121 }],
     },
@@ -695,7 +695,7 @@ assert.deepEqual(resolveEventPullRequestContext({
 });
 
 const dispatchPayload = {
-  repository: { id: 42, full_name: 'splrad/CADFontAutoReplace', default_branch: 'main' },
+  repository: { id: 42, full_name: 'axiomoth/CADFontAutoReplace', default_branch: 'main' },
   client_payload: {
     repository_id: 42,
     pr_number: 121,
@@ -711,19 +711,19 @@ const dispatchContext = resolveEventPullRequestContext({
 assert.equal(validateEventPullRequestContext({
   context: dispatchContext,
   payload: dispatchPayload,
-  repository: 'splrad/CADFontAutoReplace',
+  repository: 'axiomoth/CADFontAutoReplace',
   pull: { number: 121, state: 'open', base: { ref: 'main' }, head: { sha: eventHeadSha } },
 }), '');
 assert.match(validateEventPullRequestContext({
   context: dispatchContext,
   payload: dispatchPayload,
-  repository: 'splrad/CADFontAutoReplace',
+  repository: 'axiomoth/CADFontAutoReplace',
   pull: { number: 121, state: 'open', base: { ref: 'main' }, head: { sha: 'b'.repeat(40) } },
 }), /head 已过期/);
 assert.match(validateEventPullRequestContext({
   context: { ...dispatchContext, repositoryId: 99 },
   payload: dispatchPayload,
-  repository: 'splrad/CADFontAutoReplace',
+  repository: 'axiomoth/CADFontAutoReplace',
   pull: { number: 121, state: 'open', base: { ref: 'main' }, head: { sha: eventHeadSha } },
 }), /仓库 ID 不匹配/);
 assert.equal(validateEventPullRequestContext({
@@ -732,7 +732,7 @@ assert.equal(validateEventPullRequestContext({
     ...dispatchPayload,
     repository: { ...dispatchPayload.repository, default_branch: 'trunk' },
   },
-  repository: 'splrad/CADFontAutoReplace',
+  repository: 'axiomoth/CADFontAutoReplace',
   pull: { number: 121, state: 'open', base: { ref: 'trunk' }, head: { sha: eventHeadSha } },
 }), '');
 
@@ -823,7 +823,7 @@ for (const runOverride of [
     config,
     eventPayload: {
       workflow_run: {
-        name: 'PR Classification',
+        name: `PR Validation Target #121 / ${eventHeadSha}`,
         display_title: `PR Classification #121 / ${eventHeadSha}`,
         status: 'completed',
         conclusion: 'success',
@@ -843,7 +843,7 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
   config,
   eventPayload: {
     workflow_run: {
-      name: 'PR Classification',
+      name: `PR Validation Target #121 / ${eventHeadSha}`,
       path: '.github/workflows/pr-classification.yml@refs/heads/main',
       event: 'workflow_dispatch',
       display_title: `PR Classification #121 / ${eventHeadSha}`,
@@ -857,11 +857,39 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
   checkRuns: [classificationProxy],
   jobs: [{ name: 'Classify Pull Request', status: 'completed', conclusion: 'success' }],
   apply: false,
+}), []);
+
+const mainProxy = {
+  id: 9003,
+  name: 'Main Authorization Gate',
+  status: 'in_progress',
+  external_id: proxyExternalId(mainGateTarget, proxyPull, proxyFingerprint),
+  started_at: '2026-07-10T00:00:00Z',
+};
+assert.deepEqual(reconcileWorkflowRunCompletion({
+  event: 'workflow_run',
+  config,
+  eventPayload: {
+    workflow_run: {
+      name: `PR Validation Target #121 / ${eventHeadSha}`,
+      path: '.github/workflows/pr-governance.yml@refs/heads/main',
+      event: 'workflow_dispatch',
+      display_title: `PR Governance #121 / ${eventHeadSha}`,
+      status: 'completed',
+      conclusion: 'success',
+      pull_requests: [],
+    },
+  },
+  pull: proxyPull,
+  fingerprint: proxyFingerprint,
+  checkRuns: [mainProxy],
+  jobs: [{ name: 'Main Authorization Gate', status: 'completed', conclusion: 'success' }],
+  apply: false,
 }), [{
-  id: 'pr-classification',
-  state: 'failed',
+  id: 'main-gate',
+  state: 'passed',
   status: 'completed',
-  conclusion: 'failure',
+  conclusion: 'success',
   url: '',
 }]);
 
@@ -878,7 +906,7 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
   config,
   eventPayload: {
     workflow_run: {
-      name: 'PR Governance',
+      name: `PR Validation Target #121 / ${eventHeadSha}`,
       path: '.github/workflows/pr-governance.yml@refs/heads/main',
       event: 'workflow_dispatch',
       display_title: `PR Governance #121 / ${eventHeadSha}`,
@@ -906,7 +934,7 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
   config,
   eventPayload: {
     workflow_run: {
-      name: 'PR Governance',
+      name: `PR Validation Target #121 / ${eventHeadSha}`,
       path: '.github/workflows/pr-governance.yml@refs/heads/main',
       event: 'workflow_dispatch',
       display_title: `PR Governance #121 / ${eventHeadSha}`,
@@ -920,12 +948,6 @@ assert.deepEqual(reconcileWorkflowRunCompletion({
   checkRuns: [untouchedCopilotProxy],
   jobs: [{ name: 'Update Copilot Review Check', status: 'completed', conclusion: 'success' }],
   apply: false,
-}), [{
-  id: 'copilot-review-gate',
-  state: 'failed',
-  status: 'completed',
-  conclusion: 'failure',
-  url: '',
-}]);
+}), []);
 
 console.log('pr-validation-matrix local tests passed');

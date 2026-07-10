@@ -283,7 +283,7 @@ internal sealed class LogService : ILogService
                     "\n==========================================================================" +
                     $"\nAFR 缺失字体自动替换 v{PluginVersionService.GetDisplayVersionWithBuildMarker()}" +
                     "\n作者: splrad 秋夕寻星" +
-                    "\n项目地址GitHub(国外)：github.com/splrad/CADFontAutoReplace" +
+                    "\n项目地址GitHub(国外)：github.com/axiomoth/CADFontAutoReplace" +
                     "\n项目地址Gitee(国内)：gitee.com/splrad/CADFontAutoReplace" +
                     commandsLine +
                     "\n==========================================================================");
