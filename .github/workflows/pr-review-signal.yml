@@ -1,5 +1,6 @@
-# 将 review 状态变化转换为不携带仓库 secret 的轻量信号。
-# PR Validation Matrix 通过 workflow_run 接收该信号，并在受信任默认分支上下文中刷新门禁。
+# reviewer request 变化不会由 Copilot bot 触发，可继续通过无密钥轻量 workflow
+# 转换为 Matrix workflow_run。Review、review comment 和 conversation 事件由
+# GitHub App webhook relay 直接发送 repository_dispatch，避免 bot 事件 action_required。
 name: PR Review Signal
 
 run-name: "PR Review Signal #${{ github.event.pull_request.number }} / ${{ github.event.pull_request.head.sha }} / ${{ github.event_name }} / ${{ github.event.action }}"
@@ -7,10 +8,6 @@ run-name: "PR Review Signal #${{ github.event.pull_request.number }} / ${{ githu
 on:
   pull_request:
     types: [review_requested, review_request_removed]
-  pull_request_review:
-    types: [submitted, edited, dismissed]
-  pull_request_review_comment:
-    types: [created, edited, deleted]
 
 concurrency:
   group: pr-review-signal-${{ github.event.pull_request.number }}

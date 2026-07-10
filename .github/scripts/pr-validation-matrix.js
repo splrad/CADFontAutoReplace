@@ -93,7 +93,20 @@ const reviewSignalActions = new Map([
   ['pull_request', new Set(['review_requested', 'review_request_removed'])],
   ['pull_request_review', new Set(['submitted', 'edited', 'dismissed'])],
   ['pull_request_review_comment', new Set(['created', 'edited', 'deleted'])],
+  ['pull_request_review_thread', new Set(['resolved', 'unresolved'])],
 ]);
+
+function repositoryDispatchReviewSignal(event, eventPayload) {
+  if (event !== 'repository_dispatch') return null;
+  const clientPayload = eventPayload?.client_payload || {};
+  const action = String(clientPayload.action || '');
+  const sourceEvent = String(clientPayload.source_event || (
+    ['resolved', 'unresolved'].includes(action) ? 'pull_request_review_thread' : ''
+  ));
+  return reviewSignalActions.get(sourceEvent)?.has(action)
+    ? { event: sourceEvent, action }
+    : null;
+}
 
 function parseTrustedWorkflowRunContext(run) {
   const runPath = workflowRunPath(run);
@@ -157,6 +170,7 @@ function resolveEventPullRequestContext({ payload = {}, env = process.env } = {}
       source: 'repository-dispatch',
       repositoryId: Number(clientPayload.repository_id || '0'),
       action: String(clientPayload.action || ''),
+      sourceEvent: String(clientPayload.source_event || ''),
       deliveryId: String(clientPayload.delivery_id || ''),
     };
   }
@@ -178,7 +192,7 @@ function validateEventPullRequestContext({ context, payload = {}, pull, reposito
     return '事件对应的 head 已过期';
   }
   if (context.source === 'repository-dispatch') {
-    if (!['resolved', 'unresolved'].includes(context.action)) return 'repository dispatch action 无效';
+    if (!repositoryDispatchReviewSignal('repository_dispatch', payload)) return 'repository dispatch review signal 无效';
     if (!context.deliveryId) return 'repository dispatch 缺少 delivery_id';
     if (!context.repositoryId || context.repositoryId !== Number(payload.repository?.id || '0')) {
       return 'repository dispatch 仓库 ID 不匹配';
@@ -355,8 +369,7 @@ function planRepairs({ targets, workflowRuns, mode, pull, fingerprint, event = e
       && target.workflowFile
       && event === 'workflow_dispatch';
     const reviewSignal = reviewSignalWorkflowRun(event, eventPayload);
-    const reviewThreadSignal = event === 'repository_dispatch'
-      && ['resolved', 'unresolved'].includes(String(eventPayload?.client_payload?.action || ''));
+    const relayedReviewSignal = repositoryDispatchReviewSignal(event, eventPayload);
     const shouldRefreshReviewSignalTarget = Boolean(reviewSignal)
       && target.workflowFile === 'pr-governance.yml'
       && (
@@ -367,13 +380,20 @@ function planRepairs({ targets, workflowRuns, mode, pull, fingerprint, event = e
         || (String(reviewSignal.event || '') === 'pull_request'
           && target.id === 'copilot-review-gate')
       );
-    const shouldRefreshReviewThreadTarget = reviewThreadSignal && target.id === 'copilot-review-gate';
+    const shouldRefreshRelayedReviewTarget = Boolean(relayedReviewSignal)
+      && target.workflowFile === 'pr-governance.yml'
+      && (
+        (relayedReviewSignal.event === 'pull_request_review'
+          && ['main-authorization', 'main-gate', 'copilot-review-gate'].includes(target.id))
+        || (['pull_request_review_comment', 'pull_request_review_thread'].includes(relayedReviewSignal.event)
+          && target.id === 'copilot-review-gate')
+      );
     if (!target.repairable
       || (!['missing', 'recoverable'].includes(target.state)
         && !shouldRefreshPendingCopilotGate
         && !shouldRefreshFailedCopilotGate
         && !shouldRefreshReviewSignalTarget
-        && !shouldRefreshReviewThreadTarget)) continue;
+        && !shouldRefreshRelayedReviewTarget)) continue;
     const hasActiveProxy = ['queued', 'in_progress'].includes(String(target.checkRun?.status || ''))
       && String(target.checkRun?.external_id || '').startsWith('matrix-proxy:');
     if (hasActiveProxy) continue;
@@ -381,14 +401,14 @@ function planRepairs({ targets, workflowRuns, mode, pull, fingerprint, event = e
       && ['queued', 'in_progress'].includes(String(target.checkRun.status || ''))
       && !shouldRefreshPendingCopilotGate
       && !shouldRefreshReviewSignalTarget
-      && !shouldRefreshReviewThreadTarget) {
+      && !shouldRefreshRelayedReviewTarget) {
       continue;
     }
     if ((target.state === 'missing'
       || shouldRefreshPendingCopilotGate
       || shouldRefreshFailedCopilotGate
       || shouldRefreshReviewSignalTarget
-      || shouldRefreshReviewThreadTarget)
+      || shouldRefreshRelayedReviewTarget)
       && target.workflowFile) {
       if (!dispatchPlans.has(target.workflowFile)) {
         dispatchPlans.set(target.workflowFile, {
@@ -404,9 +424,9 @@ function planRepairs({ targets, workflowRuns, mode, pull, fingerprint, event = e
               ? 'copilot-state-refresh'
               : shouldRefreshReviewSignalTarget
                 ? 'review-state-refresh'
-                : shouldRefreshReviewThreadTarget
-                  ? 'review-thread-refresh'
-                : 'missing',
+                : shouldRefreshRelayedReviewTarget
+                  ? 'review-state-refresh'
+                  : 'missing',
         });
       }
       dispatchPlans.get(target.workflowFile).targets.push({

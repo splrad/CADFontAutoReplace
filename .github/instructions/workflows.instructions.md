@@ -11,8 +11,8 @@ applyTo: ".github/workflows/**"
 - 通用 workflow 和治理脚本是否可快速复用到不同仓库：仓库 owner/name、默认分支、GitHub App slug 等运行时信息必须来自事件、API 或集中配置；版本文件、构建命令、发布资产等不可避免的项目差异必须集中列在 workflow 顶部的复用清单中，不能散落在通用逻辑里。
 - CodeQL 使用 GitHub Advanced Security default setup，并由 main ruleset 的 `Require code scanning results` 管理；本仓库不再维护自定义 CodeQL workflow，也不把 CodeQL job name 作为 required status check。
 - 默认分支 ruleset 只应把 `PR Validation Matrix Gate` 配置为集中 required status check，source 必须匹配创建 check run 的 GitHub App 或 Any source；`Main Authorization Gate` 和 `Copilot Code Review Gate` 保留为矩阵目标，不应再单独设为 required status check。
-- `PR Validation Matrix` 是唯一拥有 `Actions: write` 的编排入口；conversation resolved 由 GitHub App webhook relay 转为 `repository_dispatch`，不得使用 cron、sleep、截止时间循环或状态轮询刷新门禁。
-- `review_requested`、`pull_request_review` / `pull_request_review_comment` 必须先经过无密钥 `PR Review Signal`，再由验证矩阵通过 `workflow_run` 调度治理，避免 fork PR 的 review 事件直接读取仓库 secrets。
+- `PR Validation Matrix` 是唯一拥有 `Actions: write` 的编排入口；review、review comment 和 conversation 事件由 GitHub App webhook relay 转为 `repository_dispatch`，不得使用 cron、sleep、截止时间循环或状态轮询刷新门禁。
+- `review_requested` / `review_request_removed` 先经过无密钥 `PR Review Signal`，再由验证矩阵通过 `workflow_run` 调度治理；Copilot bot 产生的 `pull_request_review` / `pull_request_review_comment` 由 webhook relay 直达验证矩阵，避免同仓库 bot 事件产生无法审批的 `action_required` run。
 - `DCO Sign-off Advisory` 是非阻断提示 workflow，不应加入 required checks，也不应因缺少 Signed-off-by 失败。
 - GitHub App token、`GITHUB_TOKEN`、secrets 和 artifact 是否跨信任边界使用。
 - 自动建 PR、门禁、Release workflow 的触发链是否会造成循环触发、重复 PR 或绕过审批。

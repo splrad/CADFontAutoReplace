@@ -66,6 +66,7 @@ assert.match(matrixWorkflowSource, /github\.event\.workflow_run\.display_title/)
 assert.match(matrixWorkflowSource, /Untrusted Review Signal/);
 assert.match(matrixWorkflowSource, /Ignored Matrix Check \{0\}/);
 assert.match(matrixWorkflowSource, /github\.event_name == 'check_run'[\s\S]*github\.event\.action == 'completed'[\s\S]*github\.run_id/);
+assert.match(matrixWorkflowSource, /types:\s*\[pr-review-state-changed, pr-review-thread-resolved\]/);
 assert.doesNotMatch(matrixWorkflowSource, /workflow_run\.head_branch\s*&&/);
 
 for (const file of ['pr-classification.yml', 'dco-check.yml', 'pr-governance.yml']) {
@@ -92,6 +93,8 @@ const reviewSignalSource = fs.readFileSync(
   'utf8',
 );
 assert.match(reviewSignalSource, /run:\s*\|\r?\n\s+echo "Review state changed for PR #/);
+assert.doesNotMatch(reviewSignalSource, /^\s{2}pull_request_review:\s*$/m);
+assert.doesNotMatch(reviewSignalSource, /^\s{2}pull_request_review_comment:\s*$/m);
 
 const relayPackage = JSON.parse(fs.readFileSync(
   path.join(root, '.github', 'webhook-relay', 'package.json'),
@@ -112,15 +115,17 @@ const relayWrangler = fs.readFileSync(
 assert.match(relayWrangler, /\[\[durable_objects\.bindings\]\]/);
 assert.match(relayWrangler, /new_sqlite_classes\s*=\s*\["DeliveryCoordinator"\]/);
 assert.doesNotMatch(relayWrangler, /\[\[kv_namespaces\]\]/);
-assert.match(relayWrangler, /APPROVABLE_WORKFLOW_PATHS\s*=\s*"\.github\/workflows\/pr-validation-matrix\.yml"/);
+assert.doesNotMatch(relayWrangler, /APPROVABLE_WORKFLOW_PATHS/);
 
 const relaySource = fs.readFileSync(
   path.join(root, '.github', 'webhook-relay', 'src', 'index.ts'),
   'utf8',
 );
-assert.match(relaySource, /event === 'workflow_run'/);
-assert.match(relaySource, /workflow_run\?\.conclusion !== 'action_required'/);
-assert.match(relaySource, /actions\/runs\/\$\{runId\}\/approve/);
+assert.match(relaySource, /pr-review-state-changed/);
+assert.match(relaySource, /pull_request_review_comment/);
+assert.match(relaySource, /pull_request_review_thread/);
+assert.doesNotMatch(relaySource, /event === 'workflow_run'/);
+assert.doesNotMatch(relaySource, /actions\/runs\/\$\{runId\}\/approve/);
 assert.doesNotMatch(relaySource, /setTimeout|Atomics\.wait|Start-Sleep/);
 
 const relayDeploySource = fs.readFileSync(

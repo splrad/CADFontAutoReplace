@@ -700,6 +700,7 @@ const dispatchPayload = {
     repository_id: 42,
     pr_number: 121,
     head_sha: eventHeadSha,
+    source_event: 'pull_request_review_thread',
     action: 'resolved',
     delivery_id: 'delivery-1',
   },
@@ -752,8 +753,87 @@ const resolvedRefreshPlans = planRepairs({
   eventPayload: dispatchPayload,
 });
 assert.equal(resolvedRefreshPlans.length, 1);
-assert.equal(resolvedRefreshPlans[0].reason, 'review-thread-refresh');
+assert.equal(resolvedRefreshPlans[0].reason, 'review-state-refresh');
 assert.equal(resolvedRefreshPlans[0].inputs.governance_scope, 'copilot-review');
+
+const reviewDispatchPayload = {
+  ...dispatchPayload,
+  client_payload: {
+    ...dispatchPayload.client_payload,
+    source_event: 'pull_request_review',
+    action: 'submitted',
+  },
+};
+const reviewRefreshPlans = planRepairs({
+  targets: ['main-gate', 'copilot-review-gate'].map((id) => ({
+    ...config.targets.find((target) => target.id === id),
+    required: true,
+    state: 'passed',
+    checkRun: run(
+      id === 'main-gate' ? 'Main Authorization Gate' : 'Copilot Code Review Gate',
+      'completed',
+      'success',
+    ),
+  })),
+  workflowRuns: [],
+  mode: 'enforce',
+  pull: { number: 121, base: { ref: 'main' }, head: { sha: eventHeadSha } },
+  fingerprint: proxyFingerprint,
+  event: 'repository_dispatch',
+  eventPayload: reviewDispatchPayload,
+});
+assert.equal(reviewRefreshPlans.length, 1);
+assert.deepEqual(reviewRefreshPlans[0].targets.map((target) => target.id).sort(), [
+  'copilot-review-gate',
+  'main-gate',
+]);
+assert.equal(reviewRefreshPlans[0].inputs.governance_scope, 'all');
+
+const reviewCommentDispatchPayload = {
+  ...dispatchPayload,
+  client_payload: {
+    ...dispatchPayload.client_payload,
+    source_event: 'pull_request_review_comment',
+    action: 'edited',
+  },
+};
+const reviewCommentRefreshPlans = planRepairs({
+  targets: ['main-gate', 'copilot-review-gate'].map((id) => ({
+    ...config.targets.find((target) => target.id === id),
+    required: true,
+    state: 'passed',
+    checkRun: run(
+      id === 'main-gate' ? 'Main Authorization Gate' : 'Copilot Code Review Gate',
+      'completed',
+      'success',
+    ),
+  })),
+  workflowRuns: [],
+  mode: 'enforce',
+  pull: { number: 121, base: { ref: 'main' }, head: { sha: eventHeadSha } },
+  fingerprint: proxyFingerprint,
+  event: 'repository_dispatch',
+  eventPayload: reviewCommentDispatchPayload,
+});
+assert.equal(reviewCommentRefreshPlans.length, 1);
+assert.deepEqual(reviewCommentRefreshPlans[0].targets.map((target) => target.id), [
+  'copilot-review-gate',
+]);
+assert.equal(reviewCommentRefreshPlans[0].inputs.governance_scope, 'copilot-review');
+
+assert.match(validateEventPullRequestContext({
+  context: { ...dispatchContext, action: 'submitted', sourceEvent: 'pull_request_review_thread' },
+  payload: {
+    ...dispatchPayload,
+    client_payload: {
+      ...dispatchPayload.client_payload,
+      source_event: 'pull_request_review_thread',
+      action: 'submitted',
+    },
+  },
+  repository: 'axiomoth/CADFontAutoReplace',
+  pull: { number: 121, state: 'open', base: { ref: 'main' }, head: { sha: eventHeadSha } },
+}), /review signal 无效/);
 
 const previousActionsToken = process.env.GH_ACTIONS_TOKEN;
 const previousChecksToken = process.env.GH_CHECKS_TOKEN;
