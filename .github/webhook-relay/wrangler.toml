@@ -1,0 +1,15 @@
+name = "cadfontautoreplace-webhook-relay"
+main = "src/index.ts"
+compatibility_date = "2026-07-10"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+TARGET_REPOSITORY = "splrad/CADFontAutoReplace"
+
+[[durable_objects.bindings]]
+name = "DELIVERY_COORDINATOR"
+class_name = "DeliveryCoordinator"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DeliveryCoordinator"]

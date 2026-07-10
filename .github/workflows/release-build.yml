@@ -1,13 +1,14 @@
 # 📋 复用到新项目时的配置步骤：
 #   1) 这条 Release workflow 包含当前项目专用发布逻辑。
 #      跨仓库复用时，必须重点修改：
-#      - on.push.paths：哪个版本源变化代表“准备发布”
+#      - on.pull_request_target.branches：目标仓库的默认发布分支
+#      - on.pull_request_target.paths：哪个版本源变化代表“准备发布”
 #      - Version.props：版本号读取来源；本项目只在它变化时自动发布
 #      - tools/Publish-ReleaseAssets.ps1：构建/打包命令
 #      - artifacts/ReleaseAssets 下的资产文件名检查
 #      - release notes 中的固定下载说明
 #   2) 保留的通用规则：
-#      - 只允许来自已合并 PR 的 main 提交发布
+#      - 只允许来自已合并 PR 的默认分支提交发布
 #      - tag 已存在时跳过发布
 #      - Release notes 由 .github/scripts/generate-release-notes.ps1 生成
 #      - 发布失败只保留 Actions 运行失败通知，不向 PR 额外评论
@@ -19,7 +20,8 @@
 name: Release
 
 on:
-  push:
+  pull_request_target:
+    types: [closed]
     branches:
       - main
     # 自动发布只由版本源变化触发。
@@ -27,10 +29,8 @@ on:
     # 复用到其他项目时，把这里替换为 package.json、Directory.Build.props 等“版本变更即发布”的文件。
     paths:
       - Version.props
-  workflow_dispatch:
-
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-default-branch
   cancel-in-progress: false
 
 permissions:
@@ -40,11 +40,11 @@ permissions:
 jobs:
   release:
     name: Build Assets and Publish Release
+    if: github.event.pull_request.merged == true
     runs-on: windows-latest
     timeout-minutes: 45
     outputs:
-      merged_pr_number: ${{ steps.merged-pr-guard.outputs.pr_number }}
-      merged_pr_title: ${{ steps.merged-pr-guard.outputs.pr_title }}
+      merged_pr_number: ${{ steps.release-context.outputs.pr_number }}
       display_version: ${{ steps.version.outputs.display_version }}
       build_id: ${{ steps.version.outputs.build_id }}
       tag_name: ${{ steps.version.outputs.tag_name }}
@@ -54,7 +54,7 @@ jobs:
     steps:
       - name: Create release read app token
         id: release-read-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
@@ -62,51 +62,44 @@ jobs:
           permission-contents: read
           permission-pull-requests: read
 
-      - name: Checkout source
+      - name: Resolve merged PR release context
+        id: release-context
+        shell: pwsh
+        env:
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_PR_MERGED: ${{ github.event.pull_request.merged }}
+          EVENT_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EVENT_BASE_SHA: ${{ github.sha }}
+          REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:REPOSITORY_DEFAULT_BRANCH)) {
+              throw 'The repository default branch is unavailable.'
+          }
+
+          if ($env:EVENT_PR_MERGED -ne 'true' -or $env:EVENT_PR_BASE_REF -ne $env:REPOSITORY_DEFAULT_BRANCH) {
+              throw "Automatic release requires a merged pull request targeting $env:REPOSITORY_DEFAULT_BRANCH."
+          }
+          $prNumber = $env:EVENT_PR_NUMBER
+          $targetSha = $env:EVENT_BASE_SHA
+
+          if ($targetSha -notmatch '^[a-f0-9]{40}$') {
+              throw "Merged PR #$prNumber does not expose a valid release commit SHA."
+          }
+
+          "pr_number=$prNumber" >> $env:GITHUB_OUTPUT
+          "target_sha=$targetSha" >> $env:GITHUB_OUTPUT
+          "Resolved merged PR #$prNumber at $targetSha." | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      - name: Checkout merged source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           token: ${{ steps.release-read-token.outputs.token }}
           persist-credentials: false
 
-      - name: Verify commit came from a merged PR
-        id: merged-pr-guard
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ steps.release-read-token.outputs.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          # 发布只允许由“已合并到 main 的 PR”触发。
-          # 这样可以阻止直接推送或非 PR 来源提交绕过治理流程后发版。
-          $maxAttempts = 10
-          $retrySeconds = 6
-          $mergedPullRequest = $null
-
-          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-              $associatedPulls = @(gh api "repos/$env:GH_REPO/commits/${{ github.sha }}/pulls" | ConvertFrom-Json)
-              $mergedPullRequest = $associatedPulls | Where-Object {
-                  $_.state -eq 'closed' -and
-                  $null -ne $_.merged_at -and
-                  $_.base.ref -eq $env:GITHUB_REF_NAME
-              } | Select-Object -First 1
-
-              if ($null -ne $mergedPullRequest) { break }
-              if ($attempt -lt $maxAttempts) {
-                  Write-Host "Commit is not associated with a merged $env:GITHUB_REF_NAME PR yet; retrying in $retrySeconds seconds."
-                  Start-Sleep -Seconds $retrySeconds
-              }
-          }
-
-          if ($null -eq $mergedPullRequest) {
-              throw "Current commit $env:GITHUB_SHA is not associated with a merged PR targeting $env:GITHUB_REF_NAME."
-          }
-
-          "pr_number=$($mergedPullRequest.number)" >> $env:GITHUB_OUTPUT
-          "pr_title=$([string]$mergedPullRequest.title)" >> $env:GITHUB_OUTPUT
-          "Verified merged PR #$($mergedPullRequest.number)." | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
-
       - name: Set up .NET SDK
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           global-json-file: global.json
 
@@ -212,8 +205,8 @@ jobs:
                   -Repo $env:GH_REPO `
                   -TagName $env:TAG_NAME `
                   -PreviousTag $env:LATEST_TAG `
-                  -TargetSha '${{ github.sha }}' `
-                  -TriggerPrNumber '${{ steps.merged-pr-guard.outputs.pr_number }}' `
+                  -TargetSha '${{ steps.release-context.outputs.target_sha }}' `
+                  -TriggerPrNumber '${{ steps.release-context.outputs.pr_number }}' `
                   -OutputPath $notesPath `
                   -OwnerLogin '${{ github.repository_owner }}'
           } catch {
@@ -235,7 +228,7 @@ jobs:
       - name: Create release publish app token
         if: steps.version.outputs.should_release == 'true'
         id: release-publish-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.WORKFLOW_AUTOMATION_APP_PRIVATE_KEY }}
@@ -255,7 +248,7 @@ jobs:
               '${{ steps.package.outputs.dll_zip_path }}' `
               '${{ steps.package.outputs.fonts_path }}' `
               --repo $env:GH_REPO `
-              --target '${{ github.sha }}' `
+              --target '${{ steps.release-context.outputs.target_sha }}' `
               --title '${{ steps.version.outputs.release_title }}' `
               --notes-file '${{ steps.notes.outputs.notes_path }}' `
               --latest

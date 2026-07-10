@@ -3,8 +3,7 @@
 #      - WORKFLOW_AUTOMATION_APP_CLIENT_ID
 #      - WORKFLOW_AUTOMATION_APP_PRIVATE_KEY
 #      建议该 App 统一授予 Contents 读写、Pull requests 读写、Issues 读写、Checks 读写。
-#   2) 本 workflow 在 main 目标 PR 合并时写入合并结果通知；
-#      未合并关闭必须先由关闭人写明原因。
+#   2) 本 workflow 在 PR 关闭时清理合并前门禁评论，并在 main 目标 PR 合并时写入结果通知。
 #   3) 不要把本 workflow 的 job 设置为 required check；
 #      它是合并后的清理流程，不是合并前门禁。
 name: PR Cleanup
@@ -44,7 +43,7 @@ jobs:
     steps:
       - name: Create automation app token
         id: automation-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
           # 用于读取 PR、写合并/失败原因评论、必要时重新打开未说明原因的 PR。
           client-id: ${{ vars.WORKFLOW_AUTOMATION_APP_CLIENT_ID }}
@@ -62,7 +61,7 @@ jobs:
           token: ${{ steps.automation-token.outputs.token }}
           persist-credentials: false
 
-      - name: Notify PR close status
+      - name: Cleanup governance comments and notify close status
         env:
           GH_TOKEN: ${{ steps.automation-token.outputs.token }}
           GH_COMMENT_TOKEN: ${{ steps.automation-token.outputs.token }}

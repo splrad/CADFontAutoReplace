@@ -2,6 +2,7 @@ const { execFileSync } = require('node:child_process');
 const {
   authorDisplayText,
   coreAndAuthorMentionText,
+  deleteMarkerComments,
   effectiveAuthorFromBody,
   upsertMarkerComment,
 } = require('./pr-notifications');
@@ -9,6 +10,11 @@ const {
 const repo = process.env.GITHUB_REPOSITORY || '';
 const prNumber = Number(process.env.PR_NUMBER || '0');
 const marker = '<!-- workflow:pr-close-status -->';
+const governanceMarkers = [
+  '<!-- workflow:pr-blocking-failures -->',
+  '<!-- workflow:main-authorization-gate -->',
+  '<!-- workflow:copilot-review-gate -->',
+];
 let prDetailsCache = null;
 
 function gh(args, input, token) {
@@ -51,17 +57,35 @@ function upsertComment(body) {
   upsertMarkerComment({ gh, ghJson, repo, prNumber, marker, body, token, position: 'first' });
 }
 
-function notifyClose() {
+function cleanupGovernanceComments({
+  remove = (governanceMarker) => deleteMarkerComments({
+    gh,
+    ghJson,
+    repo,
+    prNumber,
+    marker: governanceMarker,
+    token: process.env.GH_COMMENT_TOKEN || process.env.GH_TOKEN,
+  }),
+} = {}) {
+  return governanceMarkers.reduce((count, governanceMarker) => count + remove(governanceMarker), 0);
+}
+
+function notifyClose({
+  cleanup = cleanupGovernanceComments,
+  merged = process.env.PR_MERGED === 'true',
+  resolveAuthor = effectivePrAuthor,
+  publish = upsertComment,
+} = {}) {
   if (!repo || !prNumber) throw new Error('Missing PR context.');
 
-  const author = effectivePrAuthor();
-  const merged = process.env.PR_MERGED === 'true';
+  const removedComments = cleanup();
 
   if (!merged) {
-    console.log('PR was closed without merge; automated close comment skipped.');
-    return;
+    console.log(`PR was closed without merge; removed ${removedComments} governance comment(s).`);
+    return { merged: false, removedComments, body: '' };
   }
 
+  const author = resolveAuthor();
   const title = process.env.PR_TITLE || 'unknown';
   const source = process.env.PR_HEAD_REF || 'unknown';
   const target = process.env.PR_BASE_REF || 'unknown';
@@ -83,12 +107,25 @@ function notifyClose() {
     '> 本通知由 GitHub Actions 自动发布。',
   ].filter(Boolean).join('\n');
 
-  upsertComment(body);
+  publish(body);
+  return { merged: true, removedComments, body };
 }
 
-const command = process.argv[2];
-if (command === 'notify-close') {
-  notifyClose();
+function runCommand(command) {
+  if (command === 'notify-close') {
+    notifyClose();
+  } else {
+    throw new Error(`Unknown command: ${command}`);
+  }
+}
+
+if (require.main === module) {
+  runCommand(process.argv[2]);
 } else {
-  throw new Error(`Unknown command: ${command}`);
+  module.exports = {
+    cleanupGovernanceComments,
+    governanceMarkers,
+    notifyClose,
+    runCommand,
+  };
 }
